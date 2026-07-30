@@ -1,0 +1,17 @@
+{
+  "reporters": [
+    "console"
+  ],
+  "ignore": [
+    "**/src/snippets/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/docs/**"
+  ],
+  "absolute": true,
+  "min-lines": 8,
+  "min-tokens": 50,
+  "format": [
+    "typescript"
+  ]
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+
+.worktrees/
+
+# pi runtime state
+.pi
