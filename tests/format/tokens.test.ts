@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import { estimateTokens, formatCost, formatCount, formatDuration, formatTokens } from "../src/format/tokens.js";
+import { estimateTokens, formatCost, formatCount, formatDuration, formatTokens } from "../../src/format/tokens.js";
 
 describe("estimateTokens", () => {
   it("divides content length by the chars-per-token constant (ceil)", () => {

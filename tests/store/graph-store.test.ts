@@ -2,8 +2,8 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import type { GraphDelta } from "../src/graph/mutations.js";
-import { applyCreateNode } from "../src/graph/mutations.js";
+import type { GraphDelta } from "../../src/graph/mutations.js";
+import { applyCreateNode } from "../../src/graph/mutations.js";
 import {
   EMPTY_LEDGER,
   encodeDetails,
@@ -15,8 +15,8 @@ import {
   type ObservationEntry,
   SELECTION_TYPE,
   USAGE_TYPE,
-} from "../src/store/codecs.js";
-import type { StoreContext, StoreEntry } from "../src/store/graph-store.js";
+} from "../../src/store/codecs.js";
+import type { StoreContext, StoreEntry } from "../../src/store/graph-store.js";
 import {
   appendGraphDelta,
   appendObservation,
@@ -25,9 +25,9 @@ import {
   load,
   persistSelectedTree,
   resetForNewSession,
-} from "../src/store/graph-store.js";
-import type { Importance, NodeId } from "../src/types.js";
-import { makeNode, N_GOAL } from "../src/types.js";
+} from "../../src/store/graph-store.js";
+import type { Importance, NodeId } from "../../src/types.js";
+import { makeNode, N_GOAL } from "../../src/types.js";
 
 // --- fake StoreContext -----------------------------------------------------
 

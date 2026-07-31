@@ -9,9 +9,9 @@ import {
   formatTimestampRange,
   importanceAbbr,
   RENDER_LEGEND,
-} from "../src/format/render.js";
-import type { Node, Observation } from "../src/types.js";
-import { estimateContentTokens, N_GOAL } from "../src/types.js";
+} from "../../src/format/render.js";
+import type { Node, Observation } from "../../src/types.js";
+import { estimateContentTokens, N_GOAL } from "../../src/types.js";
 
 const FIXED_NOW = "2026-07-29 09:00";
 

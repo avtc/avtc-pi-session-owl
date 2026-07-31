@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { GraphInvariantError } from "../src/graph/invariants.js";
+import { GraphInvariantError } from "../../src/graph/invariants.js";
 import {
   applyCreateNode,
   applyFlushNew,
@@ -14,9 +14,9 @@ import {
   MUTATE_SOURCE,
   MUTATE_WORKING_COPY,
   setClock,
-} from "../src/graph/mutations.js";
-import type { Importance, Node, NodeId, Observation, ObsId } from "../src/types.js";
-import { estimateContentTokens, MemkeeperGraph, makeObservation, N_GOAL } from "../src/types.js";
+} from "../../src/graph/mutations.js";
+import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/types.js";
+import { estimateContentTokens, MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
 
 const NOW = "2026-07-29 09:00";
 

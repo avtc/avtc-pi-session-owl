@@ -2,12 +2,12 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import { GraphInvariantError } from "../src/graph/invariants.js";
-import type { GraphDelta, MergeDelta, MvDelta, SetMetaDelta, SupersedeDelta } from "../src/graph/mutations.js";
-import { applyCreateNode, applyRecordObservation, MUTATE_SOURCE } from "../src/graph/mutations.js";
-import { applyDelta } from "../src/graph/replay.js";
-import type { Importance, Node, NodeId, ObsId } from "../src/types.js";
-import { MemkeeperGraph, makeNode, makeObservation, N_GOAL } from "../src/types.js";
+import { GraphInvariantError } from "../../src/graph/invariants.js";
+import type { GraphDelta, MergeDelta, MvDelta, SetMetaDelta, SupersedeDelta } from "../../src/graph/mutations.js";
+import { applyCreateNode, applyRecordObservation, MUTATE_SOURCE } from "../../src/graph/mutations.js";
+import { applyDelta } from "../../src/graph/replay.js";
+import type { Importance, Node, NodeId, ObsId } from "../../src/types.js";
+import { MemkeeperGraph, makeNode, makeObservation, N_GOAL } from "../../src/types.js";
 
 // --- fixtures ---------------------------------------------------------------
 

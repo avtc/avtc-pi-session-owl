@@ -12,9 +12,9 @@ import {
   nGoalInvariants,
   noCycles,
   validateGraph,
-} from "../src/graph/invariants.js";
-import type { Importance, Node, NodeId, Observation, ObsId } from "../src/types.js";
-import { estimateContentTokens, MemkeeperGraph, N_GOAL, N_IRRELEVANT, O_INITIAL_PROMPT } from "../src/types.js";
+} from "../../src/graph/invariants.js";
+import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/types.js";
+import { estimateContentTokens, MemkeeperGraph, N_GOAL, N_IRRELEVANT, O_INITIAL_PROMPT } from "../../src/types.js";
 
 describe("isSpecial", () => {
   it("treats nGoal and oInitialPrompt as source-graph specials", () => {

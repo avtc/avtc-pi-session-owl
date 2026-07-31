@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import type { SerializedNode } from "../src/store/codecs.js";
+import type { SerializedNode } from "../../src/store/codecs.js";
 import {
   decodeDetails,
   decodeNode,
@@ -17,9 +17,9 @@ import {
   OBSERVATION_TYPE,
   SELECTION_TYPE,
   USAGE_TYPE,
-} from "../src/store/codecs.js";
-import type { Importance, NodeId, ObsId } from "../src/types.js";
-import { MemkeeperGraph, makeNode, makeObservation, N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
+} from "../../src/store/codecs.js";
+import type { Importance, NodeId, ObsId } from "../../src/types.js";
+import { MemkeeperGraph, makeNode, makeObservation, N_GOAL, O_INITIAL_PROMPT } from "../../src/types.js";
 
 // --- fixtures ---------------------------------------------------------------
 
