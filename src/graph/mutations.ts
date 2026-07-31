@@ -371,9 +371,24 @@ export function applyMerge(
     if (sources.some((n) => n.id === N_GOAL)) {
       throw new GraphInvariantError("merge: nGoal cannot be a merge source");
     }
-    if (args.destId === N_GOAL && args.newSummary !== undefined) {
-      // nGoal summary evolves only via set_meta, not a merge rewrite
-      throw new GraphInvariantError("merge: nGoal summary evolves only via set_meta");
+    if (args.destId === N_GOAL) {
+      // nGoal is a predefined root curated via set_meta + mv-in, never a fold target
+      throw new GraphInvariantError("merge: nGoal cannot be a merge destination");
+    }
+  }
+  // cycle pre-check (BEFORE creating any dest node, so a rejected call leaves
+  // the graph unchanged): a source must not contain the destination. A brand-
+  // new root destination (destId === null) is never an ancestor of anything, so
+  // only the non-null case needs the subtree check.
+  const existingDest = args.destId === null ? null : requireNode(graph, args.destId, "merge");
+  for (const src of sources) {
+    if (existingDest !== null) {
+      if (src.id === existingDest.id) {
+        throw new GraphInvariantError(`merge: source ${src.id} is the destination`);
+      }
+      if (subtreeNodeIds(graph, src.id).has(existingDest.id)) {
+        throw new GraphInvariantError(`merge: source ${src.id} contains destination ${existingDest.id} (cycle)`);
+      }
     }
   }
   // resolve or create the destination
@@ -389,18 +404,7 @@ export function applyMerge(
     });
     dest = requireNode(graph, newId, "merge");
   } else {
-    dest = requireNode(graph, args.destId, "merge");
-  }
-  // cycle pre-check: a source must not be an ancestor of dest (folding an
-  // ancestor into its descendant would make dest its own child). Also reject a
-  // source that contains another source being folded alongside it.
-  for (const src of sources) {
-    if (src.id === dest.id) {
-      throw new GraphInvariantError(`merge: source ${src.id} is the destination`);
-    }
-    if (subtreeNodeIds(graph, src.id).has(dest.id)) {
-      throw new GraphInvariantError(`merge: source ${src.id} contains destination ${dest.id} (cycle)`);
-    }
+    dest = existingDest as Node;
   }
   const oldParents = new Set<NodeId>();
   for (const src of sources) {

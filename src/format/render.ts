@@ -101,7 +101,8 @@ interface LineOptions {
 /** Render one node as a line (no indent — callers apply depth indentation). */
 export function formatNodeLine(node: Node, options: LineOptions): string {
   const parts: string[] = [`📁 ${node.id} ${stateGlyph(node, options.viewer)}${importanceAbbr(node.importance)}`];
-  parts.push(singleLine(node.summary));
+  const summary = singleLine(node.summary);
+  if (summary !== "") parts.push(summary);
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
   if (node.state === "obsolete" && node.supersededBy !== null) parts.push(`→ ${node.supersededBy}`);
   parts.push(childCounts(node));
@@ -112,7 +113,8 @@ export function formatNodeLine(node: Node, options: LineOptions): string {
 /** Render one observation as a line (no indent — callers apply depth indentation). */
 export function formatObservationLine(obs: Observation, options: LineOptions): string {
   const parts: string[] = [`📄 ${obs.id} ${importanceAbbr(obs.importance)}`];
-  parts.push(singleLine(obs.content));
+  const content = singleLine(obs.content);
+  if (content !== "") parts.push(content);
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
   parts.push(formatTimestamp(obs.timestamp));
   return parts.join(" · ");

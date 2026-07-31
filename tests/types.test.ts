@@ -9,6 +9,7 @@ import {
   IMPORTANCE_ABBR,
   IMPORTANCE_RANK,
   MemkeeperGraph,
+  makeNode,
   makeObservation,
   N_GOAL,
   N_IRRELEVANT,
@@ -65,6 +66,40 @@ describe("makeObservation", () => {
     expect(obs.contentTokens).toBe(2);
     expect(obs.importance).toBe("medium");
     expect(obs.parentNode).toBe(N_GOAL);
+  });
+});
+
+describe("makeNode", () => {
+  it("computes summaryTokens from summary and seeds timestamps", () => {
+    const node = makeNode({
+      id: "n1" as NodeId,
+      summary: "abcdefgh",
+      importance: "high" as Importance,
+      state: "active",
+      parentNode: null,
+      createdAt: "2026-07-29 09:00",
+    });
+    expect(node.summaryTokens).toBe(2);
+    expect(node.observationIds).toEqual([]);
+    expect(node.childNodeIds).toEqual([]);
+    expect(node.supersededBy).toBeNull();
+    expect(node.timestamps.createdAt).toBe("2026-07-29 09:00");
+    expect(node.timestamps.rangeStart).toBe("2026-07-29 09:00");
+    expect(node.timestamps.rangeEnd).toBe("2026-07-29 09:00");
+  });
+
+  it("defaults rangeEnd to rangeStart when only rangeStart is given", () => {
+    const node = makeNode({
+      id: "n2" as NodeId,
+      summary: "x",
+      importance: "low" as Importance,
+      state: "active",
+      parentNode: null,
+      createdAt: "2026-07-29 09:00",
+      rangeStart: "2026-07-29 08:00",
+    });
+    expect(node.timestamps.rangeStart).toBe("2026-07-29 08:00");
+    expect(node.timestamps.rangeEnd).toBe("2026-07-29 08:00");
   });
 });
 

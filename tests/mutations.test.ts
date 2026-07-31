@@ -427,22 +427,19 @@ describe("protection matrix (policy: source)", () => {
     );
   });
 
-  it("allows merging INTO nGoal without rewriting its summary", () => {
+  it("rejects nGoal as a merge destination (with or without newSummary)", () => {
     const g = graphWithNGoal();
     applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) });
-    applyMerge(g, { sourceIds: ["n1"], destId: N_GOAL }, MUTATE_SOURCE);
-    // nGoal gained n1's obs but kept its own summary
-    expect(nodeById(g, N_GOAL).summary).toBe("the goal");
-    expect(nodeById(g, N_GOAL).observationIds).toContain("o1");
-    expect(g.nodes.has("n1")).toBe(false);
-  });
-
-  it("rejects rewriting nGoal summary via merge newSummary", () => {
-    const g = graphWithNGoal();
+    // without newSummary
+    expect(() => applyMerge(g, { sourceIds: ["n1"], destId: N_GOAL }, MUTATE_SOURCE)).toThrow(GraphInvariantError);
+    // with newSummary
     expect(() =>
       applyMerge(g, { sourceIds: ["n1"], destId: N_GOAL, newSummary: "overwritten" }, MUTATE_SOURCE),
     ).toThrow(GraphInvariantError);
+    // rejected calls leave the graph unchanged
     expect(nodeById(g, N_GOAL).summary).toBe("the goal");
+    expect(nodeById(g, N_GOAL).observationIds).not.toContain("o1");
+    expect(g.nodes.has("n1")).toBe(true);
   });
 });
 
@@ -457,6 +454,14 @@ describe("working-copy policy", () => {
     const g = graphWithNGoal();
     applyMv(g, { sourceIds: ["oInitialPrompt"], destId: "n1" }, MUTATE_WORKING_COPY);
     expect(obsById(g, "oInitialPrompt").parentNode).toBe("n1");
+  });
+
+  it("allows merging INTO nGoal in the working copy (Selector may rearrange it)", () => {
+    const g = graphWithNGoal();
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) });
+    applyMerge(g, { sourceIds: ["n1"], destId: N_GOAL }, MUTATE_WORKING_COPY);
+    expect(nodeById(g, N_GOAL).observationIds).toContain("o1");
+    expect(g.nodes.has("n1")).toBe(false);
   });
 });
 

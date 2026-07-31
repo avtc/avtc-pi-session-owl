@@ -165,6 +165,13 @@ describe("singleLine rendering", () => {
     const line = formatObservationLine(obs, { viewer: "nonBuilder" });
     expect(line).toContain("a b c");
   });
+
+  it("omits the summary segment when it is empty (no double delimiter)", () => {
+    const node = makeNode({ id: "n1", summary: "", importance: "medium", observationIds: repeatObs(1) });
+    const line = formatNodeLine(node, { viewer: "nonBuilder" });
+    expect(line).not.toContain("·  ·");
+    expect(line).toBe("📁 n1 med · 1📄 · Jul 29 09:00");
+  });
 });
 
 // --- fixtures ---------------------------------------------------------------
