@@ -310,6 +310,13 @@ describe("applySupersede", () => {
     );
   });
 
+  it("requires newSummary when creating a new root via merge", () => {
+    const g = graphWithTwoRoots();
+    expect(() => applyMerge(g, { sourceIds: ["n1", "n2"], destId: null }, MUTATE_SOURCE)).toThrow(GraphInvariantError);
+    // rejected call leaves the graph unchanged — no stray new root
+    expect([...g.nodes.values()].filter((n) => n.parentNode === null).length).toBe(2);
+  });
+
   it("rejects merging an ancestor source into its descendant destination (cycle)", () => {
     const g = graphWithTwoRoots();
     // build n1 -> n2 (n2 child of n1)
@@ -462,6 +469,12 @@ describe("working-copy policy", () => {
     applyMerge(g, { sourceIds: ["n1"], destId: N_GOAL }, MUTATE_WORKING_COPY);
     expect(nodeById(g, N_GOAL).observationIds).toContain("o1");
     expect(g.nodes.has("n1")).toBe(false);
+  });
+
+  it("still rejects cycles under the working-copy policy (structural rules apply)", () => {
+    const g = graphWithTwoRoots();
+    applyMv(g, { sourceIds: ["n2"], destId: "n1" }, MUTATE_WORKING_COPY);
+    expect(() => applyMv(g, { sourceIds: ["n1"], destId: "n2" }, MUTATE_WORKING_COPY)).toThrow(GraphInvariantError);
   });
 });
 

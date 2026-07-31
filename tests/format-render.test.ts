@@ -33,6 +33,10 @@ describe("formatTimestamp", () => {
     expect(formatTimestamp("2026-01-05 08:00")).toBe("Jan 05 08:00");
     expect(formatTimestamp("2026-12-31 23:59")).toBe("Dec 31 23:59");
   });
+
+  it("renders an out-of-range month as a placeholder (defensive)", () => {
+    expect(formatTimestamp("2026-99-05 08:00")).toBe("??? 05 08:00");
+  });
 });
 
 describe("formatTimestampRange", () => {
