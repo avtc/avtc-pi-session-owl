@@ -143,4 +143,15 @@ describe("memkeeperExtension (activate wiring)", () => {
     await handler?.(event, makeCtx());
     expect(compactionHook).toHaveBeenCalledTimes(1);
   });
+
+  it("session_before_compact early-returns undefined when enabled=false (Pi native compaction)", async () => {
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    const pi = makeFakePi() as FakePiWithHandlers;
+    memkeeperExtension(pi);
+    const handler = pi._handlers.get("session_before_compact")?.[0];
+    const event = { type: "session_before_compact" } as unknown as SessionBeforeCompactEvent;
+    const result = await handler?.(event, makeCtx());
+    expect(result).toBeUndefined();
+    expect(compactionHook).not.toHaveBeenCalled();
+  });
 });

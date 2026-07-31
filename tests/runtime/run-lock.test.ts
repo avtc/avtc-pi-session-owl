@@ -65,6 +65,26 @@ describe("run-lock (single run-lock — at most one stage active at a time)", ()
     expect(() => abortInFlight()).not.toThrow();
   });
 
+  it("release is idempotent (safe to call from a finally twice)", () => {
+    const handle = acquireOrSkip("observe") as RunHandle;
+    handle.release();
+    expect(inFlight()).toBe(false);
+    expect(() => handle.release()).not.toThrow(); // second release is a no-op
+    expect(current()).toBeNull();
+    // a new run can still acquire after a double-release
+    const next = acquireOrSkip("build");
+    expect(next).not.toBeNull();
+  });
+
+  it("abort then release: release still frees the lock after an abort", () => {
+    const handle = acquireOrSkip("observe") as RunHandle;
+    abortInFlight();
+    expect(handle.abortController.signal.aborted).toBe(true);
+    expect(inFlight()).toBe(true); // abort does not release
+    handle.release();
+    expect(inFlight()).toBe(false); // release frees it
+  });
+
   it("acquireForCompaction acquires immediately when nothing is in flight", async () => {
     const handle = await acquireForCompaction();
     expect(handle).toBeDefined();

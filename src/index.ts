@@ -11,6 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { compactionHook } from "./compaction/hook.js";
 import { getMemkeeperSettings, initMemkeeperSettings } from "./config/schema.js";
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "./lifecycle.js";
+import { log } from "./log.js";
 import { onTurnEnd } from "./triggers.js";
 import { initWidget } from "./widget/tracker.js";
 
@@ -25,9 +26,17 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
     const settings = getMemkeeperSettings();
     // enabled=false off-path: no work, no capture, no background run.
     if (!settings.enabled) return;
-    // Capture the verbatim initial user message (mechanical, ahead of the
-    // Observer frontier so it is never re-observed).
-    captureInitialPromptIfAbsent(ctx, pi);
+    // Capture the verbatim initial user message SYNCHRONOUSLY before the
+    // fire-and-forget trigger: the capture's graph mutations commit before the
+    // Observer reads the graph, so the first user message is exclusively
+    // oInitialPrompt (never re-observed). Isolated so a capture failure (a real
+    // invariant bug, surfaced via the logger) does not suppress this turn's
+    // background trigger — the Observer still runs.
+    try {
+      captureInitialPromptIfAbsent(ctx, pi);
+    } catch (err) {
+      log.error("turn_end: initial-prompt capture failed", err);
+    }
     // Fire-and-forget the background trigger evaluation (Observer + Builder +
     // Selector); the handler returns immediately and never blocks the agent.
     void onTurnEnd({ ctx, settings });

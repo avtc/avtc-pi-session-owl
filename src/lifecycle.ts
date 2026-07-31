@@ -17,6 +17,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { applyCreateNode, applyRecordObservation, applySetMeta, MUTATE_SOURCE } from "./graph/mutations.js";
+import { abortInFlight } from "./runtime/run-lock.js";
 import type { ObservationEntry } from "./store/codecs.js";
 import {
   appendGraphDelta,
@@ -192,7 +193,10 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   appendObservation(store, observationEntry);
 }
 
-/** Shutdown: clear the widget (named constant, not a bare undefined). */
+/** Shutdown: abort any in-flight stage (so it stops wasting LLM tokens on a
+ *  discarded session), then drop the widget ref. Fire-and-forget — the run
+ *  releases in its own `finally`. */
 export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetController): void {
+  abortInFlight();
   widget.clearCtx();
 }

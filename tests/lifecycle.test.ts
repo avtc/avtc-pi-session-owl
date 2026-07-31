@@ -11,6 +11,7 @@ import {
   onSessionShutdown,
   onSessionStart,
 } from "../src/lifecycle.js";
+import { _resetRunLock, acquireOrSkip, type RunHandle } from "../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
 import { N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
 import type { WidgetController } from "../src/widget/tracker.js";
@@ -224,7 +225,7 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(getGraphStore().graph.nodes.get(N_GOAL)?.summary).toBe("Build the memory extension");
   });
 
-  it("persist the capture (observation entry + graph deltas)", async () => {
+  it("persist the capture (observation entry + graph deltas incl. set_meta)", async () => {
     const branch = [userEntry("u1", "do the thing")];
     const { ctx, pi, appended } = makeCtx(branch);
     await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
@@ -233,13 +234,31 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(obs.length).toBe(1);
     // coversUpToId = the first user entry (frontier advances past it)
     expect((obs[0][1] as { coversUpToId: string }).coversUpToId).toBe("u1");
+    // graph_delta log: create_node (nGoal seed) + set_meta (nGoal summary)
+    const deltas = appended.filter(([t]) => t === "memkeeper.graph_delta");
+    expect(deltas.length).toBe(2);
+    const setMetas = deltas.filter(([, d]) => (d as { delta: { type: string } }).delta?.type === "set_meta");
+    expect(setMetas.length).toBe(1);
   });
 });
 
 describe("onSessionShutdown", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    _resetRunLock();
+  });
+
   it("calls widget.clearCtx", () => {
     const widget = { ...noopWidget, clearCtx: vi.fn() };
     onSessionShutdown({ type: "session_shutdown", reason: "quit" }, widget);
     expect(widget.clearCtx).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts an in-flight run (so it stops wasting tokens on a discarded session)", () => {
+    const handle = acquireOrSkip("observe") as RunHandle;
+    expect(handle.abortController.signal.aborted).toBe(false);
+    onSessionShutdown({ type: "session_shutdown", reason: "reload" }, noopWidget);
+    expect(handle.abortController.signal.aborted).toBe(true);
+    handle.release();
   });
 });

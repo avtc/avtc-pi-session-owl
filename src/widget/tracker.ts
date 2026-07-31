@@ -16,7 +16,8 @@ export interface WidgetController {
   setCtx(ctx: ExtensionContext): void;
   clearCtx(): void;
   render(): void;
-  startStage(stage: string): void;
+  /** Begin a stage, optionally seeding its pass/batch counters (S-Widget). */
+  startStage(stage: string, init?: { pass?: number; batch?: { done: number; total: number } }): void;
   setPass(pass: number): void;
   setBatch(done: number, total: number): void;
   endStage(): void;
