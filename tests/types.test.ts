@@ -128,9 +128,22 @@ describe("MemkeeperGraph", () => {
     expect(graph.hasInitialPrompt).toBe(true);
   });
 
-  it("nGoal is the active seed state", () => {
-    const state: NodeState = "active";
-    expect(state).toBe("active");
+  it("NodeState is the four persisted states", () => {
+    const states: NodeState[] = ["new", "active", "archived", "obsolete"];
+    expect(states).toHaveLength(4);
+  });
+
+  it("makeNode seeds nGoal in the active state", () => {
+    const goal = makeNode({
+      id: N_GOAL,
+      summary: "the goal",
+      importance: "critical" as Importance,
+      state: "active",
+      parentNode: null,
+      createdAt: "2026-07-29 09:00",
+    });
+    expect(goal.state).toBe("active");
+    expect(goal.importance).toBe("critical");
   });
 });
 

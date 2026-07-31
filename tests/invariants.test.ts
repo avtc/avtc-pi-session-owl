@@ -88,7 +88,8 @@ describe("structural validators", () => {
 
   it("exactlyOneNodePerObservation fails when a node lists an obs whose parentNode is a different node", () => {
     const g = validGraph();
-    node(g, "n5" as NodeId).observationIds.push("o1" as ObsId);
+    // o2 is legitimately under n5; reparent o2 to n6 but leave n5 still listing it
+    observation(g, "o2" as ObsId).parentNode = "n6" as NodeId;
     expect(exactlyOneNodePerObservation(g)).toBe(false);
   });
 
@@ -143,13 +144,6 @@ describe("reverse-direction consistency", () => {
   it("exactlyOneNodePerObservation fails when a node lists a phantom observation id", () => {
     const g = validGraph();
     node(g, "n5" as NodeId).observationIds.push("oGhost" as ObsId);
-    expect(exactlyOneNodePerObservation(g)).toBe(false);
-  });
-
-  it("exactlyOneNodePerObservation fails when a node lists an obs whose parentNode is a different node", () => {
-    const g = validGraph();
-    // n5 claims o2 but o2.parentNode is still n5 here — instead point o2 elsewhere
-    observation(g, "o2" as ObsId).parentNode = "n6" as NodeId;
     expect(exactlyOneNodePerObservation(g)).toBe(false);
   });
 

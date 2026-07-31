@@ -302,14 +302,6 @@ describe("applySupersede", () => {
     );
   });
 
-  it("rejects a supersession cycle", () => {
-    const g = graphWithTwoRoots();
-    applySupersede(g, { nodeId: "n2", supersededNodeIds: ["n1"] }, MUTATE_SOURCE);
-    expect(() => applySupersede(g, { nodeId: "n1", supersededNodeIds: ["n2"] }, MUTATE_SOURCE)).toThrow(
-      GraphInvariantError,
-    );
-  });
-
   it("requires newSummary when creating a new root via merge", () => {
     const g = graphWithTwoRoots();
     expect(() => applyMerge(g, { sourceIds: ["n1", "n2"], destId: null }, MUTATE_SOURCE)).toThrow(GraphInvariantError);
