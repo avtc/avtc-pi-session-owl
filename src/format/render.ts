@@ -27,9 +27,6 @@ const MONTH_ABBREVIATIONS = [
   "Dec",
 ] as const;
 
-const DATE_PART = 0;
-const TIME_PART = 1;
-const YEAR_PART = 0;
 const MONTH_PART = 1;
 const DAY_PART = 2;
 const MONTH_INDEX_OFFSET = 1;
