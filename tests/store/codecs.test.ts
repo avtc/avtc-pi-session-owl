@@ -239,6 +239,12 @@ describe("MemkeeperDetails codec", () => {
     expect(decodeDetails({ version: "v1" })).toBeNull();
   });
 
+  it("rejects an otherwise-valid details with an unknown version", () => {
+    const details = encodeDetails(emptyGraph(), null, null);
+    const future = { ...details, version: "v2" };
+    expect(decodeDetails(future)).toBeNull();
+  });
+
   it("ignores unknown details fields (tolerant reader, additive fields)", () => {
     const details = encodeDetails(emptyGraph(), null, null);
     const withExtra = { ...details, futureField: "ignored" } as Record<string, unknown>;

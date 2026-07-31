@@ -149,6 +149,13 @@ function findLatestSnapshot(entries: StoreEntry[]): { details: MemkeeperDetails;
     if (e === undefined || !isCompactionEntry(e)) continue;
     const details = decodeDetails(e.details);
     if (details !== null) return { details, index: i };
+    // Selective logging: a native/Pi compaction legitimately fails decodeDetails
+    // (no `version` field) and must stay silent. A details that RESEMBLES a
+    // memkeeper snapshot (has a `version`) but fails validation is a corrupt
+    // snapshot worth surfacing — fall back to deltas-only + log.
+    if (typeof e.details === "object" && e.details !== null && "version" in e.details) {
+      log.warn(`graph-store: corrupt memkeeper snapshot at ${e.id} — falling back to deltas-only`);
+    }
   }
   return null;
 }
