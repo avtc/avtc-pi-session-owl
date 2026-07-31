@@ -19,7 +19,7 @@ import type {
 import { getMemkeeperSettings } from "./config/schema.js";
 import { applyCreateNode, applyRecordObservation, applySetMeta, MUTATE_SOURCE } from "./graph/mutations.js";
 import { abortInFlight } from "./runtime/run-lock.js";
-import type { ObservationEntry } from "./store/codecs.js";
+import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
 import {
   appendGraphDelta,
   appendObservation,
@@ -178,11 +178,10 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   // persist the capture: the observation (content + provenance) as a
   // memkeeper.observation entry (coversUpToId = first user entry → frontier
   // advances past it); the record_observation is NOT a graph_delta (T4 rule).
-  const { contentTokens: _omit, ...serialized } = obs;
   const observationEntry: ObservationEntry = {
     coversFromId: null,
     coversUpToId: firstUser.id,
-    records: [serialized],
+    records: [encodeObservation(obs)],
     tokenCount: obs.contentTokens,
   };
   appendObservation(store, observationEntry);
