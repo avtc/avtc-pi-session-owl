@@ -194,7 +194,7 @@ export function decodeObservation(raw: unknown): Observation | null {
   });
 }
 
-/** Decode a serialized node; recompute summaryTokens if absent/corrupt. */
+/** Decode a serialized node; recompute summaryTokens from the summary. */
 export function decodeNode(raw: unknown): Node | null {
   if (!isObject(raw)) return null;
   const ts = raw.timestamps;
@@ -236,6 +236,48 @@ export function decodeNode(raw: unknown): Node | null {
   });
 }
 
+/**
+ * Decode + revalidate a wire node into the canonical SerializedNode form.
+ * Returns null if the node is malformed (bad state/importance/timestamps).
+ * Shared by `decodeSelection` and `decodeDetails` so neither blind-casts.
+ */
+function decodeSerializedNode(raw: unknown): SerializedNode | null {
+  const decoded = decodeNode(raw);
+  if (decoded === null) return null;
+  return {
+    id: decoded.id,
+    summary: decoded.summary,
+    summaryTokens: decoded.summaryTokens,
+    state: decoded.state,
+    importance: decoded.importance,
+    parentNode: decoded.parentNode,
+    observationIds: decoded.observationIds,
+    childNodeIds: decoded.childNodeIds,
+    supersededBy: decoded.supersededBy,
+    timestamps: decoded.timestamps,
+  };
+}
+
+/** Decode a node array + the optional oInitialPrompt verbatim obs. */
+function decodeNodesAndPrompt(
+  nodes: unknown,
+  oInitialPrompt: unknown,
+): { nodes: SerializedNode[]; oInitialPrompt: SerializedObservation | null } | null {
+  if (!Array.isArray(nodes)) return null;
+  const decodedNodes: SerializedNode[] = [];
+  for (const n of nodes) {
+    const decoded = decodeSerializedNode(n);
+    if (decoded === null) return null;
+    decodedNodes.push(decoded);
+  }
+  let prompt: SerializedObservation | null = null;
+  if (oInitialPrompt !== null && oInitialPrompt !== undefined) {
+    prompt = decodeObservation(oInitialPrompt);
+    if (prompt === null) return null;
+  }
+  return { nodes: decodedNodes, oInitialPrompt: prompt };
+}
+
 /** Decode a selected-tree snapshot; null if malformed. */
 export function decodeSelection(raw: unknown): SerializedSelection | null {
   if (!isObject(raw)) return null;
@@ -249,19 +291,11 @@ export function decodeSelection(raw: unknown): SerializedSelection | null {
   ) {
     return null;
   }
-  const decodedNodes: SerializedNode[] = [];
-  for (const n of nodes) {
-    if (!isObject(n)) return null;
-    decodedNodes.push(n as unknown as SerializedNode);
-  }
-  let prompt: SerializedObservation | null = null;
-  if (oInitialPrompt !== null) {
-    prompt = decodeObservation(oInitialPrompt);
-    if (prompt === null) return null;
-  }
+  const base = decodeNodesAndPrompt(nodes, oInitialPrompt);
+  if (base === null) return null;
   return {
-    nodes: decodedNodes,
-    oInitialPrompt: prompt,
+    nodes: base.nodes,
+    oInitialPrompt: base.oInitialPrompt,
     obsRefs: obsRefs as string[],
     nextObsId,
     nextNodeId,
@@ -289,40 +323,24 @@ export function decodeUsage(raw: unknown): UsageLedger | null {
   return { observe, build, select };
 }
 
+/** Known MemkeeperDetails schema versions (tolerant reader rejects others). */
+const KNOWN_DETAILS_VERSIONS = new Set<string>([DETAILS_VERSION]);
+
 /** Decode compaction details; null if malformed/non-memkeeper (native rejected). */
 export function decodeDetails(raw: unknown): MemkeeperDetails | null {
   if (!isObject(raw)) return null;
   const { version, nodes, oInitialPrompt, nextObsId, nextNodeId, selectedTree, lastCompactionLedger } = raw;
   if (
     typeof version !== "string" ||
+    !KNOWN_DETAILS_VERSIONS.has(version) ||
     !Array.isArray(nodes) ||
     typeof nextObsId !== "number" ||
     typeof nextNodeId !== "number"
   ) {
     return null;
   }
-  const decodedNodes: SerializedNode[] = [];
-  for (const n of nodes) {
-    const decoded = decodeNode(n);
-    if (decoded === null) return null;
-    decodedNodes.push({
-      id: decoded.id,
-      summary: decoded.summary,
-      summaryTokens: decoded.summaryTokens,
-      state: decoded.state,
-      importance: decoded.importance,
-      parentNode: decoded.parentNode,
-      observationIds: decoded.observationIds,
-      childNodeIds: decoded.childNodeIds,
-      supersededBy: decoded.supersededBy,
-      timestamps: decoded.timestamps,
-    });
-  }
-  let prompt: SerializedObservation | null = null;
-  if (oInitialPrompt !== null && oInitialPrompt !== undefined) {
-    prompt = decodeObservation(oInitialPrompt);
-    if (prompt === null) return null;
-  }
+  const base = decodeNodesAndPrompt(nodes, oInitialPrompt);
+  if (base === null) return null;
   let tree: SerializedSelection | null = null;
   if (selectedTree !== null && selectedTree !== undefined) {
     tree = decodeSelection(selectedTree);
@@ -335,8 +353,8 @@ export function decodeDetails(raw: unknown): MemkeeperDetails | null {
   }
   return {
     version,
-    nodes: decodedNodes,
-    oInitialPrompt: prompt,
+    nodes: base.nodes,
+    oInitialPrompt: base.oInitialPrompt,
     nextObsId,
     nextNodeId,
     selectedTree: tree,
@@ -382,10 +400,14 @@ export function encodeNode(node: Node): SerializedNode {
 export function encodeSelection(graph: MemkeeperGraph, oInitialPrompt: ObsId | null): SerializedSelection {
   const nodes: SerializedNode[] = [];
   const obsRefs: string[] = [];
+  const seen = new Set<string>();
   for (const node of graph.nodes.values()) {
     nodes.push(encodeNode(node));
     for (const obsId of node.observationIds) {
-      if (!obsRefs.includes(obsId)) obsRefs.push(obsId);
+      if (!seen.has(obsId)) {
+        seen.add(obsId);
+        obsRefs.push(obsId);
+      }
     }
   }
   let prompt: SerializedObservation | null = null;

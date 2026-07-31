@@ -130,6 +130,8 @@ describe("persist methods (PERSIST-ONLY)", () => {
     expect(ids).toEqual(["e1"]);
     expect(customAt(fake, 0).customType).toBe(OBSERVATION_TYPE);
     expect(customAt(fake, 0).data).toEqual(batch);
+    // advancing the frontier mirrors the in-memory cache refresh other persists do
+    expect(getGraphStore().observerFrontier).toBe("e10");
   });
 
   it("appendGraphDelta persists a memkeeper.graph_delta envelope", () => {
@@ -410,6 +412,34 @@ describe("load edge cases", () => {
     expect(store.graph.nodes.size).toBe(0);
     expect(store.graph.observations.size).toBe(0);
     expect(store.observerFrontier).toBeNull();
+  });
+
+  it("drops an orphaned observation whose parent node is absent (graceful)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    // an obs pointing at a node that was never created (corruption / missing wrapper)
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [
+        {
+          id: "o1",
+          content: "orphan",
+          importance: "low",
+          sourceEntryIds: ["1"],
+          timestamp: "t",
+          parentNode: "nMissing",
+        },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.leafId = "e1";
+
+    await load(fake); // must not throw
+    const store = getGraphStore();
+    // the orphaned obs is dropped from the in-memory graph (persisted record survives)
+    expect(store.graph.observations.has("o1")).toBe(false);
+    expect(store.observerFrontier).toBe("e1");
   });
 
   it("replays only graph deltas AFTER the compaction entry (not before)", async () => {

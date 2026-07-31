@@ -12,6 +12,7 @@
 
 import type { GraphDelta } from "../graph/mutations.js";
 import { applyDelta } from "../graph/replay.js";
+import { log } from "../log.js";
 import { MemkeeperGraph, makeNode, type Node, type NodeId, type Observation, type ObsId } from "../types.js";
 import {
   decodeDetails,
@@ -106,6 +107,9 @@ export function resetForNewSession(): void {
 export function appendObservation(ctx: StoreContext, entry: ObservationEntry): string[] {
   ctx.appendEntry(OBSERVATION_TYPE, entry);
   const leafId = ctx.getLeafId();
+  // advance the frontier to this batch's coversUpToId (the Observer progress
+  // pointer; mirrors the in-memory cache refresh persistSelectedTree/appendUsage do)
+  getGraphStore().observerFrontier = entry.coversUpToId;
   const ids = leafId === null ? [] : [leafId];
   return ids;
 }
@@ -207,6 +211,8 @@ function reconcileLinks(graph: MemkeeperGraph): void {
 export async function load(ctx: StoreContext): Promise<void> {
   const entries = ctx.getBranch(ctx.getLeafId());
   const storeState = getGraphStore();
+  // reset the frontier — re-derived below from the replayed observation entries
+  storeState.observerFrontier = null;
 
   // 1. find the latest valid snapshot (or start empty)
   const snapshot = findLatestSnapshot(entries);
@@ -251,8 +257,9 @@ export async function load(ctx: StoreContext): Promise<void> {
     if (payload === undefined || payload.kind !== "graph_delta") continue;
     try {
       applyDelta(graph, payload.delta, "source");
-    } catch {
-      // skip corrupt/inapplicable delta — reconstruction continues
+    } catch (err) {
+      // skip corrupt/inapplicable delta — reconstruction continues (logged)
+      log.warn(`graph-store: skipping inapplicable graph_delta at ${e.id}: ${String(err)}`);
     }
   }
 

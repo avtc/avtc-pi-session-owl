@@ -176,6 +176,23 @@ describe("selection snapshot codec", () => {
     expect(decoded?.oInitialPrompt?.id).toBe(O_INITIAL_PROMPT);
     expect(decoded?.obsRefs).toContain("o1");
   });
+
+  it("rejects a snapshot with a malformed inner node (validates, not blind-casts)", () => {
+    const good = encodeSelection(emptyGraph(), null);
+    const badNode = {
+      id: "n1",
+      summary: "x",
+      summaryTokens: 1,
+      state: "bogus", // invalid state
+      importance: "medium",
+      parentNode: null,
+      observationIds: [],
+      childNodeIds: [],
+      supersededBy: null,
+      timestamps: { createdAt: "t", updatedAt: "t", rangeStart: "t", rangeEnd: "t" },
+    };
+    expect(decodeSelection({ ...good, nodes: [badNode] })).toBeNull();
+  });
 });
 
 describe("usage codec", () => {
