@@ -480,4 +480,61 @@ describe("load edge cases", () => {
     expect(store.graph.nodes.has("nPre" as NodeId)).toBe(false);
     expect(store.graph.nodes.has("nPost" as NodeId)).toBe(true);
   });
+
+  it("extends a node's time range when a post-snapshot observation is linked", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    // snapshot: a single node n1 with rangeEnd at an early time
+    const details: MemkeeperDetails = {
+      version: "v1",
+      nodes: [
+        {
+          id: "n1",
+          summary: "branch",
+          summaryTokens: 1,
+          state: "active",
+          importance: "medium",
+          parentNode: null,
+          observationIds: [],
+          childNodeIds: [],
+          supersededBy: null,
+          timestamps: {
+            createdAt: "2026-07-01 00:00",
+            updatedAt: "2026-07-01 00:00",
+            rangeStart: "2026-07-01 00:00",
+            rangeEnd: "2026-07-01 00:00",
+          },
+        },
+      ],
+      oInitialPrompt: null,
+      nextObsId: 1,
+      nextNodeId: 2,
+      selectedTree: null,
+      lastCompactionLedger: null,
+    };
+    fake.addCompaction("e1", details);
+    // post-snapshot obs with a later timestamp, parented at n1
+    fake.addCustomAt("e2", OBSERVATION_TYPE, {
+      coversFromId: "e1",
+      coversUpToId: "e2",
+      records: [
+        {
+          id: "o1",
+          content: "later",
+          importance: "low",
+          sourceEntryIds: ["2"],
+          timestamp: "2026-07-09 12:00",
+          parentNode: "n1",
+        },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.leafId = "e2";
+
+    await load(fake);
+    const n1 = getGraphStore().graph.nodes.get("n1" as NodeId);
+    expect(n1?.observationIds).toContain("o1");
+    // the linked obs extended the node's range (not stale at the snapshot value)
+    expect(n1?.timestamps.rangeEnd).toBe("2026-07-09 12:00");
+  });
 });

@@ -10,7 +10,7 @@
 // T3 mutators (apply-then-persist), then call the store to record the delta. The
 // store applies mutations ONLY during load() reconstruction (event-sourcing).
 
-import type { GraphDelta } from "../graph/mutations.js";
+import { type GraphDelta, recomputeRange } from "../graph/mutations.js";
 import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
 import { MemkeeperGraph, makeNode, type Node, type NodeId, type Observation, type ObsId } from "../types.js";
@@ -206,6 +206,8 @@ function reconcileLinks(graph: MemkeeperGraph): void {
     }
     if (!parent.observationIds.includes(obsId)) {
       parent.observationIds.push(obsId);
+      // a newly-linked post-snapshot obs extends the node's time range
+      recomputeRange(graph, parent);
     }
   }
 }

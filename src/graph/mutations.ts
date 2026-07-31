@@ -122,7 +122,7 @@ function subtreeNodeIds(graph: MemkeeperGraph, rootId: NodeId): Set<NodeId> {
  * Recompute a node's timestamp range from all observations in its subtree.
  * A node with no observations keeps rangeStart === rangeEnd === createdAt.
  */
-function recomputeRange(graph: MemkeeperGraph, node: Node): void {
+export function recomputeRange(graph: MemkeeperGraph, node: Node): void {
   let min: string | null = null;
   let max: string | null = null;
   for (const id of subtreeNodeIds(graph, node.id)) {
