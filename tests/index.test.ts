@@ -135,6 +135,17 @@ describe("memkeeperExtension (activate wiring)", () => {
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
   });
 
+  it("turn_end still fires onTurnEnd when capture throws (error isolation)", () => {
+    vi.mocked(captureInitialPromptIfAbsent).mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const pi = makeFakePi() as FakePiWithHandlers;
+    memkeeperExtension(pi);
+    const handler = pi._handlers.get("turn_end")?.[0];
+    expect(() => handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx())).not.toThrow();
+    expect(onTurnEnd).toHaveBeenCalledTimes(1);
+  });
+
   it("session_before_compact delegates to compactionHook", async () => {
     const pi = makeFakePi() as FakePiWithHandlers;
     memkeeperExtension(pi);

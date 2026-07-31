@@ -16,6 +16,7 @@ import type {
   SessionShutdownEvent,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
+import { getMemkeeperSettings } from "./config/schema.js";
 import { applyCreateNode, applyRecordObservation, applySetMeta, MUTATE_SOURCE } from "./graph/mutations.js";
 import { abortInFlight } from "./runtime/run-lock.js";
 import type { ObservationEntry } from "./store/codecs.js";
@@ -27,7 +28,7 @@ import {
   type StoreContext,
   type StoreEntry,
 } from "./store/graph-store.js";
-import { estimateContentTokens, N_GOAL, O_INITIAL_PROMPT } from "./types.js";
+import { makeObservation, N_GOAL, O_INITIAL_PROMPT } from "./types.js";
 import type { WidgetController } from "./widget/tracker.js";
 
 // --- StoreContext adapter (pi.appendEntry + ctx.sessionManager) ------------
@@ -109,7 +110,9 @@ function ensureNGoalSeeded(store: StoreContext): void {
 
 // --- lifecycle events ------------------------------------------------------
 
-/** Startup: reconstruct the graph + seed nGoal on an empty graph (no oInitialPrompt). */
+/** Startup: reconstruct the graph + seed nGoal on an empty graph (no oInitialPrompt).
+ *  Reconstruction always runs (read-only state for a mid-session enable); the nGoal
+ *  seed WRITE is gated on `enabled` so a disabled session persists nothing. */
 export async function onSessionStart(
   _event: SessionStartEvent,
   ctx: ExtensionContext,
@@ -121,8 +124,9 @@ export async function onSessionStart(
   await load(store);
   // Fresh-session seed: if the graph is empty (no snapshot/deltas), nGoal must
   // exist before any observation arrives. oInitialPrompt is NOT captured here
-  // (session_start carries no user message, decision #2).
-  ensureNGoalSeeded(store);
+  // (session_start carries no user message). Gated on enabled: a disabled
+  // session persists no graph_delta (the seed self-heals on enable via capture).
+  if (getMemkeeperSettings().enabled) ensureNGoalSeeded(store);
 }
 
 /**
@@ -145,18 +149,17 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   const text = extractMessageText(firstUser.message);
   if (text.length === 0) return;
 
-  // record oInitialPrompt under nGoal
-  applyRecordObservation(graph, {
-    obs: {
-      id: O_INITIAL_PROMPT,
-      content: text,
-      contentTokens: estimateContentTokens(text),
-      importance: "critical",
-      sourceEntryIds: [firstUser.id],
-      timestamp: firstUser.timestamp,
-      parentNode: N_GOAL,
-    },
+  // record oInitialPrompt under nGoal (built once via makeObservation; the
+  // persisted record derives from it, omitting the cached contentTokens).
+  const obs = makeObservation({
+    id: O_INITIAL_PROMPT,
+    content: text,
+    importance: "critical",
+    sourceEntryIds: [firstUser.id],
+    timestamp: firstUser.timestamp,
+    parentNode: N_GOAL,
   });
+  applyRecordObservation(graph, { obs });
 
   // seed nGoal.summary from the first non-empty line
   const firstLine = text
@@ -175,28 +178,21 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   // persist the capture: the observation (content + provenance) as a
   // memkeeper.observation entry (coversUpToId = first user entry → frontier
   // advances past it); the record_observation is NOT a graph_delta (T4 rule).
+  const { contentTokens: _omit, ...serialized } = obs;
   const observationEntry: ObservationEntry = {
     coversFromId: null,
     coversUpToId: firstUser.id,
-    records: [
-      {
-        id: O_INITIAL_PROMPT,
-        content: text,
-        importance: "critical",
-        sourceEntryIds: [firstUser.id],
-        timestamp: firstUser.timestamp,
-        parentNode: N_GOAL,
-      },
-    ],
-    tokenCount: estimateContentTokens(text),
+    records: [serialized],
+    tokenCount: obs.contentTokens,
   };
   appendObservation(store, observationEntry);
 }
 
 /** Shutdown: abort any in-flight stage (so it stops wasting LLM tokens on a
- *  discarded session), then drop the widget ref. Fire-and-forget — the run
- *  releases in its own `finally`. */
+ *  discarded session), end the widget's stage display, then drop the widget ref.
+ *  Fire-and-forget — the run releases in its own `finally`. */
 export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetController): void {
   abortInFlight();
+  widget.endStage();
   widget.clearCtx();
 }

@@ -3,7 +3,8 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
 import {
   captureInitialPromptIfAbsent,
   extractMessageText,
@@ -143,7 +144,11 @@ describe("isUnstuckAutoContinue", () => {
 });
 
 describe("onSessionStart", () => {
-  beforeEach(() => resetForNewSession());
+  beforeEach(() => {
+    resetForNewSession();
+    _resetGetMemkeeperSettings();
+  });
+  afterEach(() => _resetGetMemkeeperSettings());
 
   it("loads the store + seeds nGoal on an empty graph (no oInitialPrompt)", async () => {
     const { ctx, pi } = makeCtx([]); // empty branch -> empty graph after load
@@ -172,6 +177,16 @@ describe("onSessionStart", () => {
     await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
     const deltas = appended.filter(([t]) => t === "memkeeper.graph_delta");
     expect(deltas.length).toBe(1);
+  });
+
+  it("does NOT seed nGoal (writes no graph_delta) when enabled=false", async () => {
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    const { ctx, pi, appended } = makeCtx([]);
+    await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
+    const deltas = appended.filter(([t]) => t === "memkeeper.graph_delta");
+    expect(deltas.length).toBe(0);
+    // reconstruction still ran (graph is empty, just no seed write)
+    expect(getGraphStore().graph.nodes.has(N_GOAL)).toBe(false);
   });
 });
 
@@ -248,9 +263,10 @@ describe("onSessionShutdown", () => {
     _resetRunLock();
   });
 
-  it("calls widget.clearCtx", () => {
-    const widget = { ...noopWidget, clearCtx: vi.fn() };
+  it("ends the widget stage display and clears the ctx", () => {
+    const widget = { ...noopWidget, clearCtx: vi.fn(), endStage: vi.fn() };
     onSessionShutdown({ type: "session_shutdown", reason: "quit" }, widget);
+    expect(widget.endStage).toHaveBeenCalledTimes(1);
     expect(widget.clearCtx).toHaveBeenCalledTimes(1);
   });
 
