@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Hoisted mock: registerSettingsCommand returns a fake handle whose getSettings() yields a
 // distinct live value so the "after init" test can prove getMemkeeperSettings reads the handle.
@@ -23,10 +23,13 @@ vi.mock("avtc-pi-settings-ui", () => ({
 }));
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as settingsUi from "avtc-pi-settings-ui";
 import type { MemkeeperConfig } from "../../src/config/schema.js";
 // settingsFilePaths + registerSettingsCommand are type-only imports in schema.ts; the mock above
 // supplies runtime values. Import the schema AFTER the mock is registered.
 import {
+  _resetGetMemkeeperSettings,
+  _setGetMemkeeperSettings,
   DEFAULT_CONFIG,
   getMemkeeperSettings,
   initMemkeeperSettings,
@@ -119,6 +122,49 @@ describe("MEMKEEPER_SCHEMA", () => {
     const toolCap = MEMKEEPER_SCHEMA.settings.find((s) => s.id === "observerToolBlockCapTokens");
     expect(hasNull(toolCap?.presets), "observerToolBlockCapTokens needs a null preset").toBe(true);
   });
+
+  it("declares the correct `type` for every setting", () => {
+    const expectedType: Record<string, string> = {
+      enabled: "boolean",
+      defaultModel: "model",
+      renderMode: "string",
+      observerMode: "string",
+      builderMode: "string",
+      selectorMode: "string",
+      commandResultCap: "number",
+      observerModel: "model",
+      observerThresholdTokens: "number",
+      observerIncludeThinking: "boolean",
+      observerToolBlockCapTokens: "number",
+      builderModel: "model",
+      builderEveryNObservations: "number",
+      builderSessionContextThresholdTokens: "number",
+      builderRootViewThreshold: "number",
+      maxBuilderPasses: "number",
+      selectorModel: "model",
+      selectorSessionContextThresholdTokens: "number",
+      selectorRootViewThreshold: "number",
+      maxSelectorPasses: "number",
+    };
+    for (const s of MEMKEEPER_SCHEMA.settings) {
+      expect(s.type, `${s.id} type`).toBe(expectedType[s.id]);
+    }
+  });
+
+  it("declares `min` on the numeric knobs that need a floor", () => {
+    // Every numeric setting has min >= 1 (counts/thresholds are positive). commandResultCap and
+    // observerToolBlockCapTokens allow 0 via min:0 (capped at 0 = effectively no work, still valid).
+    const numeric = MEMKEEPER_SCHEMA.settings.filter((s) => s.type === "number");
+    expect(numeric.length, "sanity: numeric settings exist").toBeGreaterThan(0);
+    for (const s of numeric) {
+      expect(typeof s.min, `${s.id} needs a numeric min`).toBe("number");
+    }
+    // commandResultCap and observerToolBlockCapTokens floor at 0; the rest floor at 1.
+    const cap = MEMKEEPER_SCHEMA.settings.find((s) => s.id === "commandResultCap");
+    expect(cap?.min).toBe(0);
+    const toolCap = MEMKEEPER_SCHEMA.settings.find((s) => s.id === "observerToolBlockCapTokens");
+    expect(toolCap?.min).toBe(0);
+  });
 });
 
 describe("DEFAULT_CONFIG parity with schema defaults", () => {
@@ -150,18 +196,51 @@ describe("DEFAULT_CONFIG parity with schema defaults", () => {
 });
 
 describe("getMemkeeperSettings", () => {
+  afterEach(() => _resetGetMemkeeperSettings());
+
   it("returns DEFAULT_CONFIG before init (no crash for early callers)", () => {
-    // Runs before the init test below; module-level handle is still null here.
+    // Must run before any init call; module-level handle is still null here.
     const cfg = getMemkeeperSettings();
     expect(cfg).toStrictEqual(DEFAULT_CONFIG);
   });
 
-  it("returns the handle's live getSettings() after init", () => {
+  it("initMemkeeperSettings registers the /mk:settings command with the documented options", () => {
     const fakePi = {} as ExtensionAPI;
     initMemkeeperSettings(fakePi);
+    const spy = vi.mocked(settingsUi.registerSettingsCommand);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [piArg, schemaArg, optsArg] = spy.mock.calls.at(-1) ?? [];
+    expect(piArg).toBe(fakePi);
+    expect(schemaArg).toBe(MEMKEEPER_SCHEMA);
+    expect(optsArg).toMatchObject({
+      commandName: "mk:settings",
+      title: "Memkeeper Settings",
+      titleRight: "avtc-pi-memkeeper",
+      storageLevels: ["session", "project", "global"],
+      envVar: "PI_SETTINGS_MEMKEEPER",
+    });
+  });
+
+  it("returns the handle's live getSettings() after init", () => {
+    // initMemkeeperSettings ran in the test above (module-level handle now set).
     const cfg = getMemkeeperSettings();
     // The mock handle yields LIVE_AFTER_INIT (enabled:false, distinct from default true).
     expect(cfg.enabled).toBe(false);
     expect(cfg.commandResultCap).toBe(25);
+  });
+
+  it("_setGetMemkeeperSettings overrides the read (the repo DI/mock pattern)", () => {
+    const injected: MemkeeperConfig = { ...DEFAULT_CONFIG, enabled: false, maxBuilderPasses: 1 };
+    _setGetMemkeeperSettings(() => injected);
+    expect(getMemkeeperSettings()).toBe(injected);
+  });
+
+  it("_resetGetMemkeeperSettings restores the real-handle read", () => {
+    const injected: MemkeeperConfig = { ...DEFAULT_CONFIG, enabled: false };
+    _setGetMemkeeperSettings(() => injected);
+    _resetGetMemkeeperSettings();
+    // Falls through to the handle (set by the init test above) -> LIVE_AFTER_INIT.
+    expect(getMemkeeperSettings().enabled).toBe(false);
+    expect(getMemkeeperSettings().commandResultCap).toBe(25);
   });
 });

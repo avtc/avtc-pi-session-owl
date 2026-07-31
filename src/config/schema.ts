@@ -356,6 +356,21 @@ export const MEMKEEPER_SCHEMA: SettingsSchema = {
 
 let handle: SettingsHandle<MemkeeperConfig> | null = null;
 
+/** Test-only override for the settings read (the repo DI/mock pattern): when set,
+ *  getMemkeeperSettings returns this instead of the real handle. Cleared by
+ *  _resetGetMemkeeperSettings. */
+let _getSettingsOverride: (() => MemkeeperConfig) | null = null;
+
+/** Test-only: inject a mock settings source (pass `null` to restore the real handle). */
+export function _setGetMemkeeperSettings(fn: (() => MemkeeperConfig) | null): void {
+  _getSettingsOverride = fn;
+}
+
+/** Test-only: clear the mock override (restore real-handle reads). */
+export function _resetGetMemkeeperSettings(): void {
+  _getSettingsOverride = null;
+}
+
 const REGISTRATION_OPTIONS: RegisterSettingsOptions = {
   commandName: "mk:settings",
   title: "Memkeeper Settings",
@@ -371,7 +386,9 @@ export function initMemkeeperSettings(pi: ExtensionAPI): SettingsHandle<Memkeepe
 }
 
 /** Live config read — every entry point calls this at trigger time (NOT cached at session start).
- *  Before init (early callers) returns the frozen DEFAULT_CONFIG so nothing crashes. */
+ *  Test override takes precedence; otherwise the real handle when initialized, or the frozen
+ *  DEFAULT_CONFIG before init (early callers never crash). */
 export function getMemkeeperSettings(): MemkeeperConfig {
+  if (_getSettingsOverride !== null) return _getSettingsOverride();
   return handle === null ? DEFAULT_CONFIG : handle.getSettings();
 }
