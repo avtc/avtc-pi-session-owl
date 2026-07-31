@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Hoisted mock: registerSettingsCommand returns a fake handle whose getSettings() yields a
 // distinct live value so the "after init" test can prove getMemkeeperSettings reads the handle.
 const LIVE_AFTER_INIT = vi.hoisted(() => {
-  // A sentinel config distinct from DEFAULT_CONFIG (enabled flipped) — reassigned per test below.
+  // A sentinel config distinct from DEFAULT_CONFIG (enabled flipped) — the mock handle returns it.
   return { enabled: false, commandResultCap: 25 };
 });
 
@@ -25,8 +25,8 @@ vi.mock("avtc-pi-settings-ui", () => ({
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as settingsUi from "avtc-pi-settings-ui";
 import type { MemkeeperConfig } from "../../src/config/schema.js";
-// settingsFilePaths + registerSettingsCommand are type-only imports in schema.ts; the mock above
-// supplies runtime values. Import the schema AFTER the mock is registered.
+// schema.ts imports registerSettingsCommand + settingsFilePaths as runtime values from
+// avtc-pi-settings-ui; the mock above replaces that module. Import the schema AFTER the mock.
 import {
   _resetGetMemkeeperSettings,
   _setGetMemkeeperSettings,
@@ -195,20 +195,22 @@ describe("DEFAULT_CONFIG parity with schema defaults", () => {
   });
 });
 
-describe("getMemkeeperSettings", () => {
+describe("getMemkeeperSettings — before init", () => {
+  it("returns DEFAULT_CONFIG before init (no crash for early callers)", () => {
+    // Runs first (this describe precedes the initialized one); module-level handle is undefined.
+    expect(getMemkeeperSettings()).toStrictEqual(DEFAULT_CONFIG);
+  });
+});
+
+describe("getMemkeeperSettings — initialized", () => {
+  const fakePi = {} as ExtensionAPI;
+  // Each test initializes its own handle read (init is idempotent via the spy; at(-1) is current).
+  beforeEach(() => initMemkeeperSettings(fakePi));
   afterEach(() => _resetGetMemkeeperSettings());
 
-  it("returns DEFAULT_CONFIG before init (no crash for early callers)", () => {
-    // Must run before any init call; module-level handle is still null here.
-    const cfg = getMemkeeperSettings();
-    expect(cfg).toStrictEqual(DEFAULT_CONFIG);
-  });
-
   it("initMemkeeperSettings registers the /mk:settings command with the documented options", () => {
-    const fakePi = {} as ExtensionAPI;
-    initMemkeeperSettings(fakePi);
     const spy = vi.mocked(settingsUi.registerSettingsCommand);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalled();
     const [piArg, schemaArg, optsArg] = spy.mock.calls.at(-1) ?? [];
     expect(piArg).toBe(fakePi);
     expect(schemaArg).toBe(MEMKEEPER_SCHEMA);
@@ -222,7 +224,6 @@ describe("getMemkeeperSettings", () => {
   });
 
   it("returns the handle's live getSettings() after init", () => {
-    // initMemkeeperSettings ran in the test above (module-level handle now set).
     const cfg = getMemkeeperSettings();
     // The mock handle yields LIVE_AFTER_INIT (enabled:false, distinct from default true).
     expect(cfg.enabled).toBe(false);
@@ -239,7 +240,7 @@ describe("getMemkeeperSettings", () => {
     const injected: MemkeeperConfig = { ...DEFAULT_CONFIG, enabled: false };
     _setGetMemkeeperSettings(() => injected);
     _resetGetMemkeeperSettings();
-    // Falls through to the handle (set by the init test above) -> LIVE_AFTER_INIT.
+    // Override cleared -> falls through to the handle (set by beforeEach) -> LIVE_AFTER_INIT.
     expect(getMemkeeperSettings().enabled).toBe(false);
     expect(getMemkeeperSettings().commandResultCap).toBe(25);
   });

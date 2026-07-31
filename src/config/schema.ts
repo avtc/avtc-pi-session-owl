@@ -354,7 +354,7 @@ export const MEMKEEPER_SCHEMA: SettingsSchema = {
 // Handle ownership + live read
 // ---------------------------------------------------------------------------
 
-let handle: SettingsHandle<MemkeeperConfig> | null = null;
+let handle: SettingsHandle<MemkeeperConfig> | undefined;
 
 /** Test-only override for the settings read (the repo DI/mock pattern): when set,
  *  getMemkeeperSettings returns this instead of the real handle. Cleared by
@@ -389,6 +389,6 @@ export function initMemkeeperSettings(pi: ExtensionAPI): SettingsHandle<Memkeepe
  *  Test override takes precedence; otherwise the real handle when initialized, or the frozen
  *  DEFAULT_CONFIG before init (early callers never crash). */
 export function getMemkeeperSettings(): MemkeeperConfig {
-  if (_getSettingsOverride !== null) return _getSettingsOverride();
-  return handle === null ? DEFAULT_CONFIG : handle.getSettings();
+  if (_getSettingsOverride) return _getSettingsOverride();
+  return handle ? handle.getSettings() : DEFAULT_CONFIG;
 }
