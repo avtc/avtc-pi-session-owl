@@ -131,14 +131,6 @@ function messageEndUsage(message: AgentMessage): {
   };
 }
 
-/** Read a provider-streamed output token count off a `message_update` partial. */
-function streamedOutputOf(ev: AgentEvent): number | null {
-  if (ev.type !== "message_update") return null;
-  const partial = (ev.assistantMessageEvent as { partial?: { usage?: { output?: number } } }).partial;
-  const out = partial?.usage?.output;
-  return typeof out === "number" ? out : null;
-}
-
 /** Extract the delta string from a streamed assistant-message event (fallback tier). */
 function deltaTextOf(ev: AgentEvent): string | null {
   if (ev.type !== "message_update") return null;
@@ -156,7 +148,6 @@ function deltaTextOf(ev: AgentEvent): string | null {
  */
 export async function runStage(input: StageRunInput): Promise<StageRunResult> {
   const usage = emptyUsage();
-  let primaryTokens = 0;
   let fallbackTokens = 0;
 
   try {
@@ -192,10 +183,10 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       } else if (event.type === "turn_end") {
         usage.turns += 1;
       } else if (event.type === "message_update") {
-        const out = streamedOutputOf(event);
-        if (out !== null && out > primaryTokens) {
-          primaryTokens = out;
-        }
+        // Fallback tier (decision #37): accumulate chars/4 over streamed deltas so
+        // a live counter (T20, fed via onEvent) always has a value even when the
+        // provider never reports usage. The authoritative per-message output is
+        // read from each message_end below (usage.output).
         const delta = deltaTextOf(event);
         if (delta !== null) {
           fallbackTokens += estimateContentTokens(delta);
@@ -204,12 +195,12 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     }
 
     const messages = await stream.result();
-    // Two-tier (decision #37): once the provider streams ANY usage.output the
-    // primary tier is authoritative (chars/4 overestimates once real tokens are
-    // known, so `max` would inflate — hence "primary wins", not max). The
-    // fallback tier (chars/4 over deltas) only shows when the provider never
-    // streams usage, keeping the live counter moving either way.
-    const streamingOutputTokens = primaryTokens > 0 ? primaryTokens : fallbackTokens;
+    // Two-tier (decision #37): the authoritative output-token count is the SUM of
+    // every message_end usage.output (usage.output — per-message, correct across
+    // multi-turn runs since partial.usage.output resets each message). The chars/4
+    // fallback only applies when the provider reports no output at all. (A live
+    // widget counter is built separately in T20 from the raw onEvent stream.)
+    const streamingOutputTokens = usage.output > 0 ? usage.output : fallbackTokens;
     return { messages, usage, streamingOutputTokens, aborted: input.signal.aborted };
   } catch (cause) {
     throw new StageRunError(cause, usage, input.signal.aborted);

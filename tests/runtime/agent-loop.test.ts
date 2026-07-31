@@ -239,11 +239,11 @@ describe("runStage — usage accumulation", () => {
 });
 
 describe("runStage — streaming output tokens (two-tier)", () => {
-  it("uses provider usage.output as the primary source when streamed", async () => {
+  it("uses provider usage.output as the primary source when reported", async () => {
     const events: AgentEvent[] = [
       deltaUpdate("text_delta", "hello world"), // 11 chars -> 3 tokens fallback
-      usageUpdate(77), // provider streams usage -> primary takes over
-      messageEnd(usageOf(0, 77, 0, 0)),
+      usageUpdate(77), // provider streams usage mid-stream (consumed live by T20)
+      messageEnd(usageOf(0, 77, 0, 0)), // authoritative output -> primary
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
@@ -285,6 +285,23 @@ describe("runStage — streaming output tokens (two-tier)", () => {
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
     expect(result.streamingOutputTokens).toBe(estimateContentTokens(text));
+  });
+
+  it("sums provider output across multiple turns (not a global max of per-message peaks)", async () => {
+    // Each turn's partial.usage.output resets per message (Anthropic/OpenAI). A
+    // global-max would stall at turn 1's peak (50) and ignore turn 2 (30).
+    // The correct cumulative is the SUM of every message_end usage.output (80).
+    const events: AgentEvent[] = [
+      usageUpdate(50), // turn 1 partial climbs to 50
+      messageEnd(usageOf(0, 50, 0, 0)),
+      turnEnd(),
+      usageUpdate(30), // turn 2 partial resets, climbs to 30
+      messageEnd(usageOf(0, 30, 0, 0)),
+      turnEnd(),
+      agentEnd([]),
+    ];
+    const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
+    expect(result.streamingOutputTokens).toBe(80);
   });
 });
 
