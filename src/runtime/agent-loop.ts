@@ -74,7 +74,7 @@ export class StageRunError extends Error {
   readonly aborted: boolean;
   constructor(cause: unknown, partialUsage: StageUsage, aborted: boolean) {
     const msg = cause instanceof Error ? cause.message : String(cause);
-    super(`stage run failed: ${msg}`);
+    super(`stage run failed: ${msg}`, { cause });
     this.name = "StageRunError";
     this.partialUsage = partialUsage;
     this.aborted = aborted;
@@ -106,14 +106,19 @@ export function makeTurnCap(
   };
 }
 
-/** Read cumulative usage off a `message_end` message (always an assistant message). */
+/** Read cumulative usage off a `message_end` message.
+ *
+ * The loop emits a `message_end` for EVERY appended message, including prompt /
+ * steering user + toolResult messages, which carry no `usage`. The optional-
+ * chaining `?? 0` is therefore load-bearing (not defensive) — those messages
+ * contribute zero and only assistant messages carry token usage. */
 function messageEndUsage(message: AgentMessage): {
   input: number;
   output: number;
   cacheRead: number;
   cost: number;
 } {
-  // message_end always carries an assistant message with usage at runtime.
+  // Only assistant messages carry usage; prompt/steering messages have none.
   const u = (
     message as {
       usage?: { input?: number; output?: number; cacheRead?: number; cost?: { total?: number } };
@@ -164,6 +169,8 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
 
     const config: AgentLoopConfig = {
       model: input.model,
+      // memkeeper stages use standard LLM messages only (no custom message kinds),
+      // so the AgentMessage[]->Message[] transform is an identity cast.
       convertToLlm: (msgs: AgentMessage[]) => msgs as unknown as Message[],
       toolExecution: SEQUENTIAL,
       shouldStopAfterTurn: makeTurnCap(input.maxTurns),
@@ -198,6 +205,11 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     }
 
     const messages = await stream.result();
+    // Two-tier (decision #37): once the provider streams ANY usage.output the
+    // primary tier is authoritative (chars/4 overestimates once real tokens are
+    // known, so `max` would inflate — hence "primary wins", not max). The
+    // fallback tier (chars/4 over deltas) only shows when the provider never
+    // streams usage, keeping the live counter moving either way.
     const streamingOutputTokens = primaryTokens > 0 ? primaryTokens : fallbackTokens;
     return { messages, usage, streamingOutputTokens, aborted: input.signal.aborted };
   } catch (cause) {

@@ -18,7 +18,7 @@ import {
   StageRunError,
   type StageRunInput,
   type StageUsage,
-} from "../src/runtime/agent-loop.js";
+} from "../../src/runtime/agent-loop.js";
 
 // --- scripted-event helpers ------------------------------------------------
 
@@ -77,6 +77,12 @@ function usageUpdate(output: number): AgentEvent {
 
 function messageEnd(u: Usage): AgentEvent {
   return { type: "message_end", message: asstMsg(u) };
+}
+
+/** A `message_end` carrying a non-assistant message (prompt/steering user message) — no usage. */
+function nonAssistantMessageEnd(): AgentEvent {
+  const userMsg = { role: "user", content: [], timestamp: 0 } as unknown as AgentMessage;
+  return { type: "message_end", message: userMsg };
 }
 
 function turnEnd(): AgentEvent {
@@ -219,6 +225,17 @@ describe("runStage — usage accumulation", () => {
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
     expect(result.usage).toEqual({ input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 });
   });
+
+  it("counts a non-assistant message_end (no usage) as zero, not NaN", async () => {
+    const events: AgentEvent[] = [
+      messageEnd(usageOf(100, 50, 10, 0.001)),
+      nonAssistantMessageEnd(), // prompt/steering user message — no usage block
+      turnEnd(),
+      agentEnd([]),
+    ];
+    const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
+    expect(result.usage).toEqual({ input: 100, output: 50, cacheRead: 10, cost: 0.001, turns: 1 });
+  });
 });
 
 describe("runStage — streaming output tokens (two-tier)", () => {
@@ -240,6 +257,19 @@ describe("runStage — streaming output tokens (two-tier)", () => {
       deltaUpdate("thinking_delta", "abcdefgh"), // 8
       deltaUpdate("toolcall_delta", "abcd"), // 4
       messageEnd(usageOf(0, 0, 0, 0)), // output 0 -> primary never fires
+      agentEnd([]),
+    ];
+    const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
+    expect(result.streamingOutputTokens).toBe(5);
+  });
+
+  it("prefers primary over a larger fallback (primary wins, not max)", async () => {
+    // deltas -> 400 chars / 4 = 100 fallback tokens; usage.output = 5 primary.
+    // primary wins (5), NOT max(5, 100) — chars/4 overestimates once real tokens are known.
+    const events: AgentEvent[] = [
+      deltaUpdate("text_delta", "x".repeat(400)), // 400 chars -> 100 fallback
+      usageUpdate(5), // provider streams usage -> primary = 5
+      messageEnd(usageOf(0, 5, 0, 0)),
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
@@ -342,6 +372,38 @@ describe("runStage — abort", () => {
     const events: AgentEvent[] = [messageEnd(usageOf(1, 1, 0, 0)), agentEnd([])];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
     expect(result.aborted).toBe(false);
+  });
+
+  it("fires onStageEnd with the partial usage accumulated before the abort", async () => {
+    const controller = new AbortController();
+    const calls: StageUsage[] = [];
+    const events: AgentEvent[] = [
+      messageEnd(usageOf(10, 5, 0, 0)),
+      turnEnd(),
+      messageEnd(usageOf(20, 8, 0, 0)),
+      turnEnd(),
+      agentEnd([]),
+    ];
+    let sawTurnEnd = false;
+    const result = await runStage(
+      baseInput({
+        signal: controller.signal,
+        loopFn: makeFakeLoop({ events, messages: [] }),
+        onStageEnd: (u) => calls.push(u),
+        onEvent: (e) => {
+          if (e.type === "turn_end") {
+            if (!sawTurnEnd) {
+              sawTurnEnd = true;
+              controller.abort();
+            }
+          }
+        },
+      }),
+    );
+    expect(result.aborted).toBe(true);
+    expect(calls).toHaveLength(1);
+    // at least the first message_end's usage was accumulated before the abort
+    expect(calls[0]?.input).toBeGreaterThanOrEqual(10);
   });
 });
 
