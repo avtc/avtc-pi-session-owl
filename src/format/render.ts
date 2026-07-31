@@ -9,8 +9,10 @@ import { IMPORTANCE_ABBR, type Node, type Observation } from "../types.js";
 
 export type RenderViewer = "builder" | "nonBuilder";
 
-/** The canonical one-line legend for the shared render format. */
-export const RENDER_LEGEND = "📁 node · 📄 observation · crit high med low · 🆕new 📦archived 🪦obsolete";
+/** The canonical one-line legend for the shared render format (non-Builder
+ *  consumers — compaction summary, commands; the Builder's own prompt carries
+ *  its own legend including the Builder-only 🆕new glyph). */
+export const RENDER_LEGEND = "📁 node · 📄 observation · crit high med low · 📦archived 🪦obsolete";
 
 const MONTH_ABBREVIATIONS = [
   "Jan",
@@ -30,6 +32,12 @@ const MONTH_ABBREVIATIONS = [
 const MONTH_PART = 1;
 const DAY_PART = 2;
 const MONTH_INDEX_OFFSET = 1;
+
+/** Collapse any whitespace (incl. newlines) to single spaces and trim, so an
+ *  LLM-written multi-line summary never breaks the one-line render layout. */
+function singleLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
 
 /** The render abbreviation for an importance (crit/high/med/low). */
 export function importanceAbbr(imp: Node["importance"]): string {
@@ -93,7 +101,7 @@ interface LineOptions {
 /** Render one node as a line (no indent — callers apply depth indentation). */
 export function formatNodeLine(node: Node, options: LineOptions): string {
   const parts: string[] = [`📁 ${node.id} ${stateGlyph(node, options.viewer)}${importanceAbbr(node.importance)}`];
-  parts.push(node.summary);
+  parts.push(singleLine(node.summary));
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
   if (node.state === "obsolete" && node.supersededBy !== null) parts.push(`→ ${node.supersededBy}`);
   parts.push(childCounts(node));
@@ -104,7 +112,7 @@ export function formatNodeLine(node: Node, options: LineOptions): string {
 /** Render one observation as a line (no indent — callers apply depth indentation). */
 export function formatObservationLine(obs: Observation, options: LineOptions): string {
   const parts: string[] = [`📄 ${obs.id} ${importanceAbbr(obs.importance)}`];
-  parts.push(obs.content);
+  parts.push(singleLine(obs.content));
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
   parts.push(formatTimestamp(obs.timestamp));
   return parts.join(" · ");

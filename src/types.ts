@@ -84,14 +84,14 @@ export interface NodeTimestamps {
 export interface Observation {
   id: ObsId;
   /** Condensed essential summary (the full detail stays in the source). */
-  content: string;
+  readonly content: string;
   /** Cached chars/4 estimate, frozen at capture. */
-  contentTokens: number;
-  importance: Importance;
+  readonly contentTokens: number;
+  readonly importance: Importance;
   /** Provenance — real session-entry ids. */
-  sourceEntryIds: string[];
+  readonly sourceEntryIds: string[];
   /** "YYYY-MM-DD HH:MM", attached mechanically from the source entries. */
-  timestamp: string;
+  readonly timestamp: string;
   /** ALWAYS a real node id (the capture wrapper at first; regrouped later). */
   parentNode: NodeId;
 }
@@ -138,6 +138,41 @@ export interface Node {
   /** The single replacement id when state === "obsolete"; null otherwise. */
   supersededBy: NodeId | null;
   timestamps: NodeTimestamps;
+}
+
+/** Construct a node, computing `summaryTokens` from `summary` and seeding
+ *  `timestamps` (rangeStart/rangeEnd default to the createdAt instant). */
+export function makeNode(args: {
+  id: NodeId;
+  summary: string;
+  importance: Importance;
+  state: NodeState;
+  parentNode: NodeId | null;
+  observationIds?: ObsId[];
+  childNodeIds?: NodeId[];
+  supersededBy?: NodeId | null;
+  createdAt: string;
+  rangeStart?: string;
+  rangeEnd?: string;
+}): Node {
+  const rangeStart = args.rangeStart ?? args.createdAt;
+  return {
+    id: args.id,
+    summary: args.summary,
+    summaryTokens: estimateContentTokens(args.summary),
+    importance: args.importance,
+    state: args.state,
+    parentNode: args.parentNode,
+    observationIds: args.observationIds ?? [],
+    childNodeIds: args.childNodeIds ?? [],
+    supersededBy: args.supersededBy ?? null,
+    timestamps: {
+      createdAt: args.createdAt,
+      updatedAt: args.createdAt,
+      rangeStart,
+      rangeEnd: args.rangeEnd ?? rangeStart,
+    },
+  };
 }
 
 // --- Graph container -------------------------------------------------------

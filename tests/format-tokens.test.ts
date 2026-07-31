@@ -2,7 +2,15 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import { formatCost, formatCount, formatDuration, formatTokens } from "../src/format/tokens.js";
+import { estimateTokens, formatCost, formatCount, formatDuration, formatTokens } from "../src/format/tokens.js";
+
+describe("estimateTokens", () => {
+  it("divides content length by the chars-per-token constant (ceil)", () => {
+    expect(estimateTokens("")).toBe(0);
+    expect(estimateTokens("abcdefgh")).toBe(2);
+    expect(estimateTokens("abcdefghi")).toBe(3);
+  });
+});
 
 describe("formatTokens", () => {
   it("renders raw integers below 1000", () => {
@@ -49,6 +57,14 @@ describe("formatTokens", () => {
     expect(formatTokens(12_000_000_000)).toBe("12B");
     expect(formatTokens(245_000_000_000)).toBe("245B");
   });
+
+  it("hits the exact tier crossovers", () => {
+    expect(formatTokens(9999)).toBe("10.0k");
+    expect(formatTokens(1_000_000)).toBe("1.0M");
+    expect(formatTokens(1_000_000_000)).toBe("1.0B");
+    // the riskiest pair: just under 1M rounds up to 1000k; exactly 1M flips to M
+    expect(formatTokens(999999)).toBe("1000k");
+  });
 });
 
 describe("formatCost", () => {
@@ -89,5 +105,10 @@ describe("formatCount", () => {
     expect(formatCount(245)).toBe("245");
     expect(formatCount(1245)).toBe("1,245");
     expect(formatCount(1_000_000)).toBe("1,000,000");
+  });
+
+  it("renders negatives with a leading sign and truncates fractions", () => {
+    expect(formatCount(-1245)).toBe("-1,245");
+    expect(formatCount(-12.9)).toBe("-12");
   });
 });

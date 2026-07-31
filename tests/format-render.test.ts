@@ -142,8 +142,28 @@ describe("formatObservationLine", () => {
 });
 
 describe("RENDER_LEGEND", () => {
-  it("is the canonical one-line shared legend", () => {
-    expect(RENDER_LEGEND).toBe("📁 node · 📄 observation · crit high med low · 🆕new 📦archived 🪦obsolete");
+  it("is the canonical one-line shared legend (non-Builder; no Builder-only glyph)", () => {
+    expect(RENDER_LEGEND).toBe("📁 node · 📄 observation · crit high med low · 📦archived 🪦obsolete");
+  });
+});
+
+describe("singleLine rendering", () => {
+  it("collapses newlines and whitespace runs so a multi-line summary stays one line", () => {
+    const node = makeNode({
+      id: "n1",
+      summary: "line one\n  line two\t\n  three",
+      importance: "high",
+      observationIds: repeatObs(1),
+    });
+    const line = formatNodeLine(node, { viewer: "nonBuilder" });
+    expect(line).toContain("line one line two three");
+    expect(line.includes("\n")).toBe(false);
+  });
+
+  it("collapses newlines in an observation's content", () => {
+    const obs = makeObservation({ id: "o1", content: "a\nb\nc", importance: "low", timestamp: "2026-07-28 14:30" });
+    const line = formatObservationLine(obs, { viewer: "nonBuilder" });
+    expect(line).toContain("a b c");
   });
 });
 

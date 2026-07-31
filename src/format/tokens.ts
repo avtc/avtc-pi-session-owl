@@ -4,6 +4,11 @@
 // Canonical numeric/time formatting shared by the status command and widget.
 // Token formatting mirrors pi's footer logic plus a billion tier.
 
+// The canonical chars/4 token estimator lives in types.ts (the data-model
+// layer needs it to freeze Observation.contentTokens); re-exported here under
+// the name downstream stages expect, so there is a single implementation.
+export { estimateContentTokens as estimateTokens } from "../types.js";
+
 const THOUSAND = 1000;
 const TEN_THOUSAND = 10_000;
 const MILLION = 1_000_000;

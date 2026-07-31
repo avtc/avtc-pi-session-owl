@@ -38,19 +38,44 @@ export function everyObservationAttached(graph: MemkeeperGraph): boolean {
 }
 
 /**
- * Each observation is listed under exactly one node, and that node is the
- * observation's own `parentNode`. Catches double-listing and parent/list drift.
+ * Each observation is listed under exactly one node, that node is the
+ * observation's own `parentNode`, and no node references a phantom observation.
+ * Catches double-listing, parent/list drift, and dangling obs ids. Single pass
+ * over nodes (linear in node + edge count) — not nested in the obs count.
  */
 export function exactlyOneNodePerObservation(graph: MemkeeperGraph): boolean {
-  for (const obs of graph.observations.values()) {
-    let count = 0;
-    for (const node of graph.nodes.values()) {
-      if (node.observationIds.includes(obs.id)) count++;
+  const ownerOf = new Map<string, Node>();
+  for (const node of graph.nodes.values()) {
+    for (const obsId of node.observationIds) {
+      const obs = graph.observations.get(obsId);
+      if (obs === undefined) return false; // phantom obs id in a node list
+      if (ownerOf.has(obsId)) return false; // listed under more than one node
+      if (obs.parentNode !== node.id) return false; // listed node != obs.parentNode
+      ownerOf.set(obsId, node);
     }
-    if (count !== 1) return false;
-    const owner = graph.nodes.get(obs.parentNode);
-    if (owner === undefined) return false;
-    if (!owner.observationIds.includes(obs.id)) return false;
+  }
+  // every observation must appear in some node's list
+  return ownerOf.size === graph.observations.size;
+}
+
+/**
+ * Containment child-links are bidirectionally consistent: every id in a node's
+ * `childNodeIds` is a real node whose `parentNode` points back, and every
+ * non-root node is listed in its parent's `childNodeIds`. No phantom children,
+ * no dangling parents.
+ */
+export function childLinksConsistent(graph: MemkeeperGraph): boolean {
+  for (const node of graph.nodes.values()) {
+    for (const childId of node.childNodeIds) {
+      const child = graph.nodes.get(childId);
+      if (child === undefined) return false; // phantom child id
+      if (child.parentNode !== node.id) return false; // child does not point back
+    }
+    if (node.parentNode !== null) {
+      const parent = graph.nodes.get(node.parentNode);
+      if (parent === undefined) return false; // parent missing
+      if (!parent.childNodeIds.includes(node.id)) return false; // parent does not list this child
+    }
   }
   return true;
 }
@@ -77,14 +102,15 @@ export function noCycles(graph: MemkeeperGraph): boolean {
 
 /**
  * The predefined goal node invariants: nGoal exists, sits at the root, is
- * active, carries no supersession, and the permanent seed observation
- * `oInitialPrompt` is attached to it (and thus undetachable).
+ * active and critical, carries no supersession, and the permanent seed
+ * observation `oInitialPrompt` is attached to it (and thus undetachable).
  */
 export function nGoalInvariants(graph: MemkeeperGraph): boolean {
   const goal = graph.nodes.get(N_GOAL);
   if (goal === undefined) return false;
   if (goal.parentNode !== null) return false;
   if (goal.state !== "active") return false;
+  if (goal.importance !== "critical") return false;
   if (goal.supersededBy !== null) return false;
   const seed = graph.observations.get(O_INITIAL_PROMPT);
   if (seed === undefined) return false;
@@ -116,6 +142,9 @@ export function validateGraph(graph: MemkeeperGraph): boolean {
   }
   if (!exactlyOneNodePerObservation(graph)) {
     throw new GraphInvariantError("an observation is not under exactly one matching node");
+  }
+  if (!childLinksConsistent(graph)) {
+    throw new GraphInvariantError("a containment child-link is inconsistent");
   }
   if (!noCycles(graph)) {
     throw new GraphInvariantError("the containment tree has a cycle");

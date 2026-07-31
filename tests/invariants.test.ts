@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  childLinksConsistent,
   dissolvable,
   everyObservationAttached,
   exactlyOneNodePerObservation,
@@ -129,6 +130,52 @@ describe("structural validators", () => {
     const g = validGraph();
     node(g, N_GOAL).parentNode = "n5" as NodeId;
     expect(nGoalInvariants(g)).toBe(false);
+  });
+
+  it("nGoalInvariants fails when nGoal importance is not critical", () => {
+    const g = validGraph();
+    node(g, N_GOAL).importance = "low";
+    expect(nGoalInvariants(g)).toBe(false);
+  });
+});
+
+describe("reverse-direction consistency", () => {
+  it("exactlyOneNodePerObservation fails when a node lists a phantom observation id", () => {
+    const g = validGraph();
+    node(g, "n5" as NodeId).observationIds.push("oGhost" as ObsId);
+    expect(exactlyOneNodePerObservation(g)).toBe(false);
+  });
+
+  it("exactlyOneNodePerObservation fails when a node lists an obs whose parentNode is a different node", () => {
+    const g = validGraph();
+    // n5 claims o2 but o2.parentNode is still n5 here — instead point o2 elsewhere
+    observation(g, "o2" as ObsId).parentNode = "n6" as NodeId;
+    expect(exactlyOneNodePerObservation(g)).toBe(false);
+  });
+
+  it("exactlyOneNodePerObservation fails when an observation is unlisted (orphaned in the ledger)", () => {
+    const g = validGraph();
+    g.observations.set("o9" as ObsId, obsWith({ id: "o9", parentNode: "n5" as NodeId }));
+    expect(exactlyOneNodePerObservation(g)).toBe(false);
+  });
+
+  it("childLinksConsistent fails when a child is listed but does not point back to the parent", () => {
+    const g = validGraph();
+    node(g, "n5" as NodeId).childNodeIds.push("n6" as NodeId); // already a child; instead break n6's back-link
+    node(g, "n6" as NodeId).parentNode = null;
+    expect(childLinksConsistent(g)).toBe(false);
+  });
+
+  it("childLinksConsistent fails when a node lists a phantom child id", () => {
+    const g = validGraph();
+    node(g, "n5" as NodeId).childNodeIds.push("nGhost" as NodeId);
+    expect(childLinksConsistent(g)).toBe(false);
+  });
+
+  it("childLinksConsistent fails when a non-root node's parent does not list it", () => {
+    const g = validGraph();
+    node(g, "n5" as NodeId).childNodeIds = []; // n6 is parented to n5 but n5 no longer lists it
+    expect(childLinksConsistent(g)).toBe(false);
   });
 });
 

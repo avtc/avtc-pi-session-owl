@@ -18,6 +18,7 @@ import {
   type ObsId,
 } from "../types.js";
 import {
+  childLinksConsistent,
   dissolvable,
   everyObservationAttached,
   exactlyOneNodePerObservation,
@@ -96,6 +97,7 @@ function assertStructural(graph: MemkeeperGraph, what: string): void {
   if (!everyObservationAttached(graph)) throw new GraphInvariantError(`${what}: an observation is detached`);
   if (!exactlyOneNodePerObservation(graph))
     throw new GraphInvariantError(`${what}: an observation is multi/root parented`);
+  if (!childLinksConsistent(graph)) throw new GraphInvariantError(`${what}: a containment child-link is inconsistent`);
   if (!noCycles(graph)) throw new GraphInvariantError(`${what}: the containment tree has a cycle`);
 }
 
@@ -137,20 +139,32 @@ function recomputeRange(graph: MemkeeperGraph, node: Node): void {
   node.timestamps.rangeEnd = max ?? node.timestamps.createdAt;
 }
 
-/** Touch a node's updatedAt and recompute its range. */
+/** Touch a node's updatedAt and recompute its range AND every ancestor's range
+ *  (rangeStart/rangeEnd span a node's whole subtree, so an ancestor's range can
+ *  change when a descendant's content moves). */
 function touchAndRecompute(graph: MemkeeperGraph, node: Node): void {
-  node.timestamps.updatedAt = currentTimestamp();
-  recomputeRange(graph, node);
+  const now = currentTimestamp();
+  let current: Node | undefined = node;
+  while (current !== undefined) {
+    current.timestamps.updatedAt = now;
+    recomputeRange(graph, current);
+    current = current.parentNode === null ? undefined : graph.nodes.get(current.parentNode);
+  }
 }
 
 /**
  * Remove an emptied, dissolvable node and unlink it from its parent. Cascades
  * upward: a parent emptied by this removal is re-checked (a chain of emptied
  * containers collapses). nGoal and nIrrelevant are exempt and never dissolve.
- * Returns the set of ids actually removed.
+ * Returns the ids removed and the surviving parents that lost a child (their
+ * ranges need recompute).
  */
-function dissolveEmptied(graph: MemkeeperGraph, candidates: NodeId[]): Set<NodeId> {
+function dissolveEmptied(
+  graph: MemkeeperGraph,
+  candidates: NodeId[],
+): { removed: Set<NodeId>; orphanedParents: Set<NodeId> } {
   const removed = new Set<NodeId>();
+  const orphanedParents = new Set<NodeId>();
   const queue = [...candidates];
   while (queue.length > 0) {
     const id = queue.pop();
@@ -164,13 +178,14 @@ function dissolveEmptied(graph: MemkeeperGraph, candidates: NodeId[]): Set<NodeI
       const parent = graph.nodes.get(node.parentNode);
       if (parent !== undefined) {
         parent.childNodeIds = parent.childNodeIds.filter((c) => c !== id);
+        orphanedParents.add(parent.id);
         queue.push(parent.id);
       }
     }
     graph.nodes.delete(id);
     removed.add(id);
   }
-  return removed;
+  return { removed, orphanedParents };
 }
 
 /** A stable "now" for timestamps (overridable via setClock in tests). */
@@ -327,12 +342,13 @@ export function applyMv(
     }
   }
   // dissolve emptied old parents, then recompute ranges on survivors + dest
-  dissolveEmptied(graph, [...oldParents]);
-  for (const id of oldParents) {
+  const dissolveResult = dissolveEmptied(graph, [...oldParents]);
+  const recomputeIds = new Set<NodeId>([...oldParents, ...dissolveResult.orphanedParents]);
+  if (dest !== null) recomputeIds.add(dest.id);
+  for (const id of recomputeIds) {
     const n = graph.nodes.get(id);
     if (n !== undefined) touchAndRecompute(graph, n);
   }
-  if (dest !== null) touchAndRecompute(graph, dest);
   assertStructural(graph, "mv");
   return {
     type: "mv",
@@ -375,6 +391,17 @@ export function applyMerge(
   } else {
     dest = requireNode(graph, args.destId, "merge");
   }
+  // cycle pre-check: a source must not be an ancestor of dest (folding an
+  // ancestor into its descendant would make dest its own child). Also reject a
+  // source that contains another source being folded alongside it.
+  for (const src of sources) {
+    if (src.id === dest.id) {
+      throw new GraphInvariantError(`merge: source ${src.id} is the destination`);
+    }
+    if (subtreeNodeIds(graph, src.id).has(dest.id)) {
+      throw new GraphInvariantError(`merge: source ${src.id} contains destination ${dest.id} (cycle)`);
+    }
+  }
   const oldParents = new Set<NodeId>();
   for (const src of sources) {
     if (src.id === dest.id) continue;
@@ -404,8 +431,12 @@ export function applyMerge(
   }
   // dissolve the emptied sources + any emptied old parents
   const toDissolve = [...sources.filter((s) => s.id !== dest.id).map((s) => s.id), ...oldParents];
-  dissolveEmptied(graph, toDissolve);
-  touchAndRecompute(graph, dest);
+  const dissolveResult = dissolveEmptied(graph, toDissolve);
+  const recomputeIds = new Set<NodeId>([dest.id, ...oldParents, ...dissolveResult.orphanedParents]);
+  for (const id of recomputeIds) {
+    const n = graph.nodes.get(id);
+    if (n !== undefined) touchAndRecompute(graph, n);
+  }
   assertStructural(graph, "merge");
   return {
     type: "merge",
@@ -477,7 +508,10 @@ export function applySetMeta(
     }
   }
   if (args.importance !== null) node.importance = args.importance;
-  if (args.archived === true) node.state = "archived";
+  if (args.archived === true) {
+    node.state = "archived";
+    if (node.supersededBy !== null) node.supersededBy = null;
+  }
   if (args.archived === false && node.state === "archived") node.state = "active";
   if (args.obsolete === false && node.state === "obsolete") {
     node.state = "active";
