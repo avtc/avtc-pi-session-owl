@@ -5,7 +5,6 @@ import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage } from "@e
 import type { Api, AssistantMessage, AssistantMessageEvent, Model, ThinkingLevel, Usage } from "@earendil-works/pi-ai";
 import { EventStream } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-
 import {
   makeTurnCap,
   NO_EVENT_SINK,
@@ -19,6 +18,7 @@ import {
   type StageRunInput,
   type StageUsage,
 } from "../../src/runtime/agent-loop.js";
+import { estimateContentTokens } from "../../src/types.js";
 
 // --- scripted-event helpers ------------------------------------------------
 
@@ -274,6 +274,17 @@ describe("runStage — streaming output tokens (two-tier)", () => {
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
     expect(result.streamingOutputTokens).toBe(5);
+  });
+
+  it("fallback tier equals the canonical chars/4 estimator (no drift)", async () => {
+    const text = "some longer delta text for the fallback estimate";
+    const events: AgentEvent[] = [
+      deltaUpdate("text_delta", text),
+      messageEnd(usageOf(0, 0, 0, 0)), // no provider usage -> fallback path
+      agentEnd([]),
+    ];
+    const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
+    expect(result.streamingOutputTokens).toBe(estimateContentTokens(text));
   });
 });
 

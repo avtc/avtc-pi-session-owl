@@ -16,6 +16,7 @@
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { agentLoop } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import { estimateContentTokens } from "../types.js";
 
 // --- named sentinels (no bare literals at call sites) ----------------------
 
@@ -80,8 +81,6 @@ export class StageRunError extends Error {
     this.aborted = aborted;
   }
 }
-
-const CHARS_PER_TOKEN_ESTIMATE = 4;
 
 /** A fresh zeroed usage accumulator. */
 function emptyUsage(): StageUsage {
@@ -199,7 +198,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
         }
         const delta = deltaTextOf(event);
         if (delta !== null) {
-          fallbackTokens += Math.ceil(delta.length / CHARS_PER_TOKEN_ESTIMATE);
+          fallbackTokens += estimateContentTokens(delta);
         }
       }
     }
