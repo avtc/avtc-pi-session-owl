@@ -44,6 +44,14 @@ export interface RenderedChunk {
 
 // --- constants --------------------------------------------------------------
 
+/** Entry types the Observer renders as citation sources (the chunk input). */
+const RENDERABLE_ENTRY_TYPES: ReadonlySet<string> = new Set(["message", "custom_message", "branch_summary"]);
+
+/** Whether an entry is an Observer-renderable source (message/custom_message/branch_summary). */
+export function isRenderableEntry(entry: SessionEntry): boolean {
+  return RENDERABLE_ENTRY_TYPES.has(entry.type);
+}
+
 const TRUNCATION_MARKER = "[…truncated…]";
 /** ANSI/VT escape sequences stripped from all rendered text: CSI (SGR colors,
  *  24-bit color with ':' params, cursor moves, '?' private modes) via \x1b[ or the

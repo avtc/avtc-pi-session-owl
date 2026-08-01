@@ -72,8 +72,6 @@ function modelChange(id: string): FakeEntry {
   } as unknown as FakeEntry;
 }
 
-const branch = (entries: FakeEntry[]): FakeEntry[] => entries;
-
 function makeInput(over: Partial<TriggerInput> & { settings?: typeof DEFAULT_CONFIG } = {}): TriggerInput {
   const settings = { ...DEFAULT_CONFIG, ...over.settings };
   return {
@@ -96,49 +94,71 @@ afterEach(() => {
 // ===========================================================================
 describe("computeUnobserved — the Observer frontier", () => {
   it("returns entries strictly after the frontier (renderable only)", () => {
-    const entries = branch([
+    const entries = [
       userEntry("u1", "first user message body long enough"),
       assistantEntry("a1", "reply"),
       userEntry("u2", "second user message"),
       assistantEntry("a2", "reply two"),
-    ]);
+    ];
     const unobserved = computeUnobserved(entries as unknown as SessionEntry[], "a1");
     expect(unobserved.map((e) => e.id)).toEqual(["u2", "a2"]);
   });
 
   it("with a null frontier, starts AFTER the first user message", () => {
-    const entries = branch([
+    const entries = [
       userEntry("u1", "the verbatim initial prompt that got captured mechanically"),
       assistantEntry("a1", "reply"),
       userEntry("u2", "second"),
-    ]);
+    ];
     const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
     expect(unobserved.map((e) => e.id)).toEqual(["a1", "u2"]);
   });
 
   it("skips operational entries (only message/custom_message/branch_summary are renderable)", () => {
-    const entries = branch([
+    const entries = [
       userEntry("u1", "initial prompt captured mechanically here"),
       modelChange("mc1"),
       assistantEntry("a1", "reply"),
-    ]);
+    ];
     const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
     expect(unobserved.map((e) => e.id)).toEqual(["a1"]);
   });
 
   it("returns nothing when the frontier is at or past the last entry", () => {
-    const entries = branch([userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "reply")]);
+    const entries = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "reply")];
     expect(computeUnobserved(entries as unknown as SessionEntry[], "a1").map((e) => e.id)).toEqual([]);
   });
 
   it("includes custom_message entries as renderable", () => {
-    const entries = branch([
+    const entries = [
       userEntry("u1", "initial prompt captured mechanically"),
       customMessageEntry("cm1", "a custom injected note"),
       assistantEntry("a1", "reply"),
-    ]);
+    ];
     const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
     expect(unobserved.map((e) => e.id)).toEqual(["cm1", "a1"]);
+  });
+
+  it("includes branch_summary entries as renderable", () => {
+    const entries = [
+      userEntry("u1", "initial prompt captured mechanically"),
+      { id: "bs1", type: "branch_summary", parentId: null, timestamp: "", summary: "a branch recap" },
+      assistantEntry("a1", "reply"),
+    ];
+    const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
+    expect(unobserved.map((e) => e.id)).toEqual(["bs1", "a1"]);
+  });
+
+  it("with a null frontier and no user message, observes nothing (no task anchor yet)", () => {
+    const entries = [modelChange("mc1"), assistantEntry("a1", "reply before any user message")];
+    const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
+    expect(unobserved).toEqual([]);
+  });
+
+  it("treats a stale frontier id (not on the branch) as nothing-after-it", () => {
+    const entries = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "reply")];
+    const unobserved = computeUnobserved(entries as unknown as SessionEntry[], "stale-id-not-in-branch");
+    expect(unobserved).toEqual([]);
   });
 });
 
@@ -153,7 +173,7 @@ describe("evaluateObserverTrigger", () => {
   });
 
   it("does not fire when there are zero unobserved entries", () => {
-    const entries = branch([userEntry("u1", "initial prompt captured mechanically")]);
+    const entries = [userEntry("u1", "initial prompt captured mechanically")];
     const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
     const res = evaluateObserverTrigger({
       ...makeInput(),
@@ -165,10 +185,10 @@ describe("evaluateObserverTrigger", () => {
 
   it("fires when unobserved tokens reach the threshold", () => {
     // ~50 chars per message → many messages to cross the default 4K-token (16K-char) threshold.
-    const entries = branch([
+    const entries = [
       userEntry("u1", "initial prompt captured mechanically"),
       ...Array.from({ length: 400 }, (_, i) => assistantEntry(`a${i}`, "x".repeat(50))),
-    ]);
+    ];
     const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
     const res = evaluateObserverTrigger({
       ...makeInput(),
@@ -178,10 +198,7 @@ describe("evaluateObserverTrigger", () => {
   });
 
   it("does not fire when unobserved tokens are below the threshold", () => {
-    const entries = branch([
-      userEntry("u1", "initial prompt captured mechanically"),
-      assistantEntry("a1", "short reply"),
-    ]);
+    const entries = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "short reply")];
     const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
     const res = evaluateObserverTrigger({
       ...makeInput(),
@@ -191,16 +208,29 @@ describe("evaluateObserverTrigger", () => {
   });
 
   it("respects a custom threshold", () => {
-    const entries = branch([
+    const entries = [
       userEntry("u1", "initial prompt captured mechanically"),
       assistantEntry("a1", "a reply of a few tokens"),
-    ]);
+    ];
     const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
     const res = evaluateObserverTrigger({
       ...makeInput({ settings: { ...DEFAULT_CONFIG, observerThresholdTokens: 1 } }),
       unobserved,
     });
     expect(res.shouldFire).toBe(true);
+  });
+
+  it("skips when a run is in flight", () => {
+    const handle = acquireOrSkip("observe");
+    if (handle === null) throw new Error("lock not acquired");
+    const entries = [
+      userEntry("u1", "initial prompt captured mechanically"),
+      ...Array.from({ length: 400 }, (_, i) => assistantEntry(`a${i}`, "x".repeat(50))),
+    ];
+    const unobserved = computeUnobserved(entries as unknown as SessionEntry[], null);
+    const res = evaluateObserverTrigger({ ...makeInput(), unobserved });
+    expect(res.shouldFire).toBe(false);
+    handle.release();
   });
 });
 
@@ -420,6 +450,21 @@ describe("evaluateSelectorTrigger", () => {
     expect(res.shouldFire).toBe(false);
     handle.release();
   });
+
+  it("on-session-context-threshold: does not fire when context tokens is null", () => {
+    const res = evaluateSelectorTrigger(
+      makeInput({
+        ctx: ctxWithTokens(null),
+        settings: {
+          ...DEFAULT_CONFIG,
+          renderMode: "selected-root",
+          selectorMode: "on-session-context-threshold",
+          selectorSessionContextThresholdTokens: 200000,
+        },
+      }),
+    );
+    expect(res.shouldFire).toBe(false);
+  });
 });
 
 // ===========================================================================
@@ -465,11 +510,24 @@ describe("launchBackgroundRun", () => {
 
 // ===========================================================================
 describe("onTurnEnd", () => {
-  it("is a no-op when enabled=false", () => {
-    const launched: string[] = [];
-    const input = makeInput({ settings: { ...DEFAULT_CONFIG, enabled: false } });
+  it("is a no-op when enabled=false (no stage run is launched)", () => {
+    let called = false;
+    setStageRuns({
+      runObserver: async () => {
+        called = true;
+      },
+      runBuilder: async () => {
+        called = true;
+      },
+      runSelector: async () => {
+        called = true;
+      },
+    });
+    const input = makeInput({
+      settings: { ...DEFAULT_CONFIG, enabled: false, observerThresholdTokens: 1 },
+    });
     onTurnEnd(input);
-    expect(launched).toHaveLength(0);
+    expect(called).toBe(false);
   });
 
   it("fires the Observer first when on-threshold + threshold met, then Builder/Selector skip (in-flight)", async () => {

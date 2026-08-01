@@ -15,7 +15,7 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "./config/schema.js";
 import { log } from "./log.js";
-import { type ChunkOptions, renderBlocks } from "./observer/chunk.js";
+import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./observer/chunk.js";
 import { acquireOrSkip, inFlight, type StageName } from "./runtime/run-lock.js";
 import { getGraphStore } from "./store/graph-store.js";
 import { estimateContentTokens } from "./types.js";
@@ -38,13 +38,7 @@ export type RunFn = (args: {
   unobserved: SessionEntry[] | null;
 }) => Promise<void>;
 
-// --- entry types that are Observer-renderable (the citation sources) --------
-
-const RENDERABLE_ENTRY_TYPES: ReadonlySet<string> = new Set(["message", "custom_message", "branch_summary"]);
-
-function isRenderableEntry(entry: SessionEntry): boolean {
-  return RENDERABLE_ENTRY_TYPES.has(entry.type);
-}
+// --- the Observer frontier -------------------------------------------------
 
 /** Whether a session entry is a user message (used to anchor the null-frontier start). */
 function isUserMessageEntry(entry: SessionEntry): boolean {
@@ -271,7 +265,7 @@ export function onTurnEnd(input: TriggerInput): void {
 
   // Observer frontier: the unobserved slice on the active branch path.
   const leafId = input.ctx.sessionManager.getLeafId();
-  const branchEntries = input.ctx.sessionManager.getBranch(leafId ?? undefined) as unknown as SessionEntry[];
+  const branchEntries = input.ctx.sessionManager.getBranch(leafId ?? undefined);
   const unobserved = computeUnobserved(branchEntries, getGraphStore().observerFrontier);
 
   const observer = evaluateObserverTrigger({ ...input, unobserved });
