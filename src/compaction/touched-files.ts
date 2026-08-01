@@ -8,7 +8,7 @@
 // to the Selector input (T15) AND the rendered compaction summary.
 
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import { toStoredTimestamp } from "../format/render.js";
+import { singleLine, toStoredTimestamp } from "../format/render.js";
 
 /** Narrow port over the session manager for touched-files (the active branch +
  *  the current leaf). Injected so tests pass a fake; production passes the
@@ -118,7 +118,9 @@ const NO_PATH_LENGTH = 0;
 
 /** Render touched files as `<DD> <HH:MM> ✎|👁 <path>` lines (one per file). */
 export function renderTouchedFiles(files: readonly TouchedFile[]): string[] {
-  return files.map((f) => `${formatDayTime(f.timestamp)} ${f.op === "write" ? WRITE_GLYPH : READ_GLYPH} ${f.path}`);
+  return files.map(
+    (f) => `${formatDayTime(f.timestamp)} ${f.op === "write" ? WRITE_GLYPH : READ_GLYPH} ${singleLine(f.path)}`,
+  );
 }
 
 const WRITE_GLYPH = "✎";

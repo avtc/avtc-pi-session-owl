@@ -43,7 +43,6 @@ const INITIAL_PROMPT_HEADING = "## Initial prompt";
 const ACTIVE_SET_HEADING = "## Active set";
 const TOUCHED_HEADING = "## Recently touched";
 const NO_INITIAL_PROMPT = "(none captured yet)";
-const NO_ROOTS_PLACEHOLDER = "(none yet)";
 
 /**
  * Render the compaction summary text. Mechanical, never truncated. The
@@ -70,7 +69,7 @@ export function renderSummary(args: RenderSummaryArgs): string {
 
   lines.push(TOUCHED_HEADING);
   if (args.touchedFiles.length === NO_TOUCHED) {
-    lines.push(NO_ROOTS_PLACEHOLDER);
+    lines.push(NO_TOUCHED_PLACEHOLDER);
   } else {
     for (const line of renderTouchedFiles(args.touchedFiles)) {
       lines.push(line);
@@ -81,6 +80,7 @@ export function renderSummary(args: RenderSummaryArgs): string {
 }
 
 const NO_TOUCHED = 0;
+const NO_TOUCHED_PLACEHOLDER = "(none)";
 
 /** The root nodes to render in the active-set section, per renderMode. */
 function activeSetRoots(args: RenderSummaryArgs): RenderableNode[] {
@@ -100,7 +100,10 @@ function sourceRoots(graph: SummaryGraph): RenderableNode[] {
     if (node.state === "obsolete") continue;
     roots.push(node);
   }
-  return orderRoots(roots);
+  // nGoal is always first (mechanical render rule); the rest by importance/recency.
+  const goal = roots.filter((n) => n.id === N_GOAL);
+  const rest = roots.filter((n) => n.id !== N_GOAL);
+  return [...goal, ...orderRoots(rest)];
 }
 
 /** Non-obsolete selected-tree roots, nGoal first, nIrrelevant last. */

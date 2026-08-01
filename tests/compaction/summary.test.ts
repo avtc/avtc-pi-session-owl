@@ -35,7 +35,7 @@ function sNode(id: string, over: Partial<SerializedNode> & { summary: string }):
   };
 }
 
-function sObs(id: string, content: string, over: Partial<SerializedObservation> = {}): SerializedObservation {
+function sObs(id: string, content: string, over: Partial<SerializedObservation>): SerializedObservation {
   return {
     id,
     content,
@@ -57,7 +57,7 @@ const TOUCHED: TouchedFile[] = [
   { path: "src/y.ts", timestamp: "2026-07-28 14:28", op: "read" },
 ];
 
-const PROMPT = sObs("oInitialPrompt", "Design the memkeeper extension. Brand-new; no 3rd-party reuse.");
+const PROMPT = sObs("oInitialPrompt", "Design the memkeeper extension. Brand-new; no 3rd-party reuse.", {});
 
 function emptyGraph(): { nodes: Map<string, SerializedNode> } {
   return { nodes: new Map() };
@@ -131,7 +131,7 @@ describe("renderSummary — observations-root", () => {
     return nodeGraph(nodes);
   }
 
-  it("renders all non-obsolete source roots (nGoal first)", () => {
+  it("renders all non-obsolete source roots (nGoal first even when a newer critical root exists)", () => {
     const out = renderSummary({
       graph: graphWith([
         sNode("nGoal", {
@@ -140,9 +140,25 @@ describe("renderSummary — observations-root", () => {
           importance: "critical",
           childNodeIds: ["o1"],
           observationIds: ["o1"],
+          // nGoal OLDER than n3 — a pure importance/recency sort would put n3 first.
+          timestamps: {
+            createdAt: "2026-07-28 09:00",
+            updatedAt: "2026-07-28 09:00",
+            rangeStart: "2026-07-28 09:00",
+            rangeEnd: "2026-07-28 09:00",
+          },
         }),
         sNode("n7", { summary: "Selector spec", importance: "high" }),
-        sNode("n3", { summary: "Mechanical render", importance: "critical" }),
+        sNode("n3", {
+          summary: "Mechanical render",
+          importance: "critical",
+          timestamps: {
+            createdAt: "2026-07-28 14:00",
+            updatedAt: "2026-07-28 14:30",
+            rangeStart: "2026-07-28 14:00",
+            rangeEnd: "2026-07-28 14:30",
+          },
+        }),
         sNode("n9", { summary: "old idea", importance: "low", state: "obsolete", supersededBy: "n7" }),
       ]),
       selectedTree: null,

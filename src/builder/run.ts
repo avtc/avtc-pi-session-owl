@@ -19,6 +19,7 @@ import type { MemkeeperConfig } from "../config/schema.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
+import { notify } from "../notify.js";
 import { BUILDER_SYSTEM } from "../prompts/builder.js";
 import {
   NO_REASONING,
@@ -250,7 +251,3 @@ function flushNew(widget: WidgetController, store: StoreContext): void {
   appendGraphDelta(store, delta);
   widget.render();
 }
-
-// --- notify ----------------------------------------------------------------
-
-import { notify } from "../notify.js";

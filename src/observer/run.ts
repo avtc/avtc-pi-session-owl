@@ -20,6 +20,7 @@ import { toStoredTimestamp } from "../format/render.js";
 import { applyCreateNode, applyRecordObservation, type GraphDelta } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
+import { notify } from "../notify.js";
 import { OBSERVER_SYSTEM } from "../prompts/observer.js";
 import {
   NO_EVENT_SINK,
@@ -299,7 +300,3 @@ function persistObservationBatch(store: StoreContext, unobserved: SessionEntry[]
   const entry: ObservationEntry = { coversFromId, coversUpToId, records: serializedRecords, tokenCount };
   appendObservation(store, entry);
 }
-
-// --- notify ----------------------------------------------------------------
-
-import { notify } from "../notify.js";
