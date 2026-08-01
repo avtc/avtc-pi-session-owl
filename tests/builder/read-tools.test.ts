@@ -231,5 +231,54 @@ describe("Builder read tools", () => {
       // it's an error message, not a thrown rejection — the call resolved.
       expect(out.toLowerCase()).toContain("regex");
     });
+
+    it("rejects an overlong query with an error string", async () => {
+      const out = textOf(await callTool(tools(), "find", { query: "a".repeat(600) }));
+      expect(out.toLowerCase()).toContain("too long");
+    });
+
+    it("returns 'No matches.' when nothing matches", async () => {
+      const out = textOf(await callTool(tools(), "find", { query: "zzznomatch" }));
+      expect(out).toContain("No matches");
+    });
+  });
+
+  describe("cursor pagination round-trip", () => {
+    it("a second page using the prior afterId yields the next items, no duplicates", async () => {
+      const page1 = textOf(await callTool(tools(), "ls", { page: { take: 2 } }));
+      // extract the afterId from the footer
+      const match = page1.match(/afterId=(\S+)/);
+      expect(match).not.toBeNull();
+      const afterId = match !== null ? match[1] : "";
+      const page2 = textOf(await callTool(tools(), "ls", { page: { take: 2, afterId } }));
+      // page1 roots must NOT reappear on page2 (no duplicate re-delivery)
+      const page1Ids = page1
+        .split("\n")
+        .map((l) => l.match(/^📁 (n\S+)/))
+        .filter((m): m is RegExpMatchArray => m !== null)
+        .map((m) => m[1]);
+      for (const id of page1Ids) {
+        const asLine = page2.split("\n").some((l) => l.includes(`📁 ${id} `));
+        expect(asLine).toBe(false);
+      }
+    });
+
+    it("a stale afterId (cursor removed) yields an empty window, not duplicates", async () => {
+      // 'nX' is not a root in this graph → cursor-not-found → empty, no more.
+      const out = textOf(await callTool(tools(), "ls", { page: { take: 2, afterId: "nX-not-present" } }));
+      expect(out).toContain("empty");
+    });
+  });
+
+  describe("error + empty paths", () => {
+    it("ls of an unknown nodeId returns a not-found error", async () => {
+      const out = textOf(await callTool(tools(), "ls", { nodeId: "nX" }));
+      expect(out).toContain("No node");
+    });
+
+    it("cat of an unknown id returns a not-found block", async () => {
+      const out = textOf(await callTool(tools(), "cat", { ids: ["nX"] }));
+      expect(out).toContain("No node or observation");
+    });
   });
 });

@@ -32,41 +32,50 @@ export const FIND_TOOL = "find";
 const DEFAULT_TAKE = 50;
 /** take === 0 means "all" (no pagination). */
 const TAKE_ALL = 0;
+/** Upper bound on a `find` regex pattern length (guards against pathological
+ *  patterns — well beyond any sensible `JWT|auth|token`). */
+const FIND_QUERY_MAX = 500;
 const INDENT_STEP = 2;
 const ROOT_DEPTH = 0;
 const ROOT_PARENT: NodeId | null = null;
 const NO_AFTER_ID: string | null = null;
 
 /** Resolved cursor pagination: an ordered window into a full results list. */
-interface ResolvedPage {
+export interface ResolvedPage {
   take: number;
   afterId: string | null;
 }
 
 /** Normalize a raw `page` param (all-optional; TypeBox-inferred as unknown) into
  *  a resolved window. */
-function resolvePage(page: unknown): ResolvedPage {
+export function resolvePage(page: unknown): ResolvedPage {
   if (page === null || page === undefined || typeof page !== "object") {
     return { take: DEFAULT_TAKE, afterId: NO_AFTER_ID };
   }
   const raw = page as { take?: number; afterId?: string | null };
-  return { take: raw.take ?? DEFAULT_TAKE, afterId: raw.afterId ?? NO_AFTER_ID };
+  // clamp negative take to TAKE_ALL (the "all" sentinel) — a negative page size
+  // is meaningless; treat it like 0.
+  const rawTake = raw.take ?? DEFAULT_TAKE;
+  const take = rawTake < 0 ? TAKE_ALL : rawTake;
+  return { take, afterId: raw.afterId ?? NO_AFTER_ID };
 }
 
 /** Slice a results list by cursor pagination; return the window, whether more
- *  remain, and how many remain. `take === 0` returns the whole list. */
-function paginate<T extends { id: string }>(
+ *  remain, and how many remain. `take === 0` returns the whole list.
+ *  A stale `afterId` (the cursor item was removed/mutated away between calls)
+ *  yields an empty window with no more — the caller re-queries from null rather
+ *  than silently re-delivering duplicates from the start. */
+export function paginate<T extends { id: string }>(
   items: T[],
   page: ResolvedPage,
 ): { window: T[]; more: boolean; remaining: number } {
   if (page.take === TAKE_ALL) return { window: items, more: false, remaining: 0 };
-  const startIdx =
-    page.afterId === NO_AFTER_ID
-      ? 0
-      : (() => {
-          const i = items.findIndex((item) => item.id === page.afterId);
-          return i < 0 ? 0 : i + 1;
-        })();
+  let startIdx = 0;
+  if (page.afterId !== NO_AFTER_ID) {
+    const i = items.findIndex((item) => item.id === page.afterId);
+    if (i < 0) return { window: [], more: false, remaining: 0 }; // stale cursor
+    startIdx = i + 1;
+  }
   const window = items.slice(startIdx, startIdx + page.take);
   const remaining = Math.max(0, items.length - (startIdx + page.take));
   return { window, more: remaining > 0, remaining };
@@ -256,6 +265,14 @@ interface FindMatch {
   render: string;
 }
 
+/** A sortable wrapper carrying the entity for ordering. */
+interface NodeMatch extends FindMatch {
+  node: Node;
+}
+interface ObsMatch extends FindMatch {
+  obs: Observation;
+}
+
 /** Build the `find` tool: whole-graph regex search over node summaries +
  *  observation content, flat results each carrying `in <parent>`. */
 function makeFindTool(graph: MemkeeperGraph): AgentTool<typeof FIND_PARAMS> {
@@ -267,6 +284,12 @@ function makeFindTool(graph: MemkeeperGraph): AgentTool<typeof FIND_PARAMS> {
     parameters: FIND_PARAMS,
     async execute(_toolCallId, params) {
       const includeSuperseded = params.includeSuperseded ?? false;
+      if (params.query.length > FIND_QUERY_MAX) {
+        return {
+          content: [{ type: "text", text: `Query too long (max ${FIND_QUERY_MAX} chars). Use a shorter regex.` }],
+          details: { error: true },
+        };
+      }
       let regex: RegExp;
       try {
         regex = new RegExp(params.query);
@@ -278,15 +301,17 @@ function makeFindTool(graph: MemkeeperGraph): AgentTool<typeof FIND_PARAMS> {
         };
       }
 
-      const matches: FindMatch[] = [];
+      const nodeMatches: NodeMatch[] = [];
+      const obsMatches: ObsMatch[] = [];
       for (const node of graph.nodes.values()) {
         // parent-state gate: skip the node (and its evidence) when obsolete and
         // not including superseded.
         if (isObsolete(node) && !includeSuperseded) continue;
         if (regex.test(node.summary)) {
-          matches.push({
+          nodeMatches.push({
             id: node.id,
             parent: node.parentNode,
+            node,
             render: formatNodeLine(node, { viewer: "builder", showParent: node.parentNode ?? undefined }),
           });
         }
@@ -294,14 +319,20 @@ function makeFindTool(graph: MemkeeperGraph): AgentTool<typeof FIND_PARAMS> {
           const obs = graph.observations.get(obsId);
           if (obs === undefined) continue;
           if (regex.test(obs.content)) {
-            matches.push({
+            obsMatches.push({
               id: obs.id,
               parent: node.id,
+              obs,
               render: formatObservationLine(obs, { viewer: "builder", showParent: node.id }),
             });
           }
         }
       }
+      // nodes-first (importance desc, then recency), then observations (recency) —
+      // consistent with `ls`.
+      nodeMatches.sort((a, b) => compareNodeOrder(a.node, b.node));
+      obsMatches.sort((a, b) => compareObservationOrder(a.obs, b.obs));
+      const matches: FindMatch[] = [...nodeMatches, ...obsMatches];
 
       const page = resolvePage(params.page);
       const { window, more, remaining } = paginate(matches, page);
