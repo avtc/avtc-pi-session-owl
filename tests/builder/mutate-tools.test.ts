@@ -4,7 +4,13 @@
 import { describe, expect, it } from "vitest";
 import { makeBuilderTools } from "../../src/builder/tools.js";
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
-import { applyCreateNode, applyRecordObservation, applySupersede, setClock } from "../../src/graph/mutations.js";
+import {
+  applyCreateNode,
+  applyRecordObservation,
+  applySetMeta,
+  applySupersede,
+  setClock,
+} from "../../src/graph/mutations.js";
 import type { StoreContext } from "../../src/store/graph-store.js";
 import { MemkeeperGraph, makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
 
@@ -131,6 +137,8 @@ describe("Builder mutate tools", () => {
       const created = g.nodes.get(delta.id as NodeId);
       expect(created).toBeDefined();
       expect(created?.observationIds).toHaveLength(0);
+      // the new id surfaces in the result text so the model can ls/cat it.
+      expect(textOf(r)).toContain(delta.id);
     });
 
     it("creates a child node when parentId is given", async () => {
@@ -193,6 +201,41 @@ describe("Builder mutate tools", () => {
       expect(g.observations.get("oInitialPrompt")?.parentNode).toBe(before);
       expect(graphDeltas(entries)).toHaveLength(0);
     });
+
+    it("rewrites the dest summary via newSummary in the same atomic mutate", async () => {
+      const g = buildGraph();
+      const { ctx } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      const r = await callTool(tools, "mv", { sourceIds: ["o5"], destId: "n7", newSummary: "Auth (JWT) v2" });
+      expect(isError(r)).toBe(false);
+      expect(g.nodes.get("n7")?.summary).toBe("Auth (JWT) v2");
+      // summaryTokens recompute reflects the new summary.
+      expect(g.nodes.get("n7")?.summaryTokens).toBeGreaterThan(0);
+    });
+
+    it("ignores newSummary when promoting to root (no dest to rewrite)", async () => {
+      const g = buildGraph();
+      const { ctx } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      // newSummary passed but destId is null → it must NOT alter any node.
+      const r = await callTool(tools, "mv", { sourceIds: ["n8"], destId: null, newSummary: "should be ignored" });
+      expect(isError(r)).toBe(false);
+      expect(g.nodes.get("n8")?.parentNode).toBeNull();
+      // no node carries the ignored summary.
+      const carrier = [...g.nodes.values()].find((n) => n.summary === "should be ignored");
+      expect(carrier).toBeUndefined();
+    });
+
+    it("rejects moving an observation to the root (C4 always-attached)", async () => {
+      const g = buildGraph();
+      const { ctx, entries } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      const before = g.observations.get("o5")?.parentNode;
+      const r = await callTool(tools, "mv", { sourceIds: ["o5"], destId: null });
+      expect(isError(r)).toBe(true);
+      expect(g.observations.get("o5")?.parentNode).toBe(before);
+      expect(graphDeltas(entries)).toHaveLength(0);
+    });
   });
 
   describe("merge", () => {
@@ -224,6 +267,8 @@ describe("Builder mutate tools", () => {
       expect(bundle).toBeDefined();
       expect(bundle?.parentNode).toBeNull();
       expect(bundle?.state).toBe("active");
+      // the NEW root id surfaces in the result text so the model can ls/cat it.
+      expect(textOf(r)).toContain(bundle?.id ?? "(missing)");
     });
 
     it("rejects destId=null without newSummary — error result, graph + delta unchanged", async () => {
@@ -278,6 +323,17 @@ describe("Builder mutate tools", () => {
       const r = await callTool(tools, "supersede", { nodeId: "n7", supersededNodeIds: [N_GOAL] });
       expect(isError(r)).toBe(true);
       expect(g.nodes.get(N_GOAL)?.state).toBe(before);
+      expect(graphDeltas(entries)).toHaveLength(0);
+    });
+
+    it("rejects an obsolete node as the replacement — error result", async () => {
+      const g = buildGraph();
+      // make n12 obsolete first
+      applySupersede(g, { nodeId: "n7", supersededNodeIds: ["n12"] }, "source");
+      const { ctx, entries } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      const r = await callTool(tools, "supersede", { nodeId: "n12", supersededNodeIds: ["n8"] });
+      expect(isError(r)).toBe(true);
       expect(graphDeltas(entries)).toHaveLength(0);
     });
   });
@@ -345,6 +401,18 @@ describe("Builder mutate tools", () => {
       expect(g.nodes.get("n12")?.state).toBe("active");
       expect(g.nodes.get("n12")?.supersededBy).toBeNull();
     });
+
+    it("un-archives an archived node via archived:false", async () => {
+      const g = buildGraph();
+      // archive n12 first
+      applySetMeta(g, { nodeId: "n12", importance: null, archived: true, obsolete: null, summary: null }, "source");
+      expect(g.nodes.get("n12")?.state).toBe("archived");
+      const { ctx } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      const r = await callTool(tools, "set_meta", { nodeId: "n12", archived: false });
+      expect(isError(r)).toBe(false);
+      expect(g.nodes.get("n12")?.state).toBe("active");
+    });
   });
 
   describe("try_finish", () => {
@@ -357,6 +425,21 @@ describe("Builder mutate tools", () => {
       expect(isError(r)).toBe(false);
       expect(r.terminate).toBe(true);
       expect(textOf(r).toLowerCase()).toContain("within budget");
+      // details expose the measured tokens + threshold for inspection.
+      const details = r.details as { rootsViewTokens: number; threshold: number };
+      expect(typeof details.rootsViewTokens).toBe("number");
+      expect(details.threshold).toBe(1_000_000);
+    });
+
+    it("counts root-view tokens as exactly == threshold as within budget (boundary)", async () => {
+      const g = buildGraph();
+      const { ctx } = makeFakeStore();
+      // first measure the actual root-view tokens, then set the threshold to that.
+      const measureTools = makeBuilderTools(g, ctx, { ...DEFAULT_CONFIG, builderRootViewThreshold: 1_000_000 });
+      const measure = (await callTool(measureTools, "try_finish", {})).details as { rootsViewTokens: number };
+      const tools = makeBuilderTools(g, ctx, { ...DEFAULT_CONFIG, builderRootViewThreshold: measure.rootsViewTokens });
+      const r = await callTool(tools, "try_finish", {});
+      expect(r.terminate).toBe(true);
     });
 
     it("reports over-budget rejection + terminate:false with the numbers", async () => {

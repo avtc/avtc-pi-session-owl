@@ -141,6 +141,15 @@ function rootNodes(graph: MemkeeperGraph): Node[] {
   return [...graph.nodes.values()].filter((n) => n.parentNode === ROOT_PARENT);
 }
 
+/** Non-obsolete roots, importance desc then recency — the view `ls` renders at
+ *  the root and `try_finish` measures. Obsolete roots are hidden by default
+ *  (findable via find with includeSuperseded). */
+function nonObsoleteRoots(graph: MemkeeperGraph): Node[] {
+  return rootNodes(graph)
+    .filter((n) => !isObsolete(n))
+    .sort(compareNodeOrder);
+}
+
 /** Direct child nodes + direct observations of a parent node, ordered
  *  nodes-first (importance desc, then recency) then observations (recency). */
 function directChildren(graph: MemkeeperGraph, parent: Node): { nodes: Node[]; observations: Observation[] } {
@@ -178,9 +187,7 @@ function makeLsTool(graph: MemkeeperGraph): AgentTool<typeof LS_PARAMS> {
 
       if (params.nodeId === undefined || params.nodeId === null) {
         // roots: non-obsolete only (obsolete hidden by default — findable via find).
-        const roots = rootNodes(graph)
-          .filter((n) => !isObsolete(n))
-          .sort(compareNodeOrder);
+        const roots = nonObsoleteRoots(graph);
         const { window, more, remaining, stale } = paginate(roots, page);
         if (stale) {
           return {
@@ -443,8 +450,15 @@ function errorResult(message: string): AgentToolResult<unknown> {
 /** Run a mutation, persist its delta, and report success — or catch a structural
  *  rejection (GraphInvariantError) and surface it as an error result the model
  *  can retry from. A rejected mutate leaves the graph AND the delta log
- *  unchanged (the mutator throws before mutating). */
-function applyAndPersist(store: StoreContext, what: string, apply: () => GraphDelta): AgentToolResult<unknown> {
+ *  unchanged (the mutator throws before mutating). `describe(delta)` builds the
+ *  success text from the APPLIED delta so the model learns any new/resolved ids
+ *  (e.g. merge with destId=null resolves a new root id). */
+function applyAndPersist(
+  store: StoreContext,
+  what: string,
+  apply: () => GraphDelta,
+  describe: (delta: GraphDelta) => string,
+): AgentToolResult<unknown> {
   let delta: GraphDelta;
   try {
     delta = apply();
@@ -455,7 +469,7 @@ function applyAndPersist(store: StoreContext, what: string, apply: () => GraphDe
     throw cause;
   }
   appendGraphDelta(store, delta);
-  return okResult(`${what} ok.`, delta);
+  return okResult(describe(delta), delta);
 }
 
 /** Build the `mkdir` tool: create a container node (zero observations OK) under
@@ -470,21 +484,25 @@ function makeMkdirTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<ty
     async execute(_toolCallId, params) {
       // generate the id from the counter BEFORE applyCreateNode (which advances it).
       const id = `n${graph.nextNodeId}` as NodeId;
-      return applyAndPersist(store, `mkdir ${id}`, () =>
-        applyCreateNode(graph, {
-          id,
-          summary: params.summary,
-          importance: DEFAULT_NODE_IMPORTANCE,
-          parentNode: (params.parentId ?? null) as NodeId | null,
-          state: "active",
-        }),
+      return applyAndPersist(
+        store,
+        `mkdir ${id}`,
+        () =>
+          applyCreateNode(graph, {
+            id,
+            summary: params.summary,
+            importance: DEFAULT_NODE_IMPORTANCE,
+            parentNode: (params.parentId ?? null) as NodeId | null,
+            state: "active",
+          }),
+        () => `Created ${id} (active).`,
       );
     },
   };
 }
 
 const MKDIR_PARAMS = Type.Object({
-  summary: Type.String({ description: "One-line summary for the new container node." }),
+  summary: Type.String({ minLength: 1, description: "One-line summary for the new container node." }),
   parentId: Type.Optional(Type.String({ description: "Parent node id; omit or null for a root node." })),
 });
 
@@ -503,17 +521,23 @@ function makeMvTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeo
       const destId = (params.destId ?? null) as NodeId | null;
       // newSummary is meaningful only when there is a dest node to rewrite.
       const newSummary = destId === null ? undefined : params.newSummary;
-      const where = destId === null ? "the root" : destId;
-      return applyAndPersist(store, `mv to ${where}`, () =>
-        applyMv(
-          graph,
-          {
-            sourceIds: params.sourceIds as Array<ObsId | NodeId>,
-            destId,
-            ...(newSummary !== undefined ? { newSummary } : {}),
-          },
-          MUTATE_SOURCE,
-        ),
+      return applyAndPersist(
+        store,
+        "mv",
+        () =>
+          applyMv(
+            graph,
+            {
+              sourceIds: params.sourceIds as Array<ObsId | NodeId>,
+              destId,
+              ...(newSummary !== undefined ? { newSummary } : {}),
+            },
+            MUTATE_SOURCE,
+          ),
+        () => {
+          const where = destId === null ? "the root" : destId;
+          return `Moved ${params.sourceIds.length} item(s) to ${where}.`;
+        },
       );
     },
   };
@@ -523,7 +547,7 @@ const MV_PARAMS = Type.Object({
   sourceIds: Type.Array(Type.String(), { minItems: 1, description: "Observation and/or node ids to move." }),
   destId: Type.Optional(Type.String({ description: "Destination node id; omit or null to promote to root." })),
   newSummary: Type.Optional(
-    Type.String({ description: "New summary for the dest node (ignored when destId is null)." }),
+    Type.String({ minLength: 1, description: "New summary for the dest node (ignored when destId is null)." }),
   ),
 });
 
@@ -543,17 +567,26 @@ function makeMergeTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<ty
       if (destId === null && (params.newSummary === undefined || params.newSummary.length === 0)) {
         return errorResult("merge: newSummary is required when destId is null (names the new root node).");
       }
-      const where = destId === null ? "a new root node" : destId;
-      return applyAndPersist(store, `merge into ${where}`, () =>
-        applyMerge(
-          graph,
-          {
-            sourceIds: params.sourceIds as NodeId[],
-            destId,
-            ...(params.newSummary !== undefined ? { newSummary: params.newSummary } : {}),
-          },
-          MUTATE_SOURCE,
-        ),
+      // When destId is null, applyMerge creates a new root at n<nextNodeId>; capture
+      // the id BEFORE the call so the result can surface it to the model.
+      const newRootId = destId === null ? (`n${graph.nextNodeId}` as NodeId) : null;
+      return applyAndPersist(
+        store,
+        "merge",
+        () =>
+          applyMerge(
+            graph,
+            {
+              sourceIds: params.sourceIds as NodeId[],
+              destId,
+              ...(params.newSummary !== undefined ? { newSummary: params.newSummary } : {}),
+            },
+            MUTATE_SOURCE,
+          ),
+        () => {
+          const where = newRootId ?? destId;
+          return `Merged ${params.sourceIds.length} node(s) into ${where}.`;
+        },
       );
     },
   };
@@ -563,7 +596,7 @@ const MERGE_PARAMS = Type.Object({
   sourceIds: Type.Array(Type.String(), { minItems: 1, description: "Node ids to absorb into the target." }),
   destId: Type.Optional(Type.String({ description: "Target node id; omit or null to create a new root." })),
   newSummary: Type.Optional(
-    Type.String({ description: "Synthesized summary for the target. Required when destId is null." }),
+    Type.String({ minLength: 1, description: "Synthesized summary for the target. Required when destId is null." }),
   ),
 });
 
@@ -577,12 +610,16 @@ function makeSupersedeTool(graph: MemkeeperGraph, store: StoreContext): AgentToo
     label: "Supersede",
     parameters: SUPERSEDE_PARAMS,
     async execute(_toolCallId, params) {
-      return applyAndPersist(store, `supersede with ${params.nodeId}`, () =>
-        applySupersede(
-          graph,
-          { nodeId: params.nodeId as NodeId, supersededNodeIds: params.supersededNodeIds as NodeId[] },
-          MUTATE_SOURCE,
-        ),
+      return applyAndPersist(
+        store,
+        "supersede",
+        () =>
+          applySupersede(
+            graph,
+            { nodeId: params.nodeId as NodeId, supersededNodeIds: params.supersededNodeIds as NodeId[] },
+            MUTATE_SOURCE,
+          ),
+        () => `Superseded ${params.supersededNodeIds.length} node(s) with ${params.nodeId}.`,
       );
     },
   };
@@ -607,18 +644,22 @@ function makeSetMetaTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<
     label: "Edit metadata",
     parameters: SET_META_PARAMS,
     async execute(_toolCallId, params) {
-      return applyAndPersist(store, `set_meta ${params.nodeId}`, () =>
-        applySetMeta(
-          graph,
-          {
-            nodeId: params.nodeId as NodeId,
-            importance: (params.importance ?? null) as Importance | null,
-            archived: params.archived ?? null,
-            obsolete: params.obsolete ?? null,
-            summary: params.summary ?? null,
-          },
-          MUTATE_SOURCE,
-        ),
+      return applyAndPersist(
+        store,
+        "set_meta",
+        () =>
+          applySetMeta(
+            graph,
+            {
+              nodeId: params.nodeId as NodeId,
+              importance: (params.importance ?? null) as Importance | null,
+              archived: params.archived ?? null,
+              obsolete: params.obsolete ?? null,
+              summary: params.summary ?? null,
+            },
+            MUTATE_SOURCE,
+          ),
+        () => `Updated ${params.nodeId}.`,
       );
     },
   };
@@ -628,7 +669,7 @@ const SET_META_PARAMS = Type.Object({
   nodeId: Type.String({ description: "Node id to update." }),
   importance: Type.Optional(ImportanceSchema),
   archived: Type.Optional(Type.Boolean({ description: "true archives, false un-archives." })),
-  summary: Type.Optional(Type.String({ description: "New summary (re-rates summaryTokens)." })),
+  summary: Type.Optional(Type.String({ minLength: 1, description: "New summary (re-rates summaryTokens)." })),
   obsolete: Type.Optional(
     Type.Boolean({ description: "false resurrects an obsolete node; true is rejected (use supersede)." }),
   ),
@@ -637,9 +678,7 @@ const SET_META_PARAMS = Type.Object({
 /** Render the non-obsolete root view (the same lines `ls` shows at the root) so
  *  try_finish can measure its token cost. */
 function renderRootView(graph: MemkeeperGraph): string {
-  const roots = rootNodes(graph)
-    .filter((n) => !isObsolete(n))
-    .sort(compareNodeOrder);
+  const roots = nonObsoleteRoots(graph);
   if (roots.length === 0) return "";
   return roots.map((n) => formatNodeLine(n, { viewer: "builder" })).join("\n");
 }
