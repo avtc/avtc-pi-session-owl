@@ -245,7 +245,7 @@ describe("renderBlocks: tool block cap", () => {
       toolResultEntry("e3", "c1", "run", "ok", false),
     ];
     const cBlock = renderBlocks(entries, opts)[0];
-    expect(cBlock.text).toContain("(truncated)");
+    expect(cBlock.text).toContain("[…truncated…]");
     // head is first ~200 chars of the args JSON, tail is last ~200 chars
     const inner = cBlock.text.replace(/^<C E=e2 tool=run>/, "").replace(/<\/C>$/, "");
     expect(inner.startsWith('{"blob":"xxxx')).toBe(true);
@@ -259,7 +259,7 @@ describe("renderBlocks: tool block cap", () => {
       toolResultEntry("e3", "c1", "run", longResult, false),
     ];
     const rBlock = renderBlocks(entries, opts)[1];
-    expect(rBlock.text).toContain("(truncated)");
+    expect(rBlock.text).toContain("[…truncated…]");
     const inner = rBlock.text.replace(/^<R E=e3>/, "").replace(/<\/R>$/, "");
     expect(inner.startsWith("yyyy")).toBe(true);
     expect(inner.endsWith("yyyy")).toBe(true);
@@ -285,7 +285,7 @@ describe("renderBlocks: tool block cap", () => {
     const text = renderBlocks(entries, NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).not.toContain("(truncated)");
+    expect(text).not.toContain("[…truncated…]");
   });
 });
 
@@ -400,5 +400,137 @@ describe("buildChunks", () => {
     ];
     const chunks = buildChunks(entries, NO_CAP);
     expect(chunks).toEqual([]);
+  });
+});
+
+describe("renderBlocks: ANSI stripped from all text (not only thinking)", () => {
+  it("strips ANSI from user message text", () => {
+    const entry: SessionMessageEntry = msg("u1", {
+      role: "user",
+      content: "\u001b[31mred hello\u001b[0m world",
+      timestamp: 0,
+    });
+    const text = renderBlocks([entry], NO_CAP)
+      .map((b) => b.text)
+      .join("");
+    expect(text).toBe("<U E=u1>red hello world</U>");
+  });
+
+  it("strips ANSI from assistant text", () => {
+    const text = renderBlocks([assistantEntry("a1", [{ type: "text", text: "\u001b[32mok\u001b[0m done" }])], NO_CAP)
+      .map((b) => b.text)
+      .join("");
+    expect(text).toBe("<A E=a1>ok done</A>");
+  });
+
+  it("strips ANSI from tool result text", () => {
+    const entries: SessionEntry[] = [
+      assistantEntry("a1", [{ type: "toolCall", id: "c1", name: "run", arguments: {} }]),
+      toolResultEntry("r1", "c1", "run", "\u001b[33mout\u001b[0m put", false),
+    ];
+    const text = renderBlocks(entries, NO_CAP)
+      .map((b) => b.text)
+      .join("");
+    expect(text).toContain("<R E=r1>out put</R>");
+  });
+
+  it("strips ANSI with ':' params (24-bit color) and '?' private modes", () => {
+    const colored: ThinkingContent = {
+      type: "thinking",
+      thinking: "\u001b[38:2:255:0:0m\u001b[?25lx\u001b[0m",
+    };
+    const text = renderBlocks([assistantEntry("a1", [colored])], NO_CAP)
+      .map((b) => b.text)
+      .join("");
+    expect(text).toBe("<T E=a1>x</T>");
+  });
+});
+
+describe("buildChunks: entry-bounded (whole entry never split)", () => {
+  it("keeps a multi-block assistant entry's text + tool-call in ONE chunk", () => {
+    // assistant entry a1 has text + toolCall(+result); a tiny threshold would
+    // split it if chunking were per-block — entry-bounding keeps it whole.
+    const entries: SessionEntry[] = [
+      assistantEntry("a1", [
+        { type: "text", text: "x".repeat(400) }, // ~100 tokens
+        { type: "toolCall", id: "c1", name: "ls", arguments: {} },
+      ]),
+      toolResultEntry("r1", "c1", "ls", "y".repeat(400), false),
+    ];
+    const chunks = buildChunks(entries, {
+      tokenThreshold: 50, // tiny — forces a split at the entry boundary only
+      toolBlockCapTokens: null,
+      includeThinking: true,
+    });
+    // a1's text AND its tool-call land in the same chunk (whole entry)
+    const a1Chunks = chunks.filter((c) => c.allowedIds.has("a1"));
+    expect(a1Chunks).toHaveLength(1);
+    expect(a1Chunks[0].text).toContain("<A E=a1>");
+    expect(a1Chunks[0].text).toContain("<C E=a1 tool=ls>");
+  });
+
+  it("renders multiple tool calls in one assistant entry, each followed by its result", () => {
+    const entries: SessionEntry[] = [
+      assistantEntry("a1", [
+        { type: "toolCall", id: "c1", name: "ls", arguments: {} },
+        { type: "toolCall", id: "c2", name: "read", arguments: {} },
+      ]),
+      toolResultEntry("r1", "c1", "ls", "ls-out", false),
+      toolResultEntry("r2", "c2", "read", "read-out", false),
+    ];
+    const chunks = buildChunks(entries, {
+      tokenThreshold: Number.POSITIVE_INFINITY,
+      toolBlockCapTokens: null,
+      includeThinking: true,
+    });
+    expect(chunks[0].text).toBe("<C E=a1 tool=ls>{}</C><R E=r1>ls-out</R><C E=a1 tool=read>{}</C><R E=r2>read-out</R>");
+  });
+
+  it("a single oversized entry-group becomes its own chunk (never split mid-entry)", () => {
+    const entries: SessionEntry[] = [userEntry("u1", "z".repeat(1000))];
+    const chunks = buildChunks(entries, {
+      tokenThreshold: 10, // far below the ~250-token block
+      toolBlockCapTokens: null,
+      includeThinking: true,
+    });
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].allowedIds).toEqual(new Set(["u1"]));
+  });
+});
+
+describe("renderBlocks: orphan calls and results", () => {
+  it("emits an orphan tool call (no matching result) as a bare <C>", () => {
+    const text = renderBlocks(
+      [assistantEntry("a1", [{ type: "toolCall", id: "c1", name: "ls", arguments: {} }])],
+      NO_CAP,
+    )
+      .map((b) => b.text)
+      .join("");
+    expect(text).toBe("<C E=a1 tool=ls>{}</C>");
+  });
+
+  it("emits an orphan tool result (no matching call) as a bare <R>", () => {
+    const text = renderBlocks([toolResultEntry("r1", "orphan", "run", "out", false)], NO_CAP)
+      .map((b) => b.text)
+      .join("");
+    expect(text).toBe("<R E=r1>out</R>");
+  });
+});
+
+describe("renderBlocks: defensive branches", () => {
+  it("skips a user message with empty text", () => {
+    const entry: SessionMessageEntry = msg("u1", { role: "user", content: "", timestamp: 0 });
+    expect(renderBlocks([entry], NO_CAP)).toHaveLength(0);
+  });
+
+  it("skips a branch_summary with empty summary", () => {
+    expect(renderBlocks([branchSummaryEntry("bs1", "")], NO_CAP)).toHaveLength(0);
+  });
+
+  it("skips an empty thinking block (after sanitization)", () => {
+    const text = renderBlocks([assistantEntry("a1", [{ type: "thinking", thinking: "\u001b[31m\u001b[0m" }])], NO_CAP)
+      .map((b) => b.text)
+      .join("");
+    expect(text).toBe("");
   });
 });
