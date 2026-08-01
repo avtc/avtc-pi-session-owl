@@ -18,9 +18,7 @@ describe("createTodoWiring", () => {
     const pi = makeFakePi();
     const wiring = createTodoWiring(pi as unknown as ExtensionAPI);
     // fire pi-todo:ready with a minimal api (getItems)
-    for (const h of pi._handlers.get("pi-todo:ready") ?? []) {
-      h({ disableBuiltInFollowUp() {}, getItems: () => [] });
-    }
+    fire(pi, "pi-todo:ready", { disableBuiltInFollowUp() {}, getItems: () => [] });
     expect(wiring.getContext()).not.toBeNull();
     expect(wiring.getBridge()).not.toBeNull();
   });
@@ -44,9 +42,7 @@ describe("createTodoWiring", () => {
             );
       return filtered;
     };
-    for (const h of pi._handlers.get("pi-todo:ready") ?? []) {
-      h({ disableBuiltInFollowUp() {}, getItems });
-    }
+    fire(pi, "pi-todo:ready", { disableBuiltInFollowUp() {}, getItems });
     const ctx = wiring.getContext();
     expect(ctx).not.toBeNull();
     expect(ctx?.getInProgress()?.id).toBe("1");
