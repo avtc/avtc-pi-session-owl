@@ -17,16 +17,26 @@ export interface TodoProxy {
  *  the vendored proxy's getItems, which takes `{status} | null`). */
 const NO_FILTER = null;
 
-/** The status a `decomposed` (folder) item maps to in memkeeper's view — a
- *  terminal/done state, surfaced as `completed`. Pending/in_progress pass
- *  through unchanged. */
-const DECOMPOSED_AS = "completed" as const;
+/** Known memkeeper statuses (the union). The vendored proxy's `status` is a
+ *  bare `string` (cross-extension data), so mapTodoItem guards it at this trust
+ *  boundary rather than casting blindly. */
+const KNOWN_STATUSES = new Set<TodoItem["status"]>(["pending", "in_progress", "completed"]);
+
+/** Status a `decomposed` (folder) item maps to — a terminal/done state,
+ *  surfaced as `completed`. This is also the fallback for any UNKNOWN status
+ *  the bridge may emit in the future (terminal is the least misleading — never
+ *  surfaces as active/pending work). */
+const TERMINAL_STATUS: TodoItem["status"] = "completed";
 
 /** Map a raw bridge item (string status, includes `decomposed`, details always
  *  a string) to memkeeper's `TodoItem` (literal status union, details optional).
- *  Drops `parentId` (not part of the Selector's todo view). */
+ *  Drops `parentId` (not part of the Selector's todo view). Guards the status at
+ *  the cross-extension boundary: decomposed → completed; unknown → completed. */
 export function mapTodoItem(raw: TodoReadyItem): TodoItem {
-  const status: TodoItem["status"] = raw.status === "decomposed" ? DECOMPOSED_AS : (raw.status as TodoItem["status"]);
+  const status: TodoItem["status"] =
+    raw.status === "decomposed" || !KNOWN_STATUSES.has(raw.status as TodoItem["status"])
+      ? TERMINAL_STATUS
+      : (raw.status as TodoItem["status"]);
   const details = raw.details.length === 0 ? undefined : raw.details;
   return { id: raw.id, name: raw.name, status, details };
 }

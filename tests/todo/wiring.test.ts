@@ -4,34 +4,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { createTodoWiring } from "../../src/todo/wiring.js";
-
-/** Minimal fake pi: captures events.on / on listeners + a way to fire them. */
-interface FakePi {
-  _handlers: Map<string, Array<(...args: unknown[]) => void>>;
-  on(event: string, handler: (...args: unknown[]) => void): void;
-  events: {
-    on(event: string, handler: (...args: unknown[]) => void): () => void;
-  };
-}
-
-function makeFakePi(): FakePi {
-  const handlers = new Map<string, Array<(...args: unknown[]) => void>>();
-  const reg = (event: string, handler: (...args: unknown[]) => void) => {
-    const list = handlers.get(event) ?? [];
-    list.push(handler);
-    handlers.set(event, list);
-  };
-  return {
-    _handlers: handlers,
-    on: reg,
-    events: {
-      on: (event, handler) => {
-        reg(event, handler);
-        return () => {};
-      },
-    },
-  };
-}
+import { fire, makeFakePi } from "./fake-pi.js";
 
 describe("createTodoWiring", () => {
   it("returns null context + bridge before pi-todo:ready fires (avtc-pi-todo absent)", () => {
@@ -78,5 +51,22 @@ describe("createTodoWiring", () => {
     expect(ctx).not.toBeNull();
     expect(ctx?.getInProgress()?.id).toBe("1");
     expect(ctx?.getPending().map((i) => i.id)).toEqual(["2"]);
+  });
+
+  it("cleans its pi-todo:ready listener on session_shutdown (reload-safe, no leak)", () => {
+    const pi = makeFakePi();
+    createTodoWiring(pi as unknown as ExtensionAPI);
+    // createTodoWiring registers TWO pi-todo:ready listeners: the snippet's own
+    // (for _api) + the wiring's readiness flag. And a session_shutdown handler.
+    const readyBefore = (pi._handlers.get("pi-todo:ready") ?? []).length;
+    expect(readyBefore).toBeGreaterThanOrEqual(2);
+    expect((pi._handlers.get("session_shutdown") ?? []).length).toBeGreaterThanOrEqual(1);
+    // fire session_shutdown — both the snippet and the wiring clean up.
+    fire(pi, "session_shutdown");
+    // after shutdown: the wiring's readiness listener is gone (no orphaned
+    // listeners accumulating across reloads on the shared eventBus).
+    const readyAfter = (pi._handlers.get("pi-todo:ready") ?? []).length;
+    expect(readyAfter).toBeLessThan(readyBefore);
+    expect(readyAfter).toBe(0);
   });
 });

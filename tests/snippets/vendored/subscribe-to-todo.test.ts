@@ -9,48 +9,10 @@ import {
   type TodoReadyApi,
   type TodoReadyItem,
 } from "../../../src/snippets/vendored/subscribe-to-todo.js";
+import { fire, makeFakePi } from "../../todo/fake-pi.js";
 
 /** No status filter — return all items (the filter param is `{status} | null`). */
 const NO_FILTER: { status: TodoItemsStatus } | null = null;
-
-/** Minimal fake pi: captures `on`/`events.on` listeners + fires them. */
-interface FakePi {
-  _handlers: Map<string, Array<(...args: unknown[]) => void>>;
-  on(event: string, handler: (...args: unknown[]) => void): void;
-  events: {
-    on(event: string, handler: (...args: unknown[]) => void): () => void;
-  };
-}
-
-function makeFakePi(): FakePi {
-  const handlers = new Map<string, Array<(...args: unknown[]) => void>>();
-  const reg = (event: string, handler: (...args: unknown[]) => void) => {
-    const list = handlers.get(event) ?? [];
-    list.push(handler);
-    handlers.set(event, list);
-  };
-  return {
-    _handlers: handlers,
-    on: reg,
-    events: {
-      on: (event, handler) => {
-        reg(event, handler);
-        return () => {
-          const list = handlers.get(event);
-          if (list) {
-            const idx = list.indexOf(handler);
-            if (idx >= 0) list.splice(idx, 1);
-          }
-        };
-      },
-    },
-  };
-}
-
-/** Fire all listeners for an event on the fake pi. */
-function fire(pi: FakePi, event: string, ...args: unknown[]): void {
-  for (const h of pi._handlers.get(event) ?? []) h(...args);
-}
 
 const threeItems: TodoReadyItem[] = [
   { id: "1", parentId: null, name: "A", details: "do A", status: "in_progress" },
@@ -135,5 +97,18 @@ describe("subscribeToTodo (vendored snippet)", () => {
     fire(pi, "session_shutdown");
     // after shutdown, listeners are cleared
     expect((pi._handlers.get("pi-todo:ready") ?? []).length).toBe(0);
+  });
+
+  it("disableBuiltInFollowUp=true calls the api's disableBuiltInFollowUp on ready", () => {
+    const pi = makeFakePi();
+    subscribeToTodo(pi as unknown as ExtensionAPI, true);
+    let disabled = false;
+    fire(pi, "pi-todo:ready", {
+      disableBuiltInFollowUp: () => {
+        disabled = true;
+      },
+      getItems: () => [],
+    });
+    expect(disabled).toBe(true);
   });
 });

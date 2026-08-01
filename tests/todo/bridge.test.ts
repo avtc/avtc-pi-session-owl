@@ -66,6 +66,20 @@ describe("todo bridge adapter", () => {
       const item = context.getPending()[0] as TodoItem;
       expect(item.details).toBeUndefined();
     });
+
+    it("clamps an unknown status to a safe terminal value (no invalid union member leaks in)", () => {
+      // cross-extension data: a future avtc-pi-todo status (e.g. 'cancelled')
+      // must not pass the cast through as an invalid TodoItem.status.
+      const { bridge } = makeTodoAdapter(
+        fakeProxy([{ id: "9", parentId: null, name: "X", details: "x", status: "cancelled" }]),
+      );
+      const all = bridge.getItems();
+      expect(all.length).toBe(1);
+      const status = all[0].status;
+      // must be one of the known union members, never the raw 'cancelled'
+      expect(["pending", "in_progress", "completed"]).toContain(status);
+      expect(status).not.toBe("cancelled");
+    });
   });
 
   describe("TodoContext", () => {

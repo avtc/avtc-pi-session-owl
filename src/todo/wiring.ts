@@ -21,16 +21,23 @@ export interface TodoWiring {
 }
 
 /** Subscribe to the optional avtc-pi-todo companion and expose its todo context
- *  + bridge lazily. The vendored snippet handles the `pi-todo:ready` listener +
- *  reload-safe `session_shutdown` cleanup; this adds a readiness flag so callers
- *  can tell "not installed" (null) from "installed but empty" (non-null context).
- *  Idempotent across reloads via the snippet's session_shutdown teardown. */
+ *  + bridge lazily. The vendored snippet handles its own `pi-todo:ready` listener
+ *  + reload-safe `session_shutdown` cleanup; this adds a readiness flag (a SECOND
+ *  `pi-todo:ready` listener on the shared eventBus) so callers can tell "not
+ *  installed" (null) from "installed but empty" (non-null context). That extra
+ *  listener is unregistered on `session_shutdown` too — both the snippet and
+ *  this wiring clean up, so no listener leaks across reloads (Pi's eventBus
+ *  persists across reload; `pi.on` per-extension handlers do not, but `pi.events`
+ *  does, so explicit cleanup is required). */
 export function createTodoWiring(pi: ExtensionAPI): TodoWiring {
   const proxy = subscribeToTodo(pi, FOLLOWUP_NOT_DISABLED);
   const adapter = makeTodoAdapter(proxy);
   let installed = false;
-  pi.events.on("pi-todo:ready", () => {
+  const offReady = pi.events.on("pi-todo:ready", () => {
     installed = true;
+  });
+  pi.on("session_shutdown", () => {
+    offReady();
   });
   return {
     getContext: () => (installed ? adapter.context : null),
