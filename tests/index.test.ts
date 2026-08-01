@@ -56,6 +56,8 @@ vi.mock("../src/runtime/stages.js", () => ({
   runObserver: vi.fn(),
   makeBuilderRun: vi.fn(() => vi.fn()),
   runBuilder: vi.fn(),
+  makeSelectorRun: vi.fn(() => vi.fn()),
+  runSelector: vi.fn(),
 }));
 
 vi.mock("../src/todo/wiring.js", () => ({
@@ -69,8 +71,9 @@ import { compactionHook } from "../src/compaction/hook.js";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
 import memkeeperExtension from "../src/index.js";
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "../src/lifecycle.js";
+import { makeBuilderRun, makeObserverRun, makeSelectorRun } from "../src/runtime/stages.js";
 import { resetForNewSession } from "../src/store/graph-store.js";
-import { onTurnEnd } from "../src/triggers.js";
+import { onTurnEnd, setStageRuns } from "../src/triggers.js";
 
 /** A fake pi that records `on` registrations by event name. */
 function makeFakePi(): ExtensionAPI {
@@ -130,6 +133,31 @@ describe("memkeeperExtension (activate wiring)", () => {
     const names = pi.registerCommand.mock.calls.map((c) => c[0] as string);
     expect(names).toEqual(expect.arrayContaining(["mk:ls", "mk:cat", "mk:find", "mk:find-all", "mk:status"]));
     expect(pi.registerCommand).toHaveBeenCalledTimes(5);
+  });
+
+  it("wires all three stage runs (Observer + Builder + Selector) into the background trigger layer — no Selector stub", () => {
+    // Every background stage must be reachable from activate. A bare
+    // `runSelector: async () => {}` stub (the “built but never wired” gap) must
+    // not survive: setStageRuns receives each factory's real return.
+    memkeeperExtension(makeFakePi());
+    expect(makeObserverRun).toHaveBeenCalled();
+    expect(makeBuilderRun).toHaveBeenCalled();
+    expect(makeSelectorRun).toHaveBeenCalled();
+    expect(setStageRuns).toHaveBeenCalled();
+    // The LAST setStageRuns call is THIS activate's wiring; each run is the
+    // return value (a vi.fn) of its make*Run factory — never a bare
+    // `async () => {}` stub.
+    const lastRuns = vi.mocked(setStageRuns).mock.calls.at(-1)?.[0] as {
+      runObserver: unknown;
+      runBuilder: unknown;
+      runSelector: unknown;
+    };
+    const lastObserver = vi.mocked(makeObserverRun).mock.results.at(-1)?.value;
+    const lastBuilder = vi.mocked(makeBuilderRun).mock.results.at(-1)?.value;
+    const lastSelector = vi.mocked(makeSelectorRun).mock.results.at(-1)?.value;
+    expect(lastRuns.runObserver).toBe(lastObserver);
+    expect(lastRuns.runBuilder).toBe(lastBuilder);
+    expect(lastRuns.runSelector).toBe(lastSelector);
   });
 
   it("session_start handler calls onSessionStart", async () => {

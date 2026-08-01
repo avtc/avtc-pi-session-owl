@@ -14,7 +14,14 @@ import { getMemkeeperSettings, initMemkeeperSettings } from "./config/schema.js"
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "./lifecycle.js";
 import { log } from "./log.js";
 import { createMkRecallTool } from "./recall/mk-recall.js";
-import { makeBuilderRun, makeObserverRun, runBuilder, runObserver } from "./runtime/stages.js";
+import {
+  makeBuilderRun,
+  makeObserverRun,
+  makeSelectorRun,
+  runBuilder,
+  runObserver,
+  runSelector,
+} from "./runtime/stages.js";
 import { registerStatusCommand } from "./status/command.js";
 import { createTodoWiring } from "./todo/wiring.js";
 import { onTurnEnd, setStageRuns } from "./triggers.js";
@@ -40,12 +47,13 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   // /mk:status — the user-facing status report (memory stats + per-phase usage).
   registerStatusCommand(pi);
 
-  // Wire the stage run functions (Observer + Builder now; the Selector lands in
-  // its own task). Until then the trigger layer's default no-op stands for it.
+  // Wire the stage run functions (Observer + Builder + Selector). The
+  // Selector reads the avtc-pi-todo wiring LIVE (a todo extension appearing
+  // mid-session is picked up at the next trigger).
   setStageRuns({
     runObserver: makeObserverRun(pi, widget, runObserver),
     runBuilder: makeBuilderRun(pi, widget, runBuilder),
-    runSelector: async () => {},
+    runSelector: makeSelectorRun(pi, widget, runSelector, todo),
   });
 
   pi.on("session_start", (event, ctx) => onSessionStart(event, ctx, pi, widget));

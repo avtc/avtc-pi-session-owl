@@ -3,12 +3,15 @@
 
 // Stage wiring: adapt each stage's run function (Observer/Builder/Selector)
 // into the shared `RunFn` contract the trigger layer calls, and register them
-// via `setStageRuns`. The Observer and Builder are wired here; the Selector is
-// wired in its own task.
+// via `setStageRuns`. All three stages are wired here (the background trigger
+// layer + the compaction hook both reach them).
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type BuilderRunInput, runBuilder } from "../builder/run.js";
 import { type ObserverRunInput, runObserver } from "../observer/run.js";
+import type { TodoContext } from "../selector/input-view.js";
+import { runSelector, type SelectorRunInput } from "../selector/run.js";
+import type { TodoBridge } from "../selector/tools.js";
 import type { RunFn } from "../triggers.js";
 import type { WidgetController } from "../widget/tracker.js";
 
@@ -23,6 +26,12 @@ type RunBuilderFn = (input: BuilderRunInput) => Promise<void>;
 
 /** Re-export so production callers pass it explicitly (no default param). */
 export { runBuilder };
+
+/** A seam over the real runSelector (tests pass a fake; production passes runSelector). */
+type RunSelectorFn = (input: SelectorRunInput) => Promise<void>;
+
+/** Re-export so production callers pass it explicitly (no default param). */
+export { runSelector };
 
 /**
  * Build the Observer's `RunFn`: forwards the trigger's `{ctx, settings, signal,
@@ -61,6 +70,42 @@ export function makeBuilderRun(pi: ExtensionAPI, widget: WidgetController, runBu
       signal: args.signal,
       scope: args.scope,
       widget,
+    });
+  };
+}
+
+/** The optional avtc-pi-todo wiring the Selector reads live. `getContext()` /
+ *  `getBridge()` return null until `pi-todo:ready` fires (avtc-pi-todo absent →
+ *  the todo section + tool are omitted; graceful degrade, not an error). */
+export interface SelectorTodoAccess {
+  getContext(): TodoContext | null;
+  getBridge(): TodoBridge | null;
+}
+
+/**
+ * Build the Selector's `RunFn`: forwards the trigger's `{ctx, settings, signal,
+ *  scope}` into the run function along with the widget controller and the
+ *  avtc-pi-todo context/bridge (read LIVE at each call, so a todo extension
+ *  appearing mid-session is picked up). The Selector honors `signal` and owns
+ *  no run-lock (the caller owns the lifecycle). `unobserved` is unused
+ *  (Observer-only). The background trigger path passes `scope: null`
+ *  (mid-session); the compaction path passes the compaction cut. */
+export function makeSelectorRun(
+  pi: ExtensionAPI,
+  widget: WidgetController,
+  runSelectorFn: RunSelectorFn,
+  todo: SelectorTodoAccess,
+): RunFn {
+  return async (args) => {
+    await runSelectorFn({
+      ctx: args.ctx,
+      pi,
+      settings: args.settings,
+      signal: args.signal,
+      scope: args.scope,
+      widget,
+      todo: todo.getContext(),
+      todoBridge: todo.getBridge(),
     });
   };
 }
