@@ -25,14 +25,10 @@ import {
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
 import { getGraphStore } from "../store/graph-store.js";
-import type { NodeId } from "../types.js";
+import type { NodeId, ObsId } from "../types.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
-/** Default cap on the number of lines a `/mk:*` popup renders before truncation. */
-export const DEFAULT_COMMAND_CAP = 50;
-/** `commandResultCap === null` means "no limit" (render everything). */
-export const NO_CAP: number | null = null;
 const VIEWER: RenderViewer = "nonBuilder";
 const INDENT_STEP = 2;
 const CHILD_DEPTH = 1;
@@ -97,7 +93,7 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
 
   const parent = graph.nodes.get(idArg as NodeId);
   if (parent === undefined) {
-    await notifyError(ctx, `No node with id ${idArg}.`);
+    await notifyError(ctx, `No node '${idArg}'.`);
     return;
   }
   // parent header at depth 0; children indented at depth 1.
@@ -126,12 +122,15 @@ export async function runMkCat(args: string, ctx: ExtensionCommandContext): Prom
     return;
   }
   const graph = getGraphStore().graph;
-  const units = buildCatUnits(graph, [idArg], VIEWER);
-  // buildCatUnits emits a not-found unit for an unknown id — detect it.
-  if (units.length === 1 && units[0]?.header.startsWith("No node or observation")) {
-    await notifyError(ctx, units[0].header);
+  // Resolve the id directly (no string-prefix coupling to buildCatUnits' error
+  // wording): an unknown node OR observation id → error notify naming the id.
+  const node = graph.nodes.get(idArg as NodeId);
+  const obs = graph.observations.get(idArg as ObsId);
+  if (node === undefined && obs === undefined) {
+    await notifyError(ctx, `No node or observation with id '${idArg}'.`);
     return;
   }
+  const units = buildCatUnits(graph, [idArg], VIEWER);
   const lines = units.map(renderCatUnit);
   const { text } = formatList(lines, resolveCap());
   await notifyInfo(ctx, text);

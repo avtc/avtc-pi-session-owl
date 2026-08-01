@@ -19,7 +19,7 @@ import {
   type RenderableObservation,
   type RenderViewer,
 } from "../format/render.js";
-import { DEFAULT_TAKE, FIND_QUERY_MAX, paginate, type ResolvedPage, resolvePage } from "../graph/read-tools.js";
+import { DEFAULT_TAKE, paginate, type ResolvedPage, resolvePage, tryCompileFindRegex } from "../graph/read-tools.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeState, type ObsId } from "../types.js";
@@ -505,18 +505,12 @@ function executeRecall(params: MkRecallParams): RecallResult {
   }
 
   // --- search/list path ---
-  // compile query regex (if any)
+  // compile query regex (if any) — shared compiler (length cap + error wording)
   let regex: RegExp | null = null;
   if (params.query !== undefined && params.query !== "") {
-    if (params.query.length > FIND_QUERY_MAX) {
-      return err(`Query too long (max ${FIND_QUERY_MAX} chars). Use a shorter regex.`);
-    }
-    try {
-      regex = new RegExp(params.query);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      return err(`Invalid regex "${params.query}": ${message}. Retry with a fixed pattern.`);
-    }
+    const compiled = tryCompileFindRegex(params.query);
+    if ("error" in compiled) return err(compiled.error);
+    regex = compiled.regex;
   }
 
   const bounds = resolveBounds(params.from, params.to);

@@ -247,6 +247,19 @@ describe("/mk:* user commands", () => {
       expect(message ?? "").toContain("nDoesNotExist");
     });
 
+    it("node with zero direct observations → header only (no content body)", async () => {
+      seedSource();
+      // n8 has no direct observations (it is a child of n7 with no obs of its own)
+      const { message, type } = await run(runMkCat, "n8");
+      expect(type).toBe("info");
+      const text = message ?? "";
+      // node header present
+      expect(text).toContain("📁 n8");
+      // no observation expanded (header-only unit — single line, no obs content)
+      expect(text).not.toContain("\n");
+      expect(text).not.toMatch(/📄 o\d/);
+    });
+
     it("missing arg → usage error", async () => {
       seedSource();
       const { message, type } = await run(runMkCat, "");
@@ -258,12 +271,15 @@ describe("/mk:* user commands", () => {
   describe("/mk:find", () => {
     it("matches across node summaries + obs content, non-obsolete, with in <parent>", async () => {
       seedSource();
-      const { message, type } = await run(runMkFind, "auth");
+      // "JWT" matches the n7 NODE summary ("Auth migration to JWT") AND the o5
+      // observation content ("Chose JWT for stateless auth") — so both a node
+      // line and an obs line appear, the obs showing `in n7`.
+      const { message, type } = await run(runMkFind, "JWT");
       expect(type).toBe("info");
       const text = message ?? "";
-      // n7 "Auth migration to JWT" matches summary
-      expect(text).toContain("n7");
-      // o5 "stateless auth" matches content → shows in n7
+      // n7 node line genuinely matches its summary (not just via `in n7`)
+      expect(text).toContain("📁 n7");
+      // o5 content matches → shows `in n7`
       expect(text).toContain("o5");
       expect(text).toContain("in n7");
       // obsolete n99 EXCLUDED (non-obsolete default)
@@ -357,5 +373,14 @@ describe("formatList (cap helper)", () => {
     const out = formatList([], 50);
     expect(out.text).toBe("");
     expect(out.truncated).toBe(0);
+  });
+
+  it("cap 0 → everything truncated, footer only", () => {
+    // cap 0 is not a reachable config value (min preset 10) but formatList must
+    // behave sanely: keep nothing, report all as truncated, show the drill footer.
+    const out = formatList(["a", "b", "c"], 0);
+    expect(out.truncated).toBe(3);
+    expect(out.text).toContain("+3 more");
+    expect(out.text).not.toContain("\na");
   });
 });

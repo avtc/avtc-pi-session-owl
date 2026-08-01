@@ -45,8 +45,10 @@ export const TAKE_ALL = 0;
 /** Upper bound on a `find` regex pattern length — guards against accidental
  *  megabyte patterns. NOTE: this caps PATTERN LENGTH, not catastrophic
  *  backtracking (a short `(a+)+$` can still blow up on long input). True ReDoS
- *  hardening needs a worker-thread timeout; find is cooperative-LLM-only here,
- *  so that is deferred until the user-facing search path lands. */
+ *  hardening needs a worker-thread timeout — that remains a known limitation.
+ *  find now accepts USER input (/mk:find), but observations are condensed
+ *  (short) and the graph is session-bounded, so the realistic blast radius is
+ *  a brief synchronous hang, not a crash. */
 export const FIND_QUERY_MAX = 500;
 const INDENT_STEP = 2;
 const ROOT_DEPTH = 0;
@@ -363,7 +365,7 @@ export function tryCompileFindRegex(query: string): { regex: RegExp } | { error:
     return { regex: new RegExp(query) };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { error: `Invalid regex "${query}": ${message}.` };
+    return { error: `Invalid regex "${query}": ${message}. Retry with a fixed pattern.` };
   }
 }
 
