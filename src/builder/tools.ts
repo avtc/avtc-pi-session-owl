@@ -9,6 +9,7 @@
 // compaction summary.
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
 import { formatNodeLine, formatObservationLine, formatTimestamp, importanceAbbr } from "../format/render.js";
@@ -23,7 +24,7 @@ import {
   type GraphDelta,
   MUTATE_SOURCE,
 } from "../graph/mutations.js";
-import { ImportanceSchema, PageSchema } from "../schema.js";
+import { PageSchema } from "../schema.js";
 import { appendGraphDelta, type StoreContext } from "../store/graph-store.js";
 import {
   estimateContentTokens,
@@ -477,8 +478,7 @@ function applyAndPersist(
 function makeMkdirTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeof MKDIR_PARAMS> {
   return {
     name: MKDIR_TOOL,
-    description:
-      "Create a container node (optionally under a parent). Zero observations is fine. Returns the new node id.",
+    description: "Create an empty container node for grouping. Returns the new node's id.",
     label: "Create container",
     parameters: MKDIR_PARAMS,
     async execute(_toolCallId, params) {
@@ -502,8 +502,8 @@ function makeMkdirTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<ty
 }
 
 const MKDIR_PARAMS = Type.Object({
-  summary: Type.String({ minLength: 1, description: "One-line summary for the new container node." }),
-  parentId: Type.Optional(Type.String({ description: "Parent node id; omit or null for a root node." })),
+  summary: Type.String({ minLength: 1, description: "The new node's summary." }),
+  parentId: Type.Optional(Type.String({ description: "A parent node, or omit/null for the root." })),
 });
 
 /** Build the `mv` tool: move observations and/or nodes to a new parent (or to
@@ -514,7 +514,7 @@ function makeMvTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeo
   return {
     name: MV_TOOL,
     description:
-      "Move observations and/or nodes under a new parent (group/split/reparent). destId null promotes to root. Optional newSummary rewrites the dest summary atomically.",
+      "Move items (nodes and/or observations) into a destination node or to the root — for grouping, splitting, or reparenting.",
     label: "Move",
     parameters: MV_PARAMS,
     async execute(_toolCallId, params) {
@@ -544,10 +544,10 @@ function makeMvTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeo
 }
 
 const MV_PARAMS = Type.Object({
-  sourceIds: Type.Array(Type.String(), { minItems: 1, description: "Observation and/or node ids to move." }),
-  destId: Type.Optional(Type.String({ description: "Destination node id; omit or null to promote to root." })),
+  sourceIds: Type.Array(Type.String(), { minItems: 1, description: "The items to move. At least one." }),
+  destId: Type.Optional(Type.String({ description: "The destination node, or null for the root." })),
   newSummary: Type.Optional(
-    Type.String({ minLength: 1, description: "New summary for the dest node (ignored when destId is null)." }),
+    Type.String({ minLength: 1, description: "Optionally rewrite the destination node's summary." }),
   ),
 });
 
@@ -559,7 +559,7 @@ function makeMergeTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<ty
   return {
     name: MERGE_TOOL,
     description:
-      "Fold one or more nodes into a target node (absorbed nodes dissolve). destId null creates a new root; in that case newSummary is required to name it.",
+      "Fold nodes into a destination, combining their contents; the absorbed nodes dissolve. Write a fresh summary for the result.",
     label: "Merge",
     parameters: MERGE_PARAMS,
     async execute(_toolCallId, params) {
@@ -593,10 +593,16 @@ function makeMergeTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<ty
 }
 
 const MERGE_PARAMS = Type.Object({
-  sourceIds: Type.Array(Type.String(), { minItems: 1, description: "Node ids to absorb into the target." }),
-  destId: Type.Optional(Type.String({ description: "Target node id; omit or null to create a new root." })),
+  sourceIds: Type.Array(Type.String(), {
+    minItems: 1,
+    description: "The nodes to fold in (their observations and children come along). At least one.",
+  }),
+  destId: Type.Optional(Type.String({ description: "The destination node, or null to create a new root node." })),
   newSummary: Type.Optional(
-    Type.String({ minLength: 1, description: "Synthesized summary for the target. Required when destId is null." }),
+    Type.String({
+      minLength: 1,
+      description: "A synthesized summary for the destination (required when destId is null).",
+    }),
   ),
 });
 
@@ -605,8 +611,7 @@ const MERGE_PARAMS = Type.Object({
 function makeSupersedeTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeof SUPERSEDE_PARAMS> {
   return {
     name: SUPERSEDE_TOOL,
-    description:
-      "Mark one or more nodes obsolete, superseded by a replacement node. Superseded nodes keep their observations (a non-empty tombstone).",
+    description: "Retire nodes as obsolete, pointing each at a replacement node.",
     label: "Supersede",
     parameters: SUPERSEDE_PARAMS,
     async execute(_toolCallId, params) {
@@ -626,10 +631,10 @@ function makeSupersedeTool(graph: MemkeeperGraph, store: StoreContext): AgentToo
 }
 
 const SUPERSEDE_PARAMS = Type.Object({
-  nodeId: Type.String({ description: "The replacement node id." }),
+  nodeId: Type.String({ description: "The replacement node — the current truth." }),
   supersededNodeIds: Type.Array(Type.String(), {
     minItems: 1,
-    description: "Node ids to mark obsolete.",
+    description: "The nodes to retire. At least one.",
   }),
 });
 
@@ -640,7 +645,7 @@ function makeSetMetaTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<
   return {
     name: SET_META_TOOL,
     description:
-      "Update a node's importance, archived flag, summary, or resurrect it (obsolete:false). obsolete:true is not allowed — use supersede.",
+      "Change a node's importance, archive or resurrect it, or rewrite its summary. (`nGoal` allows summary only.)",
     label: "Edit metadata",
     parameters: SET_META_PARAMS,
     async execute(_toolCallId, params) {
@@ -666,12 +671,16 @@ function makeSetMetaTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<
 }
 
 const SET_META_PARAMS = Type.Object({
-  nodeId: Type.String({ description: "Node id to update." }),
-  importance: Type.Optional(ImportanceSchema),
-  archived: Type.Optional(Type.Boolean({ description: "true archives, false un-archives." })),
-  summary: Type.Optional(Type.String({ minLength: 1, description: "New summary (re-rates summaryTokens)." })),
+  nodeId: Type.String({ description: "The node to update." }),
+  importance: Type.Optional(
+    StringEnum(["critical", "high", "medium", "low"], {
+      description: "New importance — critical, high, medium, or low.",
+    }),
+  ),
+  archived: Type.Optional(Type.Boolean({ description: "True to archive, false to restore to active." })),
+  summary: Type.Optional(Type.String({ minLength: 1, description: "A new summary for the node." })),
   obsolete: Type.Optional(
-    Type.Boolean({ description: "false resurrects an obsolete node; true is rejected (use supersede)." }),
+    Type.Boolean({ description: "False to resurrect an obsolete node (clears its replacement link)." }),
   ),
 });
 
@@ -691,7 +700,7 @@ function makeTryFinishTool(graph: MemkeeperGraph, settings: MemkeeperConfig): Ag
   return {
     name: TRY_FINISH_TOOL,
     description:
-      "Signal the Builder run is done. Reports whether the root view is within budget; within = stop, over = keep organizing.",
+      "Signal the graph is organized and check the root view fits the budget. Accepts when it fits; otherwise reports the overrun and asks for more consolidation.",
     label: "Finish",
     parameters: TRY_FINISH_PARAMS,
     async execute() {

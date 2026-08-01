@@ -226,7 +226,7 @@ describe("Builder mutate tools", () => {
       expect(carrier).toBeUndefined();
     });
 
-    it("rejects moving an observation to the root (C4 always-attached)", async () => {
+    it("rejects moving an observation to the root (observations must stay under a node)", async () => {
       const g = buildGraph();
       const { ctx, entries } = makeFakeStore();
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
