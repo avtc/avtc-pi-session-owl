@@ -17,6 +17,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings } from "./config/schema.js";
+import { toStoredTimestamp } from "./format/render.js";
 import { applyCreateNode, applyRecordObservation, applySetMeta, MUTATE_SOURCE } from "./graph/mutations.js";
 import { abortInFlight } from "./runtime/run-lock.js";
 import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
@@ -156,7 +157,7 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
     content: text,
     importance: "critical",
     sourceEntryIds: [firstUser.id],
-    timestamp: firstUser.timestamp,
+    timestamp: toStoredTimestamp(firstUser.timestamp),
     parentNode: N_GOAL,
   });
   applyRecordObservation(graph, { obs });
@@ -177,7 +178,7 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
 
   // persist the capture: the observation (content + provenance) as a
   // memkeeper.observation entry (coversUpToId = first user entry → frontier
-  // advances past it); the record_observation is NOT a graph_delta (T4 rule).
+  // advances past it); the record_observation is NOT a graph_delta (the store never applies mutations).
   const observationEntry: ObservationEntry = {
     coversFromId: null,
     coversUpToId: firstUser.id,

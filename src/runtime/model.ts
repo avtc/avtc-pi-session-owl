@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// AD10 model resolution shared by every agentLoop stage (Observer / Builder /
+// Model resolution shared by every agentLoop stage (Observer / Builder /
 // Selector). Each stage calls this with its resolved `modelSetting` — the
 // component-specific model string (e.g. `settings.observerModel`) falling back to
 // `settings.defaultModel` — and the session context. Resolution chain:

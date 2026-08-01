@@ -4,7 +4,7 @@
 // The Observer run: an in-process agentLoop per chunk that calls a
 // `record_observations` tool to capture observations, then mechanically wraps
 // each captured observation in a fresh `new` node at the root and persists the
-// batch. The Observer is a non-writer under AD2 (it only appends observation +
+// batch. The Observer is a non-writer (it only appends observation +
 // new-wrapper deltas; it never restructures — that's the Builder).
 //
 // Persistence granularity: ONE `memkeeper.observation` delta per run
@@ -16,6 +16,7 @@ import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-age
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
+import { nowStoredTimestamp, toStoredTimestamp } from "../format/render.js";
 import { applyCreateNode, applyRecordObservation, type GraphDelta } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
@@ -126,7 +127,7 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
 // --- run input -------------------------------------------------------------
 
 /** Input to `runObserver`. The run honors `signal` only — the caller owns the
- *  run-lock (T9 background releases in its IIFE; T14 compaction holds). */
+ *  run-lock (the background trigger releases in its IIFE; compaction holds). */
 export interface ObserverRunInput {
   ctx: ExtensionContext;
   pi: ExtensionAPI;
@@ -159,7 +160,7 @@ interface WrappedPair {
 export async function runObserver(input: ObserverRunInput): Promise<void> {
   if (input.unobserved.length === EMPTY_GAP) return;
 
-  // AD10 model resolution (observerModel -> defaultModel -> session).
+  // model resolution (observerModel -> defaultModel -> session).
   const resolved = await resolveStageModel(input.ctx, input.settings.observerModel ?? input.settings.defaultModel);
   if (!resolved.ok) {
     notify(input.ctx, `Observer skipped a run: ${resolved.error}`, "warning");
@@ -238,7 +239,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     });
     const obsId = `o${graph.nextObsId}` as ObsId;
     const firstSource = record.sourceEntryIds.map((id) => entryById.get(id)).find((entry) => entry !== NO_SOURCE_ENTRY);
-    const timestamp = firstSource?.timestamp ?? new Date().toISOString().slice(0, 16).replace("T", " ");
+    const timestamp = firstSource !== undefined ? toStoredTimestamp(firstSource.timestamp) : nowStoredTimestamp();
     applyRecordObservation(graph, {
       obs: makeObservation({
         id: obsId,
@@ -254,7 +255,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
 
   // persist: the wrapper create_node deltas (one per record), then the single
   // observation entry for the whole run (coversFromId/coversUpToId). The
-  // record_observation delta is NOT persisted (T4 rule — observations enter via
+  // record_observation delta is NOT persisted — observations enter via
   // the observation entry's content index + reconcileLinks on load).
   persistWrappers(store, pairs);
   persistObservationBatch(store, input.unobserved, pairs);

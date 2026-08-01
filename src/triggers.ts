@@ -69,7 +69,7 @@ export function computeUnobserved(entries: readonly SessionEntry[], frontier: st
   return entries.slice(startIndex).filter(isRenderableEntry);
 }
 
-/** Render the unobserved entries and sum their token estimate (chars/4, AD10). */
+/** Render the unobserved entries and sum their token estimate (chars/4). */
 function estimateUnobservedTokens(unobserved: SessionEntry[], settings: MemkeeperConfig): number {
   if (unobserved.length === 0) return 0;
   const options: ChunkOptions = {
@@ -215,7 +215,7 @@ export function evaluateSelectorTrigger(input: TriggerInput): StageTriggerResult
   };
 }
 
-// --- turn_end entry point (T9 sub-step 3) ----------------------------------
+// --- turn_end entry point (turn_end entry point) ----------------------------------
 
 /** Fire-and-forget launch a stage run: acquire the lock or SKIP (decision #20);
  *  on acquire, capture ctx synchronously and `void` an async IIFE whose `finally`
@@ -237,8 +237,8 @@ export function launchBackgroundRun(input: TriggerInput, stage: StageName, runFn
   })();
 }
 
-/** Per-stage run injection (T10/T13/T17 register their real run functions at
- *  activate; defaults are no-ops so T9 is testable + the turn_end hook doesn't
+/** Per-stage run injection (each stage registers their real run functions at
+ *  activate; defaults are no-ops so the trigger layer is testable + the turn_end hook doesn't
  *  crash before those land). */
 export interface StageRuns {
   runObserver: RunFn;

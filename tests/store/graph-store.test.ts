@@ -177,7 +177,7 @@ describe("persist methods (PERSIST-ONLY)", () => {
   });
 });
 
-describe("load reconstruction (§4.3)", () => {
+describe("load reconstruction", () => {
   it("reconstructs from a snapshot + replayed deltas (flush_new inside a graph_delta, Issue 6)", async () => {
     freshStore();
     const fake = new FakeStore();

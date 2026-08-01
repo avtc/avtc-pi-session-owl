@@ -9,6 +9,7 @@ import {
   formatTimestampRange,
   importanceAbbr,
   RENDER_LEGEND,
+  toStoredTimestamp,
 } from "../../src/format/render.js";
 import type { Node, Observation } from "../../src/types.js";
 import { estimateContentTokens, N_GOAL } from "../../src/types.js";
@@ -50,6 +51,20 @@ describe("formatTimestampRange", () => {
 
   it("collapses an identical start/end to a single timestamp", () => {
     expect(formatTimestampRange("2026-07-28 14:30", "2026-07-28 14:30")).toBe("Jul 28 14:30");
+  });
+});
+
+describe("toStoredTimestamp", () => {
+  it("converts a real ISO session-entry timestamp to the stored contract format", () => {
+    expect(toStoredTimestamp("2026-07-29T09:22:50.283Z")).toBe("2026-07-29 09:22");
+  });
+
+  it("passes an already-contracted value through unchanged", () => {
+    expect(toStoredTimestamp("2026-07-29 09:22")).toBe("2026-07-29 09:22");
+  });
+
+  it("passes an unparseable value through unchanged (tolerant)", () => {
+    expect(toStoredTimestamp("not a timestamp")).toBe("not a timestamp");
   });
 });
 

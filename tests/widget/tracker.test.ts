@@ -8,7 +8,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { initWidget } from "../../src/widget/tracker.js";
 
-describe("initWidget stub (T7; T20 replaces)", () => {
+describe("initWidget stub", () => {
   it("returns a controller with all surface methods as functions", () => {
     const widget = initWidget();
     expect(typeof widget.setCtx).toBe("function");

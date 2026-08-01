@@ -67,6 +67,25 @@ export function formatTimestamp(stored: string): string {
   return `${monthDay(date)} ${time}`;
 }
 
+/** Convert a raw session-entry timestamp (pi stores ISO 8601, e.g.
+ *  "2026-07-29T09:22:50.283Z") into the stored "YYYY-MM-DD HH:MM" contract
+ *  format the in-memory model + render layer use (UTC, matching the in-memory
+ *  clock convention). A value NOT in ISO form (already-contracted or
+ *  unparseable) passes through unchanged — so the helper is idempotent and
+ *  tolerant. */
+export function toStoredTimestamp(raw: string): string {
+  // ISO timestamps carry a 'T' separator; the stored contract format does not.
+  if (!raw.includes("T")) return raw;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toISOString().slice(0, 16).replace("T", " ");
+}
+
+/** The current instant as a stored "YYYY-MM-DD HH:MM" timestamp (UTC). */
+export function nowStoredTimestamp(): string {
+  return new Date().toISOString().slice(0, 16).replace("T", " ");
+}
+
 /** Render a [start, end] range, compressing identical or same-day endpoints. */
 export function formatTimestampRange(startStored: string, endStored: string): string {
   if (startStored === endStored) return formatTimestamp(startStored);

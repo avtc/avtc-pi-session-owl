@@ -3,7 +3,7 @@
 
 // Shared TypeBox schemas reused by every agentLoop tool stage (Observer /
 // Builder / Selector) so the importance / state / pagination shapes are defined
-// once and never drift (avoids jscpd dupes across T10/T11/T12/T16).
+// once and never drift (avoids jscpd dupes across every stage).
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type TSchema, Type } from "typebox";

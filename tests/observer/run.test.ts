@@ -174,6 +174,13 @@ describe("runObserver", () => {
     expect(graphDeltas).toHaveLength(1);
     expect(obsEntries).toHaveLength(1);
 
+    // the single observation delta covers the whole unobserved range and carries
+    // the accumulated token count.
+    const obsEntry = obsEntries[0].data as { coversFromId: string | null; coversUpToId: string; tokenCount: number };
+    expect(obsEntry.coversFromId).toBe("u1");
+    expect(obsEntry.coversUpToId).toBe("a1");
+    expect(obsEntry.tokenCount).toBeGreaterThan(0);
+
     // the wrapper node exists in-memory at root, state new, with the obs
     const graph = getGraphStore().graph;
     const wrapper = [...graph.nodes.values()].find((n) => n.id !== "nGoal" && n.state === "new");
@@ -188,6 +195,39 @@ describe("runObserver", () => {
 
     // frontier advanced to the last unobserved entry id
     expect(getGraphStore().observerFrontier).toBe("a1");
+  });
+
+  it("converts a real ISO source timestamp into the stored 'YYYY-MM-DD HH:MM' contract format", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // real SessionEntry timestamps are ISO (e.g. '2026-07-29T09:22:50.283Z'); the
+    // observation's stored timestamp must be the 'YYYY-MM-DD HH:MM' format the
+    // render layer expects, not the raw ISO.
+    const unobserved: SessionEntry[] = [
+      {
+        id: "u1",
+        type: "message",
+        parentId: null,
+        timestamp: "2026-07-29T09:00:00.000Z",
+        message: { role: "user", content: "initial prompt captured mechanically" },
+      } as unknown as SessionEntry,
+      {
+        id: "a1",
+        type: "message",
+        parentId: null,
+        timestamp: "2026-07-29T09:22:50.283Z",
+        message: { role: "assistant", content: [{ type: "text", text: "we chose vitest for tests" }] },
+      } as unknown as SessionEntry,
+    ];
+    const script = scriptedRunStage([[{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }]]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    const wrapper = [...getGraphStore().graph.nodes.values()].find((n) => n.state === "new");
+    const obsId = wrapper !== undefined ? wrapper.observationIds[0] : undefined;
+    const obs = obsId !== undefined ? getGraphStore().graph.observations.get(obsId) : undefined;
+    // contract format, not raw ISO: 'YYYY-MM-DD HH:MM' derived from '2026-07-29T09:22:50.283Z'
+    expect(obs?.timestamp).toBe("2026-07-29 09:22");
   });
 
   it("skips + notifies when the model cannot be resolved (no model available)", async () => {
