@@ -1,6 +1,7 @@
-import type { AssistantMessage, Message, ToolCall, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, ThinkingContent, ToolCall, Usage } from "@earendil-works/pi-ai";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
+import { validateGraph } from "../../src/graph/invariants.js";
 import { buildTail, buildWorkingCopy, type TailContext } from "../../src/selector/input-view.js";
 import type { Node, NodeId, Observation, ObsId } from "../../src/types.js";
 import { MemkeeperGraph, makeNode, makeObservation, N_GOAL, N_IRRELEVANT, O_INITIAL_PROMPT } from "../../src/types.js";
@@ -156,6 +157,103 @@ describe("buildWorkingCopy", () => {
     expect(graph.nodes.has("n10")).toBe(true); // live child kept
     expect(graph.nodes.get("n10")?.parentNode).toBe(null); // reparented to root
   });
+
+  it("removes a dropped non-root obsolete node from its parent's childNodeIds (no phantom links)", () => {
+    const nodes = new Map<NodeId, Node>();
+    const observations = new Map<ObsId, Observation>();
+    const nGoal = makeNode({
+      id: N_GOAL,
+      summary: "g",
+      importance: "critical",
+      parentNode: null,
+      state: "active",
+      createdAt: "2026-07-28 09:00",
+    });
+    const nObs = makeNode({
+      id: "n9",
+      summary: "obsolete child of nGoal",
+      importance: "low",
+      parentNode: N_GOAL,
+      state: "obsolete",
+      supersededBy: "n3",
+      createdAt: "2026-07-28 09:00",
+    });
+    nGoal.childNodeIds = ["n9"];
+    nGoal.observationIds = [O_INITIAL_PROMPT];
+    observations.set(
+      O_INITIAL_PROMPT,
+      makeObservation({
+        id: O_INITIAL_PROMPT,
+        content: "goal",
+        importance: "critical",
+        sourceEntryIds: ["u1"],
+        timestamp: "2026-07-28 09:00",
+        parentNode: N_GOAL,
+      }),
+    );
+    nodes.set(N_GOAL, nGoal);
+    nodes.set("n9", nObs);
+    const source = new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 10 });
+    const { graph } = buildWorkingCopy(source);
+    expect(graph.nodes.has("n9")).toBe(false); // obsolete dropped
+    // No phantom child link — nGoal no longer references the dropped n9.
+    expect(graph.nodes.get(N_GOAL)?.childNodeIds).toEqual([]);
+    // The working copy is structurally valid (no dangling child links).
+    expect(() => validateGraph(graph)).not.toThrow();
+  });
+
+  it("excludes observations whose parent node is obsolete (dropped with it)", () => {
+    const nodes = new Map<NodeId, Node>();
+    const observations = new Map<ObsId, Observation>();
+    const nGoal = makeNode({
+      id: N_GOAL,
+      summary: "g",
+      importance: "critical",
+      parentNode: null,
+      state: "active",
+      createdAt: "2026-07-28 09:00",
+    });
+    const nObs = makeNode({
+      id: "n9",
+      summary: "obsolete",
+      importance: "low",
+      parentNode: null,
+      state: "obsolete",
+      supersededBy: "n3",
+      createdAt: "2026-07-28 09:00",
+    });
+    nObs.observationIds = ["o5"];
+    observations.set(
+      O_INITIAL_PROMPT,
+      makeObservation({
+        id: O_INITIAL_PROMPT,
+        content: "goal",
+        importance: "critical",
+        sourceEntryIds: ["u1"],
+        timestamp: "2026-07-28 09:00",
+        parentNode: N_GOAL,
+      }),
+    );
+    observations.set(
+      "o5",
+      makeObservation({
+        id: "o5",
+        content: "dead fact",
+        importance: "low",
+        sourceEntryIds: ["e5"],
+        timestamp: "2026-07-28 09:00",
+        parentNode: "n9",
+      }),
+    );
+    nGoal.observationIds = [O_INITIAL_PROMPT];
+    nodes.set(N_GOAL, nGoal);
+    nodes.set("n9", nObs);
+    const source = new MemkeeperGraph({ nodes, observations, nextObsId: 2, nextNodeId: 10 });
+    const { graph } = buildWorkingCopy(source);
+    expect(graph.nodes.has("n9")).toBe(false);
+    expect(graph.observations.has("o5")).toBe(false); // obs under obsolete node excluded
+    expect(graph.observations.has(O_INITIAL_PROMPT)).toBe(true); // goal obs kept
+  });
 });
 
 // --- buildTail fixtures ------------------------------------------------------
@@ -180,6 +278,24 @@ function assistantEntry(id: string, text: string): SessionMessageEntry {
   const message: AssistantMessage = {
     role: "assistant",
     content: [{ type: "text", text }],
+    api: "anthropic",
+    provider: "anthropic",
+    model: "m",
+    usage: USAGE,
+    stopReason: "stop",
+    timestamp: 0,
+  };
+  return msg(id, message);
+}
+
+function assistantWithToolAndThinking(id: string, text: string): SessionMessageEntry {
+  const message: AssistantMessage = {
+    role: "assistant",
+    content: [
+      { type: "thinking", thinking: "the thinking" } as ThinkingContent,
+      { type: "text", text },
+      { type: "toolCall", id: "call1", name: "read", arguments: { path: "/x" } } as ToolCall,
+    ],
     api: "anthropic",
     provider: "anthropic",
     model: "m",
@@ -227,6 +343,19 @@ describe("buildTail", () => {
     expect(out).toContain("tail msg");
   });
 
+  it("pairs the preceding agent message as TEXT-ONLY (no tool calls / thinking)", () => {
+    // The preceding agent carries a tool call + thinking; only its text surfaces.
+    const branch: SessionEntry[] = [
+      assistantWithToolAndThinking("a0", "the text reply"),
+      userEntry("u0", "the ask"),
+      assistantEntry("a2", "tail begins"),
+    ];
+    const out = buildTail(ctxFor(branch), { firstKeptEntryId: "a2" }, CHUNK_OPTS);
+    expect(out).toContain("the text reply"); // text surfaced
+    expect(out).not.toContain("the thinking"); // thinking excluded
+    expect(out).not.toContain("<C "); // tool call excluded (no <C> in prelude)
+  });
+
   it("prepends [last agent text] + [last user] + truncation marker when last user is before the cut", () => {
     const branch: SessionEntry[] = [
       assistantEntry("a0", "the preceding agent reply"),
@@ -259,6 +388,20 @@ describe("buildTail", () => {
     const branch: SessionEntry[] = [userEntry("u1", "x"), assistantEntry("a1", "y")];
     const out = buildTail(ctxFor(branch), { firstKeptEntryId: null }, CHUNK_OPTS);
     expect(out).toBe("");
+  });
+
+  it("renders the full retained tail with no truncation (a large multi-chunk branch is kept whole)", () => {
+    // A branch large enough to span multiple chunks; the tail (from the cut) is
+    // rendered in full — nothing is cut to an arbitrary cap.
+    const branch: SessionEntry[] = [];
+    for (let i = 0; i < 60; i += 1) {
+      branch.push(userEntry(`u${i}`, `message body ${i} with enough text to accumulate tokens`));
+    }
+    const cutId = "u0"; // whole branch is the tail
+    const out = buildTail(ctxFor(branch), { firstKeptEntryId: cutId }, CHUNK_OPTS);
+    // First and last entries both present → nothing was truncated away.
+    expect(out).toContain("message body 0 ");
+    expect(out).toContain("message body 59 ");
   });
 });
 
@@ -303,7 +446,6 @@ describe("buildTodo", () => {
 
 // --- buildSelectorInputView tests -------------------------------------------
 
-import type { TouchedFile } from "../../src/compaction/touched-files.js";
 import { buildSelectorInputView } from "../../src/selector/input-view.js";
 
 function sourceGraphForAssembly(): MemkeeperGraph {
@@ -393,14 +535,87 @@ describe("buildSelectorInputView", () => {
     expect(view).not.toContain("Todo");
   });
 
+  it("renders working-tree roots nGoal-first, then importance-desc/recency-desc, nIrrelevant-last", () => {
+    const nodes = new Map<NodeId, Node>();
+    const observations = new Map<ObsId, Observation>();
+    nodes.set(
+      N_GOAL,
+      makeNode({
+        id: N_GOAL,
+        summary: "goal summary",
+        importance: "critical",
+        parentNode: null,
+        state: "active",
+        createdAt: "2026-07-28 09:00",
+      }),
+    );
+    // high (newer) + high (older) + low → after nGoal: high-newer, high-older, low.
+    nodes.set(
+      "n1",
+      makeNode({
+        id: "n1",
+        summary: "alpha high newer",
+        importance: "high",
+        parentNode: null,
+        state: "active",
+        createdAt: "2026-07-29 10:00",
+      }),
+    );
+    nodes.set(
+      "n2",
+      makeNode({
+        id: "n2",
+        summary: "bravo high older",
+        importance: "high",
+        parentNode: null,
+        state: "active",
+        createdAt: "2026-07-28 10:00",
+      }),
+    );
+    nodes.set(
+      "n3",
+      makeNode({
+        id: "n3",
+        summary: "charlie low",
+        importance: "low",
+        parentNode: null,
+        state: "active",
+        createdAt: "2026-07-29 10:00",
+      }),
+    );
+    observations.set(
+      O_INITIAL_PROMPT,
+      makeObservation({
+        id: O_INITIAL_PROMPT,
+        content: "goal",
+        importance: "critical",
+        sourceEntryIds: ["u1"],
+        timestamp: "2026-07-28 09:00",
+        parentNode: N_GOAL,
+      }),
+    );
+    const nGoal = nodes.get(N_GOAL);
+    if (nGoal) nGoal.observationIds = [O_INITIAL_PROMPT];
+    const source = new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 5 });
+    const { view } = buildSelectorInputView({
+      sourceGraph: source,
+      tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
+      tailBoundary: { firstKeptEntryId: "a2" },
+      todo: null,
+      touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
+      sinceEntryId: "a2",
+      chunkOptions: ASSEMBLY_OPTS,
+    });
+    const treeSection = view.split("Current task")[0] ?? "";
+    expect(treeSection.indexOf("goal summary")).toBeLessThan(treeSection.indexOf("alpha high newer"));
+    expect(treeSection.indexOf("alpha high newer")).toBeLessThan(treeSection.indexOf("bravo high older")); // newer before older on importance tie
+    expect(treeSection.indexOf("bravo high older")).toBeLessThan(treeSection.indexOf("charlie low")); // high before low
+    expect(treeSection.indexOf("charlie low")).toBeLessThan(treeSection.indexOf("Irrelevant")); // nIrrelevant last
+  });
+
   it("renders touched files (read + write deduped) in the context section", () => {
     // A branch with a read and a write/edit on the same path + a distinct path.
     const branch: SessionEntry[] = [assistantEntry("a2", "tail")];
-    // Supply touched files directly via a fake context that returns fixed files.
-    const touched = (): TouchedFile[] => [
-      { path: "src/a.ts", timestamp: "2026-07-28 14:00", op: "write" },
-      { path: "README.md", timestamp: "2026-07-28 13:00", op: "read" },
-    ];
     // buildSelectorInputView uses extractTouchedFiles(touchedFiles, sinceEntryId);
     // we feed a context whose getBranch returns toolCall entries below.
     const { view } = buildSelectorInputView({
@@ -412,7 +627,6 @@ describe("buildSelectorInputView", () => {
       sinceEntryId: null,
       chunkOptions: ASSEMBLY_OPTS,
     });
-    void touched;
     expect(view).toContain("src/a.ts");
     expect(view).toContain("✎");
   });

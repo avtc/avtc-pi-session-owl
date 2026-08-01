@@ -2,12 +2,10 @@ import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-codin
 import { extractTouchedFiles, renderTouchedFiles, type TouchedFilesContext } from "../compaction/touched-files.js";
 import { formatNodeLine, RENDER_LEGEND } from "../format/render.js";
 import { cloneGraph } from "../graph/clone.js";
-import { isUnstuckAutoContinue } from "../lifecycle.js";
+import { extractMessageText, isUnstuckAutoContinue } from "../lifecycle.js";
 import { buildChunks, type ChunkOptions } from "../observer/chunk.js";
 import type { MemkeeperGraph, NodeId, ObsId } from "../types.js";
-import { IMPORTANCE_RANK, makeNode, N_GOAL, N_IRRELEVANT } from "../types.js";
-
-const NOW = "2026-07-28 00:00";
+import { IMPORTANCE_RANK, makeNode, N_GOAL, N_IRRELEVANT, nowStoredTimestamp, ROOT_PARENT } from "../types.js";
 
 /**
  * The Selector's working copy: a deep-copied, in-memory graph the Selector
@@ -32,13 +30,23 @@ export interface SelectorWorkingCopy {
 export function buildWorkingCopy(source: MemkeeperGraph): SelectorWorkingCopy {
   const clone = cloneGraph(source);
 
-  // Drop obsolete nodes; collect their children for reparenting.
+  // Drop obsolete nodes; collect their children for reparenting and note each
+  // dropped node's parent so its childNodeIds can be cleaned (no phantom links).
   const toReparent: NodeId[] = [];
+  const droppedParents: Array<{ parent: NodeId | null; dropped: NodeId }> = [];
   for (const [id, node] of clone.nodes) {
     if (node.state === "obsolete") {
       toReparent.push(...node.childNodeIds);
+      droppedParents.push({ parent: node.parentNode, dropped: id });
       clone.nodes.delete(id);
     }
+  }
+  // Remove each dropped obsolete id from its parent's childNodeIds.
+  for (const { parent, dropped } of droppedParents) {
+    if (parent === null) continue;
+    const parentNode = clone.nodes.get(parent);
+    if (parentNode === undefined) continue; // parent itself dropped (nested obsolete)
+    parentNode.childNodeIds = parentNode.childNodeIds.filter((cid) => cid !== dropped);
   }
   // Reparent a non-obsolete orphan whose parent was dropped to the root.
   for (const childId of toReparent) {
@@ -66,7 +74,7 @@ export function buildWorkingCopy(source: MemkeeperGraph): SelectorWorkingCopy {
         importance: "medium",
         parentNode: null,
         state: "active",
-        createdAt: NOW,
+        createdAt: nowStoredTimestamp(),
       }),
     );
   }
@@ -76,11 +84,9 @@ export function buildWorkingCopy(source: MemkeeperGraph): SelectorWorkingCopy {
 
 // --- tail rendering ---------------------------------------------------------
 
-/** Port to read the active branch (the same shape T14's touched-files uses). */
-export interface TailContext {
-  getLeafId: () => string | null;
-  getBranch: (leafId?: string) => SessionEntry[];
-}
+/** Port to read the active branch — identical to {@link TouchedFilesContext}
+ *  (both read `getBranch(leafId)`); aliased to avoid a byte-duplicate type. */
+export type TailContext = TouchedFilesContext;
 
 /** Tail boundary: `firstKeptEntryId` is the compaction cut (the kept side starts
  *  here). `null` = no compaction cut yet (mid-session) — the tail is undefined
@@ -120,20 +126,27 @@ export function buildTail(ctx: TailContext, boundary: TailBoundary, options: Chu
     return renderTail(tail, options);
   }
 
-  // The last user message is before the cut → pair it with its preceding agent.
+  // The last user message is before the cut → pair it with its preceding
+  // agent TEXT message (text-only — no thinking/tool calls, per the tail spec).
   const precedingAgentIndex = findPrecedingAssistantText(branch, lastUserIndex);
-  const prelude: SessionEntry[] = [];
-  if (precedingAgentIndex !== NOT_FOUND) prelude.push(entryAt(branch, precedingAgentIndex));
-  prelude.push(entryAt(branch, lastUserIndex));
+  const userEntry = entryAt(branch, lastUserIndex);
+  const preludeParts: string[] = [];
+  if (precedingAgentIndex !== NOT_FOUND) {
+    const agentEntry = entryAt(branch, precedingAgentIndex);
+    const agentText = extractAgentText(agentEntry);
+    if (agentText.length > 0) preludeParts.push(`<A E=${agentEntry.id}>${agentText}</A>`);
+  }
+  const userText = renderTail([userEntry], options);
+  preludeParts.push(userText);
 
-  const preludeText = renderTail(prelude, options);
+  const preludeText = preludeParts.join("");
   const tailText = renderTail(tail, options);
   return `${preludeText}\n${TRUNCATION_MARKER}\n${tailText}`;
 }
 
 /** Join a slice of entries' rendered XML-tag chunks into one text block. */
 function renderTail(entries: readonly SessionEntry[], options: ChunkOptions): string {
-  const chunks = buildChunks(entries as SessionEntry[], options);
+  const chunks = buildChunks(entries, options);
   return chunks.map((chunk) => chunk.text).join("");
 }
 
@@ -164,6 +177,13 @@ function findPrecedingAssistantText(branch: readonly SessionEntry[], from: numbe
 
 function isMessageEntry(entry: SessionEntry): entry is SessionMessageEntry {
   return entry.type === "message";
+}
+
+/** Extract the TEXT content of an assistant message (text-only; thinking and
+ *  tool calls are dropped — the tail-pairing prelude surfaces text only). */
+function extractAgentText(entry: SessionEntry): string {
+  if (!isMessageEntry(entry)) return "";
+  return entry.message.role === "assistant" ? extractMessageText(entry.message) : "";
 }
 
 /** Read a branch entry by index with a runtime guard (indices returned by the
@@ -224,8 +244,6 @@ export function buildTodo(ctx: TodoContext): string {
 /** The tail legend (Observer XML-tag format), WITHOUT the E= attribute — the
  *  Selector needs the tag glossary, not the citation convention. */
 const TAIL_LEGEND_NO_E = "U user · A assistant · C tool-call · R tool-result · T thinking";
-
-const ROOT_PARENT_ID: string | null = null;
 
 /** Full args for assembling the Selector's agentLoop-start input view. */
 export interface SelectorInputViewArgs {
@@ -292,7 +310,7 @@ export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInp
 function renderWorkingRoots(workingCopy: SelectorWorkingCopy): string {
   const graph = workingCopy.graph;
   const roots = [...graph.nodes.values()].filter(
-    (node) => node.parentNode === ROOT_PARENT_ID && node.state !== "obsolete",
+    (node) => node.parentNode === ROOT_PARENT && node.state !== "obsolete",
   );
   const goal = roots.filter((node) => node.id === N_GOAL);
   const irrelevant = roots.filter((node) => node.id === N_IRRELEVANT);
