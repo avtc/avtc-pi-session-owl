@@ -31,6 +31,7 @@ vi.mock("../src/lifecycle.js", () => ({
 
 vi.mock("../src/triggers.js", () => ({
   onTurnEnd: vi.fn(),
+  setStageRuns: vi.fn(),
 }));
 
 vi.mock("../src/compaction/hook.js", () => ({
@@ -48,6 +49,11 @@ vi.mock("../src/widget/tracker.js", () => ({
     endStage: vi.fn(),
     onEvent: vi.fn(),
   })),
+}));
+
+vi.mock("../src/runtime/stages.js", () => ({
+  makeObserverRun: vi.fn(() => vi.fn()),
+  runObserver: vi.fn(),
 }));
 
 import { compactionHook } from "../src/compaction/hook.js";

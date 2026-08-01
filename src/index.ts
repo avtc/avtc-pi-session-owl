@@ -12,12 +12,21 @@ import { compactionHook } from "./compaction/hook.js";
 import { getMemkeeperSettings, initMemkeeperSettings } from "./config/schema.js";
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "./lifecycle.js";
 import { log } from "./log.js";
-import { onTurnEnd } from "./triggers.js";
+import { makeObserverRun, runObserver } from "./runtime/stages.js";
+import { onTurnEnd, setStageRuns } from "./triggers.js";
 import { initWidget } from "./widget/tracker.js";
 
 export default function memkeeperExtension(pi: ExtensionAPI): void {
   initMemkeeperSettings(pi);
   const widget = initWidget();
+
+  // Wire the stage run functions (Observer now; Builder/Selector land in their
+  // own tasks). Until then the trigger layer's default no-ops stand.
+  setStageRuns({
+    runObserver: makeObserverRun(pi, runObserver),
+    runBuilder: async () => {},
+    runSelector: async () => {},
+  });
 
   pi.on("session_start", (event, ctx) => onSessionStart(event, ctx, pi, widget));
   pi.on("session_shutdown", (_event, _ctx) => onSessionShutdown(_event, widget));
