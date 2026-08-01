@@ -162,7 +162,7 @@ describe("persist methods (PERSIST-ONLY)", () => {
       parentNode: null,
       state: "active",
     });
-    const snapshot = encodeSelection(store.graph, null);
+    const snapshot = encodeSelection(store.graph, null, null);
     persistSelectedTree(fake, snapshot);
     expect(customAt(fake, 0).customType).toBe(SELECTION_TYPE);
     expect(getGraphStore().selectedTree).toEqual(snapshot);

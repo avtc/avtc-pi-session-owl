@@ -107,6 +107,11 @@ export interface SerializedSelection {
   nodes: SerializedNode[];
   oInitialPrompt: SerializedObservation | null;
   obsRefs: string[];
+  /** The observer frontier (`coversUpToId`) at tree-build time — the staleness
+   *  check compares it to the current frontier: equal = no new observations
+   *  since build (tree is current); different = new observations (rebuild).
+   *  Additive optional (legacy snapshots lack it → null → stale → rebuild). */
+  coveredFrontier: string | null;
   nextObsId: number;
   nextNodeId: number;
 }
@@ -281,11 +286,12 @@ function decodeNodesAndPrompt(
 /** Decode a selected-tree snapshot; null if malformed. */
 export function decodeSelection(raw: unknown): SerializedSelection | null {
   if (!isObject(raw)) return null;
-  const { nodes, oInitialPrompt, obsRefs, nextObsId, nextNodeId } = raw;
+  const { nodes, oInitialPrompt, obsRefs, coveredFrontier, nextObsId, nextNodeId } = raw;
   if (
     !Array.isArray(nodes) ||
     !Array.isArray(obsRefs) ||
     obsRefs.some((s) => typeof s !== "string") ||
+    (coveredFrontier !== null && coveredFrontier !== undefined && typeof coveredFrontier !== "string") ||
     typeof nextObsId !== "number" ||
     typeof nextNodeId !== "number"
   ) {
@@ -297,6 +303,7 @@ export function decodeSelection(raw: unknown): SerializedSelection | null {
     nodes: base.nodes,
     oInitialPrompt: base.oInitialPrompt,
     obsRefs: obsRefs as string[],
+    coveredFrontier: typeof coveredFrontier === "string" ? coveredFrontier : null,
     nextObsId,
     nextNodeId,
   };
@@ -397,7 +404,11 @@ export function encodeNode(node: Node): SerializedNode {
  * observations become id refs (content stays in the immutable observation store);
  * `oInitialPrompt` is carried verbatim.
  */
-export function encodeSelection(graph: MemkeeperGraph, oInitialPrompt: ObsId | null): SerializedSelection {
+export function encodeSelection(
+  graph: MemkeeperGraph,
+  oInitialPrompt: ObsId | null,
+  coveredFrontier: string | null,
+): SerializedSelection {
   const nodes: SerializedNode[] = [];
   const obsRefs: string[] = [];
   const seen = new Set<string>();
@@ -421,6 +432,7 @@ export function encodeSelection(graph: MemkeeperGraph, oInitialPrompt: ObsId | n
     nodes,
     oInitialPrompt: prompt,
     obsRefs,
+    coveredFrontier,
     nextObsId: graph.nextObsId,
     nextNodeId: graph.nextNodeId,
   };

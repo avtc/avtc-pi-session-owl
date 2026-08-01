@@ -17,6 +17,7 @@ describe("initWidget stub", () => {
     expect(typeof widget.startStage).toBe("function");
     expect(typeof widget.setPass).toBe("function");
     expect(typeof widget.setBatch).toBe("function");
+    expect(typeof widget.setSelectedCounts).toBe("function");
     expect(typeof widget.endStage).toBe("function");
     expect(typeof widget.onEvent).toBe("function");
   });
@@ -29,6 +30,7 @@ describe("initWidget stub", () => {
     expect(() => widget.startStage("observe")).not.toThrow();
     expect(() => widget.setPass(1)).not.toThrow();
     expect(() => widget.setBatch(0, 0)).not.toThrow();
+    expect(() => widget.setSelectedCounts(0, 0)).not.toThrow();
     expect(() => widget.endStage()).not.toThrow();
     expect(() => widget.onEvent({})).not.toThrow();
   });

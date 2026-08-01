@@ -163,22 +163,34 @@ describe("selection snapshot codec", () => {
       parentNode: N_GOAL,
     });
     g.observations.set(prompt.id, prompt);
-    const snapshot = encodeSelection(g, O_INITIAL_PROMPT);
+    const snapshot = encodeSelection(g, O_INITIAL_PROMPT, "entry-42");
     expect(snapshot.nodes.map((n) => n.id)).toContain("n1");
     // oInitialPrompt is carried verbatim (full SerializedObservation)
     expect(snapshot.oInitialPrompt?.id).toBe(O_INITIAL_PROMPT);
     // obsRefs are id-only refs (NOT full content)
     expect(snapshot.obsRefs).toContain("o1");
     expect(snapshot.obsRefs).not.toContain(O_INITIAL_PROMPT); // oInitialPrompt carried separately
+    // coveredFrontier is the observer frontier at tree-build time (staleness check)
+    expect(snapshot.coveredFrontier).toBe("entry-42");
 
     const decoded = decodeSelection(snapshot);
     expect(decoded).not.toBeNull();
     expect(decoded?.oInitialPrompt?.id).toBe(O_INITIAL_PROMPT);
     expect(decoded?.obsRefs).toContain("o1");
+    expect(decoded?.coveredFrontier).toBe("entry-42");
+  });
+
+  it("decodeSelection treats a missing coveredFrontier as null (additive field, legacy-safe → stale → rebuild)", () => {
+    const snapshot = encodeSelection(emptyGraph(), null, "entry-7");
+    const { coveredFrontier, ...legacy } = snapshot;
+    void coveredFrontier;
+    const decoded = decodeSelection(legacy);
+    expect(decoded).not.toBeNull();
+    expect(decoded?.coveredFrontier).toBeNull();
   });
 
   it("rejects a snapshot with a malformed inner node (validates, not blind-casts)", () => {
-    const good = encodeSelection(emptyGraph(), null);
+    const good = encodeSelection(emptyGraph(), null, null);
     const badNode = {
       id: "n1",
       summary: "x",

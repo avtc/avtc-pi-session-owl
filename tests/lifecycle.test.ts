@@ -90,6 +90,7 @@ const noopWidget: WidgetController = {
   startStage: () => {},
   setPass: () => {},
   setBatch: () => {},
+  setSelectedCounts: () => {},
   endStage: () => {},
   onEvent: () => {},
 };

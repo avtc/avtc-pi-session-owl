@@ -20,6 +20,10 @@ export interface WidgetController {
   startStage(stage: string, init?: { pass?: number; batch?: { done: number; total: number } }): void;
   setPass(pass: number): void;
   setBatch(done: number, total: number): void;
+  /** Push the Selector's working-copy selected counts (root node count + root
+   *  view tokens) so the widget can render live `selected` deltas during a run
+   *  (the working copy isn't in the store until run completion). */
+  setSelectedCounts(rootCount: number, rootViewTokens: number): void;
   endStage(): void;
   onEvent(event: unknown): void;
 }
@@ -39,6 +43,7 @@ export const NO_OP_WIDGET: WidgetController = {
   startStage: NO_OP,
   setPass: NO_OP,
   setBatch: NO_OP,
+  setSelectedCounts: NO_OP,
   endStage: NO_OP,
   onEvent: NO_OP,
 };

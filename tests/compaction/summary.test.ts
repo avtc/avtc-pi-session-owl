@@ -49,7 +49,7 @@ function sObs(id: string, content: string, over: Partial<SerializedObservation>)
 function selection(nodes: SerializedNode[], oInitialPrompt: SerializedObservation | null): SerializedSelection {
   const obsRefs: string[] = [];
   for (const n of nodes) for (const o of n.observationIds) if (!obsRefs.includes(o)) obsRefs.push(o);
-  return { nodes, oInitialPrompt, obsRefs, nextObsId: 1, nextNodeId: 1 };
+  return { nodes, oInitialPrompt, obsRefs, coveredFrontier: null, nextObsId: 1, nextNodeId: 1 };
 }
 
 const TOUCHED: TouchedFile[] = [
