@@ -92,7 +92,7 @@ export function formatTimestampRange(startStored: string, endStored: string): st
 }
 
 /** The notable-state glyph for a node, or empty for active. */
-function stateGlyph(node: Node, viewer: RenderViewer): string {
+function stateGlyph(node: RenderableNode, viewer: RenderViewer): string {
   if (node.state === "archived") return "📦";
   if (node.state === "obsolete") return "🪦";
   if (node.state === "new") return viewer === "builder" ? "🆕" : "";
@@ -100,7 +100,7 @@ function stateGlyph(node: Node, viewer: RenderViewer): string {
 }
 
 /** The direct-child counts fragment for a node (empty when none at all). */
-function childCounts(node: Node): string {
+function childCounts(node: RenderableNode): string {
   const folders = node.childNodeIds.length;
   const files = node.observationIds.length;
   if (folders > 0) return `${folders}📁 ${files}📄`;
@@ -112,8 +112,31 @@ interface LineOptions {
   showParent?: string;
 }
 
+/** Structural node shape the line helpers read (satisfied by both the in-memory
+ *  `Node` and the serialized `SerializedNode` — the compaction summary renders
+ *  a self-contained snapshot, so the helpers must not pin to `NodeId`). */
+export interface RenderableNode {
+  id: string;
+  summary: string;
+  state: Node["state"];
+  importance: Node["importance"];
+  parentNode: string | null;
+  supersededBy: string | null;
+  childNodeIds: readonly string[];
+  observationIds: readonly string[];
+  timestamps: { rangeStart: string; rangeEnd: string };
+}
+
+/** Structural observation shape the line helpers read. */
+export interface RenderableObservation {
+  id: string;
+  content: string;
+  importance: Observation["importance"];
+  timestamp: string;
+}
+
 /** Render one node as a line (no indent — callers apply depth indentation). */
-export function formatNodeLine(node: Node, options: LineOptions): string {
+export function formatNodeLine(node: RenderableNode, options: LineOptions): string {
   const parts: string[] = [`📁 ${node.id} ${stateGlyph(node, options.viewer)}${importanceAbbr(node.importance)}`];
   const summary = singleLine(node.summary);
   if (summary !== "") parts.push(summary);
@@ -125,7 +148,7 @@ export function formatNodeLine(node: Node, options: LineOptions): string {
 }
 
 /** Render one observation as a line (no indent — callers apply depth indentation). */
-export function formatObservationLine(obs: Observation, options: LineOptions): string {
+export function formatObservationLine(obs: RenderableObservation, options: LineOptions): string {
   const parts: string[] = [`📄 ${obs.id} ${importanceAbbr(obs.importance)}`];
   const content = singleLine(obs.content);
   if (content !== "") parts.push(content);

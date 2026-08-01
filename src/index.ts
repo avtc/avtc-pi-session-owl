@@ -55,6 +55,6 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
     const settings = getMemkeeperSettings();
     // enabled=false off-path: return undefined so Pi runs its native compaction.
     if (!settings.enabled) return undefined;
-    return compactionHook(event, ctx, pi);
+    return compactionHook(event, ctx, pi, widget);
   });
 }

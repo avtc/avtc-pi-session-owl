@@ -302,6 +302,4 @@ function persistObservationBatch(store: StoreContext, unobserved: SessionEntry[]
 
 // --- notify ----------------------------------------------------------------
 
-function notify(ctx: ExtensionContext, message: string, level: "warning" | "info"): void {
-  ctx.ui.notify(message, level);
-}
+import { notify } from "../notify.js";

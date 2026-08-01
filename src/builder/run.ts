@@ -253,6 +253,4 @@ function flushNew(widget: WidgetController, store: StoreContext): void {
 
 // --- notify ----------------------------------------------------------------
 
-function notify(ctx: ExtensionContext, message: string, level: "warning" | "info"): void {
-  ctx.ui.notify(message, level);
-}
+import { notify } from "../notify.js";

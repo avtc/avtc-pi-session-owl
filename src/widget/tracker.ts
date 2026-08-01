@@ -28,14 +28,17 @@ const NO_OP = (): void => {};
 
 /** STUB (the real widget replaces this): return a no-op widget controller. */
 export function initWidget(): WidgetController {
-  return {
-    setCtx: NO_OP,
-    clearCtx: NO_OP,
-    render: NO_OP,
-    startStage: NO_OP,
-    setPass: NO_OP,
-    setBatch: NO_OP,
-    endStage: NO_OP,
-    onEvent: NO_OP,
-  };
+  return NO_OP_WIDGET;
 }
+
+/** A shared no-op widget controller (the hook default + tests). */
+export const NO_OP_WIDGET: WidgetController = {
+  setCtx: NO_OP,
+  clearCtx: NO_OP,
+  render: NO_OP,
+  startStage: NO_OP,
+  setPass: NO_OP,
+  setBatch: NO_OP,
+  endStage: NO_OP,
+  onEvent: NO_OP,
+};

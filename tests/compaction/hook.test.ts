@@ -1,21 +1,258 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Stub-guard: verifies the compactionHook returns undefined (Pi native
-// compaction). The real hook replaces the stub with the ensure-ready gate + render and
-// replaces this test with the real suite.
+// compactionHook: the session_before_compact handler. Owns the run-lock for the
+// duration of its ensure-ready stages (Observer catch-up → Builder → Selector),
+// renders the summary, snapshots the graph to details, and returns the
+// compaction result. Failure / abort → {cancel:true} + notify.
 
 import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
-import { compactionHook } from "../../src/compaction/hook.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  type CompactionStageRuns,
+  compactionHook,
+  resetCompactionSeams,
+  setCompactionSettingsGetter,
+  setCompactionStageRuns,
+} from "../../src/compaction/hook.js";
+import { DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { resetForNewSession } from "../../src/store/graph-store.js";
+import { MemkeeperGraph, N_GOAL } from "../../src/types.js";
+import { NO_OP_WIDGET } from "../../src/widget/tracker.js";
 
-describe("compactionHook stub", () => {
-  it("resolves to undefined (Pi native compaction)", async () => {
+// --- fixtures ---------------------------------------------------------------
+
+interface FakeRunCalls {
+  observer: number;
+  builder: number;
+  selector: number;
+  observerUnobservedLen: number[];
+  builderScope: ({ firstKeptEntryId: string | null } | null)[];
+  order: string[];
+}
+
+function newCalls(): FakeRunCalls {
+  return { observer: 0, builder: 0, selector: 0, observerUnobservedLen: [], builderScope: [], order: [] };
+}
+
+function fakeRuns(calls: FakeRunCalls): CompactionStageRuns {
+  return {
+    runObserver: vi.fn(async (args) => {
+      calls.observer += 1;
+      calls.observerUnobservedLen.push(args.unobserved.length);
+      calls.order.push("observer");
+    }),
+    runBuilder: vi.fn(async (args) => {
+      calls.builder += 1;
+      calls.builderScope.push(args.scope);
+      calls.order.push("builder");
+    }),
+    runSelector: vi.fn(async () => {
+      calls.selector += 1;
+      calls.order.push("selector");
+    }),
+  };
+}
+
+function makeFakePi(): ExtensionAPI {
+  return { appendEntry: () => {} } as unknown as ExtensionAPI;
+}
+
+function makeFakeCtx(branch: unknown[], notify?: (msg: string, level: "warning" | "info") => void): ExtensionContext {
+  const fakeModel = { provider: "test", id: "m" } as unknown as ExtensionContext["model"];
+  return {
+    sessionManager: { getLeafId: () => "leaf-1", getBranch: () => branch },
+    modelRegistry: {
+      find: () => fakeModel,
+      getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }),
+    } as unknown as ExtensionContext["modelRegistry"],
+    model: fakeModel,
+    ui: { notify: notify ?? (() => {}) },
+  } as unknown as ExtensionContext;
+}
+
+function compactEvent(over: Partial<SessionBeforeCompactEvent> = {}): SessionBeforeCompactEvent {
+  return {
+    type: "session_before_compact",
+    preparation: { firstKeptEntryId: "cut-1", tokensBefore: 50000 } as SessionBeforeCompactEvent["preparation"],
+    branchEntries: [],
+    reason: "threshold",
+    willRetry: false,
+    signal: new AbortController().signal,
+    ...over,
+  } as unknown as SessionBeforeCompactEvent;
+}
+
+/** A graph seeded with nGoal so the summary has a root. */
+function seededGraph(): MemkeeperGraph {
+  const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+  g.nodes.set(N_GOAL, {
+    id: N_GOAL,
+    summary: "the goal",
+    summaryTokens: 8,
+    state: "active",
+    importance: "critical",
+    parentNode: null,
+    observationIds: [],
+    childNodeIds: [],
+    supersededBy: null,
+    timestamps: {
+      createdAt: "2026-07-28 09:00",
+      updatedAt: "2026-07-28 09:00",
+      rangeStart: "2026-07-28 09:00",
+      rangeEnd: "2026-07-28 09:00",
+    },
+  });
+  return g;
+}
+
+function assistantMsg(id: string, text: string): unknown {
+  return {
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: `2026-07-28T${id}0:00:00Z`,
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      api: "a",
+      provider: "p",
+      model: "m",
+      stopReason: "stop",
+      timestamp: 0,
+    },
+  };
+}
+
+const settings = (over: Partial<typeof DEFAULT_CONFIG> = {}) => ({ ...DEFAULT_CONFIG, ...over });
+
+describe("compactionHook", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    resetCompactionSeams();
+  });
+  afterEach(() => {
+    resetForNewSession();
+    resetCompactionSeams();
+  });
+
+  it("returns the compaction result with summary, firstKeptEntryId, tokensBefore, details", async () => {
+    seededGraph();
+    const calls = newCalls();
+    setCompactionStageRuns(fakeRuns(calls));
+
+    const result = await compactionHook(compactEvent(), makeFakeCtx([]), makeFakePi(), NO_OP_WIDGET);
+    const compaction = (
+      result as { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; details: unknown } }
+    ).compaction;
+    expect(compaction.firstKeptEntryId).toBe("cut-1");
+    expect(compaction.tokensBefore).toBe(50000);
+    expect(compaction.summary).toContain("# Memory");
+    expect(compaction.details).toBeDefined();
+  });
+
+  it("runs Observer catch-up (gap-driven), Builder, Selector in order", async () => {
+    // threshold 0 → Builder always runs (no fast-path skip) so the ordering is observable.
+    setCompactionSettingsGetter(() => settings({ builderRootViewThreshold: 0 }));
+    // entries after the frontier (null → starts after first user msg; no user msg
+    // here so the gap is empty) — use entries that computeUnobserved treats as a
+    // gap: set a branch with a user anchor first.
+    const branch = [
+      {
+        type: "message",
+        id: "u1",
+        parentId: null,
+        timestamp: "2026-07-28T09:00:00Z",
+        message: { role: "user", content: "first", timestamp: 0 },
+      },
+      assistantMsg("a1", "response"),
+    ];
+    const calls = newCalls();
+    setCompactionStageRuns(fakeRuns(calls));
+
+    await compactionHook(compactEvent(), makeFakeCtx(branch), makeFakePi(), NO_OP_WIDGET);
+
+    // Observer catch-up ran (gap-driven) and received the unobserved gap.
+    expect(calls.observer).toBe(1);
+    expect(calls.observerUnobservedLen[0]).toBeGreaterThan(0);
+    // Builder ran with the compaction scope.
+    expect(calls.builder).toBe(1);
+    expect(calls.builderScope[0]).toEqual({ firstKeptEntryId: "cut-1" });
+    // Selector ran (default renderMode = selected-root).
+    expect(calls.selector).toBe(1);
+    expect(calls.order).toEqual(["observer", "builder", "selector"]);
+  });
+
+  it("skips Builder when the root view is under builderRootViewThreshold (fast-path)", async () => {
+    seededGraph(); // only nGoal → tiny root view
+    const calls = newCalls();
+    setCompactionStageRuns(fakeRuns(calls));
+
+    await compactionHook(compactEvent(), makeFakeCtx([]), makeFakePi(), NO_OP_WIDGET);
+    expect(calls.builder).toBe(0);
+  });
+
+  it("skips the Selector when renderMode is observations-root", async () => {
+    seededGraph();
+    setCompactionSettingsGetter(() => settings({ renderMode: "observations-root" }));
+    const calls = newCalls();
+    setCompactionStageRuns(fakeRuns(calls));
+
+    await compactionHook(compactEvent(), makeFakeCtx([]), makeFakePi(), NO_OP_WIDGET);
+    expect(calls.selector).toBe(0);
+    // Builder + Observer still ran.
+    expect(calls.builder).toBe(0); // fast-path (tiny root view)
+  });
+
+  it("skips Observer catch-up when the frontier-to-cut gap is empty", async () => {
+    seededGraph();
+    // no branch entries → no gap → Observer catch-up is a no-op.
+    const calls = newCalls();
+    setCompactionStageRuns(fakeRuns(calls));
+
+    await compactionHook(compactEvent(), makeFakeCtx([]), makeFakePi(), NO_OP_WIDGET);
+    expect(calls.observer).toBe(0);
+  });
+
+  it("returns cancel:true + notifies when a stage throws", async () => {
+    seededGraph();
+    setCompactionSettingsGetter(() => settings({ builderRootViewThreshold: 0 }));
+    const notify = vi.fn<(msg: string, level: "warning" | "info") => void>();
+    setCompactionStageRuns({
+      runObserver: vi.fn(async () => {}),
+      runBuilder: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+      runSelector: vi.fn(async () => {}),
+    });
+
+    const result = await compactionHook(compactEvent(), makeFakeCtx([], notify), makeFakePi(), NO_OP_WIDGET);
+    expect(result).toEqual({ cancel: true });
+    expect(notify).toHaveBeenCalled();
+  });
+
+  it("returns cancel:true when event.signal is already aborted at entry", async () => {
+    seededGraph();
+    const ac = new AbortController();
+    ac.abort();
+    const calls = newCalls();
+    setCompactionStageRuns(fakeRuns(calls));
+
     const result = await compactionHook(
-      { type: "session_before_compact" } as unknown as SessionBeforeCompactEvent,
-      {} as unknown as ExtensionContext,
-      {} as unknown as ExtensionAPI,
+      compactEvent({ signal: ac.signal }),
+      makeFakeCtx([]),
+      makeFakePi(),
+      NO_OP_WIDGET,
     );
-    expect(result).toBeUndefined();
+    expect(result).toEqual({ cancel: true });
+    expect(calls.observer).toBe(0);
   });
 });
