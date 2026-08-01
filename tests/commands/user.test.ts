@@ -311,7 +311,7 @@ describe("/mk:* user commands", () => {
     it("respects commandResultCap with footer when over", async () => {
       seedSource();
       _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: 1 }));
-      // JWT matches n7 summary + o5 content (2 matches) → cap=1 truncates
+      // JWT matches n7 + n8 summaries and o5 content (>1 match) → cap=1 truncates
       const { message } = await run(runMkFind, "JWT");
       expect(message ?? "").toMatch(/\+\d+ more/);
       _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: null }));

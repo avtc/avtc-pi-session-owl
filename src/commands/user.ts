@@ -34,8 +34,10 @@ const INDENT_STEP = 2;
 const CHILD_DEPTH = 1;
 const EXCLUDE_SUPERSEDED: IncludeSuperseded = false;
 const INCLUDE_SUPERSEDED: IncludeSuperseded = true;
-/** Split a raw args string into a trimmed id token (or null when blank). */
-function parseIdArg(args: string): string | null {
+/** Trim a raw positional-args string into the single token (or null when
+ *  blank/whitespace). Shared by the id commands (ls/cat) and the regex commands
+ *  (find/find-all). */
+function trimArg(args: string): string | null {
   const trimmed = args.trim();
   return trimmed === "" ? null : trimmed;
 }
@@ -78,7 +80,7 @@ async function notifyError(ctx: ExtensionCommandContext, text: string): Promise<
 /** `/mk:ls [nodeId]` — list roots (no arg) or a node's direct children. */
 export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promise<void> {
   const graph = getGraphStore().graph;
-  const idArg = parseIdArg(args);
+  const idArg = trimArg(args);
 
   const lines: string[] = [];
   if (idArg === null) {
@@ -116,7 +118,7 @@ const MK_CAT_USAGE = "Usage: /mk:cat <id> — give a node id or an observation i
 /** `/mk:cat <id>` — a node's header + its direct observations' full text, or an
  *  observation's full content + header. Mirrors the Builder `cat`. */
 export async function runMkCat(args: string, ctx: ExtensionCommandContext): Promise<void> {
-  const idArg = parseIdArg(args);
+  const idArg = trimArg(args);
   if (idArg === null) {
     await notifyError(ctx, MK_CAT_USAGE);
     return;
@@ -146,7 +148,7 @@ async function runFind(
   ctx: ExtensionCommandContext,
   includeSuperseded: IncludeSuperseded,
 ): Promise<void> {
-  const query = parseIdArg(args);
+  const query = trimArg(args);
   if (query === null) {
     await notifyError(ctx, MK_FIND_USAGE);
     return;
