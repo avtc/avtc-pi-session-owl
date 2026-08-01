@@ -33,8 +33,6 @@ const MONTH_PART = 1;
 const DAY_PART = 2;
 const MONTH_INDEX_OFFSET = 1;
 
-/** Collapse any whitespace (incl. newlines) to single spaces and trim, so an
- *  LLM-written multi-line summary never breaks the one-line render layout. */
 /** Collapse internal whitespace + trim so a multi-line summary/content/path
  *  cannot break the one-line render layout. */
 export function singleLine(text: string): string {

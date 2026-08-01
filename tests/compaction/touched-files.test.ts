@@ -136,4 +136,11 @@ describe("renderTouchedFiles", () => {
   it("renders nothing for empty input", () => {
     expect(renderTouchedFiles([])).toEqual([]);
   });
+
+  it("collapses internal whitespace in a path so it cannot break the one-line render", () => {
+    const files: TouchedFile[] = [
+      { path: "path/with\nnewline\tand tabs.ts", timestamp: "2026-07-28 14:30", op: "write" },
+    ];
+    expect(renderTouchedFiles(files)).toEqual(["28 14:30 ✎ path/with newline and tabs.ts"]);
+  });
 });
