@@ -62,7 +62,9 @@ describe("formatWidgetLine", () => {
         streamingOutputTokens: 1100,
       }),
     );
-    expect(text).toContain("🦉");
+    // owl is a LEADING PREFIX (🦉 {obs}), not a ' → ' section (🦉 → {obs})
+    expect(text.startsWith("🦉 ")).toBe(true);
+    expect(text).not.toContain("🦉 →");
     expect(text).toContain("1000(+5) obs");
     expect(text).toContain("100(+5) roots");
     expect(text).toContain("45k(+5.0k)/40k");

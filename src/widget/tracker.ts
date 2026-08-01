@@ -12,10 +12,10 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
-import { measureRootViewTokens, nonObsoleteRoots } from "../graph/read-tools.js";
+import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import type { StageUsage } from "../runtime/agent-loop.js";
 import { getGraphStore } from "../store/graph-store.js";
-import { estimateContentTokens } from "../types.js";
+import { estimateContentTokens, type MemkeeperGraph } from "../types.js";
 import { formatWidgetLine } from "./render.js";
 
 /** The maintenance stages the widget surfaces (one at a time; run-level). */
@@ -240,22 +240,27 @@ export function createTracker(): ProgressTracker {
  *  (the builderRootViewThreshold gate uses the same render). */
 const WIDGET_ROOTS_VIEWER = "builder" as const;
 
+/** Non-obsolete root count + view tokens from a SINGLE `nonObsoleteRoots` pass
+ *  (the widget renders per streaming event, so the count + the rendered view must
+ *  share one roots computation, not two). */
+function rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number } {
+  const roots = nonObsoleteRoots(graph);
+  const viewTokens = estimateContentTokens(renderRootViewFromRoots(roots, WIDGET_ROOTS_VIEWER));
+  return { count: roots.length, viewTokens };
+}
+
 /** Snapshot the current root counts + view tokens (the baseline at stage start). */
 function currentRootBaseline(): Baseline {
   const { graph } = getGraphStore();
-  return {
-    obsCount: graph.observations.size,
-    rootsCount: nonObsoleteRoots(graph).length,
-    rootsViewTokens: measureRootViewTokens(graph, WIDGET_ROOTS_VIEWER),
-  };
+  const roots = rootViewCounts(graph);
+  return { obsCount: graph.observations.size, rootsCount: roots.count, rootsViewTokens: roots.viewTokens };
 }
 
 /** Build the render snapshot from the tracker + live store/ctx. */
 export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): WidgetSnapshot {
   const settings = getMemkeeperSettings();
   const { graph } = getGraphStore();
-  const rootsCount = nonObsoleteRoots(graph).length;
-  const rootsViewTokens = measureRootViewTokens(graph, WIDGET_ROOTS_VIEWER);
+  const roots = rootViewCounts(graph);
   const baseline = tracker.baseline ?? { obsCount: 0, rootsCount: 0, rootsViewTokens: 0 };
   const obsCount = graph.observations.size;
   const ctxUsage = ctx.getContextUsage();
@@ -288,10 +293,10 @@ export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): 
     streamingOutputTokens: tracker.streamingOutputTokens,
     obs: { count: obsCount, delta: obsCount - baseline.obsCount },
     roots: {
-      count: rootsCount,
-      countDelta: rootsCount - baseline.rootsCount,
-      viewTokens: rootsViewTokens,
-      tokenDelta: rootsViewTokens - baseline.rootsViewTokens,
+      count: roots.count,
+      countDelta: roots.count - baseline.rootsCount,
+      viewTokens: roots.viewTokens,
+      tokenDelta: roots.viewTokens - baseline.rootsViewTokens,
       threshold: settings.builderRootViewThreshold,
     },
     selected,

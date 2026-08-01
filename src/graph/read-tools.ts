@@ -461,7 +461,13 @@ export function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): Agent
  *  `viewer`. Shared by try_finish (budget gate), the run's fast-path, and the
  *  per-pass user-message state snapshot. */
 export function renderRootView(graph: MemkeeperGraph, viewer: RenderViewer): string {
-  const roots = nonObsoleteRoots(graph);
+  return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer);
+}
+
+/** Render an already-collected set of non-obsolete roots for `viewer`. Lets a
+ *  caller that already needs the roots list (e.g. the widget, which reads both
+ *  the count and the view tokens) avoid recomputing `nonObsoleteRoots`. */
+export function renderRootViewFromRoots(roots: Node[], viewer: RenderViewer): string {
   if (roots.length === 0) return "";
   return roots.map((n) => formatNodeLine(n, { viewer })).join("\n");
 }
