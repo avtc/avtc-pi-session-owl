@@ -2,8 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import { makeBuilderTools } from "../../src/builder/tools.js";
-import { DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { makeBuilderReadTools } from "../../src/builder/tools.js";
 import {
   applyCreateNode,
   applyRecordObservation,
@@ -121,7 +120,7 @@ function textOf(result: { content: { text?: string }[] }): string {
 type ToolResult = { content: { text?: string }[]; details: unknown };
 
 async function callTool(
-  tools: ReturnType<typeof makeBuilderTools>,
+  tools: ReturnType<typeof makeBuilderReadTools>,
   name: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
@@ -132,7 +131,7 @@ async function callTool(
 }
 
 describe("Builder read tools", () => {
-  const tools = () => makeBuilderTools(buildGraph(), DEFAULT_CONFIG);
+  const tools = () => makeBuilderReadTools(buildGraph());
 
   describe("ls — roots", () => {
     it("lists non-obsolete roots (nGoal, active, archived), excludes obsolete", async () => {
@@ -218,7 +217,7 @@ describe("Builder read tools", () => {
           parentNode: "n7",
         }),
       });
-      const localTools = makeBuilderTools(g, DEFAULT_CONFIG);
+      const localTools = makeBuilderReadTools(g);
 
       // page size 1 over the node's three observations → header (preamble) + first obs only.
       const page1 = textOf(await callTool(localTools, "cat", { ids: ["n7"], page: { take: 1 } }));

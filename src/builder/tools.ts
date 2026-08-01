@@ -8,13 +8,27 @@
 // Builder ls/find, the Selector, mk_recall, the user commands, and the
 // compaction summary.
 
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
 import { formatNodeLine, formatObservationLine, formatTimestamp, importanceAbbr } from "../format/render.js";
-import { PageSchema } from "../schema.js";
+import { formatTokens } from "../format/tokens.js";
+import { GraphInvariantError } from "../graph/invariants.js";
 import {
+  applyCreateNode,
+  applyMerge,
+  applyMv,
+  applySetMeta,
+  applySupersede,
+  type GraphDelta,
+  MUTATE_SOURCE,
+} from "../graph/mutations.js";
+import { ImportanceSchema, PageSchema } from "../schema.js";
+import { appendGraphDelta, type StoreContext } from "../store/graph-store.js";
+import {
+  estimateContentTokens,
   IMPORTANCE_RANK,
+  type Importance,
   type MemkeeperGraph,
   type Node,
   type NodeId,
@@ -402,11 +416,295 @@ function makeFindTool(graph: MemkeeperGraph): AgentTool<typeof FIND_PARAMS> {
   };
 }
 
+// --- mutate tools ---------------------------------------------------------
+
+const MKDIR_TOOL = "mkdir";
+const MV_TOOL = "mv";
+const MERGE_TOOL = "merge";
+const SUPERSEDE_TOOL = "supersede";
+const SET_META_TOOL = "set_meta";
+const TRY_FINISH_TOOL = "try_finish";
+
+/** Default importance for Builder-created container nodes. */
+const DEFAULT_NODE_IMPORTANCE: Importance = "medium";
+
+/** A success mutation result: the ack text + the applied delta recorded in
+ *  `details` for inspection/tests. */
+function okResult(text: string, delta: GraphDelta): AgentToolResult<unknown> {
+  return { content: [{ type: "text", text }], details: { ok: true as const, delta } };
+}
+
+/** An error mutation result: the model sees the message and can retry. The
+ *  graph is unchanged (the mutator threw before mutating). */
+function errorResult(message: string): AgentToolResult<unknown> {
+  return { content: [{ type: "text", text: message }], details: { error: true } };
+}
+
+/** Run a mutation, persist its delta, and report success — or catch a structural
+ *  rejection (GraphInvariantError) and surface it as an error result the model
+ *  can retry from. A rejected mutate leaves the graph AND the delta log
+ *  unchanged (the mutator throws before mutating). */
+function applyAndPersist(store: StoreContext, what: string, apply: () => GraphDelta): AgentToolResult<unknown> {
+  let delta: GraphDelta;
+  try {
+    delta = apply();
+  } catch (cause) {
+    if (cause instanceof GraphInvariantError) {
+      return errorResult(`${what}: ${cause.message}`);
+    }
+    throw cause;
+  }
+  appendGraphDelta(store, delta);
+  return okResult(`${what} ok.`, delta);
+}
+
+/** Build the `mkdir` tool: create a container node (zero observations OK) under
+ *  an optional parent, state `active`, default importance medium. */
+function makeMkdirTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeof MKDIR_PARAMS> {
+  return {
+    name: MKDIR_TOOL,
+    description:
+      "Create a container node (optionally under a parent). Zero observations is fine. Returns the new node id.",
+    label: "Create container",
+    parameters: MKDIR_PARAMS,
+    async execute(_toolCallId, params) {
+      // generate the id from the counter BEFORE applyCreateNode (which advances it).
+      const id = `n${graph.nextNodeId}` as NodeId;
+      return applyAndPersist(store, `mkdir ${id}`, () =>
+        applyCreateNode(graph, {
+          id,
+          summary: params.summary,
+          importance: DEFAULT_NODE_IMPORTANCE,
+          parentNode: (params.parentId ?? null) as NodeId | null,
+          state: "active",
+        }),
+      );
+    },
+  };
+}
+
+const MKDIR_PARAMS = Type.Object({
+  summary: Type.String({ description: "One-line summary for the new container node." }),
+  parentId: Type.Optional(Type.String({ description: "Parent node id; omit or null for a root node." })),
+});
+
+/** Build the `mv` tool: move observations and/or nodes to a new parent (or to
+ *  the root when destId is null). An optional newSummary rewrites the dest
+ *  node's summary as part of the same atomic mutate (ignored when destId is
+ *  null — promoting to root touches no dest). */
+function makeMvTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeof MV_PARAMS> {
+  return {
+    name: MV_TOOL,
+    description:
+      "Move observations and/or nodes under a new parent (group/split/reparent). destId null promotes to root. Optional newSummary rewrites the dest summary atomically.",
+    label: "Move",
+    parameters: MV_PARAMS,
+    async execute(_toolCallId, params) {
+      const destId = (params.destId ?? null) as NodeId | null;
+      // newSummary is meaningful only when there is a dest node to rewrite.
+      const newSummary = destId === null ? undefined : params.newSummary;
+      const where = destId === null ? "the root" : destId;
+      return applyAndPersist(store, `mv to ${where}`, () =>
+        applyMv(
+          graph,
+          {
+            sourceIds: params.sourceIds as Array<ObsId | NodeId>,
+            destId,
+            ...(newSummary !== undefined ? { newSummary } : {}),
+          },
+          MUTATE_SOURCE,
+        ),
+      );
+    },
+  };
+}
+
+const MV_PARAMS = Type.Object({
+  sourceIds: Type.Array(Type.String(), { minItems: 1, description: "Observation and/or node ids to move." }),
+  destId: Type.Optional(Type.String({ description: "Destination node id; omit or null to promote to root." })),
+  newSummary: Type.Optional(
+    Type.String({ description: "New summary for the dest node (ignored when destId is null)." }),
+  ),
+});
+
+/** Build the `merge` tool: fold absorbed nodes into a target. newSummary is
+ *  required when destId is null (names the new root node); optional when merging
+ *  into an existing dest (a refreshed synthesis — omit to keep the dest summary).
+ *  Absorbed nodes dissolve once emptied. */
+function makeMergeTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeof MERGE_PARAMS> {
+  return {
+    name: MERGE_TOOL,
+    description:
+      "Fold one or more nodes into a target node (absorbed nodes dissolve). destId null creates a new root; in that case newSummary is required to name it.",
+    label: "Merge",
+    parameters: MERGE_PARAMS,
+    async execute(_toolCallId, params) {
+      const destId = (params.destId ?? null) as NodeId | null;
+      if (destId === null && (params.newSummary === undefined || params.newSummary.length === 0)) {
+        return errorResult("merge: newSummary is required when destId is null (names the new root node).");
+      }
+      const where = destId === null ? "a new root node" : destId;
+      return applyAndPersist(store, `merge into ${where}`, () =>
+        applyMerge(
+          graph,
+          {
+            sourceIds: params.sourceIds as NodeId[],
+            destId,
+            ...(params.newSummary !== undefined ? { newSummary: params.newSummary } : {}),
+          },
+          MUTATE_SOURCE,
+        ),
+      );
+    },
+  };
+}
+
+const MERGE_PARAMS = Type.Object({
+  sourceIds: Type.Array(Type.String(), { minItems: 1, description: "Node ids to absorb into the target." }),
+  destId: Type.Optional(Type.String({ description: "Target node id; omit or null to create a new root." })),
+  newSummary: Type.Optional(
+    Type.String({ description: "Synthesized summary for the target. Required when destId is null." }),
+  ),
+});
+
+/** Build the `supersede` tool: mark nodes obsolete, each carrying supersededBy
+ *  pointing at the replacement. The superseded nodes retain their evidence. */
+function makeSupersedeTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeof SUPERSEDE_PARAMS> {
+  return {
+    name: SUPERSEDE_TOOL,
+    description:
+      "Mark one or more nodes obsolete, superseded by a replacement node. Superseded nodes keep their observations (a non-empty tombstone).",
+    label: "Supersede",
+    parameters: SUPERSEDE_PARAMS,
+    async execute(_toolCallId, params) {
+      return applyAndPersist(store, `supersede with ${params.nodeId}`, () =>
+        applySupersede(
+          graph,
+          { nodeId: params.nodeId as NodeId, supersededNodeIds: params.supersededNodeIds as NodeId[] },
+          MUTATE_SOURCE,
+        ),
+      );
+    },
+  };
+}
+
+const SUPERSEDE_PARAMS = Type.Object({
+  nodeId: Type.String({ description: "The replacement node id." }),
+  supersededNodeIds: Type.Array(Type.String(), {
+    minItems: 1,
+    description: "Node ids to mark obsolete.",
+  }),
+});
+
+/** Build the `set_meta` tool: re-rate importance, archive/un-archive, condense
+ *  the summary, or resurrect an obsolete node. obsolete:true is rejected (use
+ *  supersede). nGoal allows summary only. */
+function makeSetMetaTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeof SET_META_PARAMS> {
+  return {
+    name: SET_META_TOOL,
+    description:
+      "Update a node's importance, archived flag, summary, or resurrect it (obsolete:false). obsolete:true is not allowed — use supersede.",
+    label: "Edit metadata",
+    parameters: SET_META_PARAMS,
+    async execute(_toolCallId, params) {
+      return applyAndPersist(store, `set_meta ${params.nodeId}`, () =>
+        applySetMeta(
+          graph,
+          {
+            nodeId: params.nodeId as NodeId,
+            importance: (params.importance ?? null) as Importance | null,
+            archived: params.archived ?? null,
+            obsolete: params.obsolete ?? null,
+            summary: params.summary ?? null,
+          },
+          MUTATE_SOURCE,
+        ),
+      );
+    },
+  };
+}
+
+const SET_META_PARAMS = Type.Object({
+  nodeId: Type.String({ description: "Node id to update." }),
+  importance: Type.Optional(ImportanceSchema),
+  archived: Type.Optional(Type.Boolean({ description: "true archives, false un-archives." })),
+  summary: Type.Optional(Type.String({ description: "New summary (re-rates summaryTokens)." })),
+  obsolete: Type.Optional(
+    Type.Boolean({ description: "false resurrects an obsolete node; true is rejected (use supersede)." }),
+  ),
+});
+
+/** Render the non-obsolete root view (the same lines `ls` shows at the root) so
+ *  try_finish can measure its token cost. */
+function renderRootView(graph: MemkeeperGraph): string {
+  const roots = rootNodes(graph)
+    .filter((n) => !isObsolete(n))
+    .sort(compareNodeOrder);
+  if (roots.length === 0) return "";
+  return roots.map((n) => formatNodeLine(n, { viewer: "builder" })).join("\n");
+}
+
+/** Build the `try_finish` convergence gate: measures the non-obsolete root view
+ *  against builderRootViewThreshold. Within budget → success + terminate:true
+ *  (stops the pass/run). Over budget → reject + terminate:false (keep
+ *  organizing, call again). Deterministic/mechanical — no LLM. */
+function makeTryFinishTool(graph: MemkeeperGraph, settings: MemkeeperConfig): AgentTool<typeof TRY_FINISH_PARAMS> {
+  return {
+    name: TRY_FINISH_TOOL,
+    description:
+      "Signal the Builder run is done. Reports whether the root view is within budget; within = stop, over = keep organizing.",
+    label: "Finish",
+    parameters: TRY_FINISH_PARAMS,
+    async execute() {
+      const rootsViewTokens = estimateContentTokens(renderRootView(graph));
+      const threshold = settings.builderRootViewThreshold;
+      if (rootsViewTokens <= threshold) {
+        return {
+          content: [
+            { type: "text", text: `Within budget: ${formatTokens(rootsViewTokens)} / ${formatTokens(threshold)}.` },
+          ],
+          details: { ok: true, rootsViewTokens, threshold },
+          terminate: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Over budget: ${formatTokens(rootsViewTokens)} / ${formatTokens(threshold)}. Keep organizing, then call try_finish again.`,
+          },
+        ],
+        details: { ok: false, rootsViewTokens, threshold },
+        terminate: false,
+      };
+    },
+  };
+}
+
+const TRY_FINISH_PARAMS = Type.Object({}, { description: "No parameters." });
+
 // --- factory ---------------------------------------------------------------
 
-/** Build the Builder read tools over the given source graph. The mutate tools
- *  + try_finish are appended in the mutate-tools task; both fold into a single
- *  `BUILDER_TOOLS` array there. */
-export function makeBuilderTools(graph: MemkeeperGraph, _settings: MemkeeperConfig): AgentTool[] {
+/** Build the Builder READ tools over the given source graph (ls/cat/find).
+ *  Read-only — no store or settings needed, so read-only tests and read-only
+ *  consumers can construct these without a StoreContext. */
+export function makeBuilderReadTools(graph: MemkeeperGraph): AgentTool[] {
   return [makeLsTool(graph), makeCatTool(graph), makeFindTool(graph)];
+}
+
+/** Build the full Builder toolset (9 tools): ls/cat/find (read) +
+ *  mkdir/mv/merge/supersede/set_meta/try_finish (mutate). The mutate tools close
+ *  over the store (to append graph deltas) and settings (try_finish threshold).
+ *  Builder tools operate on the SOURCE graph with `MUTATE_SOURCE` policy (the
+ *  nGoal/oInitialPrompt protection matrix is enforced). */
+export function makeBuilderTools(graph: MemkeeperGraph, store: StoreContext, settings: MemkeeperConfig): AgentTool[] {
+  return [
+    ...makeBuilderReadTools(graph),
+    makeMkdirTool(graph, store),
+    makeMvTool(graph, store),
+    makeMergeTool(graph, store),
+    makeSupersedeTool(graph, store),
+    makeSetMetaTool(graph, store),
+    makeTryFinishTool(graph, settings),
+  ];
 }
