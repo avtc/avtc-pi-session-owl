@@ -75,6 +75,7 @@ function makeFakePi(): ExtensionAPI {
       handlers.set(event, list);
     },
     appendEntry: () => {},
+    registerTool: vi.fn(),
   };
   return { ...pi, _handlers: handlers } as unknown as ExtensionAPI;
 }
@@ -105,6 +106,14 @@ describe("memkeeperExtension (activate wiring)", () => {
     expect(events).toContain("session_shutdown");
     expect(events).toContain("turn_end");
     expect(events).toContain("session_before_compact");
+  });
+
+  it("registers the mk_recall tool (read-only memory drill-down)", () => {
+    const pi = makeFakePi() as unknown as ExtensionAPI & { registerTool: ReturnType<typeof vi.fn> };
+    memkeeperExtension(pi);
+    expect(pi.registerTool).toHaveBeenCalledTimes(1);
+    const tool = pi.registerTool.mock.calls[0]?.[0] as { name: string };
+    expect(tool.name).toBe("mk_recall");
   });
 
   it("session_start handler calls onSessionStart", async () => {

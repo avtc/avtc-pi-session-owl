@@ -12,6 +12,7 @@ import { compactionHook } from "./compaction/hook.js";
 import { getMemkeeperSettings, initMemkeeperSettings } from "./config/schema.js";
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "./lifecycle.js";
 import { log } from "./log.js";
+import { createMkRecallTool } from "./recall/mk-recall.js";
 import { makeBuilderRun, makeObserverRun, runBuilder, runObserver } from "./runtime/stages.js";
 import { onTurnEnd, setStageRuns } from "./triggers.js";
 import { initWidget } from "./widget/tracker.js";
@@ -19,6 +20,11 @@ import { initWidget } from "./widget/tracker.js";
 export default function memkeeperExtension(pi: ExtensionAPI): void {
   initMemkeeperSettings(pi);
   const widget = initWidget();
+
+  // The agent's read-only memory drill-down tool. Registered unconditionally
+  // (it is read-only and harmless even when memkeeper is disabled — it just
+  // reads whatever graph state exists).
+  pi.registerTool(createMkRecallTool());
 
   // Wire the stage run functions (Observer + Builder now; the Selector lands in
   // its own task). Until then the trigger layer's default no-op stands for it.
