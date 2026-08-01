@@ -223,16 +223,22 @@ describe("Builder read tools", () => {
       // page size 1 over the node's three observations → header (preamble) + first obs only.
       const page1 = textOf(await callTool(localTools, "cat", { ids: ["n7"], page: { take: 1 } }));
       expect(page1).toContain("Auth migration to JWT"); // n7 header (preamble, once)
-      // exactly one observation full-text block on page 1
-      expect(page1).toMatch(/afterId=o/);
+      expect(page1).toMatch(/afterId=(\S+)/);
+      // page1 carries exactly ONE observation full-text (o5) — the page-1 unit.
+      expect(page1).toContain("o5");
+      expect(page1).not.toContain("Second JWT note");
 
-      // page 2 via the afterId cursor yields the NEXT observation, no header repeat.
-      const m = page1.match(/afterId=(oS+)/);
+      // page 2 via the real afterId cursor yields the NEXT observation, no header repeat.
+      const m = page1.match(/afterId=(\S+)/);
       const afterId = m !== null ? m[1] : "";
+      expect(afterId).toBe("o5");
       const page2 = textOf(await callTool(localTools, "cat", { ids: ["n7"], page: { take: 1, afterId } }));
       // the n7 header must NOT repeat on page 2 (it rode page 1 as a preamble).
       const headerOccurrences = page2.split("Auth migration to JWT").length - 1;
       expect(headerOccurrences).toBe(0);
+      // page2 carries the NEXT observation full-text (o6), not the stale-cursor message.
+      expect(page2).toContain("Second JWT note");
+      expect(page2).not.toContain("Cursor");
     });
   });
 
