@@ -538,7 +538,7 @@ describe("onTurnEnd", () => {
       ...Array.from({ length: 20 }, (_, i) => assistantEntry(`a${i}`, "x".repeat(200))),
     ];
     const ctx = {
-      getContextUsage: () => ({ tokens: 0, contextWindow: 200000, percent: 0 }),
+      getContextUsage: () => ({ tokens: 100000, contextWindow: 200000, percent: 50 }),
       sessionManager: { getLeafId: () => leaf, getBranch: () => entries },
     } as unknown as ExtensionContext;
 
@@ -568,8 +568,9 @@ describe("onTurnEnd", () => {
       }),
     );
 
-    // Observer is launched first (acquires the lock); Builder + Selector fire
-    // their shouldFire=true but skip because the lock is in flight.
+    // Observer is launched first (acquires the lock synchronously); Builder +
+    // Selector pass their context-threshold gate but skip because the lock is
+    // in flight (held by the Observer run).
     await new Promise((r) => setTimeout(r, 10));
     expect(order).toEqual(["observer"]);
     expect(runLockInFlight()).toBe(false); // released after the observer run resolves
