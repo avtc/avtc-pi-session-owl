@@ -52,6 +52,11 @@ const INDENT_STEP = 2;
 const ROOT_DEPTH = 0;
 const ROOT_PARENT: NodeId | null = null;
 const NO_AFTER_ID: string | null = null;
+/** Default value for an `includeSuperseded` flag (hide obsolete unless asked). */
+const INCLUDE_DEFAULT = false;
+
+/** The boolean that gates obsolete-item visibility in find/ls-style reads. */
+export type IncludeSuperseded = boolean;
 
 /** Resolved cursor pagination: an ordered window into a full results list. */
 export interface ResolvedPage {
@@ -271,7 +276,7 @@ export function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentT
 
 /** A content-free header for a cat observation block: id · importance · timestamp
  *  (NO content — that's the body; NO sourceEntryIds — provenance is internal). */
-function catObsHeader(obs: Observation): string {
+export function catObsHeader(obs: Observation): string {
   return `📄 ${obs.id} ${importanceAbbr(obs.importance)} · ${formatTimestamp(obs.timestamp)}`;
 }
 
@@ -279,7 +284,7 @@ function catObsHeader(obs: Observation): string {
  *  optional node-header preamble shown above it (the node summary, shown once
  *  on the page where the node's first observation lands). A node with no
  *  observations, or an unknown id, becomes a header-only unit. */
-interface CatUnit {
+export interface CatUnit {
   id: string;
   preamble?: string;
   header: string;
@@ -289,7 +294,7 @@ interface CatUnit {
 /** Build the cat units for a list of requested ids: each node expands to its
  *  direct observations (the node header rides the first as a preamble); each
  *  observation is one unit; unknown ids are a not-found unit. */
-function buildCatUnits(graph: MemkeeperGraph, ids: string[], viewer: RenderViewer): CatUnit[] {
+export function buildCatUnits(graph: MemkeeperGraph, ids: string[], viewer: RenderViewer): CatUnit[] {
   const units: CatUnit[] = [];
   for (const id of ids) {
     const node = graph.nodes.get(id as NodeId);
@@ -325,7 +330,7 @@ function buildCatUnits(graph: MemkeeperGraph, ids: string[], viewer: RenderViewe
 }
 
 /** Render one cat unit (preamble + header + content). */
-function renderCatUnit(unit: CatUnit): string {
+export function renderCatUnit(unit: CatUnit): string {
   const parts: string[] = [];
   if (unit.preamble !== undefined) parts.push(unit.preamble);
   parts.push(unit.header);
@@ -348,6 +353,64 @@ interface FindMatch {
   render: string;
 }
 
+/** Compile a `find` regex with the shared length cap + error handling. Returns
+ *  the compiled regex, or an error string the caller surfaces verbatim. */
+export function tryCompileFindRegex(query: string): { regex: RegExp } | { error: string } {
+  if (query.length > FIND_QUERY_MAX) {
+    return { error: `Query too long (max ${FIND_QUERY_MAX} chars). Use a shorter regex.` };
+  }
+  try {
+    return { regex: new RegExp(query) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: `Invalid regex "${query}": ${message}.` };
+  }
+}
+
+/** Collect ordered find matches across node summaries + observation content.
+ *  `includeSuperseded=false` (default) applies the parent-state gate: obsolete
+ *  nodes and their evidence are skipped. Nodes-first (importance desc, then
+ *  recency), then observations (recency) — consistent with `ls`. Each match
+ *  carries `in <parent>`. Shared by the agent `find` tool and the user
+ *  `/mk:find` commands. */
+export function collectFindMatches(
+  graph: MemkeeperGraph,
+  regex: RegExp,
+  includeSuperseded: IncludeSuperseded,
+  viewer: RenderViewer,
+): FindMatch[] {
+  const nodeMatches: NodeMatch[] = [];
+  const obsMatches: ObsMatch[] = [];
+  for (const node of graph.nodes.values()) {
+    // parent-state gate: skip the node (and its evidence) when obsolete and
+    // not including superseded.
+    if (isObsolete(node) && !includeSuperseded) continue;
+    if (regex.test(node.summary)) {
+      nodeMatches.push({
+        id: node.id,
+        node,
+        render: formatNodeLine(node, { viewer, showParent: node.parentNode ?? undefined }),
+      });
+    }
+    for (const obsId of node.observationIds) {
+      const obs = graph.observations.get(obsId);
+      if (obs === undefined) continue;
+      if (regex.test(obs.content)) {
+        obsMatches.push({
+          id: obs.id,
+          obs,
+          render: formatObservationLine(obs, { viewer, showParent: node.id }),
+        });
+      }
+    }
+  }
+  // nodes-first (importance desc, then recency), then observations (recency) —
+  // consistent with `ls`.
+  nodeMatches.sort((a, b) => compareNodeOrder(a.node, b.node));
+  obsMatches.sort((a, b) => compareObservationOrder(a.obs, b.obs));
+  return [...nodeMatches, ...obsMatches];
+}
+
 /** A sortable wrapper carrying the entity for ordering. */
 interface NodeMatch extends FindMatch {
   node: Node;
@@ -367,55 +430,13 @@ export function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): Agent
     label: "Find",
     parameters: FIND_PARAMS,
     async execute(_toolCallId, params) {
-      const includeSuperseded = params.includeSuperseded ?? false;
-      if (params.query.length > FIND_QUERY_MAX) {
-        return {
-          content: [{ type: "text", text: `Query too long (max ${FIND_QUERY_MAX} chars). Use a shorter regex.` }],
-          details: { error: true },
-        };
-      }
-      let regex: RegExp;
-      try {
-        regex = new RegExp(params.query);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: `Invalid regex "${params.query}": ${message}. Retry with a fixed pattern.` }],
-          details: { error: true },
-        };
+      const includeSuperseded = params.includeSuperseded ?? INCLUDE_DEFAULT;
+      const compiled = tryCompileFindRegex(params.query);
+      if ("error" in compiled) {
+        return { content: [{ type: "text", text: compiled.error }], details: { error: true } };
       }
 
-      const nodeMatches: NodeMatch[] = [];
-      const obsMatches: ObsMatch[] = [];
-      for (const node of graph.nodes.values()) {
-        // parent-state gate: skip the node (and its evidence) when obsolete and
-        // not including superseded.
-        if (isObsolete(node) && !includeSuperseded) continue;
-        if (regex.test(node.summary)) {
-          nodeMatches.push({
-            id: node.id,
-            node,
-            render: formatNodeLine(node, { viewer, showParent: node.parentNode ?? undefined }),
-          });
-        }
-        for (const obsId of node.observationIds) {
-          const obs = graph.observations.get(obsId);
-          if (obs === undefined) continue;
-          if (regex.test(obs.content)) {
-            obsMatches.push({
-              id: obs.id,
-              obs,
-              render: formatObservationLine(obs, { viewer, showParent: node.id }),
-            });
-          }
-        }
-      }
-      // nodes-first (importance desc, then recency), then observations (recency) —
-      // consistent with `ls`.
-      nodeMatches.sort((a, b) => compareNodeOrder(a.node, b.node));
-      obsMatches.sort((a, b) => compareObservationOrder(a.obs, b.obs));
-      const matches: FindMatch[] = [...nodeMatches, ...obsMatches];
-
+      const matches = collectFindMatches(graph, compiled.regex, includeSuperseded, viewer);
       const page = resolvePage(params.page);
       const { window, more, remaining, stale } = paginate(matches, page);
       if (stale) {

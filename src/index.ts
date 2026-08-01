@@ -8,6 +8,7 @@
 // its native summary).
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerUserCommands } from "./commands/user.js";
 import { compactionHook } from "./compaction/hook.js";
 import { getMemkeeperSettings, initMemkeeperSettings } from "./config/schema.js";
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "./lifecycle.js";
@@ -25,6 +26,11 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   // (it is read-only and harmless even when memkeeper is disabled — it just
   // reads whatever graph state exists).
   pi.registerTool(createMkRecallTool());
+
+  // The user's `/mk:*` browse commands (roots / cat / find / find-all). They
+  // render via ui.notify (zero agent-context cost) and read the source graph
+  // directly, so they are harmless even when memkeeper is disabled.
+  registerUserCommands(pi);
 
   // Wire the stage run functions (Observer + Builder now; the Selector lands in
   // its own task). Until then the trigger layer's default no-op stands for it.
