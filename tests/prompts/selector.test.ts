@@ -80,7 +80,7 @@ describe("SELECTOR_SYSTEM prompt", () => {
         "Your job is to build the active-set; the work itself resumes after compaction.",
         "",
         "Examples:",
-        "- Promote — a decision (\"chose JWT for auth\") sits buried under an old branch, but the",
+        '- Promote — a decision ("chose JWT for auth") sits buried under an old branch, but the',
         "  current task is the auth migration: `mv` it to the top.",
         "- Set aside — a folder of early exploratory spikes has no bearing on the current task:",
         "  `mv` it into `nIrrelevant`.",

@@ -21,25 +21,13 @@ import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
 import { BUILDER_SYSTEM } from "../prompts/builder.js";
-import {
-  NO_REASONING,
-  NO_STAGE_END_HOOK,
-  NO_TURN_LIMIT,
-  runStage,
-  type StageRunInput,
-  type StageRunResult,
-} from "../runtime/agent-loop.js";
+import { runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
+import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } from "../runtime/convergence.js";
 import { resolveStageModel } from "../runtime/model.js";
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import type { MemkeeperGraph, NodeId } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
-import {
-  MUTATE_TOOL_NAMES,
-  makeBuilderTools,
-  measureRootViewTokens,
-  renderRootView,
-  TRY_FINISH_TOOL,
-} from "./tools.js";
+import { MUTATE_TOOL_NAMES, makeBuilderTools, measureRootViewTokens, renderRootView } from "./tools.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -47,14 +35,10 @@ const BUILD_STAGE = "build";
 const FIRST_PASS = 1;
 const NO_MUTATES = 0;
 const NO_NEW_NODES = 0;
-const NO_LOOP_OVERRIDE = null;
 const EMPTY_ROOT_VIEW = "";
 
 /** A per-pass outcome: applied mutate count + whether try_finish converged. */
-export interface PassOutcome {
-  mutates: number;
-  converged: boolean;
-}
+export interface PassOutcome extends ConvergenceOutcome {}
 
 /**
  * Build a per-pass event tracker: an `onEvent` that forwards EVERY event to the
@@ -62,26 +46,14 @@ export interface PassOutcome {
  * applied mutates (the five mutate tools with `details.ok === true` and not
  * `isError`) and detect try_finish convergence (`details.ok === true`). Read
  * tools and rejected mutates do not count.
- */
+ *
+ * Delegates to the shared convergence tracker (the Builder and Selector share
+ * the same tracking shape; only the mutate-name set differs). */
 export function makePassTracker(downstream: (event: AgentEvent) => void): {
   outcome: PassOutcome;
   onEvent: (event: AgentEvent) => void;
 } {
-  const outcome: PassOutcome = { mutates: NO_MUTATES, converged: false };
-  const onEvent = (event: AgentEvent): void => {
-    downstream(event);
-    if (event.type !== "tool_execution_end") return;
-    const details = event.result?.details as { ok?: boolean } | undefined;
-    if (details?.ok !== true) return;
-    if (event.toolName === TRY_FINISH_TOOL) {
-      outcome.converged = true;
-      return;
-    }
-    if (MUTATE_TOOL_NAMES.has(event.toolName) && !event.isError) {
-      outcome.mutates += 1;
-    }
-  };
-  return { outcome, onEvent };
+  return makeConvergenceTracker(downstream, MUTATE_TOOL_NAMES);
 }
 
 // --- run input -------------------------------------------------------------
@@ -197,35 +169,19 @@ async function runPass(
 ): Promise<{ outcome: PassOutcome }> {
   const { outcome, onEvent } = makePassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(graph, pass);
-
-  const stageInput: StageRunInput = {
+  await runConvergencePass({
     systemPrompt: BUILDER_SYSTEM,
     messages,
     tools,
     model: resolved.model,
     apiKey: resolved.apiKey,
     signal: input.signal,
-    reasoning: NO_REASONING,
-    maxTurns: NO_TURN_LIMIT,
     onEvent,
-    onStageEnd: NO_STAGE_END_HOOK,
-    loopFn: NO_LOOP_OVERRIDE,
-  };
-
-  try {
-    await runStageFn(stageInput);
-    return { outcome };
-  } catch (cause) {
-    // Error-after-≥1-mutate: partial work kept, pass counts as finished → return
-    // the outcome (mutates > 0) so the loop continues. Error-before-any-mutate:
-    // rethrow so the loop ends (nothing happened; retry next trigger).
-    if (outcome.mutates > NO_MUTATES) {
-      log.error("builder pass failed after partial work (kept)", cause);
-      return { outcome };
-    }
-    log.error("builder pass failed before any mutate (ending run)", cause);
-    throw cause;
-  }
+    outcome,
+    runStageFn,
+    stageLabel: BUILD_STAGE,
+  });
+  return { outcome };
 }
 
 /** Build the per-pass user message: the task + the current root view snapshot. */
