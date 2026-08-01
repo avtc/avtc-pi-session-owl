@@ -286,8 +286,8 @@ describe("runBuilder", () => {
     expect(passCount).toBe(1); // no-op → stop after pass 1
   });
 
-  it("keeps partial work and continues when error hits AFTER a mutate", async () => {
-    seedGraph([{ id: "n3", summary: "a" }]);
+  it("keeps partial work and continues when error hits AFTER a mutate, then flushes on normal end", async () => {
+    const g = seedGraph([{ id: "n3", summary: "a" }]);
     let passCount = 0;
     const errorScript = scriptRunStageWithError(
       { passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] },
@@ -297,8 +297,9 @@ describe("runBuilder", () => {
       passCount += 1;
       return errorScript(input);
     };
+    const cap = makeFakePi();
     await runBuilder({
-      pi: makeFakePi().pi,
+      pi: cap.pi,
       ctx: makeFakeCtx(),
       settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
       signal: new AbortController().signal,
@@ -308,6 +309,9 @@ describe("runBuilder", () => {
     });
     // pass 1 errored after 1 mutate → counts as finished; pass 2 converges.
     expect(passCount).toBe(2);
+    // the run ended normally (pass 2 converged) → new flushed to active
+    expect(g.nodes.get("n3")?.state).toBe("active");
+    expect(flushNewCount(cap.appended)).toBeGreaterThanOrEqual(1);
   });
 
   it("ends the run when error hits BEFORE any mutate (0 applied), new preserved", async () => {
@@ -415,6 +419,34 @@ describe("runBuilder", () => {
     // only pass 1 ran (the signal-abort break stopped the loop before pass 2)
     expect(passCount).toBe(1);
     // abort → run ended early → new nodes preserved (no flush)
+    expect(g.nodes.get("n3")?.state).toBe("new");
+    expect(flushNewCount(cap.appended)).toBe(0);
+  });
+
+  it("skips and preserves new when the model is unavailable", async () => {
+    const g = seedGraph([{ id: "n3", summary: "a" }]);
+    const cap = makeFakePi();
+    let runStageCalls = 0;
+    await runBuilder({
+      pi: cap.pi,
+      ctx: makeFakeCtx(),
+      // builderModel with no '/' → malformed → resolveStageModel returns !ok
+      settings: settings({ builderRootViewThreshold: 0, builderModel: "badmodel" }),
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      scope: null,
+      runStageFn: () => {
+        runStageCalls += 1;
+        return Promise.resolve({
+          messages: [],
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          streamingOutputTokens: 0,
+          aborted: false,
+        });
+      },
+    });
+    // model unavailable → no stage, no pass, new preserved (no flush)
+    expect(runStageCalls).toBe(0);
     expect(g.nodes.get("n3")?.state).toBe("new");
     expect(flushNewCount(cap.appended)).toBe(0);
   });

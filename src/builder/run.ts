@@ -141,12 +141,15 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   }
 
   // Multi-pass convergence loop. startStage opens the stage (inside the try so a
-  // throw still reaches the finally's endStage). The finally flushes `new` ONLY
-  // on a normal stage-end (normalEnd); abort / run-ending error preserve `new`.
+  // throw still reaches the finally). The finally flushes `new` ONLY on a normal
+  // stage-end (normalEnd); abort / run-ending error preserve `new`. `stageOpened`
+  // guards endStage so a startStage throw can't leave an unbalanced close.
   let normalEnd = true;
+  let stageOpened = false;
   let pass = FIRST_PASS;
   try {
     input.widget.startStage(BUILD_STAGE, { pass });
+    stageOpened = true;
     const tools = makeBuilderTools(graph, store, input.settings);
     // eslint-disable-next-line no-constant-condition -- loop bounded by breaks below
     while (true) {
@@ -174,7 +177,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   } finally {
     // Flush `new`→`active` only on a normal stage-end; abort/error preserve it.
     if (normalEnd) flushNew(input.widget, store);
-    input.widget.endStage();
+    if (stageOpened) input.widget.endStage();
   }
 }
 
