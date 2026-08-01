@@ -163,6 +163,16 @@ function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
     parentNode: null,
     state: "active",
   });
+  applyCreateNode(curated, {
+    id: "n8",
+    summary: "CURATED JWT library pick",
+    importance: "high",
+    parentNode: "n7",
+    state: "active",
+  });
+  // NOTE: in the curated tree o5 is regrouped under n8 (a child of n7), but in
+  // the SOURCE graph o5 sits directly under n7. This divergence is what the
+  // R1-1 selected-root-search-parent test asserts (tree parent, not source).
   applyRecordObservation(curated, {
     obs: makeObservation({
       id: "o5",
@@ -170,7 +180,7 @@ function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
       importance: "high",
       sourceEntryIds: ["2"],
       timestamp: T1,
-      parentNode: "n7",
+      parentNode: "n8",
     }),
   });
   setClock(null);
@@ -332,6 +342,20 @@ describe("mk_recall", () => {
       // so a from/to-only search returns observations only
       expect(out).not.toMatch(/^\s*📁 n7\b/m);
     });
+
+    it("date-only bounds pad from=start-of-day, to=end-of-day", async () => {
+      seedSource();
+      // date-only from/to for Jul 19 — o9 (obsolete parent, T3) is excluded by
+      // the parent-state gate, so use a non-obsolete observation at a known date.
+      // o5 is T1 (Jul 17); oInitialPrompt is T0 (Jul 17). Use Jul 17 date-only:
+      // from=2026-07-17 (00:00) to=2026-07-17 (23:59) → both included.
+      const sameDay = text(await recall(tool(), { from: "2026-07-17", to: "2026-07-17" }));
+      expect(sameDay).toContain("o5");
+      expect(sameDay).toContain("oInitialPrompt");
+      // a date-only range on a day with NO observations returns none
+      const empty = text(await recall(tool(), { from: "2026-07-20", to: "2026-07-20" }));
+      expect(empty).toContain("No matches");
+    });
   });
 
   describe("includeSuperseded", () => {
@@ -341,6 +365,23 @@ describe("mk_recall", () => {
       expect(out).toContain("n99");
       expect(out).toContain("🪦");
       expect(out).toContain("→ n7");
+    });
+
+    it("true with no query/from/to surfaces obsolete roots in the browse (not silently dropped)", async () => {
+      seedSource();
+      // no filters + includeSuperseded → browse includes obsolete root n99
+      const out = text(await recall(tool(), { includeSuperseded: true }));
+      expect(out).toContain("n99");
+      expect(out).toContain("🪦");
+    });
+  });
+
+  describe("query cap", () => {
+    it("an over-long regex returns an error string (not a crash)", async () => {
+      seedSource();
+      const huge = `${"a|".repeat(300)}`;
+      const out = text(await recall(tool(), { query: huge }));
+      expect(out.toLowerCase()).toMatch(/too long|shorter|max|chars/);
     });
   });
 
@@ -420,6 +461,34 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       expect(all).toContain("n2");
       expect(all).toContain("n3");
     });
+
+    it("footer total counts ALL matches (not just the tail from the cursor)", async () => {
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      for (let i = 1; i <= 3; i += 1) {
+        applyCreateNode(g, {
+          id: `n${i}` as Node["id"],
+          summary: `beta item ${i}`,
+          importance: "medium",
+          parentNode: null,
+          state: "active",
+        });
+      }
+      setClock(null);
+      getGraphStore().graph = g;
+
+      // page 1: take 2 → footer shows total 3 + afterId=n1 (first item's id)
+      const page1 = text(await recall(tool(), { query: "beta", take: 2 }));
+      expect(page1).toContain("· 3 results");
+      const afterMatch = page1.match(/afterId=(\S+)/);
+      expect(afterMatch).not.toBeNull();
+      const cursor = afterMatch?.[1] ?? "";
+
+      // page 2: from the cursor → footer STILL shows total 3 (not 1)
+      const page2 = text(await recall(tool(), { query: "beta", take: 2, afterId: cursor }));
+      expect(page2).toContain("· 3 results");
+    });
   });
 
   describe("renderMode retarget", () => {
@@ -457,6 +526,21 @@ Third line that concludes the lengthy multi-line observation body fully.`;
         clearRenderMode();
       }
     });
+
+    it("selected-root SEARCH shows the TREE parent (not the stale source parent) for a regrouped obs", async () => {
+      // in seedSelected, o5 is under n8 in the curated tree but under n7 in the
+      // source graph — search must render `in n8` (the tree parent).
+      seedSelected();
+      setRenderMode("selected-root");
+      try {
+        const out = text(await recall(tool(), { query: "Chose JWT" }));
+        expect(out).toContain("o5");
+        expect(out).toContain("in n8");
+        expect(out).not.toMatch(/o5.*in n7/);
+      } finally {
+        clearRenderMode();
+      }
+    });
   });
 
   describe("render identity (agent == user)", () => {
@@ -466,6 +550,18 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       // single text content block
       expect(result.content).toHaveLength(1);
       expect(result.content[0]?.type).toBe("text");
+    });
+
+    it("flags errors in details (invalid regex → details.error)", async () => {
+      seedSource();
+      const result = await recall(tool(), { query: "(" });
+      expect(result.details).toMatchObject({ error: true });
+    });
+
+    it("successful lookups do not flag error in details", async () => {
+      seedSource();
+      const result = await recall(tool(), { ids: ["n7"] });
+      expect(result.details).not.toMatchObject({ error: true });
     });
   });
 });

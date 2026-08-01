@@ -39,15 +39,15 @@ export const FIND_TOOL = "find";
 export const TRY_FINISH_TOOL = "try_finish";
 
 /** Default page size for cursor pagination. */
-const DEFAULT_TAKE = 50;
+export const DEFAULT_TAKE = 50;
 /** take === 0 means "all" (no pagination). */
-const TAKE_ALL = 0;
+export const TAKE_ALL = 0;
 /** Upper bound on a `find` regex pattern length — guards against accidental
  *  megabyte patterns. NOTE: this caps PATTERN LENGTH, not catastrophic
  *  backtracking (a short `(a+)+$` can still blow up on long input). True ReDoS
  *  hardening needs a worker-thread timeout; find is cooperative-LLM-only here,
  *  so that is deferred until the user-facing search path lands. */
-const FIND_QUERY_MAX = 500;
+export const FIND_QUERY_MAX = 500;
 const INDENT_STEP = 2;
 const ROOT_DEPTH = 0;
 const ROOT_PARENT: NodeId | null = null;

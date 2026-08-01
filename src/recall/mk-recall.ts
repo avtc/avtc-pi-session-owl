@@ -19,7 +19,7 @@ import {
   type RenderableObservation,
   type RenderViewer,
 } from "../format/render.js";
-import { paginate, type ResolvedPage } from "../graph/read-tools.js";
+import { DEFAULT_TAKE, FIND_QUERY_MAX, paginate, type ResolvedPage, resolvePage } from "../graph/read-tools.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeState, type ObsId } from "../types.js";
@@ -27,9 +27,6 @@ import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeState, 
 // --- named constants (no bare literals at call sites) ----------------------
 
 export const MK_RECALL_TOOL = "mk_recall";
-const DEFAULT_TAKE = 50;
-const TAKE_ALL = 0;
-const NO_AFTER_ID: string | null = null;
 const VIEWER: RenderViewer = "nonBuilder";
 /** Single-line content cap for terse results (full content shows in fullDetails). */
 const TERSE_CONTENT_MAX = 120;
@@ -42,6 +39,7 @@ const START_OF_DAY_TIME = "00:00";
 /** Range-bound selector for normalizeRangeBound — named to keep call sites self-documenting. */
 const RANGE_BOUND_START = false;
 const RANGE_BOUND_END = true;
+const NO_AFTER_ID: string | null = null;
 
 // --- normalized recall target ----------------------------------------------
 
@@ -78,19 +76,40 @@ function targetFromSourceGraph(graph: MemkeeperGraph): RecallTarget {
 
 /** Build a recall target over the persisted selected tree. Nodes are the tree's
  *  own self-contained deep copies; observations are id refs resolved from the
- *  immutable source observation store (observations are never removed). */
+ *  immutable source observation store (observations are never removed). The
+ *  observation's PARENT is taken from the tree structure (the Selector may have
+ *  regrouped an obs under a different node than the source), NOT from the source
+ *  obs.parentNode — so the search `in <parent>` render + parent-state gate use
+ *  the curated tree parent. */
 function targetFromSelection(selection: SerializedSelection, sourceGraph: MemkeeperGraph): RecallTarget {
   const nodes = new Map<string, RenderableNode>();
   for (const sn of selection.nodes) nodes.set(sn.id, serializedNodeToView(sn));
+
+  // Map each observation id to its tree-node parent (the curated placement).
+  const treeObsParent = new Map<string, string>();
+  for (const sn of selection.nodes) {
+    for (const obsId of sn.observationIds) treeObsParent.set(obsId, sn.id);
+  }
+
   const observations = new Map<string, RecallObservation>();
   for (const ref of selection.obsRefs) {
     const source = sourceGraph.observations.get(ref as ObsId);
-    if (source !== undefined) observations.set(source.id, source);
+    if (source === undefined) continue;
+    observations.set(source.id, withTreeParent(source, treeObsParent));
   }
   if (selection.oInitialPrompt !== null) {
-    observations.set(selection.oInitialPrompt.id, serializedObservationToView(selection.oInitialPrompt));
+    const view = serializedObservationToView(selection.oInitialPrompt);
+    observations.set(view.id, withTreeParent(view, treeObsParent));
   }
   return { renderMode: "selected-root", nodes, observations };
+}
+
+/** Override an observation's parentNode with its curated tree parent when the
+ *  tree places it under a different node than the source graph. */
+function withTreeParent<T extends RecallObservation>(obs: T, treeObsParent: Map<string, string>): RecallObservation {
+  const treeParent = treeObsParent.get(obs.id);
+  if (treeParent === undefined) return obs;
+  return { ...obs, parentNode: treeParent };
 }
 
 /** A SerializedNode already satisfies RenderableNode; this narrows to the view
@@ -335,12 +354,14 @@ function buildSearchCandidates(
   return candidates;
 }
 
-/** Non-obsolete root nodes for the default browse (no filters) path. */
-function rootBrowseCandidates(target: RecallTarget): SearchCandidate[] {
+/** Non-obsolete root nodes for the default browse (no filters) path. When
+ *  `includeSuperseded` is true, obsolete roots are included too (shown with 🪦
+ *  + → supersededBy) so the modifier is never silently dropped. */
+function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean): SearchCandidate[] {
   const candidates: SearchCandidate[] = [];
   for (const node of target.nodes.values()) {
     if (node.parentNode !== null) continue;
-    if (isObsoleteState(node.state)) continue;
+    if (isObsoleteState(node.state) && !includeSuperseded) continue;
     candidates.push({
       id: node.id,
       key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
@@ -353,17 +374,20 @@ function rootBrowseCandidates(target: RecallTarget): SearchCandidate[] {
 
 // --- footer ----------------------------------------------------------------
 
-function searchFooter(total: number, window: SearchCandidate[], more: boolean): string {
+/** Search footer: total match count (constant across pages) + the continuation
+ *  cursor when more remain. */
+function searchFooter(total: number, lastId: string, more: boolean): string {
   const parts = [`· ${total} results`];
-  if (more && window.length > 0) parts.push(`afterId=${window[window.length - 1].id}`);
+  if (more) parts.push(`afterId=${lastId}`);
   return parts.join(" · ");
 }
 
 // --- pagination (top-level take/afterId → ResolvedPage) --------------------
 
-function resolveTakeAfterId(take: number | undefined, afterId: string | undefined): ResolvedPage {
-  const rawTake = take ?? DEFAULT_TAKE;
-  return { take: rawTake < 0 ? TAKE_ALL : rawTake, afterId: afterId ?? NO_AFTER_ID };
+/** Normalize top-level take/afterId into the shared ResolvedPage (negative take
+ *  clamps to TAKE_ALL = "all"). */
+function pageOf(take: number | undefined, afterId: string | undefined): ResolvedPage {
+  return resolvePage({ take: take ?? DEFAULT_TAKE, afterId: afterId ?? NO_AFTER_ID });
 }
 
 // --- tool parameters + description -----------------------------------------
@@ -434,14 +458,32 @@ export function createMkRecallTool(): ToolDefinition<typeof MK_RECALL_PARAMS> {
     description: MK_RECALL_DESCRIPTION,
     parameters: MK_RECALL_PARAMS,
     async execute(_toolCallId, params) {
-      const text = executeRecall(params as MkRecallParams);
-      return { content: [{ type: "text", text }], details: { ok: true } };
+      const result = executeRecall(params as MkRecallParams);
+      return {
+        content: [{ type: "text", text: result.text }],
+        details: result.error ? { error: true } : { ok: true },
+      };
     },
   };
 }
 
+/** A recall result: the rendered text + whether it is an error (invalid regex /
+ *  datetime, missing id, stale cursor) — surfaced in `details.error` for UI,
+ *  matching the sibling read-tools' convention. */
+interface RecallResult {
+  readonly text: string;
+  readonly error: boolean;
+}
+
+function ok(text: string): RecallResult {
+  return { text, error: false };
+}
+function err(text: string): RecallResult {
+  return { text, error: true };
+}
+
 /** Pure recall logic (extracted for testability + so the tool shell stays thin). */
-function executeRecall(params: MkRecallParams): string {
+function executeRecall(params: MkRecallParams): RecallResult {
   const target = resolveTarget();
   const fullDetails = params.fullDetails ?? false;
   const includeSuperseded = params.includeSuperseded ?? false;
@@ -455,36 +497,40 @@ function executeRecall(params: MkRecallParams): string {
   // compile query regex (if any)
   let regex: RegExp | null = null;
   if (params.query !== undefined && params.query !== "") {
+    if (params.query.length > FIND_QUERY_MAX) {
+      return err(`Query too long (max ${FIND_QUERY_MAX} chars). Use a shorter regex.`);
+    }
     try {
       regex = new RegExp(params.query);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return `Invalid regex "${params.query}": ${message}. Retry with a fixed pattern.`;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return err(`Invalid regex "${params.query}": ${message}. Retry with a fixed pattern.`);
     }
   }
 
   const bounds = resolveBounds(params.from, params.to);
-  if (bounds.error !== null) return bounds.error;
+  if (bounds.error !== null) return err(bounds.error);
 
   const noFilters = regex === null && bounds.from === null && bounds.to === null;
   const candidates = noFilters
-    ? rootBrowseCandidates(target)
+    ? rootBrowseCandidates(target, includeSuperseded)
     : buildSearchCandidates(target, regex, bounds, includeSuperseded, fullDetails);
 
-  const page = resolveTakeAfterId(params.take, params.afterId);
-  const { window, more, remaining, stale } = paginate(candidates, page);
+  const page = pageOf(params.take, params.afterId);
+  const { window, more, stale } = paginate(candidates, page);
   if (stale) {
-    return `Cursor afterId=${page.afterId ?? ""} not found (memory changed since the last page). Re-query without afterId to start fresh.`;
+    return err(
+      `Cursor afterId=${page.afterId ?? ""} not found (memory changed since the last page). Re-query without afterId to start fresh.`,
+    );
   }
 
   if (window.length === 0) {
-    return noFilters ? "No memory yet." : "No matches.";
+    return ok(noFilters ? "No memory yet." : "No matches.");
   }
 
   const lines = window.map((c) => c.line);
-  const total = window.length + remaining;
-  lines.push(searchFooter(total, window, more));
-  return lines.join("\n");
+  lines.push(searchFooter(candidates.length, window[window.length - 1].id, more));
+  return ok(lines.join("\n"));
 }
 
 /** ids path: render each requested id (node payload or observation); paginate
@@ -495,10 +541,11 @@ function executeIds(
   take: number | undefined,
   afterId: string | undefined,
   fullDetails: boolean,
-): string {
+): RecallResult {
   // Build a flat list of payload blocks (one per requested id), then paginate
   // over the requested ids (each id is one paginatable unit).
   const units: { id: string; text: string }[] = [];
+  let anyMissing = false;
   for (const id of ids) {
     const node = target.nodes.get(id);
     if (node !== undefined) {
@@ -510,16 +557,19 @@ function executeIds(
       units.push({ id, text: renderObservationBlock(obs, { showParent: undefined, fullDetails }) });
       continue;
     }
+    anyMissing = true;
     units.push({ id, text: missingIdMessage(id) });
   }
 
-  const page = resolveTakeAfterId(take, afterId);
+  const page = pageOf(take, afterId);
   const { window, more, stale } = paginate(units, page);
   if (stale) {
-    return `Cursor afterId=${page.afterId ?? ""} not found (memory changed since the last page). Re-query without afterId to start fresh.`;
+    return err(
+      `Cursor afterId=${page.afterId ?? ""} not found (memory changed since the last page). Re-query without afterId to start fresh.`,
+    );
   }
 
   const lines = window.map((u) => u.text);
   if (more && window.length > 0) lines.push(`· afterId=${window[window.length - 1].id}`);
-  return lines.join("\n");
+  return { text: lines.join("\n"), error: anyMissing };
 }
