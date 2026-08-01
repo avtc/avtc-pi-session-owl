@@ -254,6 +254,75 @@ describe("buildWorkingCopy", () => {
     expect(graph.observations.has("o5")).toBe(false); // obs under obsolete node excluded
     expect(graph.observations.has(O_INITIAL_PROMPT)).toBe(true); // goal obs kept
   });
+
+  it("cleans childNodeIds across a nested obsolete chain (obsolete parent of an obsolete node)", () => {
+    // nGoal → n1 (obsolete) → n2 (obsolete) → n3 (active). Dropping n1 and n2
+    // must leave n3 reparented to root and n1 removed from nGoal.childNodeIds,
+    // with no dangling links anywhere in the chain.
+    const nodes = new Map<NodeId, Node>();
+    const observations = new Map<ObsId, Observation>();
+    const nGoal = makeNode({
+      id: N_GOAL,
+      summary: "g",
+      importance: "critical",
+      parentNode: null,
+      state: "active",
+      createdAt: "2026-07-28 09:00",
+    });
+    const n1 = makeNode({
+      id: "n1",
+      summary: "obsolete mid",
+      importance: "low",
+      parentNode: N_GOAL,
+      state: "obsolete",
+      supersededBy: "n3",
+      createdAt: "2026-07-28 09:00",
+    });
+    const n2 = makeNode({
+      id: "n2",
+      summary: "obsolete leaf",
+      importance: "low",
+      parentNode: "n1",
+      state: "obsolete",
+      supersededBy: "n3",
+      createdAt: "2026-07-28 09:00",
+    });
+    const n3 = makeNode({
+      id: "n3",
+      summary: "live grandchild",
+      importance: "high",
+      parentNode: "n2",
+      state: "active",
+      createdAt: "2026-07-28 09:00",
+    });
+    observations.set(
+      O_INITIAL_PROMPT,
+      makeObservation({
+        id: O_INITIAL_PROMPT,
+        content: "goal",
+        importance: "critical",
+        sourceEntryIds: ["u1"],
+        timestamp: "2026-07-28 09:00",
+        parentNode: N_GOAL,
+      }),
+    );
+    nGoal.observationIds = [O_INITIAL_PROMPT];
+    nGoal.childNodeIds = ["n1"];
+    n1.childNodeIds = ["n2"];
+    n2.childNodeIds = ["n3"];
+    nodes.set(N_GOAL, nGoal);
+    nodes.set("n1", n1);
+    nodes.set("n2", n2);
+    nodes.set("n3", n3);
+    const source = new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 4 });
+    const { graph } = buildWorkingCopy(source);
+    expect(graph.nodes.has("n1")).toBe(false);
+    expect(graph.nodes.has("n2")).toBe(false);
+    expect(graph.nodes.has("n3")).toBe(true);
+    expect(graph.nodes.get("n3")?.parentNode).toBe(null); // reparented to root
+    expect(graph.nodes.get(N_GOAL)?.childNodeIds).toEqual([]); // n1 removed from nGoal
+    expect(() => validateGraph(graph)).not.toThrow();
+  });
 });
 
 // --- buildTail fixtures ------------------------------------------------------
@@ -343,6 +412,33 @@ describe("buildTail", () => {
     expect(out).toContain("tail msg");
   });
 
+  it("sanitizes the preceding agent text the same way the tail is (ANSI stripped)", () => {
+    // The preceding agent text carries an ANSI color escape; it must be stripped
+    // in the prelude just as it is in the tail (consistent sanitization).
+    const ansi = "\u001b[31mred text\u001b[0m";
+    const branch: SessionEntry[] = [
+      assistantEntry("a0", ansi),
+      userEntry("u0", "the ask"),
+      assistantEntry("a2", "tail begins"),
+    ];
+    const out = buildTail(ctxFor(branch), { firstKeptEntryId: "a2" }, CHUNK_OPTS);
+    expect(out).toContain("red text");
+    expect(out).not.toContain("\u001b[31m"); // ANSI stripped in the prelude
+  });
+
+  it("skips a textless tool-call assistant turn and pairs an earlier contextual agent text", () => {
+    // a0 has text; a1 is a tool-call-only turn (no text) immediately before the
+    // user msg — findPrecedingAssistantText must skip a1 and surface a0's text.
+    const branch: SessionEntry[] = [
+      assistantEntry("a0", "the contextual reply"),
+      assistantWithToolAndThinking("a1", ""), // tool-call-only, no text
+      userEntry("u0", "the ask"),
+      assistantEntry("a2", "tail begins"),
+    ];
+    const out = buildTail(ctxFor(branch), { firstKeptEntryId: "a2" }, CHUNK_OPTS);
+    expect(out).toContain("the contextual reply"); // a0's text, skipping textless a1
+  });
+
   it("pairs the preceding agent message as TEXT-ONLY (no tool calls / thinking)", () => {
     // The preceding agent carries a tool call + thinking; only its text surfaces.
     const branch: SessionEntry[] = [
@@ -390,18 +486,21 @@ describe("buildTail", () => {
     expect(out).toBe("");
   });
 
-  it("renders the full retained tail with no truncation (a large multi-chunk branch is kept whole)", () => {
-    // A branch large enough to span multiple chunks; the tail (from the cut) is
-    // rendered in full — nothing is cut to an arbitrary cap.
+  it("renders the full retained tail with no truncation (a multi-chunk branch is kept whole)", () => {
+    // A branch large enough to span multiple chunks (low threshold → many
+    // chunks); the tail (from the cut) is rendered in full — the multi-chunk
+    // join is exercised and nothing is cut to an arbitrary cap.
     const branch: SessionEntry[] = [];
-    for (let i = 0; i < 60; i += 1) {
+    for (let i = 0; i < 30; i += 1) {
       branch.push(userEntry(`u${i}`, `message body ${i} with enough text to accumulate tokens`));
     }
     const cutId = "u0"; // whole branch is the tail
-    const out = buildTail(ctxFor(branch), { firstKeptEntryId: cutId }, CHUNK_OPTS);
-    // First and last entries both present → nothing was truncated away.
+    const multiChunkOpts = { tokenThreshold: 50, toolBlockCapTokens: null, includeThinking: false };
+    const out = buildTail(ctxFor(branch), { firstKeptEntryId: cutId }, multiChunkOpts);
+    // First, middle, and last entries all present → multi-chunk join kept it whole.
     expect(out).toContain("message body 0 ");
-    expect(out).toContain("message body 59 ");
+    expect(out).toContain("message body 15 ");
+    expect(out).toContain("message body 29 ");
   });
 });
 

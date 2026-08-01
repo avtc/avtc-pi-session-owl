@@ -1,9 +1,14 @@
-import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import { extractTouchedFiles, renderTouchedFiles, type TouchedFilesContext } from "../compaction/touched-files.js";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import {
+  extractTouchedFiles,
+  isMessageEntry,
+  renderTouchedFiles,
+  type TouchedFilesContext,
+} from "../compaction/touched-files.js";
 import { formatNodeLine, RENDER_LEGEND } from "../format/render.js";
 import { cloneGraph } from "../graph/clone.js";
-import { extractMessageText, isUnstuckAutoContinue } from "../lifecycle.js";
-import { buildChunks, type ChunkOptions } from "../observer/chunk.js";
+import { isUnstuckAutoContinue } from "../lifecycle.js";
+import { buildChunks, type ChunkOptions, renderAssistantTextBlock } from "../observer/chunk.js";
 import type { MemkeeperGraph, NodeId, ObsId } from "../types.js";
 import { IMPORTANCE_RANK, makeNode, N_GOAL, N_IRRELEVANT, nowStoredTimestamp, ROOT_PARENT } from "../types.js";
 
@@ -133,8 +138,8 @@ export function buildTail(ctx: TailContext, boundary: TailBoundary, options: Chu
   const preludeParts: string[] = [];
   if (precedingAgentIndex !== NOT_FOUND) {
     const agentEntry = entryAt(branch, precedingAgentIndex);
-    const agentText = extractAgentText(agentEntry);
-    if (agentText.length > 0) preludeParts.push(`<A E=${agentEntry.id}>${agentText}</A>`);
+    const agentBlock = renderAssistantTextBlock(agentEntry); // sanitized, text-only
+    if (agentBlock.length > 0) preludeParts.push(agentBlock);
   }
   const userText = renderTail([userEntry], options);
   preludeParts.push(userText);
@@ -164,26 +169,17 @@ function findLastUserMessage(branch: readonly SessionEntry[]): number {
 }
 
 /** Index of the nearest preceding assistant text message before `from`. */
+/** Index of the nearest preceding assistant message carrying TEXT before
+ *  `from` — skips textless (tool-call-only / thinking-only) turns so the prelude
+ *  surfaces the last contextual agent text, not an empty tool turn. */
 function findPrecedingAssistantText(branch: readonly SessionEntry[], from: number): number {
   for (let i = from - 1; i >= 0; i -= 1) {
     const entry = branch[i];
     if (!isMessageEntry(entry)) continue;
-    const { message } = entry;
-    if (message.role !== "assistant") continue;
-    return i;
+    if (entry.message.role !== "assistant") continue;
+    if (renderAssistantTextBlock(entry).length > 0) return i; // has text
   }
   return NOT_FOUND;
-}
-
-function isMessageEntry(entry: SessionEntry): entry is SessionMessageEntry {
-  return entry.type === "message";
-}
-
-/** Extract the TEXT content of an assistant message (text-only; thinking and
- *  tool calls are dropped — the tail-pairing prelude surfaces text only). */
-function extractAgentText(entry: SessionEntry): string {
-  if (!isMessageEntry(entry)) return "";
-  return entry.message.role === "assistant" ? extractMessageText(entry.message) : "";
 }
 
 /** Read a branch entry by index with a runtime guard (indices returned by the

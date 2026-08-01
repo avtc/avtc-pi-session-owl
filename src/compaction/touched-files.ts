@@ -75,7 +75,7 @@ function startIndex(entries: SessionEntry[], sinceEntryId: string | null): numbe
 }
 
 /** A message entry is a candidate if it carries toolCall parts. */
-function isMessageEntry(entry: SessionEntry): entry is SessionMessageEntry {
+export function isMessageEntry(entry: SessionEntry): entry is SessionMessageEntry {
   return entry.type === "message";
 }
 

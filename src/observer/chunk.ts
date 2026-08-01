@@ -303,3 +303,17 @@ export function buildChunks(entries: readonly SessionEntry[], options: ChunkOpti
   flush(); // trailing remainder
   return chunks;
 }
+
+/**
+ * Render an assistant message's TEXT as a single `<A E=id>text</A>` block
+ * (text-only — thinking/tool calls dropped), with the same ANSI sanitization
+ * the chunk pipeline applies. Returns "" when the message carries no text.
+ * Used by the Selector tail pairing (text-only preceding-agent prelude).
+ */
+export function renderAssistantTextBlock(entry: SessionEntry): string {
+  if (entry.type !== "message") return "";
+  if (entry.message.role !== "assistant") return "";
+  const text = cleanText(entry.message.content);
+  if (text.length === 0) return "";
+  return aBlock(entry.id, text).text;
+}
