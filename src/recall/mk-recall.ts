@@ -476,9 +476,11 @@ export function createMkRecallTool(): ToolDefinition<typeof MK_RECALL_PARAMS> {
   };
 }
 
-/** A recall result: the rendered text + whether it is an error (invalid regex /
- *  datetime, missing id, stale cursor) — surfaced in `details.error` for UI,
- *  matching the sibling read-tools' convention. */
+/** A recall result: the rendered text + whether it is a hard error (invalid
+ *  regex / datetime, over-long query, stale cursor) — surfaced in
+ *  `details.error` for UI, matching the sibling read-tools' convention. A
+ *  missing id in an `ids` lookup is NOT a hard error (conveyed by its not-found
+ *  text, like `cat`), so it does not set `error`. */
 interface RecallResult {
   readonly text: string;
   readonly error: boolean;

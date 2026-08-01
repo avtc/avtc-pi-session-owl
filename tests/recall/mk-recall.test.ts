@@ -258,6 +258,17 @@ describe("mk_recall", () => {
       // an error message, not a crash
       expect(out.toLowerCase()).toMatch(/no node|not found|unknown/);
     });
+
+    it("missing id does NOT flag details.error (conveyed by text, like cat)", async () => {
+      seedSource();
+      // fully missing
+      const fullyMissing = await recall(tool(), { ids: ["nDoesNotExist"] });
+      expect(fullyMissing.details).not.toMatchObject({ error: true });
+      // partial missing (one good + one bad) — still no whole-result error
+      const partial = await recall(tool(), { ids: ["n7", "nDoesNotExist"] });
+      expect(partial.details).not.toMatchObject({ error: true });
+      expect(text(partial)).toContain("Auth migration to JWT");
+    });
   });
 
   describe("query — regex search + ranking", () => {
