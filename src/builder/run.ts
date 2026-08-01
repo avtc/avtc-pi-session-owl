@@ -136,7 +136,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   // render-ready — skip the LLM passes entirely, just flush `new` arrivals so
   // they never linger as stale glyphs. A deliberate skip IS a normal stage-end
   // for flush purposes. No stage is opened (no startStage).
-  if (measureRootViewTokens(graph) < input.settings.builderRootViewThreshold) {
+  if (measureRootViewTokens(graph, "builder") < input.settings.builderRootViewThreshold) {
     flushNew(input.widget, store);
     return;
   }
@@ -230,7 +230,7 @@ async function runPass(
 
 /** Build the per-pass user message: the task + the current root view snapshot. */
 function passMessages(graph: MemkeeperGraph, pass: number): AgentMessage[] {
-  const rootView = renderRootView(graph) || EMPTY_ROOT_VIEW;
+  const rootView = renderRootView(graph, "builder") || EMPTY_ROOT_VIEW;
   const text =
     "Organize the memory graph. Process the new arrivals and consolidate the root view to fit the budget.\n\n" +
     `Current root view (pass ${pass}):\n${rootView}`;

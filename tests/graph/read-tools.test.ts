@@ -11,6 +11,7 @@ import {
   MUTATE_SOURCE,
   setClock,
 } from "../../src/graph/mutations.js";
+import { makeReadTools } from "../../src/graph/read-tools.js";
 import { MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
 
 const NOW = "2026-07-29 09:00";
@@ -338,5 +339,24 @@ describe("Builder read tools", () => {
       const out = textOf(await callTool(tools(), "cat", { ids: ["nX"] }));
       expect(out).toContain("No node or observation");
     });
+  });
+});
+
+describe("read-tool viewer parameterization (Builder vs nonBuilder)", () => {
+  // n12 is a `new` root in buildGraph(). The 🆕 glyph is Builder-only; every
+  // other consumer (Selector, mk_recall, commands, compaction summary) renders
+  // `new` as `active` (no glyph) per the viewer-dependent render rule.
+  it("builder viewer renders a new node with the 🆕 glyph", async () => {
+    const builderTools = makeReadTools(buildGraph(), "builder");
+    const out = textOf(await callTool(builderTools, "ls", {}));
+    expect(out).toContain("n12");
+    expect(out).toContain("🆕");
+  });
+
+  it("nonBuilder viewer renders a new node as active (no 🆕 glyph)", async () => {
+    const nonBuilderTools = makeReadTools(buildGraph(), "nonBuilder");
+    const out = textOf(await callTool(nonBuilderTools, "ls", {}));
+    expect(out).toContain("n12");
+    expect(out).not.toContain("🆕");
   });
 });

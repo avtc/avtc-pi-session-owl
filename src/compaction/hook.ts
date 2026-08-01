@@ -146,7 +146,7 @@ export async function compactionHook(
     // (b) Builder — fast-path skip when the root view is already under threshold
     // (AD9); otherwise run bounded to the compacted block.
     const graph = getGraphStore().graph;
-    if (measureRootViewTokens(graph) >= settings.builderRootViewThreshold) {
+    if (measureRootViewTokens(graph, "builder") >= settings.builderRootViewThreshold) {
       await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget });
     }
     if (signal.aborted) return cancelAborted(ctx);
