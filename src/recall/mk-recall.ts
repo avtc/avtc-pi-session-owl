@@ -93,6 +93,9 @@ function targetFromSelection(selection: SerializedSelection, sourceGraph: Memkee
 
   const observations = new Map<string, RecallObservation>();
   for (const ref of selection.obsRefs) {
+    // oInitialPrompt is carried verbatim in its own field (resolved below) — skip
+    // the redundant source-resolution here so it is not added twice.
+    if (selection.oInitialPrompt !== null && ref === selection.oInitialPrompt.id) continue;
     const source = sourceGraph.observations.get(ref as ObsId);
     if (source === undefined) continue;
     observations.set(source.id, withTreeParent(source, treeObsParent));
@@ -382,6 +385,12 @@ function searchFooter(total: number, lastId: string, more: boolean): string {
   return parts.join(" · ");
 }
 
+/** Actionable message for a stale cursor (the afterId item is gone — memory
+ *  changed between pages) — shared by the ids + search paths. */
+function staleCursorMessage(afterId: string | null): string {
+  return `Cursor afterId=${afterId ?? ""} not found (memory changed since the last page). Re-query without afterId to start fresh.`;
+}
+
 // --- pagination (top-level take/afterId → ResolvedPage) --------------------
 
 /** Normalize top-level take/afterId into the shared ResolvedPage (negative take
@@ -518,11 +527,7 @@ function executeRecall(params: MkRecallParams): RecallResult {
 
   const page = pageOf(params.take, params.afterId);
   const { window, more, stale } = paginate(candidates, page);
-  if (stale) {
-    return err(
-      `Cursor afterId=${page.afterId ?? ""} not found (memory changed since the last page). Re-query without afterId to start fresh.`,
-    );
-  }
+  if (stale) return err(staleCursorMessage(page.afterId));
 
   if (window.length === 0) {
     return ok(noFilters ? "No memory yet." : "No matches.");
@@ -545,7 +550,6 @@ function executeIds(
   // Build a flat list of payload blocks (one per requested id), then paginate
   // over the requested ids (each id is one paginatable unit).
   const units: { id: string; text: string }[] = [];
-  let anyMissing = false;
   for (const id of ids) {
     const node = target.nodes.get(id);
     if (node !== undefined) {
@@ -557,19 +561,16 @@ function executeIds(
       units.push({ id, text: renderObservationBlock(obs, { showParent: undefined, fullDetails }) });
       continue;
     }
-    anyMissing = true;
     units.push({ id, text: missingIdMessage(id) });
   }
 
   const page = pageOf(take, afterId);
   const { window, more, stale } = paginate(units, page);
-  if (stale) {
-    return err(
-      `Cursor afterId=${page.afterId ?? ""} not found (memory changed since the last page). Re-query without afterId to start fresh.`,
-    );
-  }
+  if (stale) return err(staleCursorMessage(page.afterId));
 
   const lines = window.map((u) => u.text);
   if (more && window.length > 0) lines.push(`· afterId=${window[window.length - 1].id}`);
-  return { text: lines.join("\n"), error: anyMissing };
+  // ids lookups never flag error: a missing id is conveyed by its not-found text
+  // (matching the sibling `cat` tool), not a whole-result error flag.
+  return ok(lines.join("\n"));
 }

@@ -564,4 +564,56 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       expect(result.details).not.toMatchObject({ error: true });
     });
   });
+
+  describe("stale cursor", () => {
+    it("search: an afterId not in the results → stale-cursor error", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { query: "[Jj]wt", afterId: "gone-id" }));
+      expect(out.toLowerCase()).toMatch(/cursor|stale|not found|re-query/);
+    });
+
+    it("ids: an afterId pointing past the units → stale-cursor error", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["n7"], afterId: "gone-id" }));
+      expect(out.toLowerCase()).toMatch(/cursor|stale|not found|re-query/);
+    });
+  });
+
+  describe("search fullDetails", () => {
+    it("fullDetails in a search shows the full multi-line observation content", async () => {
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(g, {
+        id: "n1",
+        summary: "Search target",
+        importance: "high",
+        parentNode: null,
+        state: "active",
+      });
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "oLong" as ObsId,
+          content: "alpha first.\nbeta second line.\ngamma third.",
+          importance: "high",
+          sourceEntryIds: ["e1"],
+          timestamp: T1,
+          parentNode: "n1",
+        }),
+      });
+      setClock(null);
+      getGraphStore().graph = g;
+
+      const terse = text(await recall(tool(), { query: "alpha" }));
+      const full = text(await recall(tool(), { query: "alpha", fullDetails: true }));
+      // terse collapses the content to a single line (space-joined, no raw newline)
+      expect(terse).toContain("alpha first. beta");
+      expect(terse).not.toContain("alpha first.\nbeta");
+      // fullDetails preserves the raw multi-line content (newline before beta)
+      expect(full).toContain("alpha first.\nbeta second line");
+      expect(full).toContain("gamma third.");
+      // both carry the parent (flat search)
+      expect(terse).toContain("in n1");
+    });
+  });
 });
