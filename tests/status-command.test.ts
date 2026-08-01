@@ -124,20 +124,31 @@ describe("buildStatusReport", () => {
       }),
     );
     expect(report).toContain("Memory");
-    expect(report).toContain("observations  2");
+    expect(report).toContain("observations");
+    expect(report).toContain("2");
     expect(report).toContain("6.0k tok"); // 4500 + 1500 = 6000 → "6.0k"
-    expect(report).toContain("nodes  2");
+    expect(report).toContain("nodes");
     expect(report).toContain("400 tok"); // 320 + 80 = 400
   });
 
-  it("counts use thousands separators (formatCount)", () => {
+  it("counts use thousands separators (formatCount) and the count column is right-aligned", () => {
     const bigNodes: Node[] = [];
     const bigObs: { contentTokens: number }[] = [];
     for (let i = 0; i < 1245; i += 1) bigObs.push({ contentTokens: 0 });
     for (let i = 0; i < 95; i += 1) bigNodes.push(node({ id: `n${i}` as unknown as Node["id"], summaryTokens: 0 }));
     const report = buildStatusReport(input({ nodes: bigNodes, observations: bigObs }));
-    expect(report).toContain("observations  1,245");
-    expect(report).toContain("nodes  95");
+    const memoryLines = report
+      .split("\n")
+      .filter((l) => l.includes("observations") || l.trimStart().startsWith("nodes"));
+    expect(memoryLines.length).toBe(2);
+    // counts present with separators
+    expect(memoryLines[0]).toContain("1,245");
+    expect(memoryLines[1]).toContain("95");
+    // right-aligned counts: both counts END at the same column (the token column
+    // — "X tok" — starts at the same index on both lines).
+    const tokenColObs = memoryLines[0].indexOf("tok");
+    const tokenColNodes = memoryLines[1].indexOf("tok");
+    expect(tokenColObs).toBe(tokenColNodes);
   });
 
   it("roots view line shows viewTokens / builderRootViewThreshold", () => {

@@ -12,7 +12,7 @@ import { renderRootViewFromRoots } from "../graph/read-tools.js";
 import { cloneLedger, decodeNode, EMPTY_LEDGER, type SerializedNode, type UsageLedger } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { estimateContentTokens, type Node, type Observation } from "../types.js";
-import { sinceLastCompaction } from "./usage-ledger.js";
+import { sinceLastCompaction, sinceSessionStart } from "./usage-ledger.js";
 
 // --- pure report builder ---------------------------------------------------
 
@@ -55,18 +55,24 @@ export function buildStatusReport(input: StatusInput): string {
   // --- Session line ---
   const durationMs = Date.now() - input.sessionStartMs;
   lines.push(
-    `Session  ${formatDuration(durationMs)} — ${input.compactionCount} compaction${input.compactionCount === 1 ? "" : "s"}`,
+    `Session  ${formatDuration(durationMs)} — ${formatCount(input.compactionCount)} compaction${input.compactionCount === 1 ? "" : "s"}`,
   );
 
-  // --- Memory section (counts with separators; columns aligned) ---
+  // --- Memory section (counts with separators; columns aligned: labels +
+  //  counts right-aligned so the token column lines up) ---
   const obsCount = input.observations.length;
   const obsTokens = sum(input.observations, (o) => o.contentTokens);
   const nodeCount = input.nodes.length;
   const nodeTokens = sum(input.nodes, (n) => n.summaryTokens);
   const LABEL_WIDTH = 12; // "observations" is the longest label
+  const COUNT_WIDTH = 6; // fits "1,245"-class counts with room
   lines.push("", "Memory");
-  lines.push(`  ${"observations".padStart(LABEL_WIDTH)}  ${formatCount(obsCount)}     ${formatTokens(obsTokens)} tok`);
-  lines.push(`  ${"nodes".padStart(LABEL_WIDTH)}  ${formatCount(nodeCount)}      ${formatTokens(nodeTokens)} tok`);
+  lines.push(
+    `  ${"observations".padStart(LABEL_WIDTH)}  ${formatCount(obsCount).padStart(COUNT_WIDTH)}  ${formatTokens(obsTokens)} tok`,
+  );
+  lines.push(
+    `  ${"nodes".padStart(LABEL_WIDTH)}  ${formatCount(nodeCount).padStart(COUNT_WIDTH)}  ${formatTokens(nodeTokens)} tok`,
+  );
   lines.push(
     `  roots view  ${formatTokens(input.rootsViewTokens)} / ${formatTokens(input.settings.builderRootViewThreshold)}`,
   );
@@ -78,7 +84,7 @@ export function buildStatusReport(input: StatusInput): string {
 
   // --- Usage sections ---
   lines.push("", "Usage since session start");
-  appendPhaseLines(lines, input.usageLedger);
+  appendPhaseLines(lines, sinceSessionStart(input.usageLedger));
   lines.push("", "Usage since last compaction");
   const baseline = input.lastCompactionLedger ?? cloneLedger(EMPTY_LEDGER);
   appendPhaseLines(lines, sinceLastCompaction(input.usageLedger, baseline));
