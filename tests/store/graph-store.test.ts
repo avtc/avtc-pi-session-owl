@@ -400,6 +400,29 @@ describe("load reconstruction", () => {
     await load(fake);
     expect(getGraphStore().usageLedger).toEqual(laterLedger);
   });
+
+  it("does NOT alias usageLedger to lastCompactionLedger when seeded from a snapshot with no later delta (in-place mutate must not corrupt the baseline)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    const baselineLedger = {
+      observe: { ...EMPTY_LEDGER.observe, input: 50, runs: 1 },
+      build: { ...EMPTY_LEDGER.build },
+      select: { ...EMPTY_LEDGER.select },
+    };
+    const details = encodeDetails(getGraphStore().graph, null, baselineLedger);
+    fake.addCompaction("e1", details);
+    fake.leafId = "e1"; // no later usage delta
+
+    await load(fake);
+    // both read the same baseline values…
+    expect(getGraphStore().usageLedger).toEqual(baselineLedger);
+    expect(getGraphStore().lastCompactionLedger).toEqual(baselineLedger);
+    // …but they MUST be independent objects: mutating usageLedger in place (as
+    // addPhaseUsage does) must not touch lastCompactionLedger.
+    getGraphStore().usageLedger.observe.input += 1000;
+    expect(getGraphStore().lastCompactionLedger?.observe.input).toBe(50);
+    expect(getGraphStore().usageLedger).not.toBe(getGraphStore().lastCompactionLedger);
+  });
 });
 
 describe("load edge cases", () => {

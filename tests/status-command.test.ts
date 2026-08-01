@@ -130,6 +130,16 @@ describe("buildStatusReport", () => {
     expect(report).toContain("400 tok"); // 320 + 80 = 400
   });
 
+  it("counts use thousands separators (formatCount)", () => {
+    const bigNodes: Node[] = [];
+    const bigObs: { contentTokens: number }[] = [];
+    for (let i = 0; i < 1245; i += 1) bigObs.push({ contentTokens: 0 });
+    for (let i = 0; i < 95; i += 1) bigNodes.push(node({ id: `n${i}` as unknown as Node["id"], summaryTokens: 0 }));
+    const report = buildStatusReport(input({ nodes: bigNodes, observations: bigObs }));
+    expect(report).toContain("observations  1,245");
+    expect(report).toContain("nodes  95");
+  });
+
   it("roots view line shows viewTokens / builderRootViewThreshold", () => {
     const report = buildStatusReport(
       input({ rootsViewTokens: 35000, settings: settings({ builderRootViewThreshold: 40000 }) }),

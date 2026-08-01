@@ -7,7 +7,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
-import { formatCost, formatDuration, formatTokens } from "../format/tokens.js";
+import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
 import { renderRootViewFromRoots } from "../graph/read-tools.js";
 import { cloneLedger, decodeNode, EMPTY_LEDGER, type SerializedNode, type UsageLedger } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -58,14 +58,15 @@ export function buildStatusReport(input: StatusInput): string {
     `Session  ${formatDuration(durationMs)} — ${input.compactionCount} compaction${input.compactionCount === 1 ? "" : "s"}`,
   );
 
-  // --- Memory section ---
+  // --- Memory section (counts with separators; columns aligned) ---
   const obsCount = input.observations.length;
   const obsTokens = sum(input.observations, (o) => o.contentTokens);
   const nodeCount = input.nodes.length;
   const nodeTokens = sum(input.nodes, (n) => n.summaryTokens);
+  const LABEL_WIDTH = 12; // "observations" is the longest label
   lines.push("", "Memory");
-  lines.push(`  observations  ${obsCount}     ${formatTokens(obsTokens)} tok`);
-  lines.push(`  nodes  ${nodeCount}      ${formatTokens(nodeTokens)} tok`);
+  lines.push(`  ${"observations".padStart(LABEL_WIDTH)}  ${formatCount(obsCount)}     ${formatTokens(obsTokens)} tok`);
+  lines.push(`  ${"nodes".padStart(LABEL_WIDTH)}  ${formatCount(nodeCount)}      ${formatTokens(nodeTokens)} tok`);
   lines.push(
     `  roots view  ${formatTokens(input.rootsViewTokens)} / ${formatTokens(input.settings.builderRootViewThreshold)}`,
   );

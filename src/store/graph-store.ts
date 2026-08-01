@@ -236,7 +236,7 @@ export async function load(ctx: StoreContext): Promise<void> {
   if (snapshot !== null) {
     graph = materializeBase(snapshot.details);
     storeState.selectedTree = snapshot.details.selectedTree;
-    storeState.usageLedger = snapshot.details.lastCompactionLedger ?? cloneLedger(EMPTY_LEDGER);
+    storeState.usageLedger = cloneLedger(snapshot.details.lastCompactionLedger ?? EMPTY_LEDGER);
     storeState.lastCompactionLedger = snapshot.details.lastCompactionLedger ?? null;
     replayFrom = snapshot.index + 1;
   } else {
