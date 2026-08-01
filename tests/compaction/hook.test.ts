@@ -61,6 +61,8 @@ function makeFakePi(): ExtensionAPI {
 
 const NO_NOTIFY: (msg: string, level: "warning" | "info") => void = () => {};
 
+/** avtc-pi-todo absent — no todo context or bridge (the graceful-degrade path). */
+const TODO_ABSENT = { context: null, bridge: null } as const;
 function makeFakeCtx(branch: unknown[], notify: (msg: string, level: "warning" | "info") => void): ExtensionContext {
   const fakeModel = { provider: "test", id: "m" } as unknown as ExtensionContext["model"];
   return {
@@ -153,7 +155,13 @@ describe("compactionHook", () => {
     const calls = newCalls();
     setCompactionStageRuns(fakeRuns(calls));
 
-    const result = await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET);
+    const result = await compactionHook(
+      compactEvent({}),
+      makeFakeCtx([], NO_NOTIFY),
+      makeFakePi(),
+      NO_OP_WIDGET,
+      TODO_ABSENT,
+    );
     const compaction = (
       result as { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; details: unknown } }
     ).compaction;
@@ -182,7 +190,7 @@ describe("compactionHook", () => {
     const calls = newCalls();
     setCompactionStageRuns(fakeRuns(calls));
 
-    await compactionHook(compactEvent({}), makeFakeCtx(branch, NO_NOTIFY), makeFakePi(), NO_OP_WIDGET);
+    await compactionHook(compactEvent({}), makeFakeCtx(branch, NO_NOTIFY), makeFakePi(), NO_OP_WIDGET, TODO_ABSENT);
 
     // Observer catch-up ran (gap-driven) and received the unobserved gap.
     expect(calls.observer).toBe(1);
@@ -200,7 +208,7 @@ describe("compactionHook", () => {
     const calls = newCalls();
     setCompactionStageRuns(fakeRuns(calls));
 
-    await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET);
+    await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET, TODO_ABSENT);
     expect(calls.builder).toBe(0);
   });
 
@@ -210,7 +218,7 @@ describe("compactionHook", () => {
     const calls = newCalls();
     setCompactionStageRuns(fakeRuns(calls));
 
-    await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET);
+    await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET, TODO_ABSENT);
     expect(calls.selector).toBe(0);
     // Builder + Observer still ran.
     expect(calls.builder).toBe(0); // fast-path (tiny root view)
@@ -222,7 +230,7 @@ describe("compactionHook", () => {
     const calls = newCalls();
     setCompactionStageRuns(fakeRuns(calls));
 
-    await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET);
+    await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET, TODO_ABSENT);
     expect(calls.observer).toBe(0);
   });
 
@@ -238,7 +246,13 @@ describe("compactionHook", () => {
       runSelector: vi.fn(async () => {}),
     });
 
-    const result = await compactionHook(compactEvent({}), makeFakeCtx([], notify), makeFakePi(), NO_OP_WIDGET);
+    const result = await compactionHook(
+      compactEvent({}),
+      makeFakeCtx([], notify),
+      makeFakePi(),
+      NO_OP_WIDGET,
+      TODO_ABSENT,
+    );
     expect(result).toEqual({ cancel: true });
     expect(notify).toHaveBeenCalled();
   });
@@ -255,6 +269,7 @@ describe("compactionHook", () => {
       makeFakeCtx([], NO_NOTIFY),
       makeFakePi(),
       NO_OP_WIDGET,
+      TODO_ABSENT,
     );
     expect(result).toEqual({ cancel: true });
     expect(calls.observer).toBe(0);
@@ -294,6 +309,7 @@ describe("compactionHook", () => {
       ),
       makeFakePi(),
       NO_OP_WIDGET,
+      TODO_ABSENT,
     );
     expect(result).toEqual({ cancel: true });
     // Observer ran; Builder + Selector skipped (signal aborted after Observer).
@@ -315,7 +331,13 @@ describe("compactionHook", () => {
 
     // Start the compaction hook (it blocks on acquireForCompaction awaiting the
     // background run's release).
-    const hookPromise = compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET);
+    const hookPromise = compactionHook(
+      compactEvent({}),
+      makeFakeCtx([], NO_NOTIFY),
+      makeFakePi(),
+      NO_OP_WIDGET,
+      TODO_ABSENT,
+    );
     // Yield once: the hook should still be awaiting (Builder not yet called).
     await Promise.resolve();
     expect(calls.observer).toBe(0);
@@ -342,7 +364,7 @@ describe("compactionHook", () => {
     expect(getGraphStore().lastCompactionLedger).toBeNull(); // none yet
 
     setCompactionStageRuns(fakeRuns(newCalls()));
-    await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET);
+    await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET, TODO_ABSENT);
 
     const snapshot = getGraphStore().lastCompactionLedger;
     expect(snapshot).not.toBeNull();

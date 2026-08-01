@@ -16,12 +16,16 @@ import { log } from "./log.js";
 import { createMkRecallTool } from "./recall/mk-recall.js";
 import { makeBuilderRun, makeObserverRun, runBuilder, runObserver } from "./runtime/stages.js";
 import { registerStatusCommand } from "./status/command.js";
+import { createTodoWiring } from "./todo/wiring.js";
 import { onTurnEnd, setStageRuns } from "./triggers.js";
 import { initWidget } from "./widget/tracker.js";
 
 export default function memkeeperExtension(pi: ExtensionAPI): void {
   initMemkeeperSettings(pi);
   const widget = initWidget();
+  // Optional avtc-pi-todo companion: getContext/getBridge return null until
+  // pi-todo:ready fires (avtc-pi-todo installed) — graceful degrade otherwise.
+  const todo = createTodoWiring(pi);
 
   // The agent's read-only memory drill-down tool. Registered unconditionally
   // (it is read-only and harmless even when memkeeper is disabled — it just
@@ -71,6 +75,9 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
     const settings = getMemkeeperSettings();
     // enabled=false off-path: return undefined so Pi runs its native compaction.
     if (!settings.enabled) return undefined;
-    return compactionHook(event, ctx, pi, widget);
+    return compactionHook(event, ctx, pi, widget, {
+      context: todo.getContext(),
+      bridge: todo.getBridge(),
+    });
   });
 }

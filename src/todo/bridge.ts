@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
+
+import type { TodoContext, TodoItem } from "../selector/input-view.js";
+import type { TodoBridge } from "../selector/tools.js";
+import type { TodoItemsStatus, TodoReadyItem } from "../snippets/vendored/subscribe-to-todo.js";
+
+/** The subset of the vendored `subscribeToTodo` proxy the adapter consumes —
+ *  just `getItems` (the read-only full-list getter). The proxy's other methods
+ *  (getInProgressItem string, areAllTodosDone, getCompletedItemId) serve the
+ *  followUp/compact path, not the Selector's todo context. */
+export interface TodoProxy {
+  getItems(filter: { status: TodoItemsStatus } | null): readonly TodoReadyItem[];
+}
+
+/** No status filter — return all items. Passed explicitly (no optional param on
+ *  the vendored proxy's getItems, which takes `{status} | null`). */
+const NO_FILTER = null;
+
+/** The status a `decomposed` (folder) item maps to in memkeeper's view — a
+ *  terminal/done state, surfaced as `completed`. Pending/in_progress pass
+ *  through unchanged. */
+const DECOMPOSED_AS = "completed" as const;
+
+/** Map a raw bridge item (string status, includes `decomposed`, details always
+ *  a string) to memkeeper's `TodoItem` (literal status union, details optional).
+ *  Drops `parentId` (not part of the Selector's todo view). */
+export function mapTodoItem(raw: TodoReadyItem): TodoItem {
+  const status: TodoItem["status"] = raw.status === "decomposed" ? DECOMPOSED_AS : (raw.status as TodoItem["status"]);
+  const details = raw.details.length === 0 ? undefined : raw.details;
+  return { id: raw.id, name: raw.name, status, details };
+}
+
+/** A read adapter over the vendored todo proxy: derives the Selector's
+ *  `TodoContext` (in-progress + pending, rendered in the input-view) and
+ *  `TodoBridge` (full list with optional status filter, powers the todo_list
+ *  tool) from the single `getItems` getter. All reads delegate lazily to the
+ *  proxy, so an absent/older bridge (no getItems) yields empty lists — graceful
+ *  degrade, not an error. */
+export function makeTodoAdapter(proxy: TodoProxy): { context: TodoContext; bridge: TodoBridge } {
+  const list = (status: TodoItemsStatus): TodoItem[] => proxy.getItems({ status }).map(mapTodoItem);
+
+  const context: TodoContext = {
+    getInProgress: () => {
+      const items = list("in_progress");
+      return items.length === 0 ? null : (items[0] ?? null);
+    },
+    getPending: () => list("pending"),
+  };
+
+  const bridge: TodoBridge = {
+    getItems: (filter) => {
+      if (filter === undefined || filter.status === undefined) {
+        return proxy.getItems(NO_FILTER).map(mapTodoItem);
+      }
+      return proxy.getItems({ status: filter.status }).map(mapTodoItem);
+    },
+  };
+
+  return { context, bridge };
+}

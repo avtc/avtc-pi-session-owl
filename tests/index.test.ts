@@ -58,6 +58,13 @@ vi.mock("../src/runtime/stages.js", () => ({
   runBuilder: vi.fn(),
 }));
 
+vi.mock("../src/todo/wiring.js", () => ({
+  createTodoWiring: vi.fn(() => ({
+    getContext: vi.fn(() => ({ getInProgress: () => null, getPending: () => [] })),
+    getBridge: vi.fn(() => ({ getItems: () => [] })),
+  })),
+}));
+
 import { compactionHook } from "../src/compaction/hook.js";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
 import memkeeperExtension from "../src/index.js";
@@ -179,6 +186,12 @@ describe("memkeeperExtension (activate wiring)", () => {
     const event = { type: "session_before_compact" } as unknown as SessionBeforeCompactEvent;
     await handler?.(event, makeCtx());
     expect(compactionHook).toHaveBeenCalledTimes(1);
+    // the todo wiring (context + bridge from createTodoWiring) is threaded through
+    const callArgs = (compactionHook as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    const todoArg = callArgs?.[4] as { context: unknown; bridge: unknown };
+    expect(todoArg).toBeDefined();
+    expect(todoArg.context).toBeDefined();
+    expect(todoArg.bridge).toBeDefined();
   });
 
   it("session_before_compact early-returns undefined when enabled=false (Pi native compaction)", async () => {

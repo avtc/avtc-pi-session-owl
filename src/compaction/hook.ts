@@ -30,7 +30,9 @@ import { isRenderableEntry } from "../observer/chunk.js";
 import type { ObserverRunInput } from "../observer/run.js";
 import { runObserver as realRunObserver } from "../observer/run.js";
 import { acquireForCompaction } from "../runtime/run-lock.js";
+import type { TodoContext } from "../selector/input-view.js";
 import { runSelector as realRunSelector, type SelectorRunInput } from "../selector/run.js";
+import type { TodoBridge } from "../selector/tools.js";
 import { snapshotAtCompaction } from "../status/usage-ledger.js";
 import { encodeDetails } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -105,6 +107,7 @@ export async function compactionHook(
   ctx: ExtensionContext,
   pi: ExtensionAPI,
   widget: WidgetController,
+  todo: { context: TodoContext | null; bridge: TodoBridge | null },
 ): Promise<CompactionResult> {
   const settings = settingsGetter();
 
@@ -154,8 +157,8 @@ export async function compactionHook(
         signal,
         widget,
         scope: { firstKeptEntryId },
-        todo: null,
-        todoBridge: null,
+        todo: todo.context,
+        todoBridge: todo.bridge,
       });
     }
     if (signal.aborted) return cancelAborted(ctx);
