@@ -38,12 +38,12 @@ import {
   SET_SUMMARY_TOOL,
 } from "../graph/mutate-tools.js";
 
-/** Re-export the Selector-only summary tool name for callers/tests. */
-export { SET_SUMMARY_TOOL };
-
 import { MUTATE_WORKING_COPY } from "../graph/mutations.js";
 import { makeReadTools, makeTryFinishTool } from "../graph/read-tools.js";
 import type { SelectorWorkingCopy, TodoItem } from "./input-view.js";
+
+/** Re-export the Selector-only summary tool name for callers/tests. */
+export { SET_SUMMARY_TOOL };
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -126,7 +126,7 @@ function makeTodoListTool(bridge: TodoBridge): AgentTool<typeof TODO_LIST_PARAMS
     label: "Todo list",
     parameters: TODO_LIST_PARAMS,
     async execute(_toolCallId, params) {
-      const status = (params.status ?? undefined) as TodoItem["status"] | undefined;
+      const status = params.status as TodoItem["status"] | undefined;
       const items = bridge.getItems(status === undefined ? {} : { status });
       if (items.length === 0) return { content: [{ type: "text", text: "(no todos)" }], details: { count: 0 } };
       const lines = items.map((item) => {

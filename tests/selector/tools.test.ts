@@ -236,7 +236,7 @@ describe("Selector set_summary (Selector-only, summary-only)", () => {
   it("rejects an unknown nodeId with an error result (no throw)", async () => {
     const tools = makeSelectorGraphTools(working, SETTINGS);
     const res = await callTool(tools, SET_SUMMARY_TOOL, { nodeId: "nGhost", summary: "x" });
-    expect(textOf(res).toLowerCase()).toContain("set_meta");
+    expect(textOf(res).toLowerCase()).toContain("set_summary");
     expect(textOf(res).toLowerCase()).toContain("nghost");
   });
 });
@@ -355,6 +355,17 @@ describe("Selector todo_list (conditional)", () => {
     const out = textOf(await callTool(tools, TODO_LIST_TOOL, { status: "pending" }));
     expect(out).toContain("b");
     expect(out).not.toContain("in_progress · a");
+  });
+
+  it("status param is enum-validated at the schema boundary (rejects typos)", () => {
+    const bridge: TodoBridge = { getItems: () => [] };
+    const tools = makeSelectorTools({ workingCopy: working, settings: SETTINGS, ctx: ctxStub(), todoBridge: bridge });
+    const tool = tools.find((t) => t.name === TODO_LIST_TOOL);
+    expect(tool).toBeDefined();
+    const schema = (tool as AgentTool).parameters as { properties?: { status?: { enum?: unknown[] } } };
+    // StringEnum emits a { type: "string", enum: [...] } — a plain Type.String
+    // would have no `enum` key, so a revert to Type.String would fail this.
+    expect(schema.properties?.status?.enum).toEqual(["in_progress", "pending", "completed"]);
   });
 });
 
