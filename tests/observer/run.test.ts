@@ -465,4 +465,38 @@ describe("runObserver", () => {
     expect(calls).toContain("end");
     expect(calls[calls.length - 1]).toBe("end");
   });
+
+  it("closes the observe stage when the run aborts mid-loop (endStage in finally)", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // two chunks so the loop iterates; abort fires before the second chunk runs.
+    const unobserved = [userEntry("u1", "x".repeat(50)), assistantEntry("a1", "y".repeat(50))];
+    const controller = new AbortController();
+    let chunk = 0;
+    const abortAfterFirst = async () => {
+      chunk += 1;
+      if (chunk === 1) controller.abort(); // abort after the first chunk processes
+      return {
+        messages: [] as AgentMessage[],
+        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
+        streamingOutputTokens: 0,
+        aborted: controller.signal.aborted,
+      };
+    };
+    const calls: string[] = [];
+    const widget: WidgetController = {
+      ...NO_OP_WIDGET,
+      startStage: () => calls.push("start"),
+      endStage: () => calls.push("end"),
+    };
+
+    await runObserver({
+      ...makeArgs({ pi, ctx, unobserved, runStageFn: abortAfterFirst, widget }),
+      signal: controller.signal,
+    });
+
+    // abort mid-run → endStage still fired (finally ran)
+    expect(calls).toContain("start");
+    expect(calls).toContain("end");
+  });
 });

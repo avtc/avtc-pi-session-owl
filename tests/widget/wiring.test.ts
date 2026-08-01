@@ -16,20 +16,20 @@ interface SetWidgetCall {
   options: unknown;
 }
 
-function makeCtx(over?: Partial<ExtensionContext>): { ctx: ExtensionContext; calls: SetWidgetCall[] } {
+function makeCtx(over: Partial<ExtensionContext> | null): { ctx: ExtensionContext; calls: SetWidgetCall[] } {
   const calls: SetWidgetCall[] = [];
   const ctx = {
     mode: "tui",
     hasUI: true,
     ui: {
-      setWidget(key: string, content: unknown, options?: unknown) {
+      setWidget(key: string, content: unknown, options: unknown) {
         calls.push({ key, content, options });
       },
       notify: () => {},
     },
     getContextUsage: () => ({ tokens: 12_000, contextWindow: 262_000, percent: 5 }),
   } as unknown as ExtensionContext;
-  return { ctx: { ...ctx, ...over } as ExtensionContext, calls };
+  return { ctx: { ...ctx, ...(over ?? {}) } as ExtensionContext, calls };
 }
 
 describe("initWidget wiring", () => {
@@ -44,7 +44,7 @@ describe("initWidget wiring", () => {
 
   it("render() with an active stage + TUI → setWidget(key, factory, aboveEditor)", () => {
     const widget = initWidget();
-    const { ctx, calls } = makeCtx();
+    const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
     widget.startStage("build", { pass: 1 });
     widget.render();
@@ -56,7 +56,7 @@ describe("initWidget wiring", () => {
 
   it("the factory produces a renderable component (renders non-empty lines)", () => {
     const widget = initWidget();
-    const { ctx, calls } = makeCtx();
+    const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
     widget.startStage("observe");
     widget.render();
@@ -70,7 +70,7 @@ describe("initWidget wiring", () => {
 
   it("render() idle (stage null) → setWidget(key, undefined) to hide", () => {
     const widget = initWidget();
-    const { ctx, calls } = makeCtx();
+    const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
     // show first, then endStage → render hides
     widget.startStage("observe");
@@ -93,7 +93,7 @@ describe("initWidget wiring", () => {
 
   it("clearCtx drops the ref (render becomes a no-op even with an active stage)", () => {
     const widget = initWidget();
-    const { ctx, calls } = makeCtx();
+    const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
     widget.startStage("observe");
     widget.clearCtx(); // hides once (1 setWidget call)
@@ -104,7 +104,7 @@ describe("initWidget wiring", () => {
 
   it("clearCtx hides the widget before dropping the ref (no stale line)", () => {
     const widget = initWidget();
-    const { ctx, calls } = makeCtx();
+    const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
     widget.startStage("observe");
     widget.render(); // shown
@@ -118,7 +118,7 @@ describe("initWidget wiring", () => {
 
   it("onEvent forwards to the tracker then renders (live streaming)", () => {
     const widget = initWidget();
-    const { ctx, calls } = makeCtx();
+    const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
     widget.startStage("build", { pass: 1 });
     // a message_update with usage → streaming tokens + a re-render

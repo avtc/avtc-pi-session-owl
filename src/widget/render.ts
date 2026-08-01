@@ -108,10 +108,10 @@ function trailingSection(snap: WidgetSnapshot, theme: ThemeSeam): string {
  */
 export function formatWidgetLine(snap: WidgetSnapshot, theme: ThemeSeam): string {
   const sep = paint(theme, "dim", SEP);
-  const owl = paint(theme, "text", OWL);
-  const parts: string[] = [owl, obsSection(snap, theme), rootsSection(snap, theme)];
+  const owl = paint(theme, "text", `${OWL} `);
+  const sections: string[] = [obsSection(snap, theme), rootsSection(snap, theme)];
   const selected = selectedSection(snap, theme);
-  if (selected !== null) parts.push(selected);
-  parts.push(trailingSection(snap, theme));
-  return `${paint(theme, "text", " ")}${parts.join(sep)}`;
+  if (selected !== null) sections.push(selected);
+  sections.push(trailingSection(snap, theme));
+  return `${owl}${sections.join(sep)}`;
 }

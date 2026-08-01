@@ -12,7 +12,9 @@ import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.j
 import type { NodeId } from "../../src/types.js";
 import { buildSnapshot, createTracker, type ProgressTracker } from "../../src/widget/tracker.js";
 
-function makeCtx(usage?: { tokens: number | null; contextWindow: number }): ExtensionContext {
+type CtxUsage = { tokens: number | null; contextWindow: number } | undefined;
+
+function makeCtx(usage: CtxUsage): ExtensionContext {
   return {
     getContextUsage: () => usage,
   } as unknown as ExtensionContext;
@@ -48,7 +50,7 @@ describe("buildSnapshot", () => {
     expect(snap.roots.countDelta).toBe(1); // 1 − 0 baseline
   });
 
-  it("roots viewTokens + threshold come from the live graph + config", () => {
+  it("roots viewTokens is the full root-view render (not Σ summaryTokens), threshold from config", () => {
     applyCreateNode(getGraphStore().graph, {
       id: "n1" as NodeId,
       summary: "x".repeat(40),
@@ -58,8 +60,9 @@ describe("buildSnapshot", () => {
     });
     tracker.startStage("build", { pass: 1 });
     const snap = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
-    // one root, summary 40 chars → ceil(40/4)=10 tokens
-    expect(snap.roots.viewTokens).toBe(10);
+    // viewTokens = the full rendered root-view line (icon/id/importance/datetime…),
+    // NOT just the summary's ceil(40/4)=10 — strictly larger than the summary alone.
+    expect(snap.roots.viewTokens).toBeGreaterThan(10);
     expect(snap.roots.threshold).toBe(40_000); // DEFAULT_CONFIG.builderRootViewThreshold
   });
 

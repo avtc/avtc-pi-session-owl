@@ -12,9 +12,10 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
+import { measureRootViewTokens, nonObsoleteRoots } from "../graph/read-tools.js";
 import type { StageUsage } from "../runtime/agent-loop.js";
 import { getGraphStore } from "../store/graph-store.js";
-import { estimateContentTokens, type Importance, type NodeState } from "../types.js";
+import { estimateContentTokens } from "../types.js";
 import { formatWidgetLine } from "./render.js";
 
 /** The maintenance stages the widget surfaces (one at a time; run-level). */
@@ -57,21 +58,6 @@ export interface WidgetSnapshot {
   selected: { count: number; countDelta: number; viewTokens: number; tokenDelta: number; threshold: number } | null;
   contextTokens: number | null;
   contextWindow: number | null;
-}
-
-/** A non-obsolete root node summary used by buildSnapshot. */
-export interface RootSummary {
-  id: string;
-  state: NodeState;
-  importance: Importance;
-  summary: string;
-}
-
-/** Σ summaryTokens of non-obsolete roots (the root-view render's token footprint —
- *  mirrors the chars/4 estimate try_finish measures). */
-export function liveRootView(roots: RootSummary[]): { count: number; viewTokens: number } {
-  const viewTokens = roots.reduce((sum, root) => sum + estimateContentTokens(root.summary), 0);
-  return { count: roots.length, viewTokens };
 }
 
 /** The stage-control methods shared by the tracker + the controller surface
@@ -250,34 +236,28 @@ export function createTracker(): ProgressTracker {
 
 // --- snapshot (tracker + live store/ctx → pure data for the render) --------
 
-/** Collect non-obsolete root nodes from the live graph (the widget's `roots` source). */
-function liveNonObsoleteRoots(): RootSummary[] {
-  const { graph } = getGraphStore();
-  const roots: RootSummary[] = [];
-  for (const node of graph.nodes.values()) {
-    if (node.parentNode !== null) continue;
-    if (node.state === "obsolete") continue;
-    roots.push({ id: node.id, state: node.state, importance: node.importance, summary: node.summary });
-  }
-  return roots;
-}
+/** The viewer the widget's roots section reflects: the Builder's budget view
+ *  (the builderRootViewThreshold gate uses the same render). */
+const WIDGET_ROOTS_VIEWER = "builder" as const;
 
 /** Snapshot the current root counts + view tokens (the baseline at stage start). */
 function currentRootBaseline(): Baseline {
-  const view = liveRootView(liveNonObsoleteRoots());
+  const { graph } = getGraphStore();
   return {
-    obsCount: getGraphStore().graph.observations.size,
-    rootsCount: view.count,
-    rootsViewTokens: view.viewTokens,
+    obsCount: graph.observations.size,
+    rootsCount: nonObsoleteRoots(graph).length,
+    rootsViewTokens: measureRootViewTokens(graph, WIDGET_ROOTS_VIEWER),
   };
 }
 
 /** Build the render snapshot from the tracker + live store/ctx. */
 export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): WidgetSnapshot {
   const settings = getMemkeeperSettings();
-  const view = liveRootView(liveNonObsoleteRoots());
+  const { graph } = getGraphStore();
+  const rootsCount = nonObsoleteRoots(graph).length;
+  const rootsViewTokens = measureRootViewTokens(graph, WIDGET_ROOTS_VIEWER);
   const baseline = tracker.baseline ?? { obsCount: 0, rootsCount: 0, rootsViewTokens: 0 };
-  const obsCount = getGraphStore().graph.observations.size;
+  const obsCount = graph.observations.size;
   const ctxUsage = ctx.getContextUsage();
   // both context fields are null when getContextUsage() is undefined (the window
   // is unknown too); render shows `?` alone rather than `?/0` (never 0/NaN).
@@ -308,10 +288,10 @@ export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): 
     streamingOutputTokens: tracker.streamingOutputTokens,
     obs: { count: obsCount, delta: obsCount - baseline.obsCount },
     roots: {
-      count: view.count,
-      countDelta: view.count - baseline.rootsCount,
-      viewTokens: view.viewTokens,
-      tokenDelta: view.viewTokens - baseline.rootsViewTokens,
+      count: rootsCount,
+      countDelta: rootsCount - baseline.rootsCount,
+      viewTokens: rootsViewTokens,
+      tokenDelta: rootsViewTokens - baseline.rootsViewTokens,
       threshold: settings.builderRootViewThreshold,
     },
     selected,
