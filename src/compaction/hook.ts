@@ -131,7 +131,7 @@ export async function compactionHook(
     // safety net AD9 provides.
     const gap = observerCatchUpGap(ctx, firstKeptEntryId);
     if (gap.length > EMPTY_GAP) {
-      await stageRuns.runObserver({ ctx, pi, settings, unobserved: gap, signal, onEvent: null });
+      await stageRuns.runObserver({ ctx, pi, settings, unobserved: gap, signal, widget });
     }
     if (signal.aborted) return cancelAborted(ctx);
 

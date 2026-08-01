@@ -11,7 +11,6 @@ import { type BuilderRunInput, runBuilder } from "../builder/run.js";
 import { type ObserverRunInput, runObserver } from "../observer/run.js";
 import type { RunFn } from "../triggers.js";
 import type { WidgetController } from "../widget/tracker.js";
-import { NO_EVENT_SINK } from "./agent-loop.js";
 
 /** A seam over the real runObserver (tests pass a fake; production passes runObserver). */
 type RunObserverFn = (input: ObserverRunInput) => Promise<void>;
@@ -30,7 +29,7 @@ export { runBuilder };
  * unobserved}` into the run function. The Observer's only input is the unobserved
  * slice; it honors `signal` and owns no run-lock (the caller owns the lifecycle).
  */
-export function makeObserverRun(pi: ExtensionAPI, runObserverFn: RunObserverFn): RunFn {
+export function makeObserverRun(pi: ExtensionAPI, widget: WidgetController, runObserverFn: RunObserverFn): RunFn {
   return async (args) => {
     if (args.unobserved === null) return;
     await runObserverFn({
@@ -39,7 +38,7 @@ export function makeObserverRun(pi: ExtensionAPI, runObserverFn: RunObserverFn):
       settings: args.settings,
       unobserved: args.unobserved,
       signal: args.signal,
-      onEvent: NO_EVENT_SINK,
+      widget,
     });
   };
 }

@@ -5,13 +5,14 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { describe, expect, it } from "vitest";
 import { makeObserverRun } from "../../src/runtime/stages.js";
 import { onTurnEnd, setStageRuns } from "../../src/triggers.js";
+import { NO_OP_WIDGET } from "../../src/widget/tracker.js";
 
 describe("makeObserverRun (Observer stage wiring)", () => {
   it("adapts the Observer run into the RunFn contract and is invoked by onTurnEnd", async () => {
     let calledWithUnobserved: unknown = "never";
     const pi = {} as unknown as ExtensionAPI;
     // inject a fake runObserver via the seam
-    const runFn = makeObserverRun(pi, async (args) => {
+    const runFn = makeObserverRun(pi, NO_OP_WIDGET, async (args) => {
       calledWithUnobserved = args.unobserved.map((e) => e.id);
     });
     setStageRuns({

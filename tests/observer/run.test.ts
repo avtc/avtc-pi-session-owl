@@ -8,6 +8,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setClock } from "../../src/graph/mutations.js";
 import { type ObserverRunInput, runObserver } from "../../src/observer/run.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
+import { NO_OP_WIDGET, type WidgetController } from "../../src/widget/tracker.js";
 
 // --- helpers ---------------------------------------------------------------
 
@@ -113,6 +114,7 @@ function makeArgs(opts: {
   unobserved: SessionEntry[];
   runStageFn: ObserverRunInput["runStageFn"];
   thresholdTokens?: number;
+  widget?: WidgetController;
 }): ObserverRunInput {
   return {
     ctx: opts.ctx,
@@ -142,7 +144,7 @@ function makeArgs(opts: {
     unobserved: opts.unobserved,
     signal: new AbortController().signal,
     runStageFn: opts.runStageFn,
-    onEvent: null,
+    widget: opts.widget ?? NO_OP_WIDGET,
   };
 }
 
@@ -401,5 +403,43 @@ describe("runObserver", () => {
     expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(2);
     // frontier advanced to the last entry of the whole run
     expect(getGraphStore().observerFrontier).toBe("a1");
+  });
+
+  it("opens the observe widget stage, reports batch progress, and closes it", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // two chunks (threshold 1 → each entry its own chunk): [u1], [a1].
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = scriptedRunStage([
+      [{ content: "Goal.", importance: "high", sourceEntryIds: ["u1"] }],
+      [{ content: "Decision.", importance: "high", sourceEntryIds: ["a1"] }],
+    ]);
+    const calls: { method: string; args: unknown[] }[] = [];
+    const widget: WidgetController = {
+      ...NO_OP_WIDGET,
+      startStage: (stage, init) => calls.push({ method: "startStage", args: [stage, init] }),
+      setBatch: (done, total) => calls.push({ method: "setBatch", args: [done, total] }),
+      endStage: () => calls.push({ method: "endStage", args: [] }),
+      onEvent: (event) => calls.push({ method: "onEvent", args: [event] }),
+      render: () => calls.push({ method: "render", args: [] }),
+    };
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn, thresholdTokens: 1, widget }));
+
+    // observe stage opened once with the chunk count as the batch total
+    const starts = calls.filter((c) => c.method === "startStage");
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.args[0]).toBe("observe");
+    expect(starts[0]?.args[1]).toEqual({ batch: { done: 0, total: 2 } });
+    // batch advanced per chunk (2 chunks → 2 setBatch calls)
+    const batches = calls.filter((c) => c.method === "setBatch").map((c) => c.args);
+    expect(batches).toEqual([
+      [1, 2],
+      [2, 2],
+    ]);
+    // stage closed exactly once at the end
+    expect(calls.filter((c) => c.method === "endStage")).toHaveLength(1);
+    // appended sanity (the run still persisted)
+    expect(appended.some((e) => e.type === "memkeeper.observation")).toBe(true);
   });
 });

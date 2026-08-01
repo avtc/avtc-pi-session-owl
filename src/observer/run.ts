@@ -12,7 +12,7 @@
 // across all chunks then appended at the end (accumulate-then-append — a failed
 // or aborted run writes nothing; idempotent by coverage range on re-run).
 
-import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
@@ -23,7 +23,6 @@ import { log } from "../log.js";
 import { notify } from "../notify.js";
 import { OBSERVER_SYSTEM } from "../prompts/observer.js";
 import {
-  NO_EVENT_SINK,
   NO_REASONING,
   NO_STAGE_END_HOOK,
   runStage,
@@ -35,6 +34,7 @@ import { ImportanceSchema } from "../schema.js";
 import { encodeObservation, type ObservationEntry } from "../store/codecs.js";
 import { appendGraphDelta, appendObservation, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import { type Importance, makeObservation, type NodeId, nowStoredTimestamp, type ObsId } from "../types.js";
+import type { WidgetController } from "../widget/tracker.js";
 import { buildChunks, type ChunkOptions } from "./chunk.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
@@ -137,8 +137,8 @@ export interface ObserverRunInput {
   unobserved: SessionEntry[];
   /** Abort signal (the caller's per-run controller). */
   signal: AbortSignal;
-  /** Widget event sink, or null. */
-  onEvent: ((event: AgentEvent) => void) | null;
+  /** The widget controller (opens the observe stage + forwards agent events). */
+  widget: WidgetController;
   /** Test seam — fake stage runner override, or null/omitted for the real `runStage`. */
   runStageFn?: (input: StageRunInput) => Promise<StageRunResult>;
 }
@@ -183,83 +183,97 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   for (const entry of input.unobserved) entryById.set(entry.id, entry);
 
   const allRecords: RecordObservation[] = [];
-  for (const chunk of chunks) {
-    if (input.signal.aborted) return;
-    const recordTool = makeRecordObservationsTool(chunk.allowedIds);
-    const stageInput: StageRunInput = {
-      systemPrompt: OBSERVER_SYSTEM,
-      messages: [{ role: "user", content: chunk.text } as AgentMessage],
-      tools: [recordTool.tool],
-      model: resolved.model,
-      apiKey: resolved.apiKey,
-      signal: input.signal,
-      reasoning: NO_REASONING,
-      maxTurns: NO_MAX_TURNS,
-      onEvent: input.onEvent ?? NO_EVENT_SINK,
-      onStageEnd: NO_STAGE_END_HOOK,
-      loopFn: NO_LOOP_OVERRIDE,
-    };
-
-    const run = input.runStageFn ?? runStage;
-    try {
-      await run(stageInput);
-    } catch (cause) {
-      // an aborted run stops the whole Observer (nothing committed yet).
+  const totalChunks = chunks.length;
+  let stageOpened = false;
+  let done = 0;
+  try {
+    input.widget.startStage("observe", { batch: { done: 0, total: totalChunks } });
+    stageOpened = true;
+    for (const chunk of chunks) {
       if (input.signal.aborted) return;
-      log.error("observer stage failed", cause);
-      notify(input.ctx, "Observer skipped a chunk (LLM error); continuing", "warning");
-      continue;
+      const recordTool = makeRecordObservationsTool(chunk.allowedIds);
+      const stageInput: StageRunInput = {
+        systemPrompt: OBSERVER_SYSTEM,
+        messages: [{ role: "user", content: chunk.text } as AgentMessage],
+        tools: [recordTool.tool],
+        model: resolved.model,
+        apiKey: resolved.apiKey,
+        signal: input.signal,
+        reasoning: NO_REASONING,
+        maxTurns: NO_MAX_TURNS,
+        onEvent: (event) => input.widget.onEvent(event),
+        onStageEnd: NO_STAGE_END_HOOK,
+        loopFn: NO_LOOP_OVERRIDE,
+      };
+
+      const run = input.runStageFn ?? runStage;
+      try {
+        await run(stageInput);
+      } catch (cause) {
+        // an aborted run stops the whole Observer (nothing committed yet).
+        if (input.signal.aborted) return;
+        log.error("observer stage failed", cause);
+        notify(input.ctx, "Observer skipped a chunk (LLM error); continuing", "warning");
+        continue;
+      } finally {
+        done += 1;
+        input.widget.setBatch(done, totalChunks);
+      }
+      allRecords.push(...recordTool.records);
+      // an all-bad chunk (model attempted records but every id was foreign) is
+      // skipped — no records from it — and the user is warned.
+      if (recordTool.attempted > EMPTY_RECORDS && recordTool.records.length === EMPTY_RECORDS) {
+        notify(input.ctx, "Observer skipped a chunk: all observations cited invalid source ids", "warning");
+      }
     }
-    allRecords.push(...recordTool.records);
-    // an all-bad chunk (model attempted records but every id was foreign) is
-    // skipped — no records from it — and the user is warned.
-    if (recordTool.attempted > EMPTY_RECORDS && recordTool.records.length === EMPTY_RECORDS) {
-      notify(input.ctx, "Observer skipped a chunk: all observations cited invalid source ids", "warning");
+
+    if (input.signal.aborted) return;
+
+    if (allRecords.length === EMPTY_RECORDS) {
+      // nothing worth keeping — no delta, frontier unchanged (re-runs next trigger).
+      notify(input.ctx, "Observer returned no observations", "warning");
+      return;
     }
-  }
 
-  if (input.signal.aborted) return;
-
-  if (allRecords.length === EMPTY_RECORDS) {
-    // nothing worth keeping — no delta, frontier unchanged (re-runs next trigger).
-    notify(input.ctx, "Observer returned no observations", "warning");
-    return;
-  }
-
-  // wrap each record in a fresh `new` node at root, in-memory first (create_node
-  // + record_observation), tracking the pairs for persistence.
-  const pairs: WrappedPair[] = [];
-  for (const record of allRecords) {
-    const nodeId = `n${graph.nextNodeId}` as NodeId;
-    applyCreateNode(graph, {
-      id: nodeId,
-      summary: "",
-      importance: record.importance,
-      parentNode: null,
-      state: "new",
-    });
-    const obsId = `o${graph.nextObsId}` as ObsId;
-    const firstSource = record.sourceEntryIds.map((id) => entryById.get(id)).find((entry) => entry !== NO_SOURCE_ENTRY);
-    const timestamp = firstSource !== undefined ? toStoredTimestamp(firstSource.timestamp) : nowStoredTimestamp();
-    applyRecordObservation(graph, {
-      obs: makeObservation({
-        id: obsId,
-        content: record.content,
+    // wrap each record in a fresh `new` node at root, in-memory first (create_node
+    // + record_observation), tracking the pairs for persistence.
+    const pairs: WrappedPair[] = [];
+    for (const record of allRecords) {
+      const nodeId = `n${graph.nextNodeId}` as NodeId;
+      applyCreateNode(graph, {
+        id: nodeId,
+        summary: "",
         importance: record.importance,
-        sourceEntryIds: record.sourceEntryIds,
-        timestamp,
-        parentNode: nodeId,
-      }),
-    });
-    pairs.push({ nodeId, obsId });
-  }
+        parentNode: null,
+        state: "new",
+      });
+      const obsId = `o${graph.nextObsId}` as ObsId;
+      const firstSource = record.sourceEntryIds
+        .map((id) => entryById.get(id))
+        .find((entry) => entry !== NO_SOURCE_ENTRY);
+      const timestamp = firstSource !== undefined ? toStoredTimestamp(firstSource.timestamp) : nowStoredTimestamp();
+      applyRecordObservation(graph, {
+        obs: makeObservation({
+          id: obsId,
+          content: record.content,
+          importance: record.importance,
+          sourceEntryIds: record.sourceEntryIds,
+          timestamp,
+          parentNode: nodeId,
+        }),
+      });
+      pairs.push({ nodeId, obsId });
+    }
 
-  // persist: the wrapper create_node deltas (one per record), then the single
-  // observation entry for the whole run (coversFromId/coversUpToId). The
-  // record_observation delta is NOT persisted — observations enter via
-  // the observation entry's content index + reconcileLinks on load).
-  persistWrappers(store, pairs);
-  persistObservationBatch(store, input.unobserved, pairs);
+    // persist: the wrapper create_node deltas (one per record), then the single
+    // observation entry for the whole run (coversFromId/coversUpToId). The
+    // record_observation delta is NOT persisted — observations enter via
+    // the observation entry's content index + reconcileLinks on load).
+    persistWrappers(store, pairs);
+    persistObservationBatch(store, input.unobserved, pairs);
+  } finally {
+    if (stageOpened) input.widget.endStage();
+  }
 }
 
 // --- persist helpers -------------------------------------------------------
