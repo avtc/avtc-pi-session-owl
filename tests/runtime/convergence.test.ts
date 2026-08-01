@@ -5,7 +5,7 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import { MKDIR_TOOL, MV_TOOL } from "../../src/graph/mutate-tools.js";
 import { LS_TOOL, TRY_FINISH_TOOL } from "../../src/graph/read-tools.js";
-import type { StageRunInput, StageRunResult } from "../../src/runtime/agent-loop.js";
+import type { StageRunInput, StageRunResult, StageUsage } from "../../src/runtime/agent-loop.js";
 import { makeConvergenceTracker, runConvergencePass } from "../../src/runtime/convergence.js";
 
 const NAMES = new Set<string>([MKDIR_TOOL, MV_TOOL]);
@@ -93,6 +93,7 @@ describe("runConvergencePass", () => {
     model: { provider: "t", id: "m" } as StageRunInput["model"],
     apiKey: undefined,
     signal: new AbortController().signal,
+    onStageEnd: null as ((usage: StageUsage) => void) | null,
     stageLabel: "test",
   } as const;
 
@@ -127,5 +128,29 @@ describe("runConvergencePass", () => {
     };
     await expect(runConvergencePass({ ...BASE, onEvent, outcome, runStageFn })).resolves.toBeUndefined();
     expect(outcome.mutates).toBe(1);
+  });
+
+  it("forwards onStageEnd into the stage input (the usage-ledger seam)", async () => {
+    const { outcome, onEvent } = makeConvergenceTracker(() => {}, NAMES);
+    let receivedHook: ((usage: StageUsage) => void) | null | undefined;
+    const runStageFn = async (input: StageRunInput): Promise<StageRunResult> => {
+      receivedHook = input.onStageEnd;
+      input.onEvent?.(endEvent(MKDIR_TOOL, true, false));
+      return {
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
+        streamingOutputTokens: 0,
+        aborted: false,
+      };
+    };
+    const sink = (_u: StageUsage): void => {};
+    await runConvergencePass({
+      ...BASE,
+      onEvent,
+      onStageEnd: sink,
+      outcome,
+      runStageFn,
+    });
+    expect(receivedHook).toBe(sink);
   });
 });

@@ -327,4 +327,30 @@ describe("compactionHook", () => {
     expect(calls.builder).toBe(1); // unblocked → Builder ran
     _resetRunLock();
   });
+
+  it("snapshots the usage ledger into lastCompactionLedger at compaction (deep copy)", async () => {
+    seedStoreGraph();
+    // pre-populate the cumulative ledger with some observe usage.
+    const { addPhaseUsage } = await import("../../src/status/usage-ledger.js");
+    addPhaseUsage(getGraphStore().usageLedger, "observe", {
+      input: 5000,
+      output: 1000,
+      cacheRead: 800,
+      cost: 0.2,
+      turns: 4,
+    });
+    expect(getGraphStore().lastCompactionLedger).toBeNull(); // none yet
+
+    setCompactionStageRuns(fakeRuns(newCalls()));
+    await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET);
+
+    const snapshot = getGraphStore().lastCompactionLedger;
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.observe.input).toBe(5000);
+    expect(snapshot?.observe.runs).toBe(1);
+    // deep copy: later stage activity must not mutate the captured baseline.
+    addPhaseUsage(getGraphStore().usageLedger, "observe", { input: 1000, output: 0, cacheRead: 0, cost: 0, turns: 1 });
+    expect(getGraphStore().lastCompactionLedger?.observe.input).toBe(5000);
+    expect(getGraphStore().lastCompactionLedger?.observe.runs).toBe(1);
+  });
 });

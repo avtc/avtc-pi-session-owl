@@ -499,4 +499,37 @@ describe("runObserver", () => {
     expect(calls).toContain("start");
     expect(calls).toContain("end");
   });
+
+  it("feeds each chunk's stage usage into the store ledger (onStageEnd seam)", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // two small chunks (low threshold forces a chunk per entry) → two stage runs
+    const unobserved = [userEntry("u1", "x".repeat(50)), assistantEntry("a1", "y".repeat(50))];
+    // a runStage that behaves like the real one: invokes onStageEnd with usage,
+    // then returns the result. Returns a distinct non-zero usage per call.
+    let call = 0;
+    const usages = [
+      { input: 1000, output: 500, cacheRead: 300, cost: 0.05, turns: 3 },
+      { input: 2000, output: 1500, cacheRead: 700, cost: 0.11, turns: 5 },
+    ];
+    const runStageFn: ObserverRunInput["runStageFn"] = async (input) => {
+      call += 1;
+      const usage = usages[call - 1] ?? usages[0];
+      // the real runStage invokes onStageEnd with the accumulated usage.
+      input.onStageEnd?.(usage);
+      return { messages: [], usage, streamingOutputTokens: 0, aborted: false };
+    };
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn, thresholdTokens: 10 }));
+
+    // observe phase accumulated BOTH chunks' usage + counted two runs.
+    const obs = getGraphStore().usageLedger.observe;
+    expect(obs.input).toBe(3000);
+    expect(obs.output).toBe(2000);
+    expect(obs.cacheRead).toBe(1000);
+    expect(obs.runs).toBe(2);
+    // build/select untouched.
+    expect(getGraphStore().usageLedger.build.runs).toBe(0);
+    expect(getGraphStore().usageLedger.select.runs).toBe(0);
+  });
 });

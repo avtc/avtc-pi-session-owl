@@ -12,13 +12,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { TRY_FINISH_TOOL } from "../graph/read-tools.js";
 import { log } from "../log.js";
-import {
-  NO_REASONING,
-  NO_STAGE_END_HOOK,
-  NO_TURN_LIMIT,
-  type StageRunInput,
-  type StageRunResult,
-} from "./agent-loop.js";
+import { NO_REASONING, NO_TURN_LIMIT, type StageRunInput, type StageRunResult, type StageUsage } from "./agent-loop.js";
 
 const NO_MUTATES = 0;
 const NO_LOOP_OVERRIDE = null;
@@ -66,6 +60,9 @@ export interface ConvergencePassArgs {
   apiKey: string | undefined;
   signal: AbortSignal;
   onEvent: (event: AgentEvent) => void;
+  /** Stage-end hook (fed the run's accumulated usage). The run wires this to the
+   *  usage-ledger feed; `NO_STAGE_END_HOOK` when unused. */
+  onStageEnd: ((usage: StageUsage) => void) | null;
   /** The tracker's outcome — read to settle errors (rethrow vs swallow). */
   outcome: ConvergenceOutcome;
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>;
@@ -89,7 +86,7 @@ export async function runConvergencePass(args: ConvergencePassArgs): Promise<voi
     reasoning: NO_REASONING,
     maxTurns: NO_TURN_LIMIT,
     onEvent: args.onEvent,
-    onStageEnd: NO_STAGE_END_HOOK,
+    onStageEnd: args.onStageEnd,
     loopFn: NO_LOOP_OVERRIDE,
   };
   try {

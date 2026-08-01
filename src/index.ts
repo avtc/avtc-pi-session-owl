@@ -15,6 +15,7 @@ import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from 
 import { log } from "./log.js";
 import { createMkRecallTool } from "./recall/mk-recall.js";
 import { makeBuilderRun, makeObserverRun, runBuilder, runObserver } from "./runtime/stages.js";
+import { registerStatusCommand } from "./status/command.js";
 import { onTurnEnd, setStageRuns } from "./triggers.js";
 import { initWidget } from "./widget/tracker.js";
 
@@ -31,6 +32,9 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   // render via ui.notify (zero agent-context cost) and read the source graph
   // directly, so they are harmless even when memkeeper is disabled.
   registerUserCommands(pi);
+
+  // /mk:status — the user-facing status report (memory stats + per-phase usage).
+  registerStatusCommand(pi);
 
   // Wire the stage run functions (Observer + Builder now; the Selector lands in
   // its own task). Until then the trigger layer's default no-op stands for it.

@@ -23,6 +23,7 @@ import { notify } from "../notify.js";
 import { BUILDER_SYSTEM } from "../prompts/builder.js";
 import { runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
 import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } from "../runtime/convergence.js";
+import { makeLedgerHook } from "../runtime/ledger-hook.js";
 import { resolveStageModel } from "../runtime/model.js";
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import type { MemkeeperGraph, NodeId } from "../types.js";
@@ -170,6 +171,7 @@ async function runPass(
 ): Promise<{ outcome: PassOutcome }> {
   const { outcome, onEvent } = makePassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(graph, pass);
+  const store = toStoreContext(input.pi, input.ctx);
   await runConvergencePass({
     systemPrompt: BUILDER_SYSTEM,
     messages,
@@ -178,6 +180,7 @@ async function runPass(
     apiKey: resolved.apiKey,
     signal: input.signal,
     onEvent,
+    onStageEnd: makeLedgerHook(store, "build"),
     outcome,
     runStageFn,
     stageLabel: BUILD_STAGE,

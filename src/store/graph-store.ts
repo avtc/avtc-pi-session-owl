@@ -15,6 +15,7 @@ import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
 import { MemkeeperGraph, makeNode, type Node, type NodeId, type Observation, type ObsId } from "../types.js";
 import {
+  cloneLedger,
   decodeDetails,
   decodeObservation,
   decodeSelection,
@@ -72,6 +73,10 @@ export interface GraphStore {
   graph: MemkeeperGraph;
   selectedTree: SerializedSelection | null;
   usageLedger: UsageLedger;
+  /** The cumulative ledger captured at the last compaction (the /mk:status
+   *  "since last compaction" baseline). `null` until the first compaction on
+   *  this branch — then since-last-compaction == since-session-start. */
+  lastCompactionLedger: UsageLedger | null;
   /** coversUpToId of the latest replayed observation delta; null when none. */
   observerFrontier: string | null;
 }
@@ -89,7 +94,8 @@ export function getGraphStore(): GraphStore {
         nextNodeId: 1,
       }),
       selectedTree: null,
-      usageLedger: { ...EMPTY_LEDGER },
+      usageLedger: cloneLedger(EMPTY_LEDGER),
+      lastCompactionLedger: null,
       observerFrontier: null,
     };
   }
@@ -230,7 +236,8 @@ export async function load(ctx: StoreContext): Promise<void> {
   if (snapshot !== null) {
     graph = materializeBase(snapshot.details);
     storeState.selectedTree = snapshot.details.selectedTree;
-    storeState.usageLedger = snapshot.details.lastCompactionLedger ?? { ...EMPTY_LEDGER };
+    storeState.usageLedger = snapshot.details.lastCompactionLedger ?? cloneLedger(EMPTY_LEDGER);
+    storeState.lastCompactionLedger = snapshot.details.lastCompactionLedger ?? null;
     replayFrom = snapshot.index + 1;
   } else {
     graph = new MemkeeperGraph({

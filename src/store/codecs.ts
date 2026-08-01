@@ -66,6 +66,18 @@ export const EMPTY_LEDGER: UsageLedger = {
   select: { ...EMPTY_PHASE_USAGE },
 };
 
+/** A deep copy of a ledger — three independent phase objects. `{ ...EMPTY_LEDGER }`
+ *  is a shallow copy whose phases alias `EMPTY_LEDGER`'s, so mutating one phase
+ *  via the shared reference corrupts the others. Use this whenever a fresh,
+ *  independently-mutable ledger is needed (store init, load fallback, tests). */
+export function cloneLedger(ledger: UsageLedger): UsageLedger {
+  return {
+    observe: { ...ledger.observe },
+    build: { ...ledger.build },
+    select: { ...ledger.select },
+  };
+}
+
 // --- serialized wire types -------------------------------------------------
 
 /** Wire observation: content + provenance + parentNode; NO contentTokens. */

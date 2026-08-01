@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
+
+// Pure usage-ledger math (no callbacks, no I/O). The ledger is a per-phase
+// cumulative token/cost/turn/run tracker; the stage runs feed it via
+// addPhaseUsage at each stage end and /mk:status reads it.
+
+import type { StageUsage } from "../runtime/agent-loop.js";
+import { cloneLedger, type PhaseUsage, type UsageLedger } from "../store/codecs.js";
+
+/** The three memkeeper stages whose usage the ledger tracks. */
+export type Phase = "observe" | "build" | "select";
+
+/**
+ * Add a stage's accumulated usage to its phase total, in place, and bump the
+ * run counter. `StageUsage` carries input/output/cacheRead/cost/turns (no runs);
+ * the phase adds those five fields and counts the call as one run. Returns the
+ * same ledger object (convenience for `appendUsage(store, addPhaseUsage(...))`).
+ */
+export function addPhaseUsage(ledger: UsageLedger, phase: Phase, usage: StageUsage): UsageLedger {
+  const p = ledger[phase];
+  p.input += usage.input;
+  p.output += usage.output;
+  p.cacheRead += usage.cacheRead;
+  p.cost += usage.cost;
+  p.turns += usage.turns;
+  p.runs += 1;
+  return ledger;
+}
+
+/**
+ * Snapshot the ledger at a compaction point. The `ledger` is the post-compaction
+ * cumulative baseline; `lastCompactionLedger` is a deep copy of it so later
+ * stage activity can't mutate the captured baseline. The compaction hook keeps
+ * `lastCompactionLedger` (carried into `details`) so post-compaction /mk:status
+ * "since last compaction" arithmetic is correct.
+ */
+export function snapshotAtCompaction(ledger: UsageLedger): { ledger: UsageLedger; lastCompactionLedger: UsageLedger } {
+  return { ledger, lastCompactionLedger: cloneLedger(ledger) };
+}
+
+/** since-session-start = the cumulative ledger itself. */
+export function sinceSessionStart(ledger: UsageLedger): UsageLedger {
+  return ledger;
+}
+
+/** Per-phase field-wise subtraction (ledger − baseline), `runs` included. Pure:
+ *  returns a fresh ledger, leaves both inputs untouched. */
+export function sinceLastCompaction(ledger: UsageLedger, baseline: UsageLedger): UsageLedger {
+  return {
+    observe: subtractPhase(ledger.observe, baseline.observe),
+    build: subtractPhase(ledger.build, baseline.build),
+    select: subtractPhase(ledger.select, baseline.select),
+  };
+}
+
+function subtractPhase(a: PhaseUsage, b: PhaseUsage): PhaseUsage {
+  return {
+    input: a.input - b.input,
+    output: a.output - b.output,
+    cacheRead: a.cacheRead - b.cacheRead,
+    cost: a.cost - b.cost,
+    turns: a.turns - b.turns,
+    runs: a.runs - b.runs,
+  };
+}

@@ -22,13 +22,8 @@ import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
 import { OBSERVER_SYSTEM } from "../prompts/observer.js";
-import {
-  NO_REASONING,
-  NO_STAGE_END_HOOK,
-  runStage,
-  type StageRunInput,
-  type StageRunResult,
-} from "../runtime/agent-loop.js";
+import { NO_REASONING, runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
+import { makeLedgerHook } from "../runtime/ledger-hook.js";
 import { resolveStageModel } from "../runtime/model.js";
 import { ImportanceSchema } from "../schema.js";
 import { encodeObservation, type ObservationEntry } from "../store/codecs.js";
@@ -202,7 +197,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         reasoning: NO_REASONING,
         maxTurns: NO_MAX_TURNS,
         onEvent: (event) => input.widget.onEvent(event),
-        onStageEnd: NO_STAGE_END_HOOK,
+        onStageEnd: makeLedgerHook(store, "observe"),
         loopFn: NO_LOOP_OVERRIDE,
       };
 

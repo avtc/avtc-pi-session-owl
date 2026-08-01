@@ -117,12 +117,12 @@ describe("memkeeperExtension (activate wiring)", () => {
     expect(tool.name).toBe("mk_recall");
   });
 
-  it("registers the four /mk:* user browse commands", () => {
+  it("registers the four /mk:* user browse commands + /mk:status", () => {
     const pi = makeFakePi() as unknown as ExtensionAPI & { registerCommand: ReturnType<typeof vi.fn> };
     memkeeperExtension(pi);
     const names = pi.registerCommand.mock.calls.map((c) => c[0] as string);
-    expect(names).toEqual(expect.arrayContaining(["mk:ls", "mk:cat", "mk:find", "mk:find-all"]));
-    expect(pi.registerCommand).toHaveBeenCalledTimes(4);
+    expect(names).toEqual(expect.arrayContaining(["mk:ls", "mk:cat", "mk:find", "mk:find-all", "mk:status"]));
+    expect(pi.registerCommand).toHaveBeenCalledTimes(5);
   });
 
   it("session_start handler calls onSessionStart", async () => {

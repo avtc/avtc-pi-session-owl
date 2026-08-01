@@ -25,6 +25,7 @@ import { notify } from "../notify.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
 import { runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
 import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } from "../runtime/convergence.js";
+import { makeLedgerHook } from "../runtime/ledger-hook.js";
 import { resolveStageModel } from "../runtime/model.js";
 import { decodeNode, encodeSelection } from "../store/codecs.js";
 import { getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
@@ -194,6 +195,7 @@ async function runPass(
 ): Promise<{ outcome: SelectorPassOutcome }> {
   const { outcome, onEvent } = makeSelectorPassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(working, contextView, pass);
+  const store = toStoreContext(input.pi, input.ctx);
   await runConvergencePass({
     systemPrompt: SELECTOR_SYSTEM,
     messages,
@@ -202,6 +204,7 @@ async function runPass(
     apiKey: resolved.apiKey,
     signal: input.signal,
     onEvent,
+    onStageEnd: makeLedgerHook(store, "select"),
     outcome,
     runStageFn,
     stageLabel: SELECT_STAGE,

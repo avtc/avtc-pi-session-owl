@@ -31,7 +31,7 @@ import type { ObserverRunInput } from "../observer/run.js";
 import { runObserver as realRunObserver } from "../observer/run.js";
 import { acquireForCompaction } from "../runtime/run-lock.js";
 import { runSelector as realRunSelector, type SelectorRunInput } from "../selector/run.js";
-import { encodeDetails } from "../store/codecs.js";
+import { cloneLedger, encodeDetails } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { computeUnobserved } from "../triggers.js";
 import type { WidgetController } from "../widget/tracker.js";
@@ -171,6 +171,10 @@ export async function compactionHook(
       touchedFiles,
     });
     const details = encodeDetails(store.graph, store.selectedTree, store.usageLedger);
+    // capture the compaction baseline so post-compaction /mk:status "since last
+    // compaction" arithmetic is correct (deep copy — later stage activity must
+    // not mutate the captured baseline).
+    store.lastCompactionLedger = cloneLedger(store.usageLedger);
 
     return {
       compaction: {
