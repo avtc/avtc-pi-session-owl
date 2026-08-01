@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Hoisted mock: registerSettingsCommand returns a fake handle whose getSettings() yields a
 // distinct live value so the "after init" test can prove getMemkeeperSettings reads the handle.
@@ -29,6 +29,7 @@ import type { MemkeeperConfig } from "../../src/config/schema.js";
 // avtc-pi-settings-ui; the mock above replaces that module. Import the schema AFTER the mock.
 import {
   _resetGetMemkeeperSettings,
+  _resetMemkeeperSettingsHandle,
   _setGetMemkeeperSettings,
   DEFAULT_CONFIG,
   getMemkeeperSettings,
@@ -62,6 +63,11 @@ const EXPECTED_IDS = [
   "selectorRootViewThreshold",
   "maxSelectorPasses",
 ] as const;
+
+// File-level teardown: clear the module handle (set by initMemkeeperSettings in the
+// initialized describe) so it does NOT leak into other test files under isolate:false
+// (getMemkeeperSettings would otherwise return the mock handle, not DEFAULT_CONFIG).
+afterAll(() => _resetMemkeeperSettingsHandle());
 
 describe("MEMKEEPER_SCHEMA", () => {
   it("declares every expected setting id", () => {
@@ -196,6 +202,9 @@ describe("DEFAULT_CONFIG parity with schema defaults", () => {
 });
 
 describe("getMemkeeperSettings — before init", () => {
+  // Ensure the handle is undefined when this runs, even if another test file set
+  // it earlier (isolate:false shares module state).
+  beforeAll(() => _resetMemkeeperSettingsHandle());
   it("returns DEFAULT_CONFIG before init (no crash for early callers)", () => {
     // Runs first (this describe precedes the initialized one); module-level handle is undefined.
     expect(getMemkeeperSettings()).toStrictEqual(DEFAULT_CONFIG);

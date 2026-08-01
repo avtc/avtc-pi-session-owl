@@ -91,10 +91,13 @@ function selectedSection(snap: WidgetSnapshot, theme: ThemeSeam): string | null 
   return `${count}${countDeltaColored}${label}${viewTokens}${tokenDeltaColored}${threshold}${pass}`;
 }
 
-/** The trailing runtime segments: {ctx/window} → {tok} tok (active only). */
+/** The trailing runtime segments: {ctx/window} → {tok} tok (active only).
+ *  When contextWindow is null (getContextUsage() undefined) the whole context
+ *  segment collapses to `?` (never `?/0`). */
 function trailingSection(snap: WidgetSnapshot, theme: ThemeSeam): string {
   const ctxPart = snap.contextTokens === null ? "?" : formatTokens(snap.contextTokens);
-  const ctx = paint(theme, "muted", `${ctxPart}/${formatTokens(snap.contextWindow)}`);
+  const windowPart = snap.contextWindow === null ? "" : `/${formatTokens(snap.contextWindow)}`;
+  const ctx = paint(theme, "muted", `${ctxPart}${windowPart}`);
   const tok = paint(theme, "muted", `${formatTokens(snap.streamingOutputTokens)} tok`);
   return `${ctx}${paint(theme, "dim", SEP)}${tok}`;
 }

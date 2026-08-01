@@ -134,6 +134,13 @@ describe("formatWidgetLine", () => {
     expect(text).toContain("?/262k");
   });
 
+  it("null contextWindow (getContextUsage undefined) renders ? alone (never ?/0)", () => {
+    const { text } = render(snap({ contextTokens: null, contextWindow: null }));
+    expect(text).toContain("?");
+    expect(text).not.toContain("?/0");
+    expect(text).not.toContain("?/0k");
+  });
+
   it("applies theme colors: counts accent on the active section, dim on separators/labels", () => {
     const { line } = render(
       snap({

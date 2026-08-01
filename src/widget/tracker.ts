@@ -56,7 +56,7 @@ export interface WidgetSnapshot {
   roots: { count: number; countDelta: number; viewTokens: number; tokenDelta: number; threshold: number };
   selected: { count: number; countDelta: number; viewTokens: number; tokenDelta: number; threshold: number } | null;
   contextTokens: number | null;
-  contextWindow: number;
+  contextWindow: number | null;
 }
 
 /** A non-obsolete root node summary used by buildSnapshot. */
@@ -87,28 +87,26 @@ export interface StageController {
   onEvent(event: AgentEvent): void;
 }
 
+/** The tracker's read-side state fields (the public ProgressTracker getters +
+ *  the internal state object share this shape). */
+interface TrackerState {
+  stage: WidgetStage | null;
+  pass: number;
+  batch: BatchProgress | null;
+  baseline: Baseline | null;
+  usage: StageUsage;
+  streamingOutputTokens: number;
+  selectedCount: number | null;
+  selectedViewTokens: number | null;
+  selectedBaseline: { count: number; viewTokens: number } | null;
+}
+
 /**
  * Pure state object for one widget run. Updated by the runs
  * (startStage/setPass/setBatch/setSelectedCounts/endStage) and the agent event
  * stream (onEvent). The render reads a snapshot via `buildSnapshot`.
  */
-export interface ProgressTracker extends StageController {
-  /** The active stage, or null when idle (→ widget hidden). */
-  stage: WidgetStage | null;
-  /** Build/Select convergence pass (1-based). */
-  pass: number;
-  /** Observe chunk progress (shown only when total > 1). */
-  batch: BatchProgress | null;
-  /** Counts at stage start (null before the first startStage). */
-  baseline: Baseline | null;
-  /** Accumulated usage from message_end events this stage. */
-  usage: StageUsage;
-  /** Live two-tier streaming output tokens (primary usage, fallback chars/4). */
-  streamingOutputTokens: number;
-  /** Working-copy selected counts (Select-only push; null outside a Select run). */
-  selectedCount: number | null;
-  selectedViewTokens: number | null;
-}
+export interface ProgressTracker extends StageController, TrackerState {}
 
 // --- streaming-token helpers (two-tier, decision #37) ---------------------
 
@@ -147,18 +145,7 @@ function messageEndUsage(message: unknown): StageUsage | null {
 
 /** Create a fresh idle tracker (stage null, zeroed usage). */
 export function createTracker(): ProgressTracker {
-  const state: {
-    stage: WidgetStage | null;
-    pass: number;
-    batch: BatchProgress | null;
-    baseline: Baseline | null;
-    usage: StageUsage;
-    streamingOutputTokens: number;
-    selectedCount: number | null;
-    selectedViewTokens: number | null;
-    fallbackTokens: number;
-    primaryTokens: number;
-  } = {
+  const state: TrackerState & { fallbackTokens: number; primaryTokens: number } = {
     stage: null,
     pass: 1,
     batch: null,
@@ -167,6 +154,7 @@ export function createTracker(): ProgressTracker {
     streamingOutputTokens: 0,
     selectedCount: null,
     selectedViewTokens: null,
+    selectedBaseline: null,
     fallbackTokens: 0,
     primaryTokens: 0,
   };
@@ -196,6 +184,9 @@ export function createTracker(): ProgressTracker {
     get selectedViewTokens() {
       return state.selectedViewTokens;
     },
+    get selectedBaseline() {
+      return state.selectedBaseline;
+    },
     startStage(stage, init) {
       state.stage = stage;
       state.pass = init?.pass ?? 1;
@@ -205,11 +196,11 @@ export function createTracker(): ProgressTracker {
       state.streamingOutputTokens = 0;
       state.fallbackTokens = 0;
       state.primaryTokens = 0;
-      // selected counts are Select-only; clear on any non-select stage start.
-      if (stage !== "select") {
-        state.selectedCount = null;
-        state.selectedViewTokens = null;
-      }
+      // selected counts + baseline are per-Select-run; a fresh stage start
+      // re-anchors the selected baseline on the next first push.
+      state.selectedCount = null;
+      state.selectedViewTokens = null;
+      state.selectedBaseline = null;
     },
     setPass(pass) {
       state.pass = pass;
@@ -218,6 +209,10 @@ export function createTracker(): ProgressTracker {
       state.batch = { done, total };
     },
     setSelectedCounts(rootCount, rootViewTokens) {
+      // capture the working-copy baseline on the first push of a Select stage.
+      if (state.selectedBaseline === null) {
+        state.selectedBaseline = { count: rootCount, viewTokens: rootViewTokens };
+      }
       state.selectedCount = rootCount;
       state.selectedViewTokens = rootViewTokens;
     },
@@ -284,18 +279,23 @@ export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): 
   const baseline = tracker.baseline ?? { obsCount: 0, rootsCount: 0, rootsViewTokens: 0 };
   const obsCount = getGraphStore().graph.observations.size;
   const ctxUsage = ctx.getContextUsage();
+  // both context fields are null when getContextUsage() is undefined (the window
+  // is unknown too); render shows `?` alone rather than `?/0` (never 0/NaN).
   const contextTokens = ctxUsage === undefined ? null : ctxUsage.tokens;
-  const contextWindow = ctxUsage === undefined ? 0 : ctxUsage.contextWindow;
+  const contextWindow = ctxUsage === undefined ? null : ctxUsage.contextWindow;
 
   // selected section: shown only in selected-root renderMode AND during Select.
+  // deltas measured from the working-copy baseline (first push of the stage),
+  // NOT the source-graph baseline (the working copy is rebuilt each Select run).
   const inSelect = tracker.stage === "select" && settings.renderMode === "selected-root";
+  const selectedBaseline = tracker.selectedBaseline;
   const selected =
     inSelect && tracker.selectedCount !== null && tracker.selectedViewTokens !== null
       ? {
           count: tracker.selectedCount,
-          countDelta: tracker.selectedCount - (baseline.rootsCount === 0 ? tracker.selectedCount : baseline.rootsCount),
+          countDelta: selectedBaseline === null ? 0 : tracker.selectedCount - selectedBaseline.count,
           viewTokens: tracker.selectedViewTokens,
-          tokenDelta: tracker.selectedViewTokens - baseline.rootsViewTokens,
+          tokenDelta: selectedBaseline === null ? 0 : tracker.selectedViewTokens - selectedBaseline.viewTokens,
           threshold: settings.selectorRootViewThreshold,
         }
       : null;
@@ -355,6 +355,9 @@ export function initWidget(): WidgetController {
       ctxRef = ctx;
     },
     clearCtx() {
+      // hide the widget before dropping the ref (session-switch/fork teardown —
+      // otherwise a stale line persists because render() no-ops without a ctx).
+      hideWidget(ctxRef);
       ctxRef = null;
     },
     startStage(stage, init) {
@@ -382,6 +385,12 @@ export function initWidget(): WidgetController {
   };
 }
 
+/** Hide the widget line via ctx.ui.setWidget (TUI-only; no-op otherwise). */
+function hideWidget(ctx: ExtensionContext | null): void {
+  if (ctx === null || ctx.mode !== "tui" || !ctx.hasUI) return;
+  ctx.ui.setWidget(WIDGET_KEY, HIDE_WIDGET, { placement: WIDGET_PLACEMENT });
+}
+
 /** Publish the widget line (or hide it) via ctx.ui.setWidget. */
 function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null): void {
   if (ctx === null) return;
@@ -389,7 +398,7 @@ function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null): v
   if (ctx.mode !== "tui" || !ctx.hasUI) return;
   // idle → hide the line (a prior render may have shown it during a run).
   if (tracker.stage === null) {
-    ctx.ui.setWidget(WIDGET_KEY, HIDE_WIDGET, { placement: WIDGET_PLACEMENT });
+    hideWidget(ctx);
     return;
   }
   const snapshot = buildSnapshot(tracker, ctx);

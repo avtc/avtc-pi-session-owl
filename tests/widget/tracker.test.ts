@@ -107,6 +107,25 @@ describe("ProgressTracker state", () => {
       expect(tracker.selectedCount).toBe(20);
       expect(tracker.selectedViewTokens).toBe(15_000);
     });
+
+    it("startStage(select) clears any prior selected baseline so the first push re-anchors", () => {
+      tracker.startStage("select");
+      tracker.setSelectedCounts(95, 35_000); // first push → baseline
+      tracker.setSelectedCounts(20, 15_000); // second push
+      // the selected baseline is the first push after the select stage start
+      expect(tracker.selectedBaseline).toEqual({ count: 95, viewTokens: 35_000 });
+      expect(tracker.selectedCount).toBe(20);
+      expect(tracker.selectedViewTokens).toBe(15_000);
+    });
+
+    it("startStage(reset) on a non-select stage clears the selected counts + baseline", () => {
+      tracker.startStage("select");
+      tracker.setSelectedCounts(95, 35_000);
+      tracker.startStage("build", { pass: 1 });
+      expect(tracker.selectedCount).toBeNull();
+      expect(tracker.selectedViewTokens).toBeNull();
+      expect(tracker.selectedBaseline).toBeNull();
+    });
   });
 
   describe("onEvent — usage accumulation", () => {

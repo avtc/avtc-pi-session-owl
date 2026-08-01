@@ -96,9 +96,24 @@ describe("initWidget wiring", () => {
     const { ctx, calls } = makeCtx();
     widget.setCtx(ctx);
     widget.startStage("observe");
-    widget.clearCtx();
-    widget.render();
-    expect(calls).toHaveLength(0);
+    widget.clearCtx(); // hides once (1 setWidget call)
+    const afterClear = calls.length;
+    widget.render(); // ref is null now → no-op (no additional call)
+    expect(calls.length).toBe(afterClear);
+  });
+
+  it("clearCtx hides the widget before dropping the ref (no stale line)", () => {
+    const widget = initWidget();
+    const { ctx, calls } = makeCtx();
+    widget.setCtx(ctx);
+    widget.startStage("observe");
+    widget.render(); // shown
+    const shownCount = calls.length;
+    widget.clearCtx(); // teardown must hide
+    expect(calls.length).toBeGreaterThan(shownCount); // a hide setWidget happened
+    const hideCall = calls[calls.length - 1];
+    expect(hideCall?.key).toBe(WIDGET_KEY);
+    expect(hideCall?.content).toBeUndefined();
   });
 
   it("onEvent forwards to the tracker then renders (live streaming)", () => {

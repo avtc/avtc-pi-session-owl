@@ -442,4 +442,27 @@ describe("runObserver", () => {
     // appended sanity (the run still persisted)
     expect(appended.some((e) => e.type === "memkeeper.observation")).toBe(true);
   });
+
+  it("closes the observe stage even when a chunk throws (endStage in finally)", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "x".repeat(50))];
+    // a runStage that always throws (non-abort error → the chunk is skipped, run continues)
+    const throwing = async () => {
+      throw new Error("LLM boom");
+    };
+    const calls: string[] = [];
+    const widget: WidgetController = {
+      ...NO_OP_WIDGET,
+      startStage: () => calls.push("start"),
+      endStage: () => calls.push("end"),
+    };
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: throwing, widget }));
+
+    // stage opened then closed despite the throw (finally ran)
+    expect(calls).toContain("start");
+    expect(calls).toContain("end");
+    expect(calls[calls.length - 1]).toBe("end");
+  });
 });

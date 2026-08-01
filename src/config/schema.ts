@@ -371,6 +371,15 @@ export function _resetGetMemkeeperSettings(): void {
   _getSettingsOverride = null;
 }
 
+/** Test-only: clear BOTH the override AND the module handle (full reset back to the
+ *  pre-init state — getMemkeeperSettings returns DEFAULT_CONFIG). Use this in a
+ *  file-level afterAll so the handle (set by initMemkeeperSettings) does not
+ *  leak across test files under isolate:false. */
+export function _resetMemkeeperSettingsHandle(): void {
+  _getSettingsOverride = null;
+  handle = undefined;
+}
+
 const REGISTRATION_OPTIONS: RegisterSettingsOptions = {
   commandName: "mk:settings",
   title: "Memkeeper Settings",
