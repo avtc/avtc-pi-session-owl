@@ -170,7 +170,9 @@ function renderLines(lines: string[]): string {
 }
 
 const LS_PARAMS = Type.Object({
-  nodeId: Type.Optional(Type.String()),
+  nodeId: Type.Optional(
+    Type.String({ description: "The node whose direct children to list. Omit or pass null for the root nodes." }),
+  ),
   page: Type.Optional(PageSchema),
 });
 
@@ -229,7 +231,10 @@ function makeLsTool(graph: MemkeeperGraph): AgentTool<typeof LS_PARAMS> {
 // --- cat -------------------------------------------------------------------
 
 const CAT_PARAMS = Type.Object({
-  ids: Type.Array(Type.String(), { minItems: 1 }),
+  ids: Type.Array(Type.String(), {
+    minItems: 1,
+    description: "Ids to read in full — observations and/or nodes. At least one.",
+  }),
   page: Type.Optional(PageSchema),
 });
 
@@ -331,8 +336,10 @@ function renderCatUnit(unit: CatUnit): string {
 // --- find ------------------------------------------------------------------
 
 const FIND_PARAMS = Type.Object({
-  query: Type.String(),
-  includeSuperseded: Type.Optional(Type.Boolean()),
+  query: Type.String({ description: "Regex (JS) to match against node summaries and observation content." }),
+  includeSuperseded: Type.Optional(
+    Type.Boolean({ description: "Include superseded and obsolete items (default false — current memory only)." }),
+  ),
   page: Type.Optional(PageSchema),
 });
 
@@ -601,7 +608,7 @@ const MERGE_PARAMS = Type.Object({
   newSummary: Type.Optional(
     Type.String({
       minLength: 1,
-      description: "A synthesized summary for the destination (required when destId is null).",
+      description: "A synthesized summary for the destination (required when `destId` is null).",
     }),
   ),
 });
