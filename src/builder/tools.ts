@@ -25,13 +25,7 @@ import {
   runMutate,
 } from "../graph/mutate-tools.js";
 import { applySetMeta, applySupersede, MUTATE_SOURCE } from "../graph/mutations.js";
-import {
-  makeReadTools,
-  makeTryFinishTool,
-  measureRootViewTokens,
-  renderRootView,
-  TRY_FINISH_TOOL,
-} from "../graph/read-tools.js";
+import { makeReadTools, makeTryFinishTool } from "../graph/read-tools.js";
 import { appendGraphDelta, type StoreContext } from "../store/graph-store.js";
 import type { Importance, MemkeeperGraph, NodeId } from "../types.js";
 

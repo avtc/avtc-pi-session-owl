@@ -16,6 +16,7 @@
 // supersede and set_meta are EXCLUDED (Builder-only source-graph semantics).
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { StringEnum } from "@earendil-works/pi-ai";
 import {
   createFindTool,
   createGrepTool,
@@ -26,15 +27,23 @@ import {
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
 import {
+  MERGE_TOOL,
+  MKDIR_TOOL,
   type MutateContext,
+  MV_TOOL,
   makeMergeTool,
   makeMkdirTool,
   makeMvTool,
   makeSetSummaryTool,
+  SET_SUMMARY_TOOL,
 } from "../graph/mutate-tools.js";
+
+/** Re-export the Selector-only summary tool name for callers/tests. */
+export { SET_SUMMARY_TOOL };
+
 import { MUTATE_WORKING_COPY } from "../graph/mutations.js";
 import { makeReadTools, makeTryFinishTool } from "../graph/read-tools.js";
-import type { SelectorWorkingCopy } from "./input-view.js";
+import type { SelectorWorkingCopy, TodoItem } from "./input-view.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -46,8 +55,15 @@ export const FS_LS_TOOL = "fs_ls";
 /** Conditional todo-list tool name. */
 export const TODO_LIST_TOOL = "todo_list";
 
-/** Re-export the Selector-only summary tool name for callers/tests. */
-export { SET_SUMMARY_TOOL } from "../graph/mutate-tools.js";
+/** The four Selector mutate tools (no-op detection for the Selector run, T17: a
+ *  pass with none of these applied is a no-op pass). Read tools (ls/cat/find) and
+ *  try_finish excluded — mirroring the Builder's MUTATE_TOOL_NAMES. */
+export const SELECTOR_MUTATE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  MKDIR_TOOL,
+  MV_TOOL,
+  MERGE_TOOL,
+  SET_SUMMARY_TOOL,
+]);
 
 /** A no-op persist: the working copy is transient and the resulting tree is
  *  persisted once at run completion, so per-call mutates append nothing. */
@@ -86,25 +102,18 @@ export function makeFileReadTools(cwd: string): AgentTool[] {
 
 // --- todo_list (conditional on the optional avtc-pi-todo bridge) -----------
 
-/** A todo item the Selector can read. Mirrors the input-view TodoItem shape. */
-export interface SelectorTodoItem {
-  id: string;
-  name: string;
-  status: "in_progress" | "pending" | "completed";
-  details?: string;
-}
-
 /** Read-only port over the (optional) avtc-pi-todo bridge. `getItems` returns
  *  the todo list, optionally filtered by status. `null` bridge → avtc-pi-todo is
  *  not installed → no `todo_list` tool (graceful degrade; not an error). This is
- *  the contract T22's `subscribeToTodo` satisfies; the tool here only reads it. */
+ *  the contract T22's `subscribeToTodo` satisfies; the tool here only reads it.
+ *  The item shape is the shared `TodoItem` (same as the input-view render). */
 export interface TodoBridge {
-  getItems(filter?: { status?: SelectorTodoItem["status"] }): SelectorTodoItem[];
+  getItems(filter?: { status?: TodoItem["status"] }): TodoItem[];
 }
 
 const TODO_LIST_PARAMS = Type.Object({
   status: Type.Optional(
-    Type.String({
+    StringEnum(["in_progress", "pending", "completed"], {
       description: "Filter by status — in_progress, pending, or completed. Omit for all.",
     }),
   ),
@@ -117,7 +126,7 @@ function makeTodoListTool(bridge: TodoBridge): AgentTool<typeof TODO_LIST_PARAMS
     label: "Todo list",
     parameters: TODO_LIST_PARAMS,
     async execute(_toolCallId, params) {
-      const status = (params.status ?? undefined) as SelectorTodoItem["status"] | undefined;
+      const status = (params.status ?? undefined) as TodoItem["status"] | undefined;
       const items = bridge.getItems(status === undefined ? {} : { status });
       if (items.length === 0) return { content: [{ type: "text", text: "(no todos)" }], details: { count: 0 } };
       const lines = items.map((item) => {

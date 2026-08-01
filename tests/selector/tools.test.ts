@@ -26,6 +26,7 @@ import {
   FS_READ_TOOL,
   makeSelectorGraphTools,
   makeSelectorTools,
+  SELECTOR_MUTATE_TOOL_NAMES,
   SET_SUMMARY_TOOL,
   TODO_LIST_TOOL,
   type TodoBridge,
@@ -379,6 +380,13 @@ describe("Selector toolset composition (supersede/set_meta excluded)", () => {
     for (const n of ["ls", "cat", "find", "mkdir", "mv", "merge", SET_SUMMARY_TOOL, "try_finish"]) {
       expect(names.has(n)).toBe(true);
     }
+  });
+
+  it("SELECTOR_MUTATE_TOOL_NAMES lists the 4 Selector mutates (no-op detection set for the run)", () => {
+    expect([...SELECTOR_MUTATE_TOOL_NAMES].sort()).toEqual(["merge", "mkdir", "mv", SET_SUMMARY_TOOL]);
+    // read tools + try_finish excluded (parity with the Builder's set).
+    expect(SELECTOR_MUTATE_TOOL_NAMES.has("ls")).toBe(false);
+    expect(SELECTOR_MUTATE_TOOL_NAMES.has("try_finish")).toBe(false);
   });
 
   it("no mutation reaches the source GraphStore across a run of graph mutates", async () => {
