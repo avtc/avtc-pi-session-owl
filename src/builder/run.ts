@@ -92,6 +92,10 @@ export interface BuilderRunInput {
   settings: MemkeeperConfig;
   signal: AbortSignal;
   widget: WidgetController;
+  /** The compaction cut; null at turn_end. Carried for contract completeness —
+   *  the Builder processes all current `new` nodes (the Observer's gap-driven
+   *  catch-up scopes them to the compacted block in the default profile). */
+  scope: { firstKeptEntryId: string | null } | null;
   /** Test seam — fake stage runner, or omitted for the real `runStage`. */
   runStageFn?: (input: StageRunInput) => Promise<StageRunResult>;
 }
@@ -100,7 +104,15 @@ export interface BuilderRunInput {
 
 /**
  * Run the Builder: ensure-ready fast-path, then a multi-pass convergence loop
- * over the source graph, then an unconditional stage-end flush of `new` nodes.
+ * over the source graph, then a stage-end flush of `new` nodes.
+ *
+ * Exit paths:
+ * - model unavailable → notify + return (the stage never started; `new` nodes
+ *   stay `new` per the design — the ensure-ready gate catches them next run).
+ * - fast-path (root view under threshold) → flush `new` + return (no stage).
+ * - loop (converged / no-op / max-passes / abort / error) → `finally` flushes
+ *   `new` and calls `endStage` (balanced with the `startStage` that opened it).
+ *
  * Honors `signal`; persists applied mutates + flush_new at call time. Never
  * throws — failures are logged + notified (partial work kept).
  */
@@ -115,17 +127,21 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   const graph = getGraphStore().graph;
   const runStageFn = input.runStageFn ?? runStage;
 
-  try {
-    // Ensure-ready fast-path (AD9): a root view already under the threshold is
-    // render-ready — skip the LLM passes entirely, just flush `new` arrivals.
-    if (measureRootViewTokens(graph) < input.settings.builderRootViewThreshold) {
-      flushNew(input.widget, store);
-      return;
-    }
+  // Ensure-ready fast-path (AD9): a root view already under the threshold is
+  // render-ready — skip the LLM passes entirely, just flush `new` arrivals so
+  // they never linger as stale glyphs. No stage is opened (no startStage).
+  if (measureRootViewTokens(graph) < input.settings.builderRootViewThreshold) {
+    flushNew(input.widget, store);
+    return;
+  }
 
-    input.widget.startStage(BUILD_STAGE, { pass: FIRST_PASS });
-    const tools = makeBuilderTools(graph, store, input.settings);
-    let pass = FIRST_PASS;
+  // Multi-pass convergence loop. startStage opens the stage; the finally closes
+  // it (balanced) and flushes `new` for every exit (converged / no-op / max /
+  // abort / pass-error) so unprocessed arrivals never linger.
+  input.widget.startStage(BUILD_STAGE, { pass: FIRST_PASS });
+  const tools = makeBuilderTools(graph, store, input.settings);
+  let pass = FIRST_PASS;
+  try {
     // eslint-disable-next-line no-constant-condition -- loop bounded by breaks below
     while (true) {
       if (input.signal.aborted) break;
@@ -142,13 +158,13 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
       input.widget.setPass(pass);
     }
   } catch (cause) {
-    // An unexpected error outside a pass (model resolution etc. already guarded).
-    // Applied mutates are already persisted; the flush below still runs.
+    // An unexpected error outside a pass. Applied mutates are already persisted;
+    // the flush below still runs.
     log.error("builder run failed", cause);
   } finally {
     // Stage-end flush: every remaining `new` node → `active`, recorded as a
-    // flush_new delta. Runs unconditionally (even on no-op / abort / error) so
-    // `new` arrivals never linger as stale glyphs for non-Builder consumers.
+    // flush_new delta, then close the stage. Runs for every loop exit so `new`
+    // arrivals never linger as stale glyphs for non-Builder consumers.
     flushNew(input.widget, store);
     input.widget.endStage();
   }

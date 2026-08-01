@@ -59,6 +59,7 @@ export function makeBuilderRun(pi: ExtensionAPI, widget: WidgetController, runBu
       pi,
       settings: args.settings,
       signal: args.signal,
+      scope: args.scope,
       widget,
     });
   };
