@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// STUB (replaced by T20): the real progress tracker + widget render live here.
+// STUB (the real widget lands later): the real progress tracker + widget render live here.
 // The activate path imports `initWidget()` so `activate` can hand the lifecycle a WidgetController;
-// until T20 lands this returns a no-op controller. T24 wires the final surface.
+// until the real widget lands this returns a no-op controller. The end-to-end task wires the final surface.
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 /**
  * The widget controller surface the lifecycle + stages touch (setCtx on start,
  * clearCtx on shutdown, startStage/endStage/setPass/setBatch/onEvent during runs,
- * render to publish). T20 replaces the no-op stub with the real ProgressTracker.
+ * render to publish). The widget task replaces the no-op stub with the real ProgressTracker.
  */
 export interface WidgetController {
   setCtx(ctx: ExtensionContext): void;
@@ -26,7 +26,7 @@ export interface WidgetController {
 
 const NO_OP = (): void => {};
 
-/** STUB (T20 replaces): return a no-op widget controller. */
+/** STUB (the real widget replaces this): return a no-op widget controller. */
 export function initWidget(): WidgetController {
   return {
     setCtx: NO_OP,

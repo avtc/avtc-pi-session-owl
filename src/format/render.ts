@@ -5,7 +5,7 @@
 // Builder ls/find, the Selector, mk_recall, the user /mk:* commands, and the
 // compaction summary.
 
-import { IMPORTANCE_ABBR, type Node, nowStoredTimestamp, type Observation } from "../types.js";
+import { IMPORTANCE_ABBR, type Node, type Observation } from "../types.js";
 
 export type RenderViewer = "builder" | "nonBuilder";
 
@@ -80,9 +80,6 @@ export function toStoredTimestamp(raw: string): string {
   if (Number.isNaN(parsed.getTime())) return raw;
   return parsed.toISOString().slice(0, 16).replace("T", " ");
 }
-
-// Re-exported so existing format-layer callers import from one place.
-export { nowStoredTimestamp };
 
 /** Render a [start, end] range, compressing identical or same-day endpoints. */
 export function formatTimestampRange(startStored: string, endStored: string): string {

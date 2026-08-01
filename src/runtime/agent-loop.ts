@@ -184,7 +184,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
         usage.turns += 1;
       } else if (event.type === "message_update") {
         // Fallback tier (decision #37): accumulate chars/4 over streamed deltas so
-        // a live counter (T20, fed via onEvent) always has a value even when the
+        // a live counter (fed via onEvent) always has a value even when the
         // provider never reports usage. The authoritative per-message output is
         // read from each message_end below (usage.output).
         const delta = deltaTextOf(event);
@@ -199,7 +199,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     // every message_end usage.output (usage.output — per-message, correct across
     // multi-turn runs since partial.usage.output resets each message). The chars/4
     // fallback only applies when the provider reports no output at all. (A live
-    // widget counter is built separately in T20 from the raw onEvent stream.)
+    // widget counter is built separately from the raw onEvent stream.)
     const streamingOutputTokens = usage.output > 0 ? usage.output : fallbackTokens;
     return { messages, usage, streamingOutputTokens, aborted: input.signal.aborted };
   } catch (cause) {
