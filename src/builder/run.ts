@@ -1,0 +1,231 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 avtc <tarensenkov@gmail.com>
+
+// The Builder run: a multi-pass convergence loop over the source graph using
+// BUILDER_TOOLS, with an ensure-ready fast-path. Each pass is one agentLoop;
+// the pass ends when the Builder calls try_finish (converged) or the loop stops
+// (no-op / context-limit / turn cap). try_finish gates the non-obsolete root
+// view against builderRootViewThreshold. At stage-end every remaining `new`
+// node flushes to `active` (a flush_new graph_delta) so non-Builder consumers
+// never see `new`.
+//
+// The run honors `signal` and owns NO run-lock (the caller — background trigger
+// or compaction hook — owns the lifecycle). Partial work from a failing pass is
+// KEPT (no rollback): each mutate is atomic and already persisted at call time.
+
+import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { MemkeeperConfig } from "../config/schema.js";
+import { applyFlushNew } from "../graph/mutations.js";
+import { toStoreContext } from "../lifecycle.js";
+import { log } from "../log.js";
+import { BUILDER_SYSTEM } from "../prompts/builder.js";
+import {
+  NO_REASONING,
+  NO_STAGE_END_HOOK,
+  NO_TURN_LIMIT,
+  runStage,
+  type StageRunInput,
+  type StageRunResult,
+} from "../runtime/agent-loop.js";
+import { resolveStageModel } from "../runtime/model.js";
+import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
+import type { MemkeeperGraph, NodeId } from "../types.js";
+import type { WidgetController } from "../widget/tracker.js";
+import {
+  MUTATE_TOOL_NAMES,
+  makeBuilderTools,
+  measureRootViewTokens,
+  renderRootView,
+  TRY_FINISH_TOOL,
+} from "./tools.js";
+
+// --- named constants (no bare literals at call sites) ----------------------
+
+const BUILD_STAGE = "build";
+const FIRST_PASS = 1;
+const NO_MUTATES = 0;
+const NO_LOOP_OVERRIDE = null;
+const EMPTY_ROOT_VIEW = "";
+
+/** A per-pass outcome: applied mutate count + whether try_finish converged. */
+export interface PassOutcome {
+  mutates: number;
+  converged: boolean;
+}
+
+/**
+ * Build a per-pass event tracker: an `onEvent` that forwards EVERY event to the
+ * downstream sink (the widget) AND inspects `tool_execution_end` to count
+ * applied mutates (the five mutate tools with `details.ok === true` and not
+ * `isError`) and detect try_finish convergence (`details.ok === true`). Read
+ * tools and rejected mutates do not count.
+ */
+export function makePassTracker(downstream: (event: AgentEvent) => void): {
+  outcome: PassOutcome;
+  onEvent: (event: AgentEvent) => void;
+} {
+  const outcome: PassOutcome = { mutates: NO_MUTATES, converged: false };
+  const onEvent = (event: AgentEvent): void => {
+    downstream(event);
+    if (event.type !== "tool_execution_end") return;
+    const details = event.result?.details as { ok?: boolean } | undefined;
+    if (details?.ok !== true) return;
+    if (event.toolName === TRY_FINISH_TOOL) {
+      outcome.converged = true;
+      return;
+    }
+    if (MUTATE_TOOL_NAMES.has(event.toolName) && !event.isError) {
+      outcome.mutates += 1;
+    }
+  };
+  return { outcome, onEvent };
+}
+
+// --- run input -------------------------------------------------------------
+
+/** Input to `runBuilder`. The run honors `signal` only — the caller owns the
+ *  run-lock (background trigger releases in its IIFE; compaction holds). */
+export interface BuilderRunInput {
+  ctx: ExtensionContext;
+  pi: ExtensionAPI;
+  settings: MemkeeperConfig;
+  signal: AbortSignal;
+  widget: WidgetController;
+  /** Test seam — fake stage runner, or omitted for the real `runStage`. */
+  runStageFn?: (input: StageRunInput) => Promise<StageRunResult>;
+}
+
+// --- the run ---------------------------------------------------------------
+
+/**
+ * Run the Builder: ensure-ready fast-path, then a multi-pass convergence loop
+ * over the source graph, then an unconditional stage-end flush of `new` nodes.
+ * Honors `signal`; persists applied mutates + flush_new at call time. Never
+ * throws — failures are logged + notified (partial work kept).
+ */
+export async function runBuilder(input: BuilderRunInput): Promise<void> {
+  const resolved = await resolveStageModel(input.ctx, input.settings.builderModel ?? input.settings.defaultModel);
+  if (!resolved.ok) {
+    notify(input.ctx, `Builder skipped a run: ${resolved.error}`, "warning");
+    return;
+  }
+
+  const store = toStoreContext(input.pi, input.ctx);
+  const graph = getGraphStore().graph;
+  const runStageFn = input.runStageFn ?? runStage;
+
+  try {
+    // Ensure-ready fast-path (AD9): a root view already under the threshold is
+    // render-ready — skip the LLM passes entirely, just flush `new` arrivals.
+    if (measureRootViewTokens(graph) < input.settings.builderRootViewThreshold) {
+      flushNew(input.widget, store);
+      return;
+    }
+
+    input.widget.startStage(BUILD_STAGE, { pass: FIRST_PASS });
+    const tools = makeBuilderTools(graph, store, input.settings);
+    let pass = FIRST_PASS;
+    // eslint-disable-next-line no-constant-condition -- loop bounded by breaks below
+    while (true) {
+      if (input.signal.aborted) break;
+
+      const { outcome } = await runPass(input, graph, resolved, tools, runStageFn, pass);
+
+      // try_finish success → converged, stop.
+      if (outcome.converged) break;
+      // no-op pass (0 mutates, not converged) → stop (decision: nothing changed).
+      if (outcome.mutates === NO_MUTATES) break;
+
+      pass += 1;
+      if (pass > input.settings.maxBuilderPasses) break;
+      input.widget.setPass(pass);
+    }
+  } catch (cause) {
+    // An unexpected error outside a pass (model resolution etc. already guarded).
+    // Applied mutates are already persisted; the flush below still runs.
+    log.error("builder run failed", cause);
+  } finally {
+    // Stage-end flush: every remaining `new` node → `active`, recorded as a
+    // flush_new delta. Runs unconditionally (even on no-op / abort / error) so
+    // `new` arrivals never linger as stale glyphs for non-Builder consumers.
+    flushNew(input.widget, store);
+    input.widget.endStage();
+  }
+}
+
+// --- one pass --------------------------------------------------------------
+
+/** Run a single Builder pass (one agentLoop) and return its outcome. A pass
+ *  that THROWS is settled here: 0 applied mutates → rethrow (ends the run);
+ *  ≥1 applied mutates → swallowed (counts as a finished pass, partial kept). */
+async function runPass(
+  input: BuilderRunInput,
+  graph: ReturnType<typeof getGraphStore>["graph"],
+  resolved: { model: StageRunInput["model"]; apiKey: string | undefined },
+  tools: ReturnType<typeof makeBuilderTools>,
+  runStageFn: (input: StageRunInput) => Promise<StageRunResult>,
+  pass: number,
+): Promise<{ outcome: PassOutcome }> {
+  const { outcome, onEvent } = makePassTracker((event) => input.widget.onEvent(event));
+  const messages = passMessages(graph, pass);
+
+  const stageInput: StageRunInput = {
+    systemPrompt: BUILDER_SYSTEM,
+    messages,
+    tools,
+    model: resolved.model,
+    apiKey: resolved.apiKey,
+    signal: input.signal,
+    reasoning: NO_REASONING,
+    maxTurns: NO_TURN_LIMIT,
+    onEvent,
+    onStageEnd: NO_STAGE_END_HOOK,
+    loopFn: NO_LOOP_OVERRIDE,
+  };
+
+  try {
+    await runStageFn(stageInput);
+    return { outcome };
+  } catch (cause) {
+    // Error-after-≥1-mutate: partial work kept, pass counts as finished → return
+    // the outcome (mutates > 0) so the loop continues. Error-before-any-mutate:
+    // rethrow so the loop ends (nothing happened; retry next trigger).
+    if (outcome.mutates > NO_MUTATES) {
+      log.error("builder pass failed after partial work (kept)", cause);
+      return { outcome };
+    }
+    log.error("builder pass failed before any mutate (ending run)", cause);
+    throw cause;
+  }
+}
+
+/** Build the per-pass user message: the task + the current root view snapshot. */
+function passMessages(graph: MemkeeperGraph, pass: number): AgentMessage[] {
+  const rootView = renderRootView(graph) || EMPTY_ROOT_VIEW;
+  const text =
+    "Organize the memory graph. Process the new arrivals and consolidate the root view to fit the budget.\n\n" +
+    `Current root view (pass ${pass}):\n${rootView}`;
+  return [{ role: "user", content: text } as AgentMessage];
+}
+
+// --- flush_new -------------------------------------------------------------
+
+/** Collect all `new` nodes, apply flush_new in-memory, persist its delta. */
+function flushNew(widget: WidgetController, store: StoreContext): void {
+  const graph = getGraphStore().graph;
+  const nodeIds: NodeId[] = [];
+  for (const node of graph.nodes.values()) {
+    if (node.state === "new") nodeIds.push(node.id);
+  }
+  if (nodeIds.length === NO_MUTATES) return;
+  const delta = applyFlushNew(graph, { nodeIds });
+  appendGraphDelta(store, delta);
+  widget.render();
+}
+
+// --- notify ----------------------------------------------------------------
+
+function notify(ctx: ExtensionContext, message: string, level: "warning" | "info"): void {
+  ctx.ui.notify(message, level);
+}

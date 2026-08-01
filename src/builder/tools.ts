@@ -433,12 +433,22 @@ function makeFindTool(graph: MemkeeperGraph): AgentTool<typeof FIND_PARAMS> {
 
 // --- mutate tools ---------------------------------------------------------
 
-const MKDIR_TOOL = "mkdir";
-const MV_TOOL = "mv";
-const MERGE_TOOL = "merge";
-const SUPERSEDE_TOOL = "supersede";
-const SET_META_TOOL = "set_meta";
-const TRY_FINISH_TOOL = "try_finish";
+export const MKDIR_TOOL = "mkdir";
+export const MV_TOOL = "mv";
+export const MERGE_TOOL = "merge";
+export const SUPERSEDE_TOOL = "supersede";
+export const SET_META_TOOL = "set_meta";
+export const TRY_FINISH_TOOL = "try_finish";
+
+/** The five Builder mutate tools (no-op detection: a pass with none of these
+ *  applied is a no-op run). Read tools (ls/cat/find) and try_finish excluded. */
+export const MUTATE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  MKDIR_TOOL,
+  MV_TOOL,
+  MERGE_TOOL,
+  SUPERSEDE_TOOL,
+  SET_META_TOOL,
+]);
 
 /** Default importance for Builder-created container nodes. */
 const DEFAULT_NODE_IMPORTANCE: Importance = "medium";
@@ -691,12 +701,19 @@ const SET_META_PARAMS = Type.Object({
   ),
 });
 
-/** Render the non-obsolete root view (the same lines `ls` shows at the root) so
- *  try_finish can measure its token cost. */
-function renderRootView(graph: MemkeeperGraph): string {
+/** Render the non-obsolete root view (the same lines `ls` shows at the root).
+ *  Shared by try_finish (budget gate), the run's fast-path, and the per-pass
+ *  user-message state snapshot. */
+export function renderRootView(graph: MemkeeperGraph): string {
   const roots = nonObsoleteRoots(graph);
   if (roots.length === 0) return "";
   return roots.map((n) => formatNodeLine(n, { viewer: "builder" })).join("\n");
+}
+
+/** Token-estimate of the non-obsolete root view (chars/4). Shared by the
+ *  fast-path (skip-when-under) and try_finish (within-budget gate). */
+export function measureRootViewTokens(graph: MemkeeperGraph): number {
+  return estimateContentTokens(renderRootView(graph));
 }
 
 /** Build the `try_finish` convergence gate: measures the non-obsolete root view
@@ -711,7 +728,7 @@ function makeTryFinishTool(graph: MemkeeperGraph, settings: MemkeeperConfig): Ag
     label: "Finish",
     parameters: TRY_FINISH_PARAMS,
     async execute() {
-      const rootsViewTokens = estimateContentTokens(renderRootView(graph));
+      const rootsViewTokens = measureRootViewTokens(graph);
       const threshold = settings.builderRootViewThreshold;
       if (rootsViewTokens <= threshold) {
         return {

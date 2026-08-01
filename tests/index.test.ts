@@ -54,6 +54,8 @@ vi.mock("../src/widget/tracker.js", () => ({
 vi.mock("../src/runtime/stages.js", () => ({
   makeObserverRun: vi.fn(() => vi.fn()),
   runObserver: vi.fn(),
+  makeBuilderRun: vi.fn(() => vi.fn()),
+  runBuilder: vi.fn(),
 }));
 
 import { compactionHook } from "../src/compaction/hook.js";
