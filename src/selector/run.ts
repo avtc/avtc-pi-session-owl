@@ -216,7 +216,7 @@ function passMessages(working: SelectorInputView["workingCopy"], contextView: st
   const workingTree = renderWorkingRoots(working);
   const text =
     `Shape the active-set for the current task (pass ${pass}). Promote what matters, demote what doesn't into nIrrelevant, consolidate and condense to fit the budget.\n\n` +
-    `Working tree\n${workingTree}\n\n${contextView}`;
+    `Working tree\n\n${workingTree}\n\n${contextView}`;
   return [{ role: "user", content: text } as AgentMessage];
 }
 

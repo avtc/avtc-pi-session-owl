@@ -301,7 +301,7 @@ export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInp
   contextSections.push(TAIL_LEGEND_NO_E);
 
   const contextView = contextSections.join("\n\n");
-  const view = [`Working tree\n${workingTree}`, contextView].join("\n\n");
+  const view = [`Working tree\n\n${workingTree}`, contextView].join("\n\n");
 
   return { view, contextView, workingCopy };
 }
