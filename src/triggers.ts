@@ -38,8 +38,6 @@ export type RunFn = (args: {
   unobserved: SessionEntry[] | null;
 }) => Promise<void>;
 
-// --- the Observer frontier -------------------------------------------------
-
 /** Whether a session entry is a user message (used to anchor the null-frontier start). */
 function isUserMessageEntry(entry: SessionEntry): boolean {
   if (entry.type !== "message") return false;
@@ -53,13 +51,15 @@ function isUserMessageEntry(entry: SessionEntry): boolean {
  * The unobserved slice: renderable entries strictly AFTER the frontier id. When the
  * frontier is null (nothing observed yet) the slice starts AFTER the first user
  * message, so the verbatim initial prompt is never re-observed (it is captured
- * mechanically — decision #2). Operational entries are never unobserved sources.
+ * mechanically — decision #2). If there is no user message at all, nothing is
+ * unobserved yet (no task anchor — the Observer waits for the first user message).
+ * Operational entries are never unobserved sources.
  */
 export function computeUnobserved(entries: readonly SessionEntry[], frontier: string | null): SessionEntry[] {
   if (frontier === null) {
     const firstUserIndex = entries.findIndex(isUserMessageEntry);
-    // nothing before/at the first user message is a source; if none, the whole
-    // renderable tail is unobserved (degenerate empty session — no-op for the Observer)
+    // start strictly after the first user message; with no user message there is no
+    // anchor, so nothing is unobserved yet (startIndex past the end → empty slice).
     const startIndex = firstUserIndex === -1 ? entries.length : firstUserIndex + 1;
     return entries.slice(startIndex).filter(isRenderableEntry);
   }
