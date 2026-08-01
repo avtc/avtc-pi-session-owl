@@ -30,6 +30,7 @@ import { isRenderableEntry } from "../observer/chunk.js";
 import type { ObserverRunInput } from "../observer/run.js";
 import { runObserver as realRunObserver } from "../observer/run.js";
 import { acquireForCompaction } from "../runtime/run-lock.js";
+import { runSelector as realRunSelector, type SelectorRunInput } from "../selector/run.js";
 import { encodeDetails } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { computeUnobserved } from "../triggers.js";
@@ -39,34 +40,25 @@ import { extractTouchedFiles } from "./touched-files.js";
 
 // --- seams (testability + later-task wiring) --------------------------------
 
-/** The inputs a Selector run needs (T17 owns the real shape; stub until then). */
-export interface SelectorRunInput {
-  ctx: ExtensionContext;
-  pi: ExtensionAPI;
-  settings: MemkeeperConfig;
-  signal: AbortSignal;
-  /** The compaction cut (firstKeptEntryId), or null mid-session. */
-  scope: { firstKeptEntryId: string | null } | null;
-}
-
-/** Injectable stage runs so tests pass fakes and T17 wires the real Selector. */
+/** Injectable stage runs so tests pass fakes. The Selector run takes the full
+ *  SelectorRunInput (ctx + pi + settings + signal + widget + scope + todo); the
+ *  hook builds it from its own inputs (todo/todoBridge are null until the
+ *  avtc-pi-todo bridge lands). */
 export interface CompactionStageRuns {
   runObserver: (input: ObserverRunInput) => Promise<void>;
   runBuilder: (input: BuilderRunInput) => Promise<void>;
   runSelector: (input: SelectorRunInput) => Promise<void>;
 }
 
-const NO_OP_SELECTOR: CompactionStageRuns["runSelector"] = async () => {};
-
-/** Module-level stage-run seams. Defaults to the real Observer + Builder + a
- *  no-op Selector (T17 replaces the Selector; tests override via the setter). */
+/** Module-level stage-run seams. Defaults to the real Observer + Builder +
+ *  Selector; tests override via the setter. */
 let stageRuns: CompactionStageRuns = {
   runObserver: realRunObserver,
   runBuilder: realRunBuilder,
-  runSelector: NO_OP_SELECTOR,
+  runSelector: realRunSelector,
 };
 
-/** Override the stage runs (tests + T17 wiring). */
+/** Override the stage runs (tests + later-task wiring). */
 export function setCompactionStageRuns(runs: CompactionStageRuns): void {
   stageRuns = runs;
 }
@@ -81,7 +73,7 @@ export function setCompactionSettingsGetter(getter: () => MemkeeperConfig): void
 
 /** Restore the default seams (tests reset between cases). */
 export function resetCompactionSeams(): void {
-  stageRuns = { runObserver: realRunObserver, runBuilder: realRunBuilder, runSelector: NO_OP_SELECTOR };
+  stageRuns = { runObserver: realRunObserver, runBuilder: realRunBuilder, runSelector: realRunSelector };
   settingsGetter = getMemkeeperSettings;
 }
 
@@ -154,7 +146,16 @@ export async function compactionHook(
     // (c) Selector — only selected-root; always called (T17 owns the internal
     // fast-path; the hook does NOT gate on threshold alone).
     if (settings.renderMode === "selected-root") {
-      await stageRuns.runSelector({ ctx, pi, settings, signal, scope: { firstKeptEntryId } });
+      await stageRuns.runSelector({
+        ctx,
+        pi,
+        settings,
+        signal,
+        widget,
+        scope: { firstKeptEntryId },
+        todo: null,
+        todoBridge: null,
+      });
     }
     if (signal.aborted) return cancelAborted(ctx);
 
