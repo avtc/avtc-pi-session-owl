@@ -32,8 +32,11 @@ export const FIND_TOOL = "find";
 const DEFAULT_TAKE = 50;
 /** take === 0 means "all" (no pagination). */
 const TAKE_ALL = 0;
-/** Upper bound on a `find` regex pattern length (guards against pathological
- *  patterns — well beyond any sensible `JWT|auth|token`). */
+/** Upper bound on a `find` regex pattern length — guards against accidental
+ *  megabyte patterns. NOTE: this caps PATTERN LENGTH, not catastrophic
+ *  backtracking (a short `(a+)+$` can still blow up on long input). True ReDoS
+ *  hardening needs a worker-thread timeout; find is cooperative-LLM-only here,
+ *  so that is deferred until the user-facing search path lands. */
 const FIND_QUERY_MAX = 500;
 const INDENT_STEP = 2;
 const ROOT_DEPTH = 0;
@@ -61,29 +64,36 @@ export function resolvePage(page: unknown): ResolvedPage {
 }
 
 /** Slice a results list by cursor pagination; return the window, whether more
- *  remain, and how many remain. `take === 0` returns the whole list.
- *  A stale `afterId` (the cursor item was removed/mutated away between calls)
- *  yields an empty window with no more — the caller re-queries from null rather
- *  than silently re-delivering duplicates from the start. */
+ *  remain, how many remain, and whether the `afterId` cursor was STALE (not
+ *  found — the graph changed between calls). `take === 0` returns the whole
+ *  list. A stale cursor yields an empty window + stale:true so the tool can
+ *  return an actionable re-query message instead of silently re-delivering
+ *  duplicates from the start. */
 export function paginate<T extends { id: string }>(
   items: T[],
   page: ResolvedPage,
-): { window: T[]; more: boolean; remaining: number } {
-  if (page.take === TAKE_ALL) return { window: items, more: false, remaining: 0 };
+): { window: T[]; more: boolean; remaining: number; stale: boolean } {
+  if (page.take === TAKE_ALL) return { window: items, more: false, remaining: 0, stale: false };
   let startIdx = 0;
   if (page.afterId !== NO_AFTER_ID) {
     const i = items.findIndex((item) => item.id === page.afterId);
-    if (i < 0) return { window: [], more: false, remaining: 0 }; // stale cursor
+    if (i < 0) return { window: [], more: false, remaining: 0, stale: true };
     startIdx = i + 1;
   }
   const window = items.slice(startIdx, startIdx + page.take);
   const remaining = Math.max(0, items.length - (startIdx + page.take));
-  return { window, more: remaining > 0, remaining };
+  return { window, more: remaining > 0, remaining, stale: false };
 }
 
 /** Render a pagination footer (only when more remain). */
 function footer(lastId: string, remaining: number): string {
   return `… +${remaining} more · afterId=${lastId}`;
+}
+
+/** Actionable message for a stale cursor (the afterId item was removed between
+ *  calls) — tells the caller to re-query from null instead of looping. */
+function staleCursorMessage(afterId: string): string {
+  return `Cursor afterId=${afterId} not found (the graph changed since the last page). Re-query without afterId to start fresh.`;
 }
 
 /** Indent a line by `depth` levels (2 spaces each). */
@@ -157,7 +167,13 @@ function makeLsTool(graph: MemkeeperGraph): AgentTool<typeof LS_PARAMS> {
         const roots = rootNodes(graph)
           .filter((n) => !isObsolete(n))
           .sort(compareNodeOrder);
-        const { window, more, remaining } = paginate(roots, page);
+        const { window, more, remaining, stale } = paginate(roots, page);
+        if (stale) {
+          return {
+            content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
+            details: { count: 0, stale: true },
+          };
+        }
         for (const node of window) lines.push(formatNodeLine(node, { viewer: "builder" }));
         if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
         return { content: [{ type: "text", text: renderLines(lines) }], details: { count: window.length, more } };
@@ -174,7 +190,13 @@ function makeLsTool(graph: MemkeeperGraph): AgentTool<typeof LS_PARAMS> {
         ...nodes.map((n) => ({ id: n.id, depth: 1, render: formatNodeLine(n, { viewer: "builder" }) })),
         ...observations.map((o) => ({ id: o.id, depth: 1, render: formatObservationLine(o, { viewer: "builder" }) })),
       ];
-      const { window, more, remaining } = paginate(combined, page);
+      const { window, more, remaining, stale } = paginate(combined, page);
+      if (stale) {
+        return {
+          content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
+          details: { count: 0, stale: true },
+        };
+      }
       for (const item of window) lines.push(indent(item.render, item.depth));
       if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
       return { content: [{ type: "text", text: renderLines(lines) }], details: { count: window.length, more } };
@@ -200,29 +222,22 @@ function makeCatTool(graph: MemkeeperGraph): AgentTool<typeof CAT_PARAMS> {
     parameters: CAT_PARAMS,
     async execute(_toolCallId, params) {
       const page = resolvePage(params.page);
-      const lines: string[] = [];
-
-      // Gather full-text blocks per requested id (node → header + its obs;
-      // observation → its full content + a compact header).
-      const blocks: { id: string; text: string }[] = [];
-      for (const id of params.ids) {
-        const node = graph.nodes.get(id as NodeId);
-        if (node !== undefined) {
-          blocks.push({ id: node.id, text: catNodeBlock(graph, node) });
-          continue;
-        }
-        const obs = graph.observations.get(id as ObsId);
-        if (obs !== undefined) {
-          blocks.push({ id: obs.id, text: catObservationBlock(obs) });
-          continue;
-        }
-        blocks.push({ id, text: `No node or observation with id ${id}.` });
+      // Build the aggregated observation full-text units (a node expands to its
+      // direct observations; the node header rides the first as a preamble),
+      // then paginate over those units (page paginates the aggregated observation
+      // full-texts, not the requested ids).
+      const units = buildCatUnits(graph, params.ids);
+      const { window, more, remaining, stale } = paginate(units, page);
+      if (stale) {
+        return {
+          content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
+          details: { count: 0, stale: true },
+        };
       }
-
-      const { window, more, remaining } = paginate(blocks, page);
-      for (const block of window) lines.push(block.text);
+      const lines = window.map(renderCatUnit);
       if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
-      return { content: [{ type: "text", text: lines.join("\n\n") }], details: { count: window.length, more } };
+      const text = lines.length === 0 ? "(empty)" : lines.join("\n\n");
+      return { content: [{ type: "text", text }], details: { count: window.length, more } };
     },
   };
 }
@@ -233,22 +248,62 @@ function catObsHeader(obs: Observation): string {
   return `📄 ${obs.id} ${importanceAbbr(obs.importance)} · ${formatTimestamp(obs.timestamp)}`;
 }
 
-/** A node's cat block: header line + its direct observations' full content. */
-function catNodeBlock(graph: MemkeeperGraph, node: Node): string {
-  const header = formatNodeLine(node, { viewer: "builder" });
-  const obs = node.observationIds
-    .map((id) => graph.observations.get(id))
-    .filter((o): o is Observation => o !== undefined)
-    .sort(compareObservationOrder);
-  if (obs.length === 0) return header;
-  const body = obs.map((o) => `${catObsHeader(o)}\n${o.content}`);
-  return [header, ...body].join("\n");
+/** A paginated cat unit: one observation full-text (header + content), with an
+ *  optional node-header preamble shown above it (the node summary, shown once
+ *  on the page where the node's first observation lands). A node with no
+ *  observations, or an unknown id, becomes a header-only unit. */
+interface CatUnit {
+  id: string;
+  preamble?: string;
+  header: string;
+  content?: string;
 }
 
-/** An observation's cat block: a compact header (id · importance · timestamp,
- *  NO sourceEntryIds — provenance is internal-only) + the full content. */
-function catObservationBlock(obs: Observation): string {
-  return `${catObsHeader(obs)}\n${obs.content}`;
+/** Build the cat units for a list of requested ids: each node expands to its
+ *  direct observations (the node header rides the first as a preamble); each
+ *  observation is one unit; unknown ids are a not-found unit. */
+function buildCatUnits(graph: MemkeeperGraph, ids: string[]): CatUnit[] {
+  const units: CatUnit[] = [];
+  for (const id of ids) {
+    const node = graph.nodes.get(id as NodeId);
+    if (node !== undefined) {
+      const nodeHeader = formatNodeLine(node, { viewer: "builder" });
+      const obs = node.observationIds
+        .map((oid) => graph.observations.get(oid))
+        .filter((o): o is Observation => o !== undefined)
+        .sort(compareObservationOrder);
+      if (obs.length === 0) {
+        // a node with no direct observations is a header-only unit.
+        units.push({ id: node.id, header: nodeHeader });
+        continue;
+      }
+      obs.forEach((o, index) => {
+        units.push({
+          id: o.id,
+          preamble: index === 0 ? nodeHeader : undefined,
+          header: catObsHeader(o),
+          content: o.content,
+        });
+      });
+      continue;
+    }
+    const obs = graph.observations.get(id as ObsId);
+    if (obs !== undefined) {
+      units.push({ id: obs.id, header: catObsHeader(obs), content: obs.content });
+      continue;
+    }
+    units.push({ id, header: `No node or observation with id ${id}.` });
+  }
+  return units;
+}
+
+/** Render one cat unit (preamble + header + content). */
+function renderCatUnit(unit: CatUnit): string {
+  const parts: string[] = [];
+  if (unit.preamble !== undefined) parts.push(unit.preamble);
+  parts.push(unit.header);
+  if (unit.content !== undefined) parts.push(unit.content);
+  return parts.join("\n");
 }
 
 // --- find ------------------------------------------------------------------
@@ -261,7 +316,6 @@ const FIND_PARAMS = Type.Object({
 
 interface FindMatch {
   id: string;
-  parent: NodeId | null;
   render: string;
 }
 
@@ -310,7 +364,6 @@ function makeFindTool(graph: MemkeeperGraph): AgentTool<typeof FIND_PARAMS> {
         if (regex.test(node.summary)) {
           nodeMatches.push({
             id: node.id,
-            parent: node.parentNode,
             node,
             render: formatNodeLine(node, { viewer: "builder", showParent: node.parentNode ?? undefined }),
           });
@@ -321,7 +374,6 @@ function makeFindTool(graph: MemkeeperGraph): AgentTool<typeof FIND_PARAMS> {
           if (regex.test(obs.content)) {
             obsMatches.push({
               id: obs.id,
-              parent: node.id,
               obs,
               render: formatObservationLine(obs, { viewer: "builder", showParent: node.id }),
             });
@@ -335,7 +387,13 @@ function makeFindTool(graph: MemkeeperGraph): AgentTool<typeof FIND_PARAMS> {
       const matches: FindMatch[] = [...nodeMatches, ...obsMatches];
 
       const page = resolvePage(params.page);
-      const { window, more, remaining } = paginate(matches, page);
+      const { window, more, remaining, stale } = paginate(matches, page);
+      if (stale) {
+        return {
+          content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
+          details: { count: 0, stale: true },
+        };
+      }
       const lines = window.map((m) => m.render);
       if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
       const text = lines.length === 0 ? "No matches." : lines.join("\n");

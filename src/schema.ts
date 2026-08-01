@@ -20,7 +20,7 @@ export const NodeStateSchema: TSchema = StringEnum(["new", "active", "archived",
 
 /** Cursor pagination common to read tools (ls/find/cat). */
 export const PageSchema: TSchema = Type.Object({
-  take: Type.Integer({ description: "Page size; 0 = all." }),
+  take: Type.Integer({ minimum: 0, description: "Page size; 0 = all." }),
   afterId: Type.Union([Type.String(), Type.Null()], {
     description: "Last id of the previous page; null from the start.",
   }),

@@ -194,6 +194,46 @@ describe("Builder read tools", () => {
       const occurrences = out.split("Chose JWT for stateless auth").length - 1;
       expect(occurrences).toBe(1);
     });
+
+    it("paginates over the aggregated observation full-texts, not the requested ids", async () => {
+      // a node with three observations: cat(node) page must window the OBSERVATIONS.
+      const g = buildGraph();
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "o6",
+          content: "Second JWT note",
+          importance: "high",
+          sourceEntryIds: ["4"],
+          timestamp: NOW,
+          parentNode: "n7",
+        }),
+      });
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "o7",
+          content: "Third JWT note",
+          importance: "high",
+          sourceEntryIds: ["5"],
+          timestamp: NOW,
+          parentNode: "n7",
+        }),
+      });
+      const localTools = makeBuilderTools(g, DEFAULT_CONFIG);
+
+      // page size 1 over the node's three observations → header (preamble) + first obs only.
+      const page1 = textOf(await callTool(localTools, "cat", { ids: ["n7"], page: { take: 1 } }));
+      expect(page1).toContain("Auth migration to JWT"); // n7 header (preamble, once)
+      // exactly one observation full-text block on page 1
+      expect(page1).toMatch(/afterId=o/);
+
+      // page 2 via the afterId cursor yields the NEXT observation, no header repeat.
+      const m = page1.match(/afterId=(oS+)/);
+      const afterId = m !== null ? m[1] : "";
+      const page2 = textOf(await callTool(localTools, "cat", { ids: ["n7"], page: { take: 1, afterId } }));
+      // the n7 header must NOT repeat on page 2 (it rode page 1 as a preamble).
+      const headerOccurrences = page2.split("Auth migration to JWT").length - 1;
+      expect(headerOccurrences).toBe(0);
+    });
   });
 
   describe("find", () => {
@@ -244,13 +284,17 @@ describe("Builder read tools", () => {
   });
 
   describe("cursor pagination round-trip", () => {
-    it("a second page using the prior afterId yields the next items, no duplicates", async () => {
+    it("a second page using the prior afterId yields the NEXT items, no duplicates", async () => {
       const page1 = textOf(await callTool(tools(), "ls", { page: { take: 2 } }));
       // extract the afterId from the footer
       const match = page1.match(/afterId=(\S+)/);
       expect(match).not.toBeNull();
       const afterId = match !== null ? match[1] : "";
       const page2 = textOf(await callTool(tools(), "ls", { page: { take: 2, afterId } }));
+      // page2 returns real next content (at least one root line, not the stale-cursor message)
+      expect(page2).not.toContain("Cursor");
+      const page2RootLines = page2.split("\n").filter((l) => l.startsWith("📁 "));
+      expect(page2RootLines.length).toBeGreaterThan(0);
       // page1 roots must NOT reappear on page2 (no duplicate re-delivery)
       const page1Ids = page1
         .split("\n")
@@ -263,10 +307,19 @@ describe("Builder read tools", () => {
       }
     });
 
-    it("a stale afterId (cursor removed) yields an empty window, not duplicates", async () => {
-      // 'nX' is not a root in this graph → cursor-not-found → empty, no more.
+    it("a negative take is clamped to 'all' (no fabricated +N more count)", async () => {
+      const out = textOf(await callTool(tools(), "ls", { page: { take: -3 } }));
+      // all non-obsolete roots returned, no pagination footer.
+      expect(out).not.toContain("afterId=");
+      expect(out).not.toContain("+0 more");
+      expect(out).toContain("nGoal");
+    });
+
+    it("a stale afterId (cursor removed) yields an actionable re-query message, not duplicates", async () => {
+      // 'nX' is not a root in this graph → cursor-not-found → actionable message.
       const out = textOf(await callTool(tools(), "ls", { page: { take: 2, afterId: "nX-not-present" } }));
-      expect(out).toContain("empty");
+      expect(out.toLowerCase()).toContain("cursor");
+      expect(out.toLowerCase()).toContain("afterid");
     });
   });
 
