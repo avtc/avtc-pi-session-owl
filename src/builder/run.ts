@@ -89,8 +89,7 @@ export interface BuilderRunInput {
  *
  * Honors `signal`; persists applied mutates + flush_new at call time. Never
  * throws — a model-unavailable skip notifies the user; a run-ending error logs
- * (the caller — the compaction hook — surfaces user-facing failure). Partial
- * work kept.
+ * (the caller may surface user-facing failure). Partial work kept.
  */
 export async function runBuilder(input: BuilderRunInput): Promise<void> {
   // Aborted before start → nothing to do; `new` nodes stay `new`.

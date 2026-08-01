@@ -18,7 +18,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
-import { measureRootViewTokens } from "../graph/read-tools.js";
+import { measureRootViewTokens, nonObsoleteRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
@@ -105,8 +105,8 @@ export interface SelectorRunInput {
  *
  * Honors `signal`; persists the selected tree once at run completion. Never
  * throws — a model-unavailable skip notifies the user; a run-ending error logs
- * (the caller — the compaction hook — surfaces user-facing failure). Partial
- * work is kept: whatever tree exists at the end is committed.
+ * (the caller may surface user-facing failure). Partial work is kept: whatever
+ * tree exists at the end is committed.
  */
 export async function runSelector(input: SelectorRunInput): Promise<void> {
   // Aborted before start → nothing to do.
@@ -286,16 +286,7 @@ function persistResult(store: StoreContext, graphStore: ReturnType<typeof getGra
 
 /** Push the working copy's current root counts to the widget (live deltas). */
 function pushSelectedCounts(widget: WidgetController, workingGraph: Graph): void {
-  const rootCount = countNonObsoleteRoots(workingGraph);
+  const rootCount = nonObsoleteRoots(workingGraph).length;
   const rootViewTokens = measureRootViewTokens(workingGraph, NON_BUILDER);
   widget.setSelectedCounts(rootCount, rootViewTokens);
-}
-
-/** Count the working graph's non-obsolete root nodes. */
-function countNonObsoleteRoots(graph: Graph): number {
-  let count = NO_MUTATES;
-  for (const node of graph.nodes.values()) {
-    if (node.parentNode === null && node.state !== "obsolete") count += 1;
-  }
-  return count;
 }
