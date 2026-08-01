@@ -46,17 +46,20 @@ describe("todo bridge adapter", () => {
       expect("parentId" in item).toBe(false);
     });
 
-    it("maps status 'decomposed' -> 'completed'", () => {
-      const { context } = makeTodoAdapter(
+    it("maps status 'decomposed' -> 'completed' (surfaces under the completed view)", () => {
+      const { bridge } = makeTodoAdapter(
         fakeProxy([
           { id: "1", parentId: null, name: "Folder", details: "x", status: "decomposed" },
           { id: "2", parentId: "1", name: "Child", details: "y", status: "pending" },
         ]),
       );
-      const completed = context.getPending(); // none pending at the literal level? 2 is pending
-      expect(completed.length).toBe(1);
-      // the decomposed parent is NOT pending:
-      expect(completed[0].id).toBe("2");
+      // bridge.getItems() (no filter) returns all items through mapTodoItem, so
+      // the decomposed parent surfaces as 'completed' (the mapping under test).
+      const all = bridge.getItems();
+      const folder = all.find((i) => i.id === "1");
+      expect(folder).toBeDefined();
+      expect(folder?.status).toBe("completed");
+      expect(all.find((i) => i.id === "2")?.status).toBe("pending");
     });
 
     it("normalizes empty details string to undefined", () => {
