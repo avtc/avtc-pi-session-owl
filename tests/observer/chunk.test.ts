@@ -453,6 +453,15 @@ describe("renderBlocks: ANSI stripped from all text (not only thinking)", () => 
       .join("");
     expect(text).toBe("<U E=u1>beforeafter</U>");
   });
+
+  it("strips OSC-8 hyperlinks terminated by the String Terminator (ESC \\)", () => {
+    // OSC-8 hyperlink: \x1b]8;;url\x1b\\ link-text \x1b]8;;\x1b\\
+    const link = "\u001b]8;;https://x\u001b\\click\u001b]8;;\u001b\\here";
+    const text = renderBlocks([userEntry("u1", link)], NO_CAP)
+      .map((b) => b.text)
+      .join("");
+    expect(text).toBe("<U E=u1>clickhere</U>");
+  });
 });
 
 describe("buildChunks: entry-bounded (whole entry never split)", () => {
