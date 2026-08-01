@@ -7,7 +7,7 @@
 // (append-only custom entries); reconstruction = last snapshot + fold deltas-since.
 //
 // The store is PERSIST-ONLY for appends: callers own in-memory mutation via the
-// T3 mutators (apply-then-persist), then call the store to record the delta. The
+// the mutators (apply-then-persist), then call the store to record the delta. The
 // store applies mutations ONLY during load() reconstruction (event-sourcing).
 
 import { type GraphDelta, recomputeRange } from "../graph/mutations.js";
@@ -257,7 +257,7 @@ export async function load(ctx: StoreContext): Promise<void> {
     }
   }
 
-  // 3. replay post-snapshot graph deltas (structural mutations) via T3 mutators.
+  // 3. replay post-snapshot graph deltas (structural mutations) via the mutators.
   //    Bad deltas are skipped (tolerant reader).
   for (let i = replayFrom; i < entries.length; i += 1) {
     const e = entries[i];

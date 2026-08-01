@@ -16,7 +16,7 @@ import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-age
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
-import { nowStoredTimestamp, toStoredTimestamp } from "../format/render.js";
+import { toStoredTimestamp } from "../format/render.js";
 import { applyCreateNode, applyRecordObservation, type GraphDelta } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
@@ -33,7 +33,7 @@ import { resolveStageModel } from "../runtime/model.js";
 import { ImportanceSchema } from "../schema.js";
 import { encodeObservation, type ObservationEntry } from "../store/codecs.js";
 import { appendGraphDelta, appendObservation, getGraphStore, type StoreContext } from "../store/graph-store.js";
-import { type Importance, makeObservation, type NodeId, type ObsId } from "../types.js";
+import { type Importance, makeObservation, type NodeId, nowStoredTimestamp, type ObsId } from "../types.js";
 import { buildChunks, type ChunkOptions } from "./chunk.js";
 
 // --- named constants (no bare literals at call sites) ----------------------

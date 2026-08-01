@@ -2,10 +2,10 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // STUB (the real hook lands later): the real compaction hook (ensure-ready gate + render +
-// snapshot) lives here. T7 imports `compactionHook` so the `session_before_compact`
+// snapshot) lives here. The activate path imports `compactionHook` so the `session_before_compact`
 // hook can delegate to it; until the real hook lands this returns `undefined` (Pi runs its
-// native compaction summary — the `enabled=false` off-path behavior). T24 wires
-// the final surface.
+// native compaction summary — the `enabled=false` off-path behavior). The end-to-end
+// integration task wires the final surface.
 
 import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 

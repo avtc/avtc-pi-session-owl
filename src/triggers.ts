@@ -215,7 +215,7 @@ export function evaluateSelectorTrigger(input: TriggerInput): StageTriggerResult
   };
 }
 
-// --- turn_end entry point (turn_end entry point) ----------------------------------
+// --- turn_end entry point ----------------------------------
 
 /** Fire-and-forget launch a stage run: acquire the lock or SKIP (decision #20);
  *  on acquire, capture ctx synchronously and `void` an async IIFE whose `finally`

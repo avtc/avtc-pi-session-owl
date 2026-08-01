@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // STUB (replaced by T20): the real progress tracker + widget render live here.
-// T7 imports `initWidget()` so `activate` can hand the lifecycle a WidgetController;
+// The activate path imports `initWidget()` so `activate` can hand the lifecycle a WidgetController;
 // until T20 lands this returns a no-op controller. T24 wires the final surface.
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";

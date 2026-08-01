@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Replay dispatcher: apply a serialized `GraphDelta` to an in-memory graph by
-// delegating to the T3 mutators. Used by GraphStore.load() to fold append-only
+// delegating to the mutators. Used by GraphStore.load() to fold append-only
 // deltas onto the compaction snapshot (event-sourcing).
 //
 // The mutators re-validate each op live; a corrupt/foreign-id delta
@@ -25,7 +25,7 @@ import {
 } from "./mutations.js";
 
 /**
- * Apply one recorded delta to the graph via the corresponding T3 mutator.
+ * Apply one recorded delta to the graph via the corresponding mutator.
  * Throws `GraphInvariantError` on a bad delta (caller decides skip/abort).
  */
 export function applyDelta(graph: MemkeeperGraph, delta: GraphDelta, policy: MutationPolicy): void {

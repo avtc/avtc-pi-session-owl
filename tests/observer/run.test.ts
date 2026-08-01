@@ -175,11 +175,11 @@ describe("runObserver", () => {
     expect(obsEntries).toHaveLength(1);
 
     // the single observation delta covers the whole unobserved range and carries
-    // the accumulated token count.
+    // the exact accumulated token count.
     const obsEntry = obsEntries[0].data as { coversFromId: string | null; coversUpToId: string; tokenCount: number };
     expect(obsEntry.coversFromId).toBe("u1");
     expect(obsEntry.coversUpToId).toBe("a1");
-    expect(obsEntry.tokenCount).toBeGreaterThan(0);
+    expect(obsEntry.tokenCount).toBe(Math.ceil("Chose vitest for all new tests.".length / 4));
 
     // the wrapper node exists in-memory at root, state new, with the obs
     const graph = getGraphStore().graph;
@@ -368,5 +368,38 @@ describe("runObserver", () => {
     expect(appended).toHaveLength(0);
     expect(getGraphStore().observerFrontier).toBeNull();
     expect(notify).toHaveBeenCalled();
+  });
+
+  it("accumulates records across multiple good chunks into ONE observation delta", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // two chunks (threshold 1 → each entry its own chunk): [u1], [a1].
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = scriptedRunStage([
+      [{ content: "Initial goal stated.", importance: "high", sourceEntryIds: ["u1"] }], // chunk 1 [u1]
+      [{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }], // chunk 2 [a1]
+    ]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn, thresholdTokens: 1 }));
+
+    // exactly ONE observation delta for the whole run, with BOTH records.
+    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    expect(obsEntries).toHaveLength(1);
+    const entry = obsEntries[0].data as {
+      coversFromId: string | null;
+      coversUpToId: string;
+      records: { content: string }[];
+      tokenCount: number;
+    };
+    expect(entry.records.map((r) => r.content)).toEqual(["Initial goal stated.", "Chose vitest."]);
+    expect(entry.coversFromId).toBe("u1");
+    expect(entry.coversUpToId).toBe("a1");
+    // exact tokenCount = sum of the two records' chars/4 estimates.
+    const expectedTokens = Math.ceil("Initial goal stated.".length / 4) + Math.ceil("Chose vitest.".length / 4);
+    expect(entry.tokenCount).toBe(expectedTokens);
+    // two wrapper create_node deltas (one per record)
+    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(2);
+    // frontier advanced to the last entry of the whole run
+    expect(getGraphStore().observerFrontier).toBe("a1");
   });
 });

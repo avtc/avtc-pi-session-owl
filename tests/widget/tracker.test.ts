@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Stub-guard: verifies the T7 no-op WidgetController contract. T20 replaces the
+// Stub-guard: verifies the no-op WidgetController contract. The widget task replaces the
 // stub with the real ProgressTracker and replaces this test with the real suite.
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";

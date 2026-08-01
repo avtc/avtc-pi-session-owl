@@ -242,7 +242,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
   it("uses provider usage.output as the primary source when reported", async () => {
     const events: AgentEvent[] = [
       deltaUpdate("text_delta", "hello world"), // 11 chars -> 3 tokens fallback
-      usageUpdate(77), // provider streams usage mid-stream (consumed live by T20)
+      usageUpdate(77), // provider streams usage mid-stream
       messageEnd(usageOf(0, 77, 0, 0)), // authoritative output -> primary
       agentEnd([]),
     ];

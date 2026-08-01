@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Stub-guard: verifies the T7 compactionHook returns undefined (Pi native
+// Stub-guard: verifies the compactionHook returns undefined (Pi native
 // compaction). The real hook replaces the stub with the ensure-ready gate + render and
 // replaces this test with the real suite.
 

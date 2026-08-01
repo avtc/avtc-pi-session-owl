@@ -101,6 +101,13 @@ export function estimateContentTokens(content: string): number {
   return Math.ceil(content.length / CHARS_PER_TOKEN_ESTIMATE);
 }
 
+/** The current instant as a stored "YYYY-MM-DD HH:MM" timestamp (UTC). The
+ *  canonical source for any code generating a fresh model timestamp (the graph
+ *  clock + the Observer's no-source fallback), so the format never drifts. */
+export function nowStoredTimestamp(): string {
+  return new Date().toISOString().slice(0, 16).replace("T", " ");
+}
+
 /** Construct an observation, freezing `contentTokens` from `content`. */
 export function makeObservation(args: {
   id: ObsId;

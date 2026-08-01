@@ -13,6 +13,7 @@ import {
   N_GOAL,
   type Node,
   type NodeId,
+  nowStoredTimestamp,
   O_INITIAL_PROMPT,
   type Observation,
   type ObsId,
@@ -194,7 +195,7 @@ function currentTimestamp(): string {
 }
 let clockFn: () => string = defaultClock;
 function defaultClock(): string {
-  return new Date().toISOString().slice(0, 16).replace("T", " ");
+  return nowStoredTimestamp();
 }
 /** Override the timestamp source (tests). Pass null to restore the default. */
 export function setClock(fn: (() => string) | null): void {
