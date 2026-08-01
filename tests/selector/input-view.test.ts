@@ -412,6 +412,31 @@ describe("buildTail", () => {
     expect(out).toContain("tail msg");
   });
 
+  it("renders one <A> block per text part in the preceding agent (byte-consistent with the tail)", () => {
+    // A multi-text-part assistant: the prelude must emit one <A> per text part,
+    // matching what the tail would render for the same entry (not one joined block).
+    const message: AssistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "First sentence." },
+        { type: "text", text: "Second sentence." },
+      ],
+      api: "anthropic",
+      provider: "anthropic",
+      model: "m",
+      usage: USAGE,
+      stopReason: "stop",
+      timestamp: 0,
+    };
+    const multiPart: SessionMessageEntry = { type: "message", id: "a0", parentId: null, timestamp: FIXED_TS, message };
+    const branch: SessionEntry[] = [multiPart, userEntry("u0", "the ask"), assistantEntry("a2", "tail begins")];
+    const out = buildTail(ctxFor(branch), { firstKeptEntryId: "a2" }, CHUNK_OPTS);
+    // Two separate <A> blocks (per part), NOT one joined block.
+    expect(out).toContain("<A E=a0>First sentence.</A>");
+    expect(out).toContain("<A E=a0>Second sentence.</A>");
+    expect(out).not.toContain("First sentence.Second sentence.");
+  });
+
   it("sanitizes the preceding agent text the same way the tail is (ANSI stripped)", () => {
     // The preceding agent text carries an ANSI color escape; it must be stripped
     // in the prelude just as it is in the tail (consistent sanitization).

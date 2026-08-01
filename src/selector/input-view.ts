@@ -168,7 +168,6 @@ function findLastUserMessage(branch: readonly SessionEntry[]): number {
   return NOT_FOUND;
 }
 
-/** Index of the nearest preceding assistant text message before `from`. */
 /** Index of the nearest preceding assistant message carrying TEXT before
  *  `from` — skips textless (tool-call-only / thinking-only) turns so the prelude
  *  surfaces the last contextual agent text, not an empty tool turn. */
