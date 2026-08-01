@@ -444,6 +444,15 @@ describe("renderBlocks: ANSI stripped from all text (not only thinking)", () => 
       .join("");
     expect(text).toBe("<T E=a1>x</T>");
   });
+
+  it("strips OSC sequences (terminal titles / hyperlinks) and the C1 8-bit intro", () => {
+    const osc = "\u001b]0;title\u0007before";
+    const c1 = "\u009b31mafter\u009b0m";
+    const text = renderBlocks([userEntry("u1", osc + c1)], NO_CAP)
+      .map((b) => b.text)
+      .join("");
+    expect(text).toBe("<U E=u1>beforeafter</U>");
+  });
 });
 
 describe("buildChunks: entry-bounded (whole entry never split)", () => {
@@ -525,6 +534,10 @@ describe("renderBlocks: defensive branches", () => {
 
   it("skips a branch_summary with empty summary", () => {
     expect(renderBlocks([branchSummaryEntry("bs1", "")], NO_CAP)).toHaveLength(0);
+  });
+
+  it("skips a branch_summary that is empty after ANSI stripping", () => {
+    expect(renderBlocks([branchSummaryEntry("bs1", "\u001b[31m\u001b[0m")], NO_CAP)).toHaveLength(0);
   });
 
   it("skips an empty thinking block (after sanitization)", () => {

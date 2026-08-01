@@ -45,9 +45,11 @@ export interface RenderedChunk {
 // --- constants --------------------------------------------------------------
 
 const TRUNCATION_MARKER = "[…truncated…]";
-/** CSI escape sequences (SGR colors, 24-bit color with ':' params, cursor, '?' private modes). */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI CSI escape sequences are the explicit target here
-const ANSI_ESCAPE_PATTERN = /\x1b\[[0-9;:?]*[A-Za-z]/g;
+/** ANSI/VT escape sequences stripped from all rendered text: CSI (SGR colors,
+ *  24-bit color with ':' params, cursor moves, '?' private modes) via \x1b[ or the
+ *  8-bit control introducer \x9b; OSC (terminal titles, OSC-8 hyperlinks) via BEL. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are the explicit target here
+const ANSI_ESCAPE_PATTERN = /\x1b\][^\x07]*\x07|\x1b\[[0-9;:?]*[A-Za-z]|\x9b[0-9;:?]*[A-Za-z]/g;
 const THINKING_PREFIX_PATTERN = /^Thinking:\s*/;
 const ATTR_ERROR = "error";
 
@@ -117,8 +119,9 @@ function renderCustomMessageGroup(entry: CustomMessageEntry): RenderGroup | null
 }
 
 function renderBranchSummaryGroup(entry: BranchSummaryEntry): RenderGroup | null {
-  if (entry.summary.length === 0) return null;
-  return { blocks: [uBlock(entry.id, stripAnsi(entry.summary))] };
+  const text = stripAnsi(entry.summary);
+  if (text.length === 0) return null;
+  return { blocks: [uBlock(entry.id, text)] };
 }
 
 /**
