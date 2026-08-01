@@ -28,9 +28,23 @@ import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } f
 import { resolveStageModel } from "../runtime/model.js";
 import { decodeNode, encodeSelection } from "../store/codecs.js";
 import { getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
-import { type MemkeeperGraph as Graph, MemkeeperGraph, O_INITIAL_PROMPT } from "../types.js";
+import {
+  type MemkeeperGraph as Graph,
+  MemkeeperGraph,
+  type Node,
+  type NodeId,
+  O_INITIAL_PROMPT,
+  type Observation,
+  type ObsId,
+} from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
-import { buildSelectorInputView, type SelectorInputView, type TailBoundary, type TodoContext } from "./input-view.js";
+import {
+  buildSelectorInputView,
+  renderWorkingRoots,
+  type SelectorInputView,
+  type TailBoundary,
+  type TodoContext,
+} from "./input-view.js";
 import { makeSelectorTools, SELECTOR_MUTATE_TOOL_NAMES, type TodoBridge } from "./tools.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
@@ -90,8 +104,9 @@ export interface SelectorRunInput {
  * over the working copy, then persist the resulting selected tree.
  *
  * Honors `signal`; persists the selected tree once at run completion. Never
- * throws — failures are logged + notified (partial work kept: whatever tree
- * exists at the end is committed).
+ * throws — a model-unavailable skip notifies the user; a run-ending error logs
+ * (the caller — the compaction hook — surfaces user-facing failure). Partial
+ * work is kept: whatever tree exists at the end is committed.
  */
 export async function runSelector(input: SelectorRunInput): Promise<void> {
   // Aborted before start → nothing to do.
@@ -113,8 +128,10 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   if (canReuseCachedTree(graphStore, input.settings.selectorRootViewThreshold)) return;
 
   // Build the input-view once (the working copy + task context). The working
-  // copy persists across passes within this run.
-  const { view, workingCopy } = buildInputView(graphStore.graph, input);
+  // copy persists across passes within this run; the context (tail/todo/touched/
+  // legends) is stable, so only the working-tree section is re-rendered per pass
+  // (it mutates across passes).
+  const { contextView, workingCopy } = buildInputView(graphStore.graph, input);
 
   let stageOpened = false;
   let pass = FIRST_PASS;
@@ -134,7 +151,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
     while (true) {
       if (input.signal.aborted) break; // abort → run ended early
 
-      const { outcome } = await runPass(input, resolved, tools, view, runStageFn, pass);
+      const { outcome } = await runPass(input, workingCopy, contextView, resolved, tools, runStageFn, pass);
       pushSelectedCounts(input.widget, workingCopy.graph);
 
       // try_finish success → converged, stop.
@@ -152,7 +169,8 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
     log.error("selector run failed", cause);
   } finally {
     // Persist the resulting tree whenever a stage opened (a working copy exists)
-    // — on convergence / no-op / max AND on a run-ending error: the working copy
+    // — on convergence / no-op / max, on a run-ending error, AND on an abort-
+    // during-run (decision #39: committed partial work is kept): the working copy
     // is the best available curation and committing it keeps mk_recall's target
     // alive. (Aborted-before-start leaves no working copy; stageOpened is false.)
     if (stageOpened) persistResult(store, graphStore, workingCopy.graph);
@@ -167,14 +185,15 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
  *  ≥1 applied mutates → swallowed (counts as a finished pass, partial kept). */
 async function runPass(
   input: SelectorRunInput,
+  working: SelectorInputView["workingCopy"],
+  contextView: string,
   resolved: { model: StageRunInput["model"]; apiKey: string | undefined },
   tools: ReturnType<typeof makeSelectorTools>,
-  view: string,
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>,
   pass: number,
 ): Promise<{ outcome: SelectorPassOutcome }> {
   const { outcome, onEvent } = makeSelectorPassTracker((event) => input.widget.onEvent(event));
-  const messages = passMessages(view, pass);
+  const messages = passMessages(working, contextView, pass);
   await runConvergencePass({
     systemPrompt: SELECTOR_SYSTEM,
     messages,
@@ -190,11 +209,14 @@ async function runPass(
   return { outcome };
 }
 
-/** Build the per-pass user message: the task + the pass number. */
-function passMessages(view: string, pass: number): AgentMessage[] {
+/** Build the per-pass user message: the task + the pass number + the CURRENT
+ *  working-tree render (re-rendered each pass — the working copy mutates across
+ *  passes) + the stable context (tail/todo/touched/legends). */
+function passMessages(working: SelectorInputView["workingCopy"], contextView: string, pass: number): AgentMessage[] {
+  const workingTree = renderWorkingRoots(working);
   const text =
     `Shape the active-set for the current task (pass ${pass}). Promote what matters, demote what doesn't into nIrrelevant, consolidate and condense to fit the budget.\n\n` +
-    view;
+    `Working tree\n${workingTree}\n\n${contextView}`;
   return [{ role: "user", content: text } as AgentMessage];
 }
 
@@ -217,14 +239,14 @@ function canReuseCachedTree(store: ReturnType<typeof getGraphStore>, threshold: 
  *  cached tree size (≤ selectorRootViewThreshold); cheap for a fast-path that
  *  skips an LLM run. */
 function materializeSnapshot(cached: NonNullable<ReturnType<typeof getGraphStore>["selectedTree"]>): Graph {
-  const nodes = new Map();
+  const nodes = new Map<NodeId, Node>();
   for (const sn of cached.nodes) {
     const node = decodeNode(sn);
     if (node !== null) nodes.set(node.id, node);
   }
   return new MemkeeperGraph({
     nodes,
-    observations: new Map(),
+    observations: new Map<ObsId, Observation>(),
     nextObsId: cached.nextObsId,
     nextNodeId: cached.nextNodeId,
   });

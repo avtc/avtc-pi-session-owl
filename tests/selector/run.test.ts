@@ -223,6 +223,53 @@ describe("runSelector", () => {
     expect(widget.selectedCalls.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("re-renders the working tree each pass (pass 2 sees pass 1's mutations, not a stale view)", async () => {
+    seedGraph([{ id: "n3", summary: "keep me", state: "active" }]);
+    const capturedMessages: string[] = [];
+    // pass 1: actually demote n3 into nIrrelevant via the real mv tool, then
+    // try_finish-reject; pass 2: converge. The scripted runStage invokes the mv
+    // tool on the working copy so pass 2's message must reflect the demotion.
+    const scripted = scriptRunStage({
+      passes: [
+        {
+          tools: [
+            { name: MV_TOOL, ok: true },
+            { name: TRY_FINISH_TOOL, ok: false },
+          ],
+        },
+        { tools: [{ name: TRY_FINISH_TOOL, ok: true }] },
+      ],
+    });
+    const countingRunStage = async (input: StageRunInput): Promise<StageRunResult> => {
+      const userText = (input.messages[0] as unknown as { content: string })?.content ?? "";
+      capturedMessages.push(userText);
+      // pass 1: actually move n3 under nIrrelevant so the working copy changes
+      if (capturedMessages.length === 1) {
+        const mv = input.tools.find((t) => t.name === MV_TOOL);
+        if (mv !== undefined) {
+          await mv.execute("c-mv", { sourceIds: ["n3"], destId: "nIrrelevant" });
+        }
+      }
+      return scripted(input);
+    };
+    await runSelector({
+      ctx: makeFakeCtx(),
+      pi: recordingPi().pi,
+      settings: settings({ selectorRootViewThreshold: 0, maxSelectorPasses: 5 }),
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: countingRunStage,
+    });
+    expect(capturedMessages.length).toBe(2);
+    // pass 1's working tree shows n3 at the root; pass 2's must NOT (it was
+    // demoted into nIrrelevant) — proving pass 2 re-rendered the live copy.
+    expect(capturedMessages[0]).toContain("keep me");
+    expect(capturedMessages[1]).not.toContain("keep me");
+  });
+
   it("persists a self-contained snapshot: nodes are deep copies (mutating source afterward doesn't change the snapshot)", async () => {
     seedGraph([{ id: "n3", summary: "original summary" }]);
     const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });

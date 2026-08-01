@@ -256,6 +256,11 @@ export interface SelectorInputViewArgs {
 /** Result of assembling the Selector input view. */
 export interface SelectorInputView {
   view: string;
+  /** The stable context (everything EXCEPT the working-tree section): the
+   *  current-task context (tail + todo + touched files) + legends. Re-rendered
+   *  fresh each pass so the per-pass message reflects the live working copy
+   *  (the working tree mutates across passes; the context does not). */
+  contextView: string;
   workingCopy: SelectorWorkingCopy;
 }
 
@@ -270,39 +275,41 @@ export interface SelectorInputView {
 export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInputView {
   const workingCopy = buildWorkingCopy(args.sourceGraph);
 
-  const sections: string[] = [];
+  const workingTree = renderWorkingRoots(workingCopy);
 
-  // A. Working tree — level-0 roots, nGoal first, nIrrelevant last.
-  sections.push("Working tree");
-  sections.push(renderWorkingRoots(workingCopy));
+  const contextSections: string[] = [];
 
   // B. Current-task context.
-  sections.push("Current task");
+  contextSections.push("Current task");
   const tailText = buildTail(args.tail, args.tailBoundary, args.chunkOptions);
   if (tailText.length > 0) {
-    sections.push("Recent tail");
-    sections.push(tailText);
+    contextSections.push("Recent tail");
+    contextSections.push(tailText);
   }
   if (args.todo !== null) {
-    sections.push(buildTodo(args.todo));
+    contextSections.push(buildTodo(args.todo));
   }
   const touched = extractTouchedFiles(args.touchedFiles, args.sinceEntryId);
   if (touched.length > 0) {
-    sections.push("Touched since last compaction");
-    sections.push(renderTouchedFiles(touched).join("\n"));
+    contextSections.push("Touched since last compaction");
+    contextSections.push(renderTouchedFiles(touched).join("\n"));
   }
 
   // C. Legends.
-  sections.push("Legend");
-  sections.push(RENDER_LEGEND);
-  sections.push(TAIL_LEGEND_NO_E);
+  contextSections.push("Legend");
+  contextSections.push(RENDER_LEGEND);
+  contextSections.push(TAIL_LEGEND_NO_E);
 
-  return { view: sections.join("\n\n"), workingCopy };
+  const contextView = contextSections.join("\n\n");
+  const view = [`Working tree\n${workingTree}`, contextView].join("\n\n");
+
+  return { view, contextView, workingCopy };
 }
 
 /** Render the working copy's non-obsolete roots: nGoal first, then the rest by
- *  importance desc / recency desc, nIrrelevant last. */
-function renderWorkingRoots(workingCopy: SelectorWorkingCopy): string {
+ *  importance desc / recency desc, nIrrelevant last. Exported so the Selector
+ *  run re-renders the working tree each pass (it mutates across passes). */
+export function renderWorkingRoots(workingCopy: SelectorWorkingCopy): string {
   const graph = workingCopy.graph;
   const roots = [...graph.nodes.values()].filter(
     (node) => node.parentNode === ROOT_PARENT && node.state !== "obsolete",
