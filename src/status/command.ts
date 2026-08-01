@@ -65,13 +65,17 @@ export function buildStatusReport(input: StatusInput): string {
   const nodeCount = input.nodes.length;
   const nodeTokens = sum(input.nodes, (n) => n.summaryTokens);
   const LABEL_WIDTH = 12; // "observations" is the longest label
-  const COUNT_WIDTH = 6; // fits "1,245"-class counts with room
+  // count width derived from the actual counts so alignment holds at any
+  // magnitude (a fixed width would let very large counts drift the column).
+  const obsCountStr = formatCount(obsCount);
+  const nodeCountStr = formatCount(nodeCount);
+  const countWidth = Math.max(obsCountStr.length, nodeCountStr.length);
   lines.push("", "Memory");
   lines.push(
-    `  ${"observations".padStart(LABEL_WIDTH)}  ${formatCount(obsCount).padStart(COUNT_WIDTH)}  ${formatTokens(obsTokens)} tok`,
+    `  ${"observations".padStart(LABEL_WIDTH)}  ${obsCountStr.padStart(countWidth)}  ${formatTokens(obsTokens)} tok`,
   );
   lines.push(
-    `  ${"nodes".padStart(LABEL_WIDTH)}  ${formatCount(nodeCount).padStart(COUNT_WIDTH)}  ${formatTokens(nodeTokens)} tok`,
+    `  ${"nodes".padStart(LABEL_WIDTH)}  ${nodeCountStr.padStart(countWidth)}  ${formatTokens(nodeTokens)} tok`,
   );
   lines.push(
     `  roots view  ${formatTokens(input.rootsViewTokens)} / ${formatTokens(input.settings.builderRootViewThreshold)}`,

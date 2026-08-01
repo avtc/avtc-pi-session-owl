@@ -151,6 +151,22 @@ describe("buildStatusReport", () => {
     expect(tokenColObs).toBe(tokenColNodes);
   });
 
+  it("count column stays aligned even when counts exceed the typical width (100k+)", () => {
+    // A fixed count width (e.g. 6 → max 99,999) would let 100,000 drift the
+    // column. The width is derived from the actual counts, so it holds.
+    const bigObs: { contentTokens: number }[] = [];
+    for (let i = 0; i < 100_000; i += 1) bigObs.push({ contentTokens: 0 });
+    const report = buildStatusReport(input({ nodes: [node({ id: "n1", summaryTokens: 0 })], observations: bigObs }));
+    const memoryLines = report
+      .split("\n")
+      .filter((l) => l.includes("observations") || l.trimStart().startsWith("nodes"));
+    expect(memoryLines.length).toBe(2);
+    expect(memoryLines[0]).toContain("100,000");
+    expect(memoryLines[1]).toContain("1");
+    // token column aligned regardless of the 6-digit count magnitude.
+    expect(memoryLines[0].indexOf("tok")).toBe(memoryLines[1].indexOf("tok"));
+  });
+
   it("roots view line shows viewTokens / builderRootViewThreshold", () => {
     const report = buildStatusReport(
       input({ rootsViewTokens: 35000, settings: settings({ builderRootViewThreshold: 40000 }) }),
