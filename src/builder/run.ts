@@ -45,6 +45,7 @@ import {
 const BUILD_STAGE = "build";
 const FIRST_PASS = 1;
 const NO_MUTATES = 0;
+const NO_NEW_NODES = 0;
 const NO_LOOP_OVERRIDE = null;
 const EMPTY_ROOT_VIEW = "";
 
@@ -106,17 +107,20 @@ export interface BuilderRunInput {
  * Run the Builder: ensure-ready fast-path, then a multi-pass convergence loop
  * over the source graph, then a stage-end flush of `new` nodes.
  *
- * Exit paths:
- * - model unavailable → notify + return (the stage never started; `new` nodes
- *   stay `new` per the design — the ensure-ready gate catches them next run).
- * - fast-path (root view under threshold) → flush `new` + return (no stage).
- * - loop (converged / no-op / max-passes / abort / error) → `finally` flushes
- *   `new` and calls `endStage` (balanced with the `startStage` that opened it).
+ * Flush semantics: `new` nodes flush to `active` only on a NORMAL
+ * stage-end — fast-path skip (render-ready), try_finish convergence, no-op,
+ * max-passes, or context-limit. On an ABNORMAL end (signal abort, or an error
+ * that ends the run) `new` nodes STAY `new` so the next run / ensure-ready gate
+ * re-processes them (the Builder didn't finish its chance). A model-unavailable
+ * run never starts, so `new` nodes stay `new` there too.
  *
  * Honors `signal`; persists applied mutates + flush_new at call time. Never
  * throws — failures are logged + notified (partial work kept).
  */
 export async function runBuilder(input: BuilderRunInput): Promise<void> {
+  // Aborted before start → nothing to do; `new` nodes stay `new`.
+  if (input.signal.aborted) return;
+
   const resolved = await resolveStageModel(input.ctx, input.settings.builderModel ?? input.settings.defaultModel);
   if (!resolved.ok) {
     notify(input.ctx, `Builder skipped a run: ${resolved.error}`, "warning");
@@ -129,43 +133,47 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
 
   // Ensure-ready fast-path (AD9): a root view already under the threshold is
   // render-ready — skip the LLM passes entirely, just flush `new` arrivals so
-  // they never linger as stale glyphs. No stage is opened (no startStage).
+  // they never linger as stale glyphs. A deliberate skip IS a normal stage-end
+  // for flush purposes. No stage is opened (no startStage).
   if (measureRootViewTokens(graph) < input.settings.builderRootViewThreshold) {
     flushNew(input.widget, store);
     return;
   }
 
-  // Multi-pass convergence loop. startStage opens the stage; the finally closes
-  // it (balanced) and flushes `new` for every exit (converged / no-op / max /
-  // abort / pass-error) so unprocessed arrivals never linger.
-  input.widget.startStage(BUILD_STAGE, { pass: FIRST_PASS });
-  const tools = makeBuilderTools(graph, store, input.settings);
+  // Multi-pass convergence loop. startStage opens the stage (inside the try so a
+  // throw still reaches the finally's endStage). The finally flushes `new` ONLY
+  // on a normal stage-end (normalEnd); abort / run-ending error preserve `new`.
+  let normalEnd = true;
   let pass = FIRST_PASS;
   try {
+    input.widget.startStage(BUILD_STAGE, { pass });
+    const tools = makeBuilderTools(graph, store, input.settings);
     // eslint-disable-next-line no-constant-condition -- loop bounded by breaks below
     while (true) {
-      if (input.signal.aborted) break;
+      if (input.signal.aborted) {
+        normalEnd = false; // abort → preserve `new` (run ended early)
+        break;
+      }
 
       const { outcome } = await runPass(input, graph, resolved, tools, runStageFn, pass);
 
-      // try_finish success → converged, stop.
+      // try_finish success → converged, stop (normal end).
       if (outcome.converged) break;
-      // no-op pass (0 mutates, not converged) → stop (decision: nothing changed).
+      // no-op pass (0 mutates, not converged) → stop (normal end).
       if (outcome.mutates === NO_MUTATES) break;
 
       pass += 1;
-      if (pass > input.settings.maxBuilderPasses) break;
+      if (pass > input.settings.maxBuilderPasses) break; // normal end (max)
       input.widget.setPass(pass);
     }
   } catch (cause) {
-    // An unexpected error outside a pass. Applied mutates are already persisted;
-    // the flush below still runs.
+    // A run-ending error (error-before-any-mutate rethrown by runPass). Applied
+    // mutates are already persisted; `new` nodes stay `new` (run ended early).
+    normalEnd = false;
     log.error("builder run failed", cause);
   } finally {
-    // Stage-end flush: every remaining `new` node → `active`, recorded as a
-    // flush_new delta, then close the stage. Runs for every loop exit so `new`
-    // arrivals never linger as stale glyphs for non-Builder consumers.
-    flushNew(input.widget, store);
+    // Flush `new`→`active` only on a normal stage-end; abort/error preserve it.
+    if (normalEnd) flushNew(input.widget, store);
     input.widget.endStage();
   }
 }
@@ -234,7 +242,7 @@ function flushNew(widget: WidgetController, store: StoreContext): void {
   for (const node of graph.nodes.values()) {
     if (node.state === "new") nodeIds.push(node.id);
   }
-  if (nodeIds.length === NO_MUTATES) return;
+  if (nodeIds.length === NO_NEW_NODES) return;
   const delta = applyFlushNew(graph, { nodeIds });
   appendGraphDelta(store, delta);
   widget.render();

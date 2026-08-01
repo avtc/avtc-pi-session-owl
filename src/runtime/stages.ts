@@ -3,8 +3,8 @@
 
 // Stage wiring: adapt each stage's run function (Observer/Builder/Selector)
 // into the shared `RunFn` contract the trigger layer calls, and register them
-// via `setStageRuns`. The Observer is wired here; the Selector is wired in its
-// own task.
+// via `setStageRuns`. The Observer and Builder are wired here; the Selector is
+// wired in its own task.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type BuilderRunInput, runBuilder } from "../builder/run.js";
@@ -45,12 +45,13 @@ export function makeObserverRun(pi: ExtensionAPI, runObserverFn: RunObserverFn):
 }
 
 /**
- * Build the Builder's `RunFn`: forwards the trigger's `{ctx, settings, signal}`
- * into the run function along with the widget controller (startStage/setPass/
- * endStage + onEvent). The Builder honors `signal` and owns no run-lock (the
- * caller owns the lifecycle). `scope` and `unobserved` are unused — the Builder
- * processes the current `new` nodes; the Observer's gap-scoping determines
- * which entries those are.
+ * Build the Builder's `RunFn`: forwards the trigger's `{ctx, settings, signal,
+ * scope}` into the run function along with the widget controller
+ * (startStage/setPass/endStage + onEvent). The Builder honors `signal` and owns
+ * no run-lock (the caller owns the lifecycle). `scope` carries the compaction
+ * cut (reserved — the Builder processes all current `new` nodes; the Observer's
+ * gap-driven catch-up scopes them to the compacted block in the default
+ * profile). `unobserved` is unused (Observer-only).
  */
 export function makeBuilderRun(pi: ExtensionAPI, widget: WidgetController, runBuilderFn: RunBuilderFn): RunFn {
   return async (args) => {

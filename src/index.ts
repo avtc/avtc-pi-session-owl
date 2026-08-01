@@ -20,8 +20,8 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   initMemkeeperSettings(pi);
   const widget = initWidget();
 
-  // Wire the stage run functions (Observer now; Builder/Selector land in their
-  // own tasks). Until then the trigger layer's default no-ops stand.
+  // Wire the stage run functions (Observer + Builder now; the Selector lands in
+  // its own task). Until then the trigger layer's default no-op stands for it.
   setStageRuns({
     runObserver: makeObserverRun(pi, runObserver),
     runBuilder: makeBuilderRun(pi, widget, runBuilder),

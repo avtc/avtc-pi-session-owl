@@ -219,7 +219,7 @@ describe("runBuilder", () => {
   });
 
   it("runs multiple passes until try_finish succeeds (convergence)", async () => {
-    seedGraph([
+    const g = seedGraph([
       { id: "n3", summary: "a" },
       { id: "n4", summary: "b" },
     ]);
@@ -256,6 +256,9 @@ describe("runBuilder", () => {
       runStageFn: countingRunStage,
     });
     expect(passCount).toBe(2);
+    // convergence is a NORMAL stage-end → new nodes flush to active
+    expect(g.nodes.get("n3")?.state).toBe("active");
+    expect(g.nodes.get("n4")?.state).toBe("active");
     expect(widget.calls[0]).toBe("start:build:1");
     expect(widget.calls).toContain("pass:2");
     expect(widget.calls[widget.calls.length - 1]).toBe("end");
@@ -307,8 +310,8 @@ describe("runBuilder", () => {
     expect(passCount).toBe(2);
   });
 
-  it("ends the run when error hits BEFORE any mutate (0 applied)", async () => {
-    seedGraph([{ id: "n3", summary: "a" }]);
+  it("ends the run when error hits BEFORE any mutate (0 applied), new preserved", async () => {
+    const g = seedGraph([{ id: "n3", summary: "a" }]);
     let passCount = 0;
     const errorScript = scriptRunStageWithError(
       { passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] },
@@ -318,8 +321,9 @@ describe("runBuilder", () => {
       passCount += 1;
       return errorScript(input);
     };
+    const cap = makeFakePi();
     await runBuilder({
-      pi: makeFakePi().pi,
+      pi: cap.pi,
       ctx: makeFakeCtx(),
       settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
       signal: new AbortController().signal,
@@ -328,6 +332,9 @@ describe("runBuilder", () => {
       runStageFn: countingRunStage,
     });
     expect(passCount).toBe(1); // error with 0 mutates → end run
+    // run-ending error → new preserved
+    expect(g.nodes.get("n3")?.state).toBe("new");
+    expect(flushNewCount(cap.appended)).toBe(0);
   });
 
   it("stops at maxBuilderPasses without convergence", async () => {
@@ -358,7 +365,7 @@ describe("runBuilder", () => {
     expect(passCount).toBe(2); // never converged, hit max
   });
 
-  it("aborts cleanly and still flushes new nodes", async () => {
+  it("aborts before start: preserves new nodes (run ended early)", async () => {
     const g = seedGraph([{ id: "n3", summary: "a" }]);
     const ac = new AbortController();
     ac.abort(); // abort before the run starts
@@ -374,12 +381,13 @@ describe("runBuilder", () => {
       scope: null,
       runStageFn: countingRunStage,
     });
-    // aborted before any pass ran, but flush_new still emitted for the new node
-    expect(g.nodes.get("n3")?.state).toBe("active");
-    expect(flushNewCount(cap.appended)).toBeGreaterThanOrEqual(1);
+    // aborted before start → new nodes stay new (no stage, no flush); the
+    // ensure-ready gate / next run re-processes them.
+    expect(g.nodes.get("n3")?.state).toBe("new");
+    expect(flushNewCount(cap.appended)).toBe(0);
   });
 
-  it("aborts between passes: applied mutates kept, run stops, flush runs", async () => {
+  it("aborts between passes: applied mutates kept, run stops, new preserved", async () => {
     const g = seedGraph([{ id: "n3", summary: "a" }]);
     const ac = new AbortController();
     let passCount = 0;
@@ -406,8 +414,8 @@ describe("runBuilder", () => {
     });
     // only pass 1 ran (the signal-abort break stopped the loop before pass 2)
     expect(passCount).toBe(1);
-    // flush still ran at stage-end
-    expect(flushNewCount(cap.appended)).toBeGreaterThanOrEqual(1);
-    void g;
+    // abort → run ended early → new nodes preserved (no flush)
+    expect(g.nodes.get("n3")?.state).toBe("new");
+    expect(flushNewCount(cap.appended)).toBe(0);
   });
 });

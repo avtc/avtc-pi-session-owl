@@ -18,7 +18,7 @@ export interface ScriptedTool {
 }
 
 /** A scripted pass: the tool_execution_end events emitted in order. */
-export interface ScriptedPass {
+interface ScriptedPass {
   tools: ScriptedTool[];
 }
 
