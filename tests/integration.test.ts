@@ -38,7 +38,7 @@ import {
 } from "../src/config/schema.js";
 import memkeeperExtension from "../src/index.js";
 import { runStage } from "../src/runtime/agent-loop.js";
-import { inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
+import { _resetRunLock, inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
 import { N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
 import { EMPTY_RESULT } from "./helpers/integration-fakes.js";
@@ -176,6 +176,11 @@ beforeEach(() => {
 
 afterEach(() => {
   _resetGetMemkeeperSettings();
+  // Defensive reset of the run-lock singleton between tests — the green path
+  // always releases (background launches are awaited, compaction acquires+
+  // releases), so this is not a current defect, but without a reset a future
+  // test change or a real hang would cascade-lock the whole suite.
+  _resetRunLock();
 });
 
 // activate sets the module `handle` via initMemkeeperSettings (the REAL
