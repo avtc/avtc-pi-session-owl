@@ -118,6 +118,15 @@ export function staleCursorMessage(afterId: string | null): string {
   return `Cursor afterId=${afterId ?? ""} not found (changed since the last page). Re-query without afterId to start fresh.`;
 }
 
+/** The full tool result for a stale cursor: the message + zero-count/stale
+ *  details. Shared by ls/cat/find so the 4 stale paths stay identical. */
+export function staleResult(page: ResolvedPage): AgentToolResult<unknown> {
+  return {
+    content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
+    details: { count: 0, stale: true },
+  };
+}
+
 // --- ordering --------------------------------------------------------------
 
 /** The node fields `compareNodeOrder` reads — structural, so it orders both the
@@ -230,10 +239,7 @@ export function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTo
         const roots = nonObsoleteRoots(graph);
         const { window, more, remaining, stale } = paginate(roots, page);
         if (stale) {
-          return {
-            content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
-            details: { count: 0, stale: true },
-          };
+          return staleResult(page);
         }
         for (const node of window) lines.push(formatNodeLine(node, { viewer }));
         if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
@@ -253,10 +259,7 @@ export function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTo
       ];
       const { window, more, remaining, stale } = paginate(combined, page);
       if (stale) {
-        return {
-          content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
-          details: { count: 0, stale: true },
-        };
+        return staleResult(page);
       }
       for (const item of window) lines.push(indent(item.render, item.depth));
       if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
@@ -294,10 +297,7 @@ export function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentT
       const units = buildCatUnits(graph, params.ids, viewer);
       const { window, more, remaining, stale } = paginate(units, page);
       if (stale) {
-        return {
-          content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
-          details: { count: 0, stale: true },
-        };
+        return staleResult(page);
       }
       const lines = window.map(renderCatUnit);
       if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
@@ -481,10 +481,7 @@ export function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): Agent
       const page = resolvePage(params.page);
       const { window, more, remaining, stale } = paginate(matches, page);
       if (stale) {
-        return {
-          content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
-          details: { count: 0, stale: true },
-        };
+        return staleResult(page);
       }
       const lines = window.map((m) => m.render);
       if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));

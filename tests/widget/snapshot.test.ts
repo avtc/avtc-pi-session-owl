@@ -145,4 +145,40 @@ describe("buildSnapshot", () => {
     const refreshed = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
     expect(refreshed.roots.count).toBe(1);
   });
+
+  it("caches getContextUsage across message_update deltas (re-read only on message boundaries)", () => {
+    // Perf: getContextUsage() re-tokenizes the whole message history, but the
+    // context only changes at message/turn boundaries — not per streaming token.
+    // So buildSnapshot must reuse the cached read for message_update deltas.
+    let reads = 0;
+    const countingCtx = {
+      getContextUsage: () => {
+        reads += 1;
+        return { tokens: 1234, contextWindow: 262_000 };
+      },
+    } as unknown as ExtensionContext;
+    tracker.startStage("build");
+    buildSnapshot(tracker, countingCtx); // first read
+    expect(reads).toBe(1);
+    // several streaming deltas must NOT re-read context usage
+    for (let i = 0; i < 5; i += 1) {
+      tracker.onEvent({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: `d${i} ` },
+      } as unknown as AgentEvent);
+      buildSnapshot(tracker, countingCtx);
+    }
+    expect(reads).toBe(1); // still cached — no re-read across message_update
+    // a message_end (message finalized) invalidates → next build re-reads
+    tracker.onEvent({
+      type: "message_end",
+      message: { role: "assistant", content: [], usage: { input: 0, output: 0, cacheRead: 0, cost: 0 } },
+    } as unknown as AgentEvent);
+    buildSnapshot(tracker, countingCtx);
+    expect(reads).toBe(2);
+    // a message_start (new message) also invalidates
+    tracker.onEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as AgentEvent);
+    buildSnapshot(tracker, countingCtx);
+    expect(reads).toBe(3);
+  });
 });

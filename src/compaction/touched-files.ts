@@ -126,15 +126,13 @@ export function renderTouchedFiles(files: readonly TouchedFile[]): string[] {
 const WRITE_GLYPH = "✎";
 const READ_GLYPH = "👁";
 
-/** Render a stored "YYYY-MM-DD HH:MM" timestamp as "<DD> <HH:MM>" (day + time). */
+/** Render a stored UTC ISO instant as a LOCAL "<DD> <HH:MM>" (2-digit day +
+ *  24h time) — same UTC→local conversion as the node/observation datetime
+ *  render, never locale-dependent. */
 function formatDayTime(stored: string): string {
-  // stored contract: "YYYY-MM-DD HH:MM" — slice the day and time directly.
-  const day = stored.slice(DAY_START, DAY_END);
-  const time = stored.slice(TIME_START, TIME_END);
-  return `${day} ${time}`;
+  const d = new Date(stored);
+  const day = d.getDate().toString().padStart(2, "0");
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  return `${day} ${hh}:${mm}`;
 }
-
-const DAY_START = 8;
-const DAY_END = 10;
-const TIME_START = 11;
-const TIME_END = 16;

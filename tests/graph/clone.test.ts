@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
+
 import { describe, expect, it } from "vitest";
 import { cloneGraph } from "../../src/graph/clone.js";
 import type { Node, NodeId, Observation, ObsId } from "../../src/types.js";

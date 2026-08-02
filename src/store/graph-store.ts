@@ -3,11 +3,11 @@
 
 // GraphStore: the single in-memory source of truth for the memkeeper graph.
 // Holds the reconstructed graph, the persisted selected tree, the usage ledger,
-// and the Observer frontier pointer. Persistence is append-only custom entries
-// (append-only custom entries); reconstruction = last snapshot + fold deltas-since.
+// and the Observer frontier pointer. Persistence is append-only custom entries;
+// reconstruction = last snapshot + fold deltas-since.
 //
 // The store is PERSIST-ONLY for appends: callers own in-memory mutation via the
-// the mutators (apply-then-persist), then call the store to record the delta. The
+// mutators (apply-then-persist), then call the store to record the delta. The
 // store applies mutations ONLY during load() reconstruction (event-sourcing).
 
 import { type GraphDelta, recomputeRange } from "../graph/mutations.js";

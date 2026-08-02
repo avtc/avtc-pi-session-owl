@@ -69,6 +69,15 @@ describe("applyCreateNode", () => {
     ).toThrow(GraphInvariantError);
     expect(g.nodes.has("n2")).toBe(false);
   });
+
+  it("rejects creating a node whose id already exists (load-bearing for replay identity)", () => {
+    const g = bareGraphWithRoot("n1");
+    expect(() =>
+      applyCreateNode(g, { id: "n1", summary: "dup", importance: "low", parentNode: null, state: "active" }),
+    ).toThrow(GraphInvariantError);
+    // the original node is untouched
+    expect(nodeById(g, "n1").summary).toBe("root");
+  });
 });
 
 describe("applyRecordObservation", () => {
@@ -105,6 +114,16 @@ describe("applyRecordObservation", () => {
       GraphInvariantError,
     );
     expect(g.observations.has("o1")).toBe(false);
+  });
+
+  it("rejects recording an observation whose id already exists (idempotency invariant)", () => {
+    const g = bareGraphWithRoot("n1");
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) });
+    // replaying the same id (e.g. a re-applied delta) is rejected, not silently overwritten
+    expect(() => applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) })).toThrow(
+      GraphInvariantError,
+    );
+    expect(nodeById(g, "n1").observationIds).toEqual(["o1"]);
   });
 });
 
@@ -300,6 +319,26 @@ describe("applyMerge", () => {
     expect(nodeById(g, "n1").summary).toBe("root one");
     expect(nodeById(g, "n1").observationIds).toContain("o1");
   });
+
+  it("requires newSummary when creating a new root via merge (destId null)", () => {
+    const g = graphWithTwoRoots();
+    expect(() => applyMerge(g, { sourceIds: ["n1", "n2"], destId: null }, MUTATE_SOURCE)).toThrow(GraphInvariantError);
+    // rejected call leaves the graph unchanged — no stray new root
+    expect([...g.nodes.values()].filter((n) => n.parentNode === null).length).toBe(2);
+  });
+
+  it("rejects merging an ancestor source into its descendant destination (cycle)", () => {
+    const g = graphWithTwoRoots();
+    // build n1 -> n2 (n2 child of n1)
+    applyMv(g, { sourceIds: ["n2"], destId: "n1" }, MUTATE_SOURCE);
+    // merging n1 (ancestor) into n2 (descendant) would make n2 its own ancestor
+    expect(() => applyMerge(g, { sourceIds: ["n1"], destId: "n2", newSummary: "x" }, MUTATE_SOURCE)).toThrow(
+      GraphInvariantError,
+    );
+    // rejected call leaves the graph unchanged: n1 still root, n2 still under n1
+    expect(nodeById(g, "n1").parentNode).toBeNull();
+    expect(nodeById(g, "n2").parentNode).toBe("n1");
+  });
 });
 
 describe("applySupersede", () => {
@@ -321,24 +360,34 @@ describe("applySupersede", () => {
     );
   });
 
-  it("requires newSummary when creating a new root via merge", () => {
+  it("rejects a supersession that would form a cycle (n1→n2, then n2 by n1)", () => {
+    // build a chain: n1 is superseded by n2 (n1.supersededBy = n2)
     const g = graphWithTwoRoots();
-    expect(() => applyMerge(g, { sourceIds: ["n1", "n2"], destId: null }, MUTATE_SOURCE)).toThrow(GraphInvariantError);
-    // rejected call leaves the graph unchanged — no stray new root
-    expect([...g.nodes.values()].filter((n) => n.parentNode === null).length).toBe(2);
-  });
-
-  it("rejects merging an ancestor source into its descendant destination (cycle)", () => {
-    const g = graphWithTwoRoots();
-    // build n1 -> n2 (n2 child of n1)
-    applyMv(g, { sourceIds: ["n2"], destId: "n1" }, MUTATE_SOURCE);
-    // merging n1 (ancestor) into n2 (descendant) would make n2 its own ancestor
-    expect(() => applyMerge(g, { sourceIds: ["n1"], destId: "n2", newSummary: "x" }, MUTATE_SOURCE)).toThrow(
+    applySupersede(g, { nodeId: "n2", supersededNodeIds: ["n1"] }, MUTATE_SOURCE);
+    expect(nodeById(g, "n1").supersededBy).toBe("n2");
+    // superseding n2 by n1 would form a cycle (n1 → n2 → n1) — the replacement's
+    // supersededBy-walk reaches the target n1
+    expect(() => applySupersede(g, { nodeId: "n1", supersededNodeIds: ["n2"] }, MUTATE_SOURCE)).toThrow(
       GraphInvariantError,
     );
-    // rejected call leaves the graph unchanged: n1 still root, n2 still under n1
-    expect(nodeById(g, "n1").parentNode).toBeNull();
-    expect(nodeById(g, "n2").parentNode).toBe("n1");
+  });
+
+  it("rejects supersede when the replacement (nodeId) does not exist", () => {
+    const g = graphWithTwoRoots();
+    expect(() => applySupersede(g, { nodeId: "n999", supersededNodeIds: ["n1"] }, MUTATE_SOURCE)).toThrow(
+      GraphInvariantError,
+    );
+    // rejected call leaves the graph unchanged
+    expect(nodeById(g, "n1").state).toBe("active");
+    expect(nodeById(g, "n1").supersededBy).toBeNull();
+  });
+
+  it("rejects supersede when a target id does not exist", () => {
+    const g = graphWithTwoRoots();
+    expect(() => applySupersede(g, { nodeId: "n2", supersededNodeIds: ["n999"] }, MUTATE_SOURCE)).toThrow(
+      GraphInvariantError,
+    );
+    expect(nodeById(g, "n2").state).toBe("active");
   });
 });
 

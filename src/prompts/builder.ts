@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The Builder's system prompt — approved protected text from the design doc.
-// Brand-new house voice; positive intent only. Any change requires re-approval.
+// The Builder's system prompt — approved protected text. Brand-new house
+// voice; positive intent only. Any change requires re-approval.
 
 export const BUILDER_SYSTEM = `You keep the memory graph coherent and bounded across compactions. The top level
 is the summary the agent continues its work from, so the roots must read clearly

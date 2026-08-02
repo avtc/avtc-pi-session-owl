@@ -175,7 +175,7 @@ interface SearchCandidate {
   readonly line: string;
 }
 
-/** Importance desc, then recency desc (lexicographic on "YYYY-MM-DD HH:MM"). */
+/** Importance desc, then recency desc (lexicographic on the UTC ISO instant). */
 function compareCandidates(a: SearchCandidate, b: SearchCandidate): number {
   const byImportance = b.key.importanceRank - a.key.importanceRank;
   if (byImportance !== 0) return byImportance;

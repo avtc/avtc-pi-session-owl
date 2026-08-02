@@ -9,7 +9,7 @@
 // ctx.ui.setWidget (event-driven, NO timer).
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ContextUsage, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
@@ -99,6 +99,12 @@ export interface ProgressTracker extends StageController, TrackerState {
    *  tool_execution_end, so this reuses the cache across message_update deltas
    *  (invalidated on startStage and tool_execution_end). */
   rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number };
+  /** Cached context-usage read for the widget render. `getContextUsage()`
+   *  re-tokenizes the whole message history (expensive), but the context only
+   *  changes at message/turn boundaries — not per streaming token — so this
+   *  reuses the cache across message_update deltas (invalidated on startStage,
+   *  message_start, tool_execution_end, turn_end). */
+  contextUsage(ctx: ExtensionContext): ContextUsage | undefined;
 }
 
 // --- streaming-token helpers (two-tier) -------------------------------------
@@ -113,6 +119,7 @@ export function createTracker(): ProgressTracker {
     fallbackTokens: number;
     primaryTokens: number;
     cachedRoots: { count: number; viewTokens: number } | null;
+    cachedContext: ContextUsage | undefined | null; // null = not yet read; undefined = ctx returned undefined
   } = {
     stage: null,
     pass: 1,
@@ -126,6 +133,7 @@ export function createTracker(): ProgressTracker {
     fallbackTokens: 0,
     primaryTokens: 0,
     cachedRoots: null,
+    cachedContext: null,
   };
 
   return {
@@ -171,6 +179,7 @@ export function createTracker(): ProgressTracker {
       state.selectedViewTokens = null;
       state.selectedBaseline = null;
       state.cachedRoots = null;
+      state.cachedContext = null;
     },
     setPass(pass) {
       state.pass = pass;
@@ -193,6 +202,14 @@ export function createTracker(): ProgressTracker {
       if (state.cachedRoots === null) state.cachedRoots = rootViewCounts(graph);
       return state.cachedRoots;
     },
+    contextUsage(ctx) {
+      // null = not yet read this turn; read once then reuse across message_update
+      // deltas (getContextUsage re-tokenizes the whole message history). The cache
+      // is invalidated on message boundaries (message_start/turn_end),
+      // tool_execution_end, and startStage — never on message_update.
+      if (state.cachedContext === null) state.cachedContext = ctx.getContextUsage();
+      return state.cachedContext;
+    },
     onEvent(event) {
       if (event.type === "message_end") {
         const u = messageEndUsage(event.message);
@@ -202,8 +219,11 @@ export function createTracker(): ProgressTracker {
           state.usage.cacheRead += u.cacheRead;
           state.usage.cost += u.cost;
         }
+        // a message finalized → context tokens changed; invalidate the cache.
+        state.cachedContext = null;
       } else if (event.type === "turn_end") {
         state.usage.turns += 1;
+        state.cachedContext = null;
       } else if (event.type === "message_update") {
         // primary tier (provider streams usage): guard > tokensSoFar so a smaller
         // per-message value (usage.output resets each message) never moves it back.
@@ -220,6 +240,10 @@ export function createTracker(): ProgressTracker {
       } else if (event.type === "tool_execution_end") {
         // a mutate happened → the cached root view is stale; rebuild on next snapshot.
         state.cachedRoots = null;
+        state.cachedContext = null;
+      } else if (event.type === "message_start") {
+        // a new message added → context tokens changed; invalidate the cache.
+        state.cachedContext = null;
       }
     },
   };
@@ -257,7 +281,7 @@ export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): 
   const roots = tracker.rootViewCounts(graph);
   const baseline = tracker.baseline ?? { obsCount: 0, rootsCount: 0, rootsViewTokens: 0 };
   const obsCount = graph.observations.size;
-  const ctxUsage = ctx.getContextUsage();
+  const ctxUsage = tracker.contextUsage(ctx);
   // both context fields are null when getContextUsage() is undefined (the window
   // is unknown too); render shows `?` alone rather than `?/0` (never 0/NaN).
   const contextTokens = ctxUsage === undefined ? null : ctxUsage.tokens;

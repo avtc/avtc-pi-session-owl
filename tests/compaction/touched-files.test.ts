@@ -143,4 +143,18 @@ describe("renderTouchedFiles", () => {
     ];
     expect(renderTouchedFiles(files)).toEqual(["28 14:30 ✎ path/with newline and tabs.ts"]);
   });
+
+  it("renders the stored UTC instant as LOCAL time (not UTC)", () => {
+    // The suite pins TZ=UTC; override to a known offset here, then restore, so
+    // the day/time render is verified to go through new Date() local getters
+    // (a UTC-positional slice would render 14:30 regardless of zone).
+    const prevTz = process.env.TZ;
+    try {
+      process.env.TZ = "America/New_York"; // UTC-4 (EDT) in July
+      const files: TouchedFile[] = [{ path: "/a.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "write" }];
+      expect(renderTouchedFiles(files)).toEqual(["28 10:30 ✎ /a.ts"]);
+    } finally {
+      process.env.TZ = prevTz;
+    }
+  });
 });

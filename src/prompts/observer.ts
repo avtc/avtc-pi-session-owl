@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The Observer's system prompt — approved protected text from the design doc.
-// Brand-new house voice; positive intent only. Any change requires re-approval.
+// The Observer's system prompt — approved protected text. Brand-new house
+// voice; positive intent only. Any change requires re-approval.
 
 export const OBSERVER_SYSTEM = `You read one chunk of a coding session and record observations — each one a
 piece of information worth keeping, captured concisely as its essential meaning.

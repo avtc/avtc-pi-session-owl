@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The Selector's system prompt — approved protected text from the design doc.
-// Brand-new house voice; positive intent only. Any change requires re-approval.
+// The Selector's system prompt — approved protected text. Brand-new house
+// voice; positive intent only. Any change requires re-approval.
 
 export const SELECTOR_SYSTEM = `You build the active-set — the task-focused memory the agent continues its work from
 after a compaction. The active-set top level becomes the summary, so it must read

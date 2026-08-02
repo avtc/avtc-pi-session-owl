@@ -90,7 +90,8 @@ export interface Observation {
   readonly importance: Importance;
   /** Provenance — real session-entry ids. */
   readonly sourceEntryIds: string[];
-  /** "YYYY-MM-DD HH:MM", attached mechanically from the source entries. */
+  /** UTC ISO instant ("...Z"), attached mechanically from the source entries
+   *  (rendered to local at display time). */
   readonly timestamp: string;
   /** ALWAYS a real node id (the capture wrapper at first; regrouped later). */
   parentNode: NodeId;

@@ -368,6 +368,18 @@ describe("mk_recall", () => {
       // o5 at 14:30; `from` 14:30 keeps it (inclusive)
       expect(text(await recall(tool(), { from: "2026-07-17 14:30" }))).toContain("o5");
     });
+
+    it("invalid `from` datetime → error string", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { from: "not-a-date" }));
+      expect(out.toLowerCase()).toMatch(/invalid.*from/);
+    });
+
+    it("invalid `to` datetime → error string", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { to: "2026-13-45 99:99" }));
+      expect(out.toLowerCase()).toMatch(/invalid.*to/);
+    });
   });
 
   describe("includeSuperseded", () => {

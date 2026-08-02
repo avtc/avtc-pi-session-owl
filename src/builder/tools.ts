@@ -11,7 +11,6 @@
 // "builder" viewer.
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
 import {
@@ -26,6 +25,7 @@ import {
 } from "../graph/mutate-tools.js";
 import { applySetMeta, applySupersede, MUTATE_SOURCE } from "../graph/mutations.js";
 import { makeReadTools, makeTryFinishTool } from "../graph/read-tools.js";
+import { ImportanceSchema } from "../schema.js";
 import { appendGraphDelta, type StoreContext } from "../store/graph-store.js";
 import type { Importance, MemkeeperGraph, NodeId } from "../types.js";
 
@@ -47,10 +47,7 @@ export {
   FIND_TOOL,
   LS_TOOL,
   measureRootViewTokens,
-  paginate,
-  type ResolvedPage,
   renderRootView,
-  resolvePage,
   TRY_FINISH_TOOL,
 } from "../graph/read-tools.js";
 
@@ -149,11 +146,7 @@ function makeSetMetaTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<
 
 const SET_META_PARAMS = Type.Object({
   nodeId: Type.String({ description: "The node to update." }),
-  importance: Type.Optional(
-    StringEnum(["critical", "high", "medium", "low"], {
-      description: "New importance — critical, high, medium, or low.",
-    }),
-  ),
+  importance: Type.Optional(ImportanceSchema),
   archived: Type.Optional(Type.Boolean({ description: "True to archive, false to restore to active." })),
   summary: Type.Optional(Type.String({ minLength: 1, description: "A new summary for the node." })),
   obsolete: Type.Optional(

@@ -300,7 +300,10 @@ export function buildChunks(entries: readonly SessionEntry[], options: ChunkOpti
 
   for (const group of groups) {
     current.push(...group.blocks);
-    currentTokens += estimateContentTokens(group.blocks.map((block) => block.text).join(""));
+    // chars/4 over the group's joined text (same as estimateContentTokens on the
+    // join) — computed by summing block lengths, avoiding the temp string alloc.
+    const groupChars = group.blocks.reduce((sum, block) => sum + block.text.length, 0);
+    currentTokens += Math.ceil(groupChars / CHARS_PER_TOKEN_ESTIMATE);
     if (currentTokens >= options.tokenThreshold) flush();
   }
   flush(); // trailing remainder
