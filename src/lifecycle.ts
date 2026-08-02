@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Session lifecycle: startup (reconstruct + seed nGoal), the mechanical
-// oInitialPrompt capture (decision #2 — NOT the Observer; the first user
+// oInitialPrompt capture (NOT the Observer; the first user
 // message is captured verbatim under nGoal), shutdown (drop the widget ref),
 // and the unstuck auto-continue predicate (the Selector skips these when
 // pairing the last user message).
@@ -132,7 +132,7 @@ export async function onSessionStart(
 
 /**
  * Capture the verbatim initial user message as oInitialPrompt under nGoal
- * (decision #2 — mechanical, NOT the Observer). No-op once present (the signal
+ * (mechanical, NOT the Observer). No-op once present (the signal
  * derives from the graph via hasInitialPrompt, never a persisted boolean). The
  * Observer frontier starts past this message so it is never re-observed.
  */

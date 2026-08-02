@@ -130,7 +130,7 @@ export interface SerializedSelection {
 
 // --- custom-entry payloads -------------------------------------------------
 
-/** `memkeeper.observation` — a batch from one Observer run (OM pattern). */
+/** `memkeeper.observation` — a batch from one Observer run. */
 export interface ObservationEntry {
   coversFromId: string | null;
   coversUpToId: string;

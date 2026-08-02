@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
+
 import type { Node, NodeId, Observation, ObsId } from "../types.js";
 import { MemkeeperGraph } from "../types.js";
 

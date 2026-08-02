@@ -3,9 +3,9 @@
 
 // The single run-lock (one run-lock; one stage active at a time; triggers await).
 // At most one of {Observer, Builder, Selector} is active at a time. Background
-// triggers that collide SKIP (fire-and-forget, decision #20); compaction is
+// triggers that collide SKIP (fire-and-forget); compaction is
 // EXCLUSIVE — it aborts an in-flight background run via its OWN abort controller
-// (decision #39 — NOT event.signal), awaits the run's actual release, then
+// (NOT event.signal), awaits the run's actual release, then
 // acquires unconditionally.
 //
 // Each run owns its own AbortController so compaction can cancel it at the next
@@ -79,7 +79,7 @@ function releaseActive(run: ActiveRun): void {
 
 /**
  * Background-trigger acquire: return a handle when idle, or null (SKIP) when a run
- * is already in flight (decision #20 — the handler returns immediately; the gap
+ * is already in flight (the handler returns immediately; the gap
  * is batched on the next trigger).
  */
 export function acquireOrSkip(stage: StageName): RunHandle | null {
@@ -87,7 +87,7 @@ export function acquireOrSkip(stage: StageName): RunHandle | null {
 }
 
 /**
- * Abort the in-flight run's OWN abort controller (decision #39 — memkeeper's
+ * Abort the in-flight run's OWN abort controller (memkeeper's
  * per-run controller, NOT event.signal). The run stops at its next tool-call
  * boundary and releases in its `finally`; this does NOT release the lock itself.
  * No-op when idle.
@@ -108,7 +108,7 @@ function waitForIdle(): Promise<void> {
 
 /**
  * Compaction-exclusive acquire (never skips): abort any in-flight background run
- * at its next tool-call boundary (decision #39), AWAIT its actual release, then
+ * at its next tool-call boundary, AWAIT its actual release, then
  * acquire unconditionally and return a fresh handle (stage "select" — compaction
  * runs observe/build/select sequentially under this single acquire). The compaction
  * hook `await`s this and releases in its `finally`.

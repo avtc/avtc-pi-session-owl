@@ -5,7 +5,7 @@
 // (Observer + Builder + Selector) + the Observer frontier. Each turn_end the
 // hook calls onTurnEnd; it evaluates the three triggers and fire-and-forget-
 // launches each that shouldFire, serialized by the single run-lock (a colliding
-// trigger SKIPS — the unobserved work batches on the next run, decision #20).
+// trigger SKIPS — the unobserved work batches on the next run).
 //
 // The run-lock lifecycle is CALLER-owned: onTurnEnd acquires per stage
 // and releases in the wrapping IIFE's `finally`; the run functions never touch
@@ -52,7 +52,7 @@ function isUserMessageEntry(entry: SessionEntry): boolean {
  * The unobserved slice: renderable entries strictly AFTER the frontier id. When the
  * frontier is null (nothing observed yet) the slice starts AFTER the first user
  * message, so the verbatim initial prompt is never re-observed (it is captured
- * mechanically — decision #2). If there is no user message at all, nothing is
+ * mechanically). If there is no user message at all, nothing is
  * unobserved yet (no task anchor — the Observer waits for the first user message).
  * Operational entries are never unobserved sources.
  */
@@ -218,7 +218,7 @@ export function evaluateSelectorTrigger(input: TriggerInput): StageTriggerResult
 
 // --- turn_end entry point ----------------------------------
 
-/** Fire-and-forget launch a stage run: acquire the lock or SKIP (decision #20);
+/** Fire-and-forget launch a stage run: acquire the lock or SKIP;
  *  on acquire, capture ctx synchronously and `void` an async IIFE whose `finally`
  *  releases the handle (the run owns its own AbortController via the handle). The
  *  run is NEVER awaited by the handler (it returns immediately). */

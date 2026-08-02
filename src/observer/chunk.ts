@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
+
 import type { AssistantMessage, TextContent, ToolCall } from "@earendil-works/pi-ai";
 import type {
   BranchSummaryEntry,

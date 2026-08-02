@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 avtc <tarensenkov@gmail.com>
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // The Builder run: a multi-pass convergence loop over the source graph using
 // BUILDER_TOOLS, with an ensure-ready fast-path. Each pass is one agentLoop;
@@ -128,7 +128,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
     input.widget.startStage(BUILD_STAGE, { pass });
     stageOpened = true;
     const tools = makeBuilderTools(graph, store, input.settings);
-    // eslint-disable-next-line no-constant-condition -- loop bounded by breaks below
+    // convergence loop — bounded by the break conditions below (budget met / no-op / context limit / signal)
     while (true) {
       if (input.signal.aborted) {
         normalEnd = false; // abort → preserve `new` (run ended early)

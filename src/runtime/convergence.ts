@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 avtc <tarensenkov@gmail.com>
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Shared multi-pass convergence primitives used by the Builder and Selector
 // runs. Both stages run the same shape: an agentLoop pass whose outcome (applied

@@ -22,6 +22,7 @@ import {
 } from "../format/render.js";
 import {
   DEFAULT_TAKE,
+  isVisible,
   paginate,
   type ResolvedPage,
   resolvePage,
@@ -30,7 +31,7 @@ import {
 } from "../graph/read-tools.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
-import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeState, type ObsId } from "../types.js";
+import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type ObsId } from "../types.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -308,10 +309,6 @@ function resolveBounds(from: string | undefined, to: string | undefined): Resolv
   return { from: fromNorm, to: toNorm, error: null };
 }
 
-function isObsoleteState(state: NodeState): boolean {
-  return state === "obsolete";
-}
-
 /** Build the ranked candidate list for the search/list path. */
 function buildSearchCandidates(
   target: RecallTarget,
@@ -324,7 +321,7 @@ function buildSearchCandidates(
 
   // node candidates: regex on summary only (nodes are never time-filtered)
   for (const node of target.nodes.values()) {
-    if (isObsoleteState(node.state) && !includeSuperseded) continue;
+    if (!isVisible(node.state, includeSuperseded)) continue;
     if (regex === null) continue; // nodes are query-only
     if (regex.test(node.summary)) {
       candidates.push({
@@ -339,7 +336,7 @@ function buildSearchCandidates(
   for (const obs of target.observations.values()) {
     const parent = obs.parentNode === null ? null : (target.nodes.get(obs.parentNode) ?? null);
     // parent-state gate: an obs under an obsolete node is hidden unless includeSuperseded
-    if (parent !== null && isObsoleteState(parent.state) && !includeSuperseded) continue;
+    if (parent !== null && !isVisible(parent.state, includeSuperseded)) continue;
     const textMatch = regex === null || regex.test(obs.content);
     if (!textMatch) continue;
     if (bounds.from !== null && obs.timestamp < bounds.from) continue;
@@ -362,7 +359,7 @@ function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean):
   const candidates: SearchCandidate[] = [];
   for (const node of target.nodes.values()) {
     if (node.parentNode !== null) continue;
-    if (isObsoleteState(node.state) && !includeSuperseded) continue;
+    if (!isVisible(node.state, includeSuperseded)) continue;
     candidates.push({
       id: node.id,
       key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 avtc <tarensenkov@gmail.com>
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // The Selector run: builds the input-view (a deep-copied working copy + task
 // context), runs a multi-pass convergence loop over that copy with the Selector
@@ -150,7 +150,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
     });
     // Push the initial working-copy counts (the live delta source).
     pushSelectedCounts(input.widget, workingCopy.graph);
-    // eslint-disable-next-line no-constant-condition -- loop bounded by breaks below
+    // convergence loop — bounded by the break conditions below (budget met / no-op / context limit / signal)
     while (true) {
       if (input.signal.aborted) break; // abort → run ended early
 
@@ -173,7 +173,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   } finally {
     // Persist the resulting tree whenever a stage opened (a working copy exists)
     // — on convergence / no-op / max, on a run-ending error, AND on an abort-
-    // during-run (decision #39: committed partial work is kept): the working copy
+    // during-run (committed partial work is kept): the working copy
     // is the best available curation and committing it keeps mk_recall's target
     // alive. (Aborted-before-start leaves no working copy; stageOpened is false.)
     if (stageOpened) persistResult(store, graphStore, workingCopy.graph);

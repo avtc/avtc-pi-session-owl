@@ -153,7 +153,20 @@ export function compareObservationOrder(a: Observation, b: Observation): number 
 
 /** A node is obsolete when its state is "obsolete". */
 export function isObsolete(node: Node): boolean {
-  return node.state === "obsolete";
+  return isObsoleteState(node.state);
+}
+
+/** A raw state is obsolete when it is "obsolete" (the visible-by-default gate;
+ *  the operand form of `isObsolete` for sites that hold a `NodeState`, not a node). */
+export function isObsoleteState(state: Node["state"]): boolean {
+  return state === "obsolete";
+}
+
+/** The single obsolete-visibility rule every read path shares: a node (by state)
+ *  is visible in default listings unless obsolete, and obsolete nodes appear only
+ *  when the caller opted into superseded items. */
+export function isVisible(state: Node["state"], includeSuperseded: boolean): boolean {
+  return !isObsoleteState(state) || includeSuperseded;
 }
 
 // --- root view + children --------------------------------------------------
@@ -410,9 +423,9 @@ export function collectFindMatches(
   const nodeMatches: NodeMatch[] = [];
   const obsMatches: ObsMatch[] = [];
   for (const node of graph.nodes.values()) {
-    // parent-state gate: skip the node (and its evidence) when obsolete and
-    // not including superseded.
-    if (isObsolete(node) && !includeSuperseded) continue;
+    // obsolete-visibility gate: skip the node (and its evidence) unless the
+    // caller opted into superseded items.
+    if (!isVisible(node.state, includeSuperseded)) continue;
     if (regex.test(node.summary)) {
       nodeMatches.push({
         id: node.id,

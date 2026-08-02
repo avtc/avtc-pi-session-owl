@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 avtc <tarensenkov@gmail.com>
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // The Selector's system prompt — approved protected text from the design doc.
 // Brand-new house voice; positive intent only. Any change requires re-approval.

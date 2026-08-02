@@ -55,7 +55,7 @@ export type StoreEntry = StoreCompactionEntry | StoreCustomEntry;
 /**
  * Narrow port over the pi ExtensionContext the store needs. Injected (not the
  * full context) so tests pass a fake. `getBranch` returns the active branch
- * path only (decision #38 — NOT `getEntries`, which mixes all branches).
+ * path only (NOT `getEntries`, which mixes all branches).
  */
 export interface StoreContext {
   /** Append a custom entry; returns void (pi API). */

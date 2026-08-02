@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Two-tier streaming-output-token extraction primitives (decision #37), shared by
+// Two-tier streaming-output-token extraction primitives, shared by
 // the agent-loop run accumulator (final count) and the widget tracker (live
 // counter). Both read the same event stream; the EXTRACTION of usage + delta text
 // is identical here, while each caller owns its own ACCUMULATE strategy (the run

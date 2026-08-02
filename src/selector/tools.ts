@@ -55,7 +55,7 @@ export const FS_LS_TOOL = "fs_ls";
 /** Conditional todo-list tool name. */
 export const TODO_LIST_TOOL = "todo_list";
 
-/** The four Selector mutate tools (no-op detection for the Selector run, T17: a
+/** The four Selector mutate tools (no-op detection for the Selector run: a
  *  pass with none of these applied is a no-op pass). Read tools (ls/cat/find) and
  *  try_finish excluded — mirroring the Builder's MUTATE_TOOL_NAMES. */
 export const SELECTOR_MUTATE_TOOL_NAMES: ReadonlySet<string> = new Set([
@@ -105,7 +105,7 @@ export function makeFileReadTools(cwd: string): AgentTool[] {
 /** Read-only port over the (optional) avtc-pi-todo bridge. `getItems` returns
  *  the todo list, optionally filtered by status. `null` bridge → avtc-pi-todo is
  *  not installed → no `todo_list` tool (graceful degrade; not an error). This is
- *  the contract T22's `subscribeToTodo` satisfies; the tool here only reads it.
+ *  the contract the todo bridge satisfies; the tool here only reads it.
  *  The item shape is the shared `TodoItem` (same as the input-view render). */
 export interface TodoBridge {
   getItems(filter?: { status?: TodoItem["status"] }): TodoItem[];

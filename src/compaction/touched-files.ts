@@ -5,7 +5,7 @@
 // which mixes all branches) for read/write/edit toolCall entries since a cut
 // entry, excludes bash-mediated ops, dedups by path (write dominates, latest
 // timestamp kept), and renders <DD> <HH:MM> ✎|👁 <path> oldest-first. Surfaces
-// to the Selector input (T15) AND the rendered compaction summary.
+// to the Selector input AND the rendered compaction summary.
 
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { singleLine, toStoredTimestamp } from "../format/render.js";

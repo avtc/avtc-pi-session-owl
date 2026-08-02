@@ -120,7 +120,7 @@ export async function compactionHook(
   const firstKeptEntryId = event.preparation.firstKeptEntryId;
 
   // Acquire the run-lock for the whole ensure-ready gate (aborts + awaits any
-  // in-flight background run via its OWN controller — decision #39). Held across
+  // in-flight background run via its OWN controller). Held across
   // all three sequential stages; released in the finally.
   const handle = await acquireForCompaction();
   // Link Pi's compaction signal into the compaction's own controller so the
@@ -147,7 +147,7 @@ export async function compactionHook(
     }
     if (signal.aborted) return cancelAborted(ctx);
 
-    // (c) Selector — only selected-root; always called (T17 owns the internal
+    // (c) Selector — only selected-root; always called (the Selector owns the internal
     // fast-path; the hook does NOT gate on threshold alone).
     if (settings.renderMode === "selected-root") {
       await stageRuns.runSelector({

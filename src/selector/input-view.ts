@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
+
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
   extractTouchedFiles,
@@ -192,7 +195,7 @@ function entryAt(branch: readonly SessionEntry[], index: number): SessionEntry {
 
 // --- todo context -----------------------------------------------------------
 
-/** One todo item (read-only view sourced from the avtc-pi-todo bridge, T22). */
+/** One todo item (read-only view sourced from the avtc-pi-todo bridge). */
 export interface TodoItem {
   id: string;
   name: string;
@@ -214,7 +217,7 @@ const NO_IN_PROGRESS = "(nothing in progress)";
  * Render the Selector's todo context: the in-progress item with its full
  * details, plus the pending items as a terse list (no details). When there is
  * no in-progress item, an explicit placeholder is shown so the Selector knows
- * the work state. (Pending details are drilled via the `todo_list` tool, T16.)
+ * the work state. (Pending details are drilled via the `todo_list` tool.)
  */
 export function buildTodo(ctx: TodoContext): string {
   const lines: string[] = [TODO_HEADING];
@@ -270,7 +273,7 @@ export interface SelectorInputView {
  * (the deep-copied, nIrrelevant-injected graph rendered at its roots), the
  * current-task context (recent tail + todo + touched files), and two legends.
  *
- * The working copy is returned alongside so the Selector's tools (T16) operate
+ * The working copy is returned alongside so the Selector's tools operate
  * on it; the source graph is untouched.
  */
 export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInputView {

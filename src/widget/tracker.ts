@@ -101,7 +101,7 @@ export interface ProgressTracker extends StageController, TrackerState {
   rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number };
 }
 
-// --- streaming-token helpers (two-tier, decision #37) ---------------------
+// --- streaming-token helpers (two-tier) -------------------------------------
 // Extraction primitives live in src/runtime/streaming-tokens.ts (shared with
 // the agent-loop run accumulator). The tracker owns its own ACCUMULATE
 // strategy here: a running primary max (mid-stream message_update usage.output)
@@ -373,7 +373,7 @@ function hideWidget(ctx: ExtensionContext | null): void {
 /** Publish the widget line (or hide it) via ctx.ui.setWidget. */
 function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null): void {
   if (ctx === null) return;
-  // TUI-only (guard like OM): no-op in rpc/json/print.
+  // TUI-only: no-op in rpc/json/print.
   if (ctx.mode !== "tui" || !ctx.hasUI) return;
   // idle → hide the line (a prior render may have shown it during a run).
   if (tracker.stage === null) {
