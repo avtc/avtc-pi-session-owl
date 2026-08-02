@@ -56,6 +56,24 @@ describe("resolveStageModel", () => {
     if (!res.ok) expect(res.error).toMatch(/openai\/missing/);
   });
 
+  it("errors on a malformed component model with no '/' separator", async () => {
+    const res = await resolveStageModel(ctxWith({ findResult: undefined }), "gpt-4o");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/not a provider\/id reference/);
+  });
+
+  it("errors when the provider side is empty", async () => {
+    const res = await resolveStageModel(ctxWith({ findResult: undefined }), "/gpt-4o");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/not a provider\/id reference/);
+  });
+
+  it("errors when the model-id side is empty", async () => {
+    const res = await resolveStageModel(ctxWith({ findResult: undefined }), "openai/");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/not a provider\/id reference/);
+  });
+
   it("errors when no component model and no session model available", async () => {
     const res = await resolveStageModel(ctxWith({ sessionModel: undefined }), null);
     expect(res.ok).toBe(false);
