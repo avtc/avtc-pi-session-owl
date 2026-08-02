@@ -113,7 +113,11 @@ describe("makeSelectorRun (Selector stage wiring)", () => {
     await runFn({ ctx, settings, signal, scope: { firstKeptEntryId: "cut-1" }, unobserved: null });
 
     expect(captured.length).toBe(2);
-    // first call: background scope (null) + no todo.
+    // first call: ctx/settings/signal forwarded by identity, background scope
+    // (null), no todo.
+    expect(captured[0]?.ctx).toBe(ctx);
+    expect(captured[0]?.settings).toBe(settings);
+    expect(captured[0]?.signal).toBe(signal);
     expect(captured[0]?.scope).toBeNull();
     expect(captured[0]?.todo).toBeNull();
     expect(captured[0]?.todoBridge).toBeNull();
