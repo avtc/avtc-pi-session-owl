@@ -8,7 +8,7 @@ import type {
   SessionEntry,
   SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
-import { CHARS_PER_TOKEN_ESTIMATE, estimateContentTokens } from "../types.js";
+import { CHARS_PER_TOKEN_ESTIMATE } from "../types.js";
 
 /**
  * One rendered tag-block in the Observer's XML-tagged chunk format. A block is

@@ -18,7 +18,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
-import { measureRootViewTokens, nonObsoleteRoots } from "../graph/read-tools.js";
+import { measureRootViewTokens, nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
@@ -29,6 +29,7 @@ import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { decodeNode, encodeSelection } from "../store/codecs.js";
 import { getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
 import {
+  estimateContentTokens,
   type MemkeeperGraph as Graph,
   MemkeeperGraph,
   type Node,
@@ -139,7 +140,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   let stageOpened = false;
   let normalEnd = true;
   let pass = FIRST_PASS;
-  const ledger = makeLedgerHook(store, "select");
+  const ledger = makeLedgerHook("select");
   try {
     input.widget.startStage(SELECT_STAGE, { pass });
     stageOpened = true;
@@ -188,9 +189,9 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   } finally {
     // Persist the resulting tree whenever a stage opened (a working copy exists)
     // — on convergence / no-op / max, on a run-ending error, AND on an abort-
-    // during-run (committed partial work is kept): the working copy
-    // is the best available curation and committing it keeps mk_recall's target
-    // alive. (Aborted-before-start leaves no working copy; stageOpened is false.)
+    // during-run (committed partial work is kept): the working copy is the best
+    // available curation and committing it keeps mk_recall's target alive.
+    // (Aborted-before-start leaves no working copy; stageOpened is false.)
     if (stageOpened) persistResult(store, graphStore, workingCopy.graph);
     // Persist the cumulative usage ledger ONCE at run end (fold-per-pass,
     // persist-once — mirroring the Observer + Builder). Skipped on abort/error
@@ -308,9 +309,12 @@ function persistResult(store: StoreContext, graphStore: ReturnType<typeof getGra
 
 // --- widget counts ---------------------------------------------------------
 
-/** Push the working copy's current root counts to the widget (live deltas). */
+/** Push the working copy's current root counts to the widget (live deltas).
+ *  Single-pass: collect+sort the roots ONCE, then derive both the count and the
+ *  rendered view tokens from that same array (mirrors the widget's
+ *  `rootViewCounts`). */
 function pushSelectedCounts(widget: WidgetController, workingGraph: Graph): void {
-  const rootCount = nonObsoleteRoots(workingGraph).length;
-  const rootViewTokens = measureRootViewTokens(workingGraph, NON_BUILDER);
-  widget.setSelectedCounts(rootCount, rootViewTokens);
+  const roots = nonObsoleteRoots(workingGraph);
+  const rootViewTokens = estimateContentTokens(renderRootViewFromRoots(roots, NON_BUILDER));
+  widget.setSelectedCounts(roots.length, rootViewTokens);
 }

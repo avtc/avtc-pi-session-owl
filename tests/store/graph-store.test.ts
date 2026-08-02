@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GraphDelta } from "../../src/graph/mutations.js";
 import { applyCreateNode, applyMerge, MUTATE_SOURCE } from "../../src/graph/mutations.js";
+import { log } from "../../src/log.js";
 import {
   EMPTY_LEDGER,
   encodeDetails,
@@ -379,6 +380,42 @@ describe("load reconstruction", () => {
     const store = getGraphStore();
     // corrupt snapshot skipped → deltas-only reconstruction
     expect(store.graph.observations.has("o9")).toBe(true);
+  });
+
+  it("warns on a corrupt memkeeper snapshot that CARRIES a version key (resembles memkeeper but fails validation)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    const warn = vi.spyOn(log, "warn");
+    // a details with a `version` (so it resembles a memkeeper snapshot) but a
+    // malformed body that fails decodeDetails → the warn branch + deltas-only
+    fake.addCompaction("e3", { version: "v1", nodes: "NOT_AN_ARRAY" });
+    fake.addCustomAt("e3b", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      delta: {
+        type: "create_node",
+        id: "n9",
+        summary: "wrapper",
+        importance: "low",
+        parentNode: null,
+        state: "active",
+      },
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("e4", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e4",
+      records: [
+        { id: "o9", content: "post", importance: "low", sourceEntryIds: ["3"], timestamp: "t", parentNode: "n9" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.leafId = "e4";
+
+    await load(fake);
+    // the version-carrying corrupt snapshot surfaced the warn
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("corrupt memkeeper snapshot"));
+    // deltas-only reconstruction still applies
+    expect(getGraphStore().graph.observations.has("o9")).toBe(true);
+    warn.mockRestore();
   });
 
   it("skips a native (non-memkeeper) compaction details", async () => {

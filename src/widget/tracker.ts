@@ -353,6 +353,18 @@ export const NO_OP_WIDGET: WidgetController = {
 export function initWidget(): WidgetController {
   const tracker = createTracker();
   let ctxRef: ExtensionContext | null = null;
+  // Coalesce renders: a fast stream emits many message_update events per tick,
+  // but the widget only needs one fresh line per tick. scheduleRender dedupes
+  // — N events in the same microtask produce a single formatWidgetLine call.
+  let renderScheduled = false;
+  const scheduleRender = (): void => {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    queueMicrotask(() => {
+      renderScheduled = false;
+      renderWidget(tracker, ctxRef);
+    });
+  };
   return {
     setCtx(ctx) {
       ctxRef = ctx;
@@ -380,7 +392,7 @@ export function initWidget(): WidgetController {
     },
     onEvent(event) {
       tracker.onEvent(event);
-      renderWidget(tracker, ctxRef);
+      scheduleRender();
     },
     render() {
       renderWidget(tracker, ctxRef);

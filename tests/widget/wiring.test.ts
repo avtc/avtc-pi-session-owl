@@ -116,16 +116,37 @@ describe("initWidget wiring", () => {
     expect(hideCall?.content).toBeUndefined();
   });
 
-  it("onEvent forwards to the tracker then renders (live streaming)", () => {
+  it("onEvent forwards to the tracker then renders (live streaming)", async () => {
     const widget = initWidget();
     const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
     widget.startStage("build", { pass: 1 });
-    // a message_update with usage → streaming tokens + a re-render
+    // a message_update with usage → streaming tokens + a coalesced re-render
+    // (onEvent schedules the render via queueMicrotask so a fast stream produces
+    // one render per tick)
     widget.onEvent({ type: "message_update", message: { usage: { output: 250 } } } as unknown as Parameters<
       typeof widget.onEvent
     >[0]);
+    await Promise.resolve(); // flush the scheduled microtask render
     expect(calls.length).toBeGreaterThanOrEqual(1);
     expect(calls[0]?.key).toBe(WIDGET_KEY);
+  });
+
+  it("onEvent coalesces a fast stream into one render per microtask tick", async () => {
+    const widget = initWidget();
+    const { ctx, calls } = makeCtx(null);
+    widget.setCtx(ctx);
+    widget.startStage("build", { pass: 1 });
+    // many message_update events in the same tick → ONE coalesced render
+    for (let i = 0; i < 50; i += 1) {
+      widget.onEvent({ type: "message_update", message: { usage: { output: i * 10 } } } as unknown as Parameters<
+        typeof widget.onEvent
+      >[0]);
+    }
+    const beforeFlush = calls.length;
+    await Promise.resolve();
+    // the 50 events produced at most one additional render (the coalesced one)
+    expect(calls.length - beforeFlush).toBeLessThanOrEqual(1);
+    expect(calls.length).toBeGreaterThanOrEqual(1);
   });
 });

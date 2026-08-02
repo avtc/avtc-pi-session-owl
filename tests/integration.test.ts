@@ -36,6 +36,7 @@ import {
   _setGetMemkeeperSettings,
   DEFAULT_CONFIG,
 } from "../src/config/schema.js";
+import { validateGraph } from "../src/graph/invariants.js";
 import memkeeperExtension from "../src/index.js";
 import { runStage, type StageRunResult } from "../src/runtime/agent-loop.js";
 import { _resetRunLock, inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
@@ -364,10 +365,9 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     expect(newNodes.length).toBe(0);
     // the selected tree was built + persisted (selected-root default).
     expect(getGraphStore().selectedTree).not.toBeNull();
-    // attachment invariant: every observation's parentNode exists as a node.
-    for (const o of graph.observations.values()) {
-      expect(graph.nodes.has(o.parentNode)).toBe(true);
-    }
+    // C4 structural invariant: every observation under exactly one existing
+    // node, containment tree acyclic + consistent, nGoal invariants hold.
+    expect(() => validateGraph(getGraphStore().graph)).not.toThrow();
   });
 
   it("enabled=false off-path: turn_end no-ops + compaction returns undefined (Pi native)", async () => {

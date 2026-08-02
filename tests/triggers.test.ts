@@ -603,4 +603,37 @@ describe("onTurnEnd", () => {
     // returned immediately — the run hasn't resolved yet
     expect(resolved).toBe(false);
   });
+
+  it("reads getContextUsage ONCE even when both Builder + Selector are on-session-context-threshold (dual threshold)", () => {
+    // the non-default dual-threshold config would otherwise call the uncached
+    // getContextUsage twice per turn; onTurnEnd prefetches once + threads it.
+    setStageRuns({
+      runObserver: async () => {},
+      runBuilder: async () => {},
+      runSelector: async () => {},
+    });
+    let calls = 0;
+    const ctx = {
+      getContextUsage: () => {
+        calls += 1;
+        return { tokens: 100000, contextWindow: 200000, percent: 50 };
+      },
+      sessionManager: { getLeafId: () => "leaf-1", getBranch: () => [] as FakeEntry[] },
+    } as unknown as ExtensionContext;
+    onTurnEnd(
+      makeInput({
+        ctx,
+        settings: {
+          ...DEFAULT_CONFIG,
+          observerMode: "on-compaction",
+          builderMode: "on-session-context-threshold",
+          selectorMode: "on-session-context-threshold",
+          builderSessionContextThresholdTokens: 50000,
+          selectorSessionContextThresholdTokens: 50000,
+        },
+      }),
+    );
+    // prefetched once in onTurnEnd — NOT once per evaluator
+    expect(calls).toBe(1);
+  });
 });

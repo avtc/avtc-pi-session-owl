@@ -415,6 +415,38 @@ describe("buildTail", () => {
     expect(out).toContain("tail msg");
   });
 
+  it("renders the prelude with ONLY the user block when the last user message has NO preceding agent text (user is the first entry)", () => {
+    // branch where the last user message is the FIRST entry — no preceding
+    // assistant TEXT to pair it with (precedingAgentIndex === NOT_FOUND)
+    const branch: SessionEntry[] = [
+      userEntry("u1", "the opening ask"), // first entry — nothing precedes it
+      assistantEntry("a1", "tail start"),
+    ];
+    const out = buildTail(ctxFor(branch), { firstKeptEntryId: "a1" }, CHUNK_OPTS);
+    // the user block appears in the prelude (before the truncation marker)...
+    const marker = "<truncated events>";
+    const prelude = out.slice(0, out.indexOf(marker));
+    expect(prelude).toContain("the opening ask");
+    // ...but NO <A> agent block in the PRELUDE (there is no preceding agent text)
+    expect(prelude).not.toContain("<A");
+    // the retained tail still renders (a1 is in the tail)
+    expect(out).toContain("tail start");
+  });
+
+  it("renders verbatim when the last user message is within the tail (no pairing needed)", () => {
+    const branch: SessionEntry[] = [
+      assistantEntry("a1", "earlier reply"),
+      userEntry("u1", "the real ask"),
+      assistantEntry("a2", "tail start"),
+      userEntry("u2", "tail msg"),
+    ];
+    const out = buildTail(ctxFor(branch), { firstKeptEntryId: "a2" }, CHUNK_OPTS);
+    // The last REAL user message is u2 (within tail at a2). But if we force the
+    // last user message outside the cut, the pairing kicks in. Here u2 is in the
+    // tail, so this asserts the verbatim path; pairing is covered next.
+    expect(out).toContain("tail msg");
+  });
+
   it("renders one <A> block per text part in the preceding agent (byte-consistent with the tail)", () => {
     // A multi-text-part assistant: the prelude must emit one <A> per text part,
     // matching what the tail would render for the same entry (not one joined block).

@@ -21,10 +21,15 @@ import { acquireOrSkip, inFlight, type StageName } from "./runtime/run-lock.js";
 import { getGraphStore } from "./store/graph-store.js";
 import { estimateContentTokens } from "./types.js";
 
-/** Args handed to `onTurnEnd` and the trigger evaluators from the `turn_end` hook. */
+/** Args handed to `onTurnEnd` and the trigger evaluators from the `turn_end` hook.
+ *  `prefetchedContextTokens` lets `onTurnEnd` read pi's uncached `getContextUsage()`
+ *  ONCE and thread the value into both threshold evaluators (avoids the
+ *  double whole-history re-tokenization of the non-default dual-threshold
+ *  config). Absent → the evaluator reads it itself. */
 export interface TriggerInput {
   ctx: ExtensionContext;
   settings: MemkeeperConfig;
+  prefetchedContextTokens?: number | null;
 }
 
 /** The run function injected per stage (assignable to the real Observer/Builder/Selector runs).
@@ -143,9 +148,12 @@ function computeRootViewTokens(): number {
   return measureRootViewTokens(getGraphStore().graph, "builder");
 }
 
-/** Read the live session context tokens (null when pi reports unknown). */
-function contextTokens(ctx: ExtensionContext): number | null {
-  return ctx.getContextUsage()?.tokens ?? null;
+/** Read the live session context tokens (null when pi reports unknown).
+ *  Prefers a value threaded in by `onTurnEnd` (read once for both evaluators);
+ *  falls back to pi's `getContextUsage()` when absent (direct test calls). */
+function contextTokens(input: TriggerInput): number | null {
+  if (input.prefetchedContextTokens !== undefined) return input.prefetchedContextTokens;
+  return input.ctx.getContextUsage()?.tokens ?? null;
 }
 
 export interface StageTriggerResult {
@@ -171,7 +179,7 @@ export function evaluateBuilderTrigger(input: TriggerInput): StageTriggerResult 
       return { shouldFire: fire, reason: `${count} new nodes (threshold ${settings.builderEveryNObservations})` };
     }
     case "on-session-context-threshold": {
-      const tokens = contextTokens(input.ctx);
+      const tokens = contextTokens(input);
       if (tokens === null) return { shouldFire: false, reason: "context tokens unknown (null)" };
       const fire = tokens >= settings.builderSessionContextThresholdTokens;
       return {
@@ -207,7 +215,7 @@ export function evaluateSelectorTrigger(input: TriggerInput): StageTriggerResult
     return { shouldFire: false, reason: SKIP_INFLIGHT };
   }
   // selectorMode is on-session-context-threshold (the only other variant)
-  const tokens = contextTokens(input.ctx);
+  const tokens = contextTokens(input);
   if (tokens === null) return { shouldFire: false, reason: "context tokens unknown (null)" };
   const fire = tokens >= settings.selectorSessionContextThresholdTokens;
   return {
@@ -284,17 +292,28 @@ export function onTurnEnd(input: TriggerInput): void {
   const branchEntries = input.ctx.sessionManager.getBranch(leafId ?? undefined);
   const unobserved = computeUnobserved(branchEntries, getGraphStore().observerFrontier);
 
+  // Read pi's uncached getContextUsage() ONCE and thread it into the threshold
+  // evaluators — but ONLY when at least one of them is on-session-context-
+  // threshold (the only modes that read it). The default profile (both
+  // on-compaction) never reads it, so no per-turn call is added there.
+  const needsContextTokens =
+    input.settings.builderMode === "on-session-context-threshold" ||
+    input.settings.selectorMode === "on-session-context-threshold";
+  const withCtx: TriggerInput = needsContextTokens
+    ? { ...input, prefetchedContextTokens: input.ctx.getContextUsage()?.tokens ?? null }
+    : input;
+
   const observer = evaluateObserverTrigger({ ...input, unobserved });
   if (observer.shouldFire) {
     launchBackgroundRun(input, "observe", async (args) => stageRuns.runObserver({ ...args, unobserved }));
   }
 
-  const builder = evaluateBuilderTrigger(input);
+  const builder = evaluateBuilderTrigger(withCtx);
   if (builder.shouldFire) {
     launchBackgroundRun(input, "build", stageRuns.runBuilder);
   }
 
-  const selector = evaluateSelectorTrigger(input);
+  const selector = evaluateSelectorTrigger(withCtx);
   if (selector.shouldFire) {
     launchBackgroundRun(input, "select", stageRuns.runSelector);
   }

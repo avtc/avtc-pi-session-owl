@@ -19,10 +19,7 @@ import type { StageUsage } from "./agent-loop.js";
  * `persistLedger` once at run end. `hasUsage()` reports whether any fold fired.
  * Closing over `phase` keeps each run's hook scoped to its own stage.
  */
-export function makeLedgerHook(
-  store: StoreContext,
-  phase: Phase,
-): {
+export function makeLedgerHook(phase: Phase): {
   onStageEnd: (usage: StageUsage) => void;
   hasUsage: () => boolean;
 } {

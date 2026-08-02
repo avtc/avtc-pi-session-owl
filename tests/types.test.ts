@@ -13,6 +13,7 @@ import {
   makeObservation,
   N_GOAL,
   N_IRRELEVANT,
+  nowStoredTimestamp,
   O_INITIAL_PROMPT,
   ROOT_PARENT,
 } from "../src/types.js";
@@ -50,6 +51,33 @@ describe("token estimation", () => {
     expect(estimateContentTokens("")).toBe(0);
     expect(estimateContentTokens("abcdefgh")).toBe(2);
     expect(estimateContentTokens("abcdefghi")).toBe(3);
+  });
+});
+
+describe("nowStoredTimestamp", () => {
+  it("returns a UTC ISO 8601 string ending in Z", () => {
+    const ts = nowStoredTimestamp();
+    expect(ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  it("parses to a Date within a few seconds of now (a real instant)", () => {
+    const before = Date.now();
+    const ts = nowStoredTimestamp();
+    const after = Date.now();
+    const parsed = new Date(ts).getTime();
+    expect(parsed).toBeGreaterThanOrEqual(before);
+    expect(parsed).toBeLessThanOrEqual(after);
+  });
+
+  it("is lexicographically orderable = chronological (two calls preserve order)", () => {
+    const a = nowStoredTimestamp();
+    // a tiny gap guarantees a distinct instant (millisecond resolution)
+    const loopEnd = Date.now() + 1;
+    while (Date.now() < loopEnd) {
+      /* spin to cross a ms boundary */
+    }
+    const b = nowStoredTimestamp();
+    expect(a < b).toBe(true);
   });
 });
 

@@ -107,6 +107,13 @@ function starHeight(pattern: string): number {
     }
     if (ch === ")") {
       const innerMax = groupMaxima.pop() ?? 0;
+      // propagate this group's max star-height into the parent group's max slot,
+      // so a quantifier nested one group deep (e.g. the `?` in `((a?))+`) is
+      // not lost when the inner group closes — the outer `+` must see height 2.
+      if (groupMaxima.length > 0) {
+        const parent = groupMaxima[groupMaxima.length - 1];
+        if (innerMax > parent) groupMaxima[groupMaxima.length - 1] = innerMax;
+      }
       operandHeight = innerMax;
       i += 1;
       continue;
@@ -141,66 +148,112 @@ function starHeight(pattern: string): number {
   return maxHeight;
 }
 
-/**
- * Imprecise-alternation-under-quantifier check: returns true if any quantified
- * group contains an alternation whose branches can match the same input
- * (`(a|a)+`, `(a|ab)*`) — making the repetition ambiguous.
- *
- * Conservative: only flags a literal-char prefix overlap between the first
- * token of two branches (covers the common evil shapes) and nullable-branch
- * cases.
- */
-function hasImpreciseAlternationUnderQuantifier(pattern: string): boolean {
-  // Find each quantified group `( … )*|+|{n,}` and inspect its top-level
-  // alternations. This is a best-effort scan; false negatives are tolerated but
-  // the common `(a|a)+` and `(a|ab)*` shapes are caught.
-  for (let i = 0; i < pattern.length; i += 1) {
-    if (pattern[i] !== "(") continue;
-    // locate the matching close, then the trailing quantifier
-    let depth = 1;
-    let j = i + 1;
-    let inClass = false;
-    let escaped = false;
-    while (j < pattern.length && depth > 0) {
-      const c = pattern[j];
-      if (escaped) {
-        escaped = false;
-        j += 1;
-        continue;
-      }
-      if (c === "\\") {
-        escaped = true;
-        j += 1;
-        continue;
-      }
-      if (inClass) {
-        if (c === "]") inClass = false;
-        j += 1;
-        continue;
-      }
-      if (c === "[") inClass = true;
-      else if (c === "(") depth += 1;
-      else if (c === ")") depth -= 1;
-      if (depth === 0) break;
+/** Return the index of the `)` matching the `(` at `openIdx`, or -1 if
+ *  unbalanced. Tracks nesting, escapes, and char classes. */
+function findMatchingClose(pattern: string, openIdx: number): number {
+  let depth = 1;
+  let j = openIdx + 1;
+  let inClass = false;
+  let escaped = false;
+  while (j < pattern.length && depth > 0) {
+    const c = pattern[j];
+    if (escaped) {
+      escaped = false;
       j += 1;
-    }
-    if (j >= pattern.length || pattern[j] !== ")") continue;
-    const after = j + 1;
-    const quantified =
-      after < pattern.length && (pattern[after] === "*" || pattern[after] === "+" || pattern[after] === "{");
-    if (!quantified) {
-      i = j;
       continue;
     }
-    // the group body, skipping any non-capturing/lookahead/lookbehind/named
-    // marker so `(?:a|a)+` is inspected as `a|a`.
-    let bodyStart = i + 1;
-    if (bodyStart < j && pattern[bodyStart] === "?") {
-      bodyStart = groupBodyStart(pattern, bodyStart + 1);
+    if (c === "\\") {
+      escaped = true;
+      j += 1;
+      continue;
     }
-    const body = pattern.slice(bodyStart, j);
-    if (topLevelAlternationOverlaps(body)) return true;
-    i = j;
+    if (inClass) {
+      if (c === "]") inClass = false;
+      j += 1;
+      continue;
+    }
+    if (c === "[") inClass = true;
+    else if (c === "(") depth += 1;
+    else if (c === ")") {
+      depth -= 1;
+      if (depth === 0) return j;
+    }
+    j += 1;
+  }
+  return -1;
+}
+
+/** Body of the group whose `(` is at `groupOpen`: skips a `(?…)`, `(?<name>)`,
+ *  or `(?<=)`/`(?<!)` marker so the body is the alternation-bearing content.
+ *  Returns the substring between the marker and the matching `)`. */
+function groupBody(pattern: string, groupOpen: number): string {
+  const closeIdx = findMatchingClose(pattern, groupOpen);
+  if (closeIdx === -1) return "";
+  let bodyStart = groupOpen + 1;
+  if (bodyStart < closeIdx && pattern[bodyStart] === "?") {
+    bodyStart = groupBodyStart(pattern, bodyStart + 1);
+  }
+  return pattern.slice(bodyStart, closeIdx);
+}
+
+/** True if `body` contains an imprecise alternation at ANY nesting depth: a
+ *  top-level `|` with overlapping/nullable branches, OR such a shape inside any
+ *  nested group within `body`. The enclosing quantifier repeats everything in
+ *  body, so a buried ambiguous alternation (e.g. the inner `(a|a)` in
+ *  `((a|a))+`) is still dangerous. */
+function bodyHasImpreciseAlternation(body: string): boolean {
+  if (topLevelAlternationOverlaps(body)) return true;
+  let k = 0;
+  while (k < body.length) {
+    const c = body[k];
+    if (c === "\\") {
+      k += 2;
+      continue;
+    }
+    if (c === "[") {
+      // skip the char class
+      k += 1;
+      while (k < body.length) {
+        if (body[k] === "\\") k += 1;
+        if (body[k] === "]") break;
+        k += 1;
+      }
+      k += 1;
+      continue;
+    }
+    if (c === "(") {
+      if (bodyHasImpreciseAlternation(groupBody(body, k))) return true;
+      // skip past this group so its internals aren't re-scanned linearly
+      const close = findMatchingClose(body, k);
+      k = close === -1 ? k + 1 : close + 1;
+      continue;
+    }
+    k += 1;
+  }
+  return false;
+}
+
+/**
+ * Imprecise-alternation-under-quantifier check: returns true if any quantified
+ * group contains (at any nesting depth) an alternation whose branches can match
+ * the same input (`(a|a)+`, `(a|ab)*`, `((a|a))+`) or a nullable branch
+ * (`(a?)+`). The enclosing quantifier repeats the whole body, so a buried
+ * ambiguous alternation is dangerous.
+ *
+ * Scans every `(` in the pattern — does NOT skip the contents of non-quantified
+ * groups, so a quantified group nested inside a plain group (`((a|a)+)`) is
+ * still found.
+ */
+function hasImpreciseAlternationUnderQuantifier(pattern: string): boolean {
+  for (let i = 0; i < pattern.length; i += 1) {
+    if (pattern[i] !== "(") continue;
+    const closeIdx = findMatchingClose(pattern, i);
+    if (closeIdx === -1) continue;
+    const after = closeIdx + 1;
+    const quantified =
+      after < pattern.length && (pattern[after] === "*" || pattern[after] === "+" || pattern[after] === "{");
+    if (!quantified) continue; // do not skip: a nested quantified group may follow
+    if (bodyHasImpreciseAlternation(groupBody(pattern, i))) return true;
   }
   return false;
 }

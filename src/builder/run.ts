@@ -124,7 +124,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   let normalEnd = true;
   let stageOpened = false;
   let pass = FIRST_PASS;
-  const ledger = makeLedgerHook(store, "build");
+  const ledger = makeLedgerHook("build");
   try {
     input.widget.startStage(BUILD_STAGE, { pass });
     stageOpened = true;

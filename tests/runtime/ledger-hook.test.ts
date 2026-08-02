@@ -50,8 +50,8 @@ describe("makeLedgerHook", () => {
   });
 
   it("folds a stage's usage into the store ledger's named phase WITHOUT persisting", () => {
-    const { ctx, usageDeltaCount } = recordingStore();
-    const { onStageEnd } = makeLedgerHook(ctx, "build");
+    const { usageDeltaCount } = recordingStore();
+    const { onStageEnd } = makeLedgerHook("build");
     expect(usageDeltaCount()).toBe(0);
     onStageEnd(USAGE_A);
     expect(getGraphStore().usageLedger.build).toEqual({ ...USAGE_A, runs: 1 });
@@ -59,8 +59,7 @@ describe("makeLedgerHook", () => {
   });
 
   it("accumulates across multiple folds (one hook = the same phase each call)", () => {
-    const { ctx } = recordingStore();
-    const { onStageEnd } = makeLedgerHook(ctx, "observe");
+    const { onStageEnd } = makeLedgerHook("observe");
     onStageEnd(USAGE_A);
     onStageEnd(USAGE_A);
     expect(getGraphStore().usageLedger.observe).toEqual({
@@ -74,17 +73,15 @@ describe("makeLedgerHook", () => {
   });
 
   it("each phase's hook is independent (observe hook doesn't touch build)", () => {
-    const { ctx } = recordingStore();
-    makeLedgerHook(ctx, "observe").onStageEnd(USAGE_A);
-    makeLedgerHook(ctx, "select").onStageEnd(USAGE_A);
+    makeLedgerHook("observe").onStageEnd(USAGE_A);
+    makeLedgerHook("select").onStageEnd(USAGE_A);
     expect(getGraphStore().usageLedger.observe.runs).toBe(1);
     expect(getGraphStore().usageLedger.select.runs).toBe(1);
     expect(getGraphStore().usageLedger.build.runs).toBe(0);
   });
 
   it("hasUsage() reports false before any fold, true after", () => {
-    const { ctx } = recordingStore();
-    const ledger = makeLedgerHook(ctx, "build");
+    const ledger = makeLedgerHook("build");
     expect(ledger.hasUsage()).toBe(false);
     ledger.onStageEnd(USAGE_A);
     expect(ledger.hasUsage()).toBe(true);
@@ -92,7 +89,7 @@ describe("makeLedgerHook", () => {
 
   it("persistLedger writes ONE memkeeper.usage delta for the folded ledger (run-end persist)", () => {
     const { ctx, usageDeltaCount } = recordingStore();
-    const ledger = makeLedgerHook(ctx, "build");
+    const ledger = makeLedgerHook("build");
     // two passes fold into the same phase — only ONE persist at run end
     ledger.onStageEnd(USAGE_A);
     ledger.onStageEnd(USAGE_A);
@@ -104,7 +101,7 @@ describe("makeLedgerHook", () => {
   it("persistLedger writes nothing across a full multi-pass run until called once", () => {
     // simulates a 3-pass Builder run: 3 folds, 1 persist (the design's per-run batch)
     const { ctx, usageDeltaCount } = recordingStore();
-    const ledger = makeLedgerHook(ctx, "build");
+    const ledger = makeLedgerHook("build");
     for (let i = 0; i < 3; i += 1) ledger.onStageEnd(USAGE_A);
     expect(usageDeltaCount()).toBe(0);
     if (ledger.hasUsage()) persistLedger(ctx);

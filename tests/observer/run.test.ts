@@ -344,6 +344,41 @@ describe("runObserver", () => {
     expect(getGraphStore().observerFrontier).toBeNull();
   });
 
+  it("discards accumulated records when abort fires BETWEEN chunks (chunk 1 done, chunk 2 aborted)", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const controller = new AbortController();
+    // two chunks (low threshold forces one entry per chunk)
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    let chunk = 0;
+    const fn = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
+      chunk += 1;
+      const tool = input.tools[0] as AgentTool;
+      // chunk 1 COMPLETES with a valid record (accumulates in allRecords)...
+      await tool.execute("c1", {
+        observations: [{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }],
+      });
+      // ...then abort fires before chunk 2 starts (chunk 2 never runs)
+      if (chunk === 1) controller.abort();
+      return {
+        messages: [] as AgentMessage[],
+        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
+        streamingOutputTokens: 0,
+        aborted: controller.signal.aborted,
+      };
+    };
+
+    await runObserver({ ...makeArgs({ pi, ctx, unobserved, runStageFn: fn }), signal: controller.signal });
+
+    // only chunk 1 ran (the abort-guards at the loop top stopped chunk 2)
+    expect(chunk).toBe(1);
+    // chunk 1's accumulated records were DISCARDED — nothing persisted
+    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "memkeeper.observation")).toHaveLength(0);
+    // frontier unchanged (the persist that advances it was never reached)
+    expect(getGraphStore().observerFrontier).toBeNull();
+  });
+
   it("does NOT flush new nodes (leaves them state:new for the Builder)", async () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();

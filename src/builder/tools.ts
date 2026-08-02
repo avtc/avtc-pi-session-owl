@@ -78,9 +78,17 @@ function sourceMutateContext(store: StoreContext): MutateContext {
 
 // --- supersede -------------------------------------------------------------
 
+const SUPERSEDE_PARAMS = Type.Object({
+  nodeId: Type.String({ description: "The replacement node — the current truth." }),
+  supersededNodeIds: Type.Array(Type.String(), {
+    minItems: 1,
+    description: "The nodes to retire. At least one.",
+  }),
+});
+
 /** Build the `supersede` tool: mark nodes obsolete, each carrying supersededBy
  *  pointing at the replacement. The superseded nodes retain their evidence. */
-function makeSupersedeTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeof SUPERSEDE_PARAMS> {
+function makeSupersedeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof SUPERSEDE_PARAMS> {
   return {
     name: SUPERSEDE_TOOL,
     description: "Retire nodes as obsolete, pointing each at a replacement node.",
@@ -88,7 +96,7 @@ function makeSupersedeTool(graph: MemkeeperGraph, store: StoreContext): AgentToo
     parameters: SUPERSEDE_PARAMS,
     async execute(_toolCallId, params) {
       return runMutate(
-        sourceMutateContext(store),
+        ctx,
         "supersede",
         () =>
           applySupersede(
@@ -102,20 +110,22 @@ function makeSupersedeTool(graph: MemkeeperGraph, store: StoreContext): AgentToo
   };
 }
 
-const SUPERSEDE_PARAMS = Type.Object({
-  nodeId: Type.String({ description: "The replacement node — the current truth." }),
-  supersededNodeIds: Type.Array(Type.String(), {
-    minItems: 1,
-    description: "The nodes to retire. At least one.",
-  }),
-});
-
 // --- set_meta --------------------------------------------------------------
+
+const SET_META_PARAMS = Type.Object({
+  nodeId: Type.String({ description: "The node to update." }),
+  importance: Type.Optional(ImportanceSchema),
+  archived: Type.Optional(Type.Boolean({ description: "True to archive, false to restore to active." })),
+  summary: Type.Optional(Type.String({ minLength: 1, description: "A new summary for the node." })),
+  obsolete: Type.Optional(
+    Type.Boolean({ description: "False to resurrect an obsolete node (clears its replacement link)." }),
+  ),
+});
 
 /** Build the `set_meta` tool: re-rate importance, archive/un-archive, condense
  *  the summary, or resurrect an obsolete node. obsolete:true is rejected (use
  *  supersede). nGoal allows summary only. */
-function makeSetMetaTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<typeof SET_META_PARAMS> {
+function makeSetMetaTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof SET_META_PARAMS> {
   return {
     name: SET_META_TOOL,
     description:
@@ -124,7 +134,7 @@ function makeSetMetaTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<
     parameters: SET_META_PARAMS,
     async execute(_toolCallId, params) {
       return runMutate(
-        sourceMutateContext(store),
+        ctx,
         "set_meta",
         () =>
           applySetMeta(
@@ -143,16 +153,6 @@ function makeSetMetaTool(graph: MemkeeperGraph, store: StoreContext): AgentTool<
     },
   };
 }
-
-const SET_META_PARAMS = Type.Object({
-  nodeId: Type.String({ description: "The node to update." }),
-  importance: Type.Optional(ImportanceSchema),
-  archived: Type.Optional(Type.Boolean({ description: "True to archive, false to restore to active." })),
-  summary: Type.Optional(Type.String({ minLength: 1, description: "A new summary for the node." })),
-  obsolete: Type.Optional(
-    Type.Boolean({ description: "False to resurrect an obsolete node (clears its replacement link)." }),
-  ),
-});
 
 // --- factory ---------------------------------------------------------------
 
@@ -175,8 +175,8 @@ export function makeBuilderTools(graph: MemkeeperGraph, store: StoreContext, set
     makeMkdirTool(graph, ctx),
     makeMvTool(graph, ctx),
     makeMergeTool(graph, ctx),
-    makeSupersedeTool(graph, store),
-    makeSetMetaTool(graph, store),
+    makeSupersedeTool(graph, ctx),
+    makeSetMetaTool(graph, ctx),
     makeTryFinishTool(graph, { rootViewThreshold: settings.builderRootViewThreshold }, "builder"),
   ];
 }

@@ -62,6 +62,35 @@ describe("isSafeRegex", () => {
     expect(isSafeRegex("(?:a|ab)*")).toBe(false);
   });
 
+  it("rejects overlapping alternation nested one group deep under a quantifier (R4-1 bypass fix)", () => {
+    // wrapping the evil alternation in one extra group hid it from the old
+    // top-level-only check
+    expect(isSafeRegex("((a|a))+")).toBe(false);
+    expect(isSafeRegex("((a|ab))+")).toBe(false);
+    expect(isSafeRegex("((?:a|a))+")).toBe(false);
+    expect(isSafeRegex("((a?))+")).toBe(false);
+    expect(isSafeRegex("((.+a))+")).toBe(false);
+  });
+
+  it("rejects an imprecise alternation nested under a plain (non-capturing-free) quantified group", () => {
+    // the inner (a|a)+ is itself quantified but sits inside a non-quantified
+    // outer group — the old scanner skipped past the outer group's contents
+    expect(isSafeRegex("((a|a)+)")).toBe(false);
+    expect(isSafeRegex("((a|ab)+)x")).toBe(false);
+    expect(isSafeRegex("x((?:a|a)*)y")).toBe(false);
+  });
+
+  it("rejects a non-overlapping alternation that becomes overlapping via a nullable branch, nested", () => {
+    expect(isSafeRegex("((a|))+")).toBe(false); // nullable branch under quantifier
+  });
+
+  it("accepts a quantified group with a SAFE nested alternation (no false positive)", () => {
+    // distinct first chars — no ambiguity even though nested + repeated
+    expect(isSafeRegex("((a|b)(c|d))+")).toBe(true);
+    expect(isSafeRegex("((foo|bar))+")).toBe(true);
+    expect(isSafeRegex("((ab|cd))+")).toBe(true);
+  });
+
   it("accepts a safe non-capturing group under a quantifier", () => {
     expect(isSafeRegex("(?:ab)+")).toBe(true);
     expect(isSafeRegex("(?:foo|bar)*")).toBe(true);

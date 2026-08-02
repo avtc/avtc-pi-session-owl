@@ -31,7 +31,7 @@ import {
 } from "../graph/read-tools.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
-import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type ObsId } from "../types.js";
+import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, type ObsId } from "../types.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -109,6 +109,83 @@ function targetFromSelection(selection: SerializedSelection, sourceGraph: Memkee
   return { renderMode: "selected-root", nodes, observations };
 }
 
+/** Build a FOCUSED recall target over the source graph for an `ids` drill:
+ *  materialize only the requested nodes + their direct children + requested
+ *  observations, instead of iterating the whole graph. */
+function targetFromSourceGraphForIds(graph: MemkeeperGraph, ids: readonly string[]): RecallTarget {
+  const nodes = new Map<string, RenderableNode>();
+  const observations = new Map<string, RecallObservation>();
+  for (const id of ids) {
+    const node = graph.nodes.get(id as NodeId);
+    if (node !== undefined) {
+      nodes.set(node.id, node);
+      for (const childId of node.childNodeIds) {
+        const child = graph.nodes.get(childId);
+        if (child !== undefined) nodes.set(child.id, child);
+      }
+      for (const obsId of node.observationIds) {
+        const obs = graph.observations.get(obsId as ObsId);
+        if (obs !== undefined) observations.set(obs.id, obs);
+      }
+      continue;
+    }
+    const obs = graph.observations.get(id as ObsId);
+    if (obs !== undefined) observations.set(obs.id, obs);
+  }
+  return { renderMode: "observations-root", nodes, observations };
+}
+
+/** Build a FOCUSED recall target over the persisted selected tree for an `ids`
+ *  drill: materialize only the requested nodes + their direct children +
+ *  requested observations (resolved from the immutable source store). The
+ *  tree-parent map is built once (cheap id mapping) so observation parents use
+ *  the curated placement, mirroring the full targetFromSelection path. */
+function targetFromSelectionForIds(
+  selection: SerializedSelection,
+  sourceGraph: MemkeeperGraph,
+  ids: readonly string[],
+): RecallTarget {
+  const byId = new Map<string, SerializedNode>();
+  for (const sn of selection.nodes) byId.set(sn.id, sn);
+
+  // tree-parent map (built once — a cheap id sweep, not a full obs resolution)
+  const treeObsParent = new Map<string, string>();
+  for (const sn of selection.nodes) {
+    for (const obsId of sn.observationIds) treeObsParent.set(obsId, sn.id);
+  }
+
+  const nodes = new Map<string, RenderableNode>();
+  const observations = new Map<string, RecallObservation>();
+  const wantObs = (obsId: string): void => {
+    if (observations.has(obsId)) return;
+    // oInitialPrompt is carried verbatim in its own field
+    if (selection.oInitialPrompt !== null && obsId === selection.oInitialPrompt.id) {
+      observations.set(obsId, withTreeParent(serializedObservationToView(selection.oInitialPrompt), treeObsParent));
+      return;
+    }
+    const source = sourceGraph.observations.get(obsId as ObsId);
+    if (source !== undefined) observations.set(obsId, withTreeParent(source, treeObsParent));
+  };
+
+  for (const id of ids) {
+    const sn = byId.get(id);
+    if (sn !== undefined) {
+      const view = serializedNodeToView(sn);
+      nodes.set(view.id, view);
+      for (const childId of sn.childNodeIds) {
+        const child = byId.get(childId);
+        if (child !== undefined) nodes.set(child.id, serializedNodeToView(child));
+      }
+      for (const obsId of sn.observationIds) wantObs(obsId);
+      continue;
+    }
+    // requested id is an observation (or missing → renderNodePayload/executeIds
+    // handles the not-found case; materializing it lets the lookup succeed)
+    wantObs(id);
+  }
+  return { renderMode: "selected-root", nodes, observations };
+}
+
 /** Override an observation's parentNode with its curated tree parent when the
  *  tree places it under a different node than the source graph. */
 function withTreeParent<T extends RecallObservation>(obs: T, treeObsParent: Map<string, string>): RecallObservation {
@@ -158,6 +235,23 @@ function resolveTarget(): RecallTarget {
     return targetFromSelection(store.selectedTree, store.graph);
   }
   return targetFromSourceGraph(store.graph);
+}
+
+/** Resolve a FOCUSED target for an `ids` drill: only the requested ids + the
+ *  direct children of requested nodes are materialized (not the whole graph).
+ *  The `ids` path bypasses ranking + includeSuperseded, so it never needs the
+ *  full node/observation Maps — building them over the whole (unbounded)
+ *  retained observation set per single-id drill is pure waste. */
+function resolveTargetForIds(ids: readonly string[]): RecallTarget {
+  const store = getGraphStore();
+  const settings = getMemkeeperSettings();
+  if (settings.renderMode === "observations-root") {
+    return targetFromSourceGraphForIds(store.graph, ids);
+  }
+  if (store.selectedTree !== null) {
+    return targetFromSelectionForIds(store.selectedTree, store.graph, ids);
+  }
+  return targetFromSourceGraphForIds(store.graph, ids);
 }
 
 // --- ranking ---------------------------------------------------------------
@@ -469,14 +563,19 @@ function err(text: string): RecallResult {
 
 /** Pure recall logic (extracted for testability + so the tool shell stays thin). */
 function executeRecall(params: MkRecallParams): RecallResult {
-  const target = resolveTarget();
   const fullDetails = params.fullDetails ?? false;
   const includeSuperseded = params.includeSuperseded ?? false;
 
   // --- ids path: exact lookup, bypasses ranking + includeSuperseded ---
+  // builds a FOCUSED target (only the requested ids + their children), not the
+  // whole graph — single-id drills must not allocate Maps over every retained
+  // observation.
   if (params.ids !== undefined && params.ids.length > 0) {
+    const target = resolveTargetForIds(params.ids);
     return executeIds(target, params.ids, params.take, params.afterId, fullDetails);
   }
+
+  const target = resolveTarget();
 
   // --- search/list path ---
   // compile query regex (if any) — shared compiler (length cap + error wording)
