@@ -17,6 +17,32 @@
 // the user/agent can always rephrase — but false negatives (letting an evil
 // pattern through) are not, so the analyzer stays conservative.
 
+/** Given `pattern` and `i` pointing just past the `(?` of a `(?…)`, return the
+ *  index where the group BODY starts. Lookahead/lookbehind (`(?=`, `(?!`,
+ *  `(?<=`, `(?<!`) have the body right after the marker char; `(?:` / `(?i:`
+ *  start after `:`; `(?<name>` starts after `>`; flag-only `(?i)` returns the
+ *  index of the closing `)` (empty body). */
+function groupBodyStart(pattern: string, i: number): number {
+  if (i >= pattern.length) return i;
+  const c = pattern[i];
+  // lookahead: body right after the single `=`/`!`
+  if (c === "=" || c === "!") return i + 1;
+  // lookbehind / named group start with `<`
+  if (c === "<") {
+    const next = pattern[i + 1];
+    // lookbehind `(?<=` / `(?<!`: body after the assertion char
+    if (next === "=" || next === "!") return i + 2;
+    // named group `(?<name>`: body after the closing `>`
+    let k = i + 1;
+    while (k < pattern.length && pattern[k] !== ">" && pattern[k] !== ")") k += 1;
+    return k < pattern.length && pattern[k] === ">" ? k + 1 : k;
+  }
+  // `(?` then flag chars up to ':' (body) or ')' (flag-only group, empty body)
+  while (i < pattern.length && pattern[i] !== ":" && pattern[i] !== ")") i += 1;
+  if (i < pattern.length && pattern[i] === ":") return i + 1;
+  return i; // flag-only group: index of ')'
+}
+
 /**
  * Star-height check: returns the max quantifier-nesting depth of the pattern.
  * Height ≥ 2 means a quantifier applies to something that already contains a
@@ -61,23 +87,17 @@ function starHeight(pattern: string): number {
       continue;
     }
     if (ch === "(") {
-      // a (?…) non-capturing/flag group is an opaque atom (height 0)
+      // A non-capturing/lookahead/lookbehind/named group `(?…)`, `(?<…>)` is
+      // still a group for backtracking: its body can nest quantifiers. Skip the
+      // type marker, then process the body as a normal group (so `(?:a+)+` is
+      // detected as star-height 2, NOT treated as an opaque atom).
       if (i + 1 < pattern.length && pattern[i + 1] === "?") {
-        // skip to matching close
-        let depthQ = 1;
-        let k = i + 2;
-        while (k < pattern.length && depthQ > 0) {
-          if (pattern[k] === "\\") k += 2;
-          else if (pattern[k] === "(") {
-            depthQ += 1;
-            k += 1;
-          } else if (pattern[k] === ")") {
-            depthQ -= 1;
-            k += 1;
-          } else k += 1;
-        }
+        groupMaxima.push(0);
         operandHeight = 0;
-        i = k;
+        // skip the `(?…)` marker to the body start (lookahead/lookbehind/named/
+        // non-capturing), then process the body as a normal group so nested
+        // quantifiers inside it raise the star height (e.g. `(?:a+)+` → 2).
+        i = groupBodyStart(pattern, i + 2);
         continue;
       }
       groupMaxima.push(0);
@@ -172,7 +192,13 @@ function hasImpreciseAlternationUnderQuantifier(pattern: string): boolean {
       i = j;
       continue;
     }
-    const body = pattern.slice(i + 1, j);
+    // the group body, skipping any non-capturing/lookahead/lookbehind/named
+    // marker so `(?:a|a)+` is inspected as `a|a`.
+    let bodyStart = i + 1;
+    if (bodyStart < j && pattern[bodyStart] === "?") {
+      bodyStart = groupBodyStart(pattern, bodyStart + 1);
+    }
+    const body = pattern.slice(bodyStart, j);
     if (topLevelAlternationOverlaps(body)) return true;
     i = j;
   }

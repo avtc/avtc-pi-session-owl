@@ -290,6 +290,11 @@ describe("Builder read tools", () => {
       expect(out.toLowerCase()).toContain("backtrack");
     });
 
+    it("rejects a non-capturing-group ReDoS bypass (R1-1)", async () => {
+      const out = textOf(await callTool(tools(), "find", { query: "(?:a+)+" }));
+      expect(out.toLowerCase()).toContain("backtrack");
+    });
+
     it("returns 'No matches.' when nothing matches", async () => {
       const out = textOf(await callTool(tools(), "find", { query: "zzznomatch" }));
       expect(out).toContain("No matches");

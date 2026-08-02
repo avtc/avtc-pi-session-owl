@@ -28,15 +28,29 @@ describe("isSafeRegex", () => {
     expect(isSafeRegex("(\\d+)+")).toBe(false);
   });
 
+  it("rejects nested quantifiers inside a non-capturing/lookahead group (R1-1 bypass fix)", () => {
+    expect(isSafeRegex("(?:a+)+")).toBe(false);
+    expect(isSafeRegex("(?:a*)*")).toBe(false);
+    expect(isSafeRegex("(?:a+)*")).toBe(false);
+    expect(isSafeRegex("(?=a+)+")).toBe(false);
+    expect(isSafeRegex("(?!a*)*+")).toBe(false);
+  });
+
   it("rejects overlapping alternation under a quantifier", () => {
     expect(isSafeRegex("(a|a)+")).toBe(false);
     expect(isSafeRegex("(a|ab)*")).toBe(false);
     expect(isSafeRegex("(.*a){10}")).toBe(false);
   });
 
-  it("accepts non-overlapping alternation under a quantifier", () => {
-    expect(isSafeRegex("(foo|bar)+")).toBe(true);
-    expect(isSafeRegex("(cat|dog)*")).toBe(true);
+  it("rejects overlapping alternation inside a non-capturing group", () => {
+    expect(isSafeRegex("(?:a|a)+")).toBe(false);
+    expect(isSafeRegex("(?:a|ab)*")).toBe(false);
+  });
+
+  it("accepts a safe non-capturing group under a quantifier", () => {
+    expect(isSafeRegex("(?:ab)+")).toBe(true);
+    expect(isSafeRegex("(?:foo|bar)*")).toBe(true);
+    expect(isSafeRegex("(?i)abc")).toBe(true);
   });
 
   it("treats a safe pattern as safe regardless of flags (flags are caller's concern)", () => {
