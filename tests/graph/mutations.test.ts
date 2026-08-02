@@ -274,6 +274,25 @@ describe("applyMerge", () => {
     expect(g.nodes.has("n2")).toBe(false);
   });
 
+  it("records resolvedDestId for a new-root merge so replay is identity-stable", () => {
+    const g = graphWithTwoRoots();
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29 11:00", parentNode: "n2" }) });
+    const delta = applyMerge(g, { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root" }, MUTATE_SOURCE);
+    expect(delta.destId).toBeNull();
+    expect(delta.resolvedDestId).toBeDefined();
+    // replay on a graph whose nextNodeId counter is LOWER than at original apply
+    // (simulating a skipped counter-advancing delta): the resolved id must win.
+    const g2 = graphWithTwoRoots();
+    g2.nextNodeId = 5; // lower than the original graph's counter
+    applyMerge(
+      g2,
+      { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root", resolvedDestId: delta.resolvedDestId },
+      MUTATE_SOURCE,
+    );
+    expect(g2.nodes.has(delta.resolvedDestId as NodeId)).toBe(true);
+  });
+
   it("merges into an existing destination without newSummary, keeping its summary", () => {
     const g = graphWithTwoRoots();
     applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n2" }) });

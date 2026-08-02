@@ -9,9 +9,9 @@
 // truncated (bounded by the Selector/Builder try_finish, not here).
 
 import { formatNodeLine, RENDER_LEGEND, type RenderableNode } from "../format/render.js";
-import { compareNodeOrder } from "../graph/read-tools.js";
+import { orderActiveSetRoots } from "../graph/read-tools.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
-import { N_GOAL, N_IRRELEVANT } from "../types.js";
+import { ROOT_PARENT } from "../types.js";
 import { renderTouchedFiles, type TouchedFile } from "./touched-files.js";
 
 /** Which tree the active-set renders. */
@@ -101,10 +101,8 @@ function sourceRoots(graph: SummaryGraph): RenderableNode[] {
     if (node.state === "obsolete") continue;
     roots.push(node);
   }
-  // nGoal is always first (mechanical render rule); the rest by importance/recency.
-  const goal = roots.filter((n) => n.id === N_GOAL);
-  const rest = roots.filter((n) => n.id !== N_GOAL);
-  return [...goal, ...orderRoots(rest)];
+  // nGoal first, the rest by importance/recency (nIrrelevant is source-absent).
+  return orderActiveSetRoots(roots);
 }
 
 /** Non-obsolete selected-tree roots, nGoal first, nIrrelevant last. */
@@ -116,15 +114,5 @@ function selectedRoots(tree: SerializedSelection): RenderableNode[] {
     roots.push(node);
   }
   // nGoal first, nIrrelevant last, the rest by importance/recency.
-  const goal = roots.filter((n) => n.id === N_GOAL);
-  const irrelevant = roots.filter((n) => n.id === N_IRRELEVANT);
-  const rest = roots.filter((n) => n.id !== N_GOAL && n.id !== N_IRRELEVANT);
-  return [...goal, ...orderRoots(rest), ...irrelevant];
+  return orderActiveSetRoots(roots);
 }
-
-/** Importance desc then recency desc (shared ordering with the Builder). */
-function orderRoots(roots: RenderableNode[]): RenderableNode[] {
-  return [...roots].sort(compareNodeOrder);
-}
-
-const ROOT_PARENT = null;

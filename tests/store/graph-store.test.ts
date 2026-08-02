@@ -115,7 +115,7 @@ describe("GraphStore singleton", () => {
 });
 
 describe("persist methods (PERSIST-ONLY)", () => {
-  it("appendObservation persists a memkeeper.observation entry and returns ids via getLeafId", () => {
+  it("appendObservation persists a memkeeper.observation entry and advances the frontier", () => {
     freshStore();
     const fake = new FakeStore();
     const batch: ObservationEntry = {
@@ -126,8 +126,7 @@ describe("persist methods (PERSIST-ONLY)", () => {
       ],
       tokenCount: 1,
     };
-    const ids = appendObservation(fake, batch);
-    expect(ids).toEqual(["e1"]);
+    appendObservation(fake, batch);
     expect(customAt(fake, 0).customType).toBe(OBSERVATION_TYPE);
     expect(customAt(fake, 0).data).toEqual(batch);
     // advancing the frontier mirrors the in-memory cache refresh other persists do

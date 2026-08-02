@@ -9,6 +9,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 /** Surface a user notification through the host UI. */
-export function notify(ctx: ExtensionContext, message: string, level: "warning" | "info"): void {
+export function notify(ctx: ExtensionContext, message: string, level: "info" | "warning" | "error"): void {
   ctx.ui.notify(message, level);
 }

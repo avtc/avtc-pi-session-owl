@@ -4,6 +4,7 @@
 // Unit tests for buildSnapshot — the core delta-computation + context-fallback
 // + selected-delta-guard (exercises it directly rather than via the wiring smoke).
 
+import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
@@ -108,5 +109,40 @@ describe("buildSnapshot", () => {
     tracker.setSelectedCounts(20, 15_000);
     const snap = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
     expect(snap.selected).toBeNull();
+  });
+
+  it("caches root counts across message_update deltas (recomputed only on state-change events)", () => {
+    // Perf: the widget renders per streaming event, but the graph only changes
+    // on tool_execution_end, so buildSnapshot must reuse cached root counts for
+    // message_update deltas rather than re-rendering the whole root view per token.
+    tracker.startStage("build");
+    buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 })); // computes + caches
+    // add a root AFTER the snapshot, with no tool_execution_end reaching the widget
+    applyCreateNode(getGraphStore().graph, {
+      id: "n1" as NodeId,
+      summary: "arrived mid-stream",
+      importance: "high",
+      parentNode: null,
+      state: "active",
+    });
+    // several streaming deltas must NOT invalidate the cache
+    for (let i = 0; i < 5; i += 1) {
+      tracker.onEvent({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: `delta${i} ` },
+      } as unknown as AgentEvent);
+    }
+    const cached = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
+    expect(cached.roots.count).toBe(0); // cached pre-arrival value
+    // a tool_execution_end event invalidates → next build sees the new root
+    tracker.onEvent({
+      type: "tool_execution_end",
+      toolCallId: "c1",
+      toolName: "mkdir",
+      result: {},
+      isError: false,
+    } as unknown as AgentEvent);
+    const refreshed = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
+    expect(refreshed.roots.count).toBe(1);
   });
 });

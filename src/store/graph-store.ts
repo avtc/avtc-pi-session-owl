@@ -109,15 +109,12 @@ export function resetForNewSession(): void {
 
 // --- persist (PERSIST-ONLY) ------------------------------------------------
 
-/** Persist an observation batch; return the new entry's ids. */
-export function appendObservation(ctx: StoreContext, entry: ObservationEntry): string[] {
+/** Persist an observation batch. */
+export function appendObservation(ctx: StoreContext, entry: ObservationEntry): void {
   ctx.appendEntry(OBSERVATION_TYPE, entry);
-  const leafId = ctx.getLeafId();
   // advance the frontier to this batch's coversUpToId (the Observer progress
   // pointer; mirrors the in-memory cache refresh persistSelectedTree/appendUsage do)
   getGraphStore().observerFrontier = entry.coversUpToId;
-  const ids = leafId === null ? [] : [leafId];
-  return ids;
 }
 
 /** Persist a recorded graph delta (the caller already applied it in-memory). */

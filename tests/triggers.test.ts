@@ -338,7 +338,7 @@ describe("evaluateBuilderTrigger", () => {
   });
 
   it("on-root-view-threshold: fires when the non-obsolete root view >= threshold", () => {
-    // 10 roots × 40 chars = 400 chars = 100 tokens (chars/4); threshold 100
+    // 10 roots × ~19 rendered tokens/line (full node line, chars/4) = ~190; threshold 100
     for (let i = 0; i < 10; i++) addRootNode(`n${i}` as NodeId, "active");
     const res = evaluateBuilderTrigger(
       makeInput({
@@ -353,7 +353,7 @@ describe("evaluateBuilderTrigger", () => {
     addRootNode("n2" as NodeId, "active");
     addRootNode("n3" as NodeId, "archived");
     addRootNode("n4" as NodeId, "obsolete");
-    // 3 non-obsolete × 40 chars = 120 chars = 30 tokens; threshold 30
+    // 3 non-obsolete roots × ~19 rendered tokens/line = ~57; threshold 30
     const res = evaluateBuilderTrigger(
       makeInput({
         settings: { ...DEFAULT_CONFIG, builderMode: "on-root-view-threshold", builderRootViewThreshold: 30 },

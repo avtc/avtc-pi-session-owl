@@ -9,6 +9,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
 import { renderRootViewFromRoots } from "../graph/read-tools.js";
+import { notify } from "../notify.js";
 import { cloneLedger, decodeNode, EMPTY_LEDGER, type SerializedNode, type UsageLedger } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { estimateContentTokens, type Node, type Observation } from "../types.js";
@@ -119,19 +120,19 @@ export async function runMkStatus(_args: string, ctx: ExtensionCommandContext): 
     const settings = getMemkeeperSettings();
     const { sessionStartMs, compactionCount } = readSessionBounds(ctx.sessionManager);
     const report = buildStatusReport(gatherStatusInput(settings, { sessionStartMs, compactionCount }));
-    await ctx.ui.notify(report, "info");
+    notify(ctx, report, "info");
   } catch (cause) {
     const reason = cause instanceof Error ? cause.message : String(cause);
-    await ctx.ui.notify(`memkeeper status failed: ${reason}`, "error");
+    notify(ctx, `memkeeper status failed: ${reason}`, "error");
   }
 }
 
 /** Read the session-start timestamp + compaction count from the active branch. */
 function readSessionBounds(sessionManager: {
-  getBranch(fromId?: string | null): { timestamp: string; type: string }[];
+  getBranch(fromId?: string): { timestamp: string; type: string }[];
   getLeafId(): string | null;
 }): { sessionStartMs: number; compactionCount: number } {
-  const branch = sessionManager.getBranch(sessionManager.getLeafId());
+  const branch = sessionManager.getBranch(sessionManager.getLeafId() ?? undefined);
   const first = branch[0];
   const sessionStartMs = first === undefined ? Date.now() : Date.parse(first.timestamp);
   let compactionCount = 0;

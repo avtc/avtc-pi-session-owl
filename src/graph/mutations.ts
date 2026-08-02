@@ -57,6 +57,11 @@ export interface MergeDelta {
   sourceIds: NodeId[];
   destId: NodeId | null;
   newSummary?: string;
+  /** When destId === null (a new root is created), the resolved id of that
+   *  node — recorded so replay is identity-stable even if the store's tolerant
+   *  reader skipped an earlier counter-advancing delta. Absent when destId is
+   *  non-null (no new node is minted). */
+  resolvedDestId?: NodeId;
 }
 export interface SupersedeDelta {
   type: "supersede";
@@ -361,7 +366,7 @@ export function applyMv(
 
 export function applyMerge(
   graph: MemkeeperGraph,
-  args: { sourceIds: NodeId[]; destId: NodeId | null; newSummary?: string },
+  args: { sourceIds: NodeId[]; destId: NodeId | null; newSummary?: string; resolvedDestId?: NodeId },
   policy: MutationPolicy,
 ): MergeDelta {
   if (args.destId === null && args.newSummary === undefined) {
@@ -395,7 +400,7 @@ export function applyMerge(
   // resolve or create the destination
   let dest: Node;
   if (args.destId === null) {
-    const newId = `n${graph.nextNodeId}` as NodeId;
+    const newId = args.resolvedDestId ?? (`n${graph.nextNodeId}` as NodeId);
     applyCreateNode(graph, {
       id: newId,
       summary: args.newSummary ?? "",
@@ -448,6 +453,7 @@ export function applyMerge(
     sourceIds: args.sourceIds,
     destId: args.destId,
     ...(args.newSummary !== undefined ? { newSummary: args.newSummary } : {}),
+    ...(args.destId === null ? { resolvedDestId: dest.id } : {}),
   };
 }
 

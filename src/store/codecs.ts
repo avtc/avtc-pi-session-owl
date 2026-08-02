@@ -4,7 +4,7 @@
 // Custom-entry codecs: encode/decode the four `memkeeper.*` custom-entry
 // payloads + the `MemkeeperDetails` compaction-entry details snapshot.
 //
-// Tolerant-reader contract (the tolerant-reader contract): decoders return `null` on any
+// Tolerant-reader contract: decoders return `null` on any
 // malformed input rather than throwing — a single bad entry/details is skipped,
 // never poisoning the session. Unknown additive fields are ignored (forward-
 // compatible). `contentTokens`/`summaryTokens` are recomputed on decode (never

@@ -14,6 +14,7 @@
 
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "./config/schema.js";
+import { measureRootViewTokens } from "./graph/read-tools.js";
 import { log } from "./log.js";
 import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./observer/chunk.js";
 import { acquireOrSkip, inFlight, type StageName } from "./runtime/run-lock.js";
@@ -132,13 +133,14 @@ function countNewNodes(): number {
   return count;
 }
 
-/** Sum the cached summaryTokens of non-obsolete ROOT nodes (the rendered root view). */
+/** Measure the non-obsolete ROOT view the same way `try_finish` does — the
+ *  rendered node line (icon/id/importance/counts/datetime), chars/4 — so the
+ *  on-root-view-threshold trigger and the convergence gate agree on what
+ *  counts against `builderRootViewThreshold`. (Summing cached `summaryTokens`
+ *  would under-count: it omits every line's framing, so the trigger and the
+ *  gate could disagree on whether the root view is over budget.) */
 function computeRootViewTokens(): number {
-  let total = 0;
-  for (const node of getGraphStore().graph.nodes.values()) {
-    if (node.parentNode === null && node.state !== "obsolete") total += node.summaryTokens;
-  }
-  return total;
+  return measureRootViewTokens(getGraphStore().graph, "builder");
 }
 
 /** Read the live session context tokens (null when pi reports unknown). */

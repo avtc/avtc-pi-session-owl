@@ -155,6 +155,14 @@ describe("/mk:* user commands", () => {
   });
 
   describe("/mk:ls", () => {
+    it("replies 'memkeeper is disabled.' when enabled=false (master-switch off-path)", async () => {
+      seedSource();
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+      const { message, type } = await run(runMkLs, "");
+      expect(message).toBe("memkeeper is disabled.");
+      expect(type).toBe("info");
+    });
+
     it("no arg → non-obsolete roots, indented, nGoal first by importance", async () => {
       seedSource();
       const { message, type } = await run(runMkLs, "");

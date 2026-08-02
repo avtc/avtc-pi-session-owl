@@ -46,7 +46,16 @@ export function applyDelta(graph: MemkeeperGraph, delta: GraphDelta, policy: Mut
       applyMv(graph, { sourceIds: delta.sourceIds, destId: delta.destId, newSummary: delta.newSummary }, policy);
       return;
     case "merge":
-      applyMerge(graph, { sourceIds: delta.sourceIds, destId: delta.destId, newSummary: delta.newSummary }, policy);
+      applyMerge(
+        graph,
+        {
+          sourceIds: delta.sourceIds,
+          destId: delta.destId,
+          newSummary: delta.newSummary,
+          resolvedDestId: delta.resolvedDestId,
+        },
+        policy,
+      );
       return;
     case "supersede":
       applySupersede(graph, { nodeId: delta.nodeId, supersededNodeIds: delta.supersededNodeIds }, policy);

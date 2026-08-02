@@ -93,7 +93,13 @@ interface TrackerState {
  * (startStage/setPass/setBatch/setSelectedCounts/endStage) and the agent event
  * stream (onEvent). The render reads a snapshot via `buildSnapshot`.
  */
-export interface ProgressTracker extends StageController, TrackerState {}
+export interface ProgressTracker extends StageController, TrackerState {
+  /** Cached non-obsolete root count + view tokens for the widget render. The
+   *  widget renders per streaming event, but the graph only changes on a
+   *  tool_execution_end, so this reuses the cache across message_update deltas
+   *  (invalidated on startStage and tool_execution_end). */
+  rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number };
+}
 
 // --- streaming-token helpers (two-tier, decision #37) ---------------------
 // Extraction primitives live in src/runtime/streaming-tokens.ts (shared with
@@ -103,7 +109,11 @@ export interface ProgressTracker extends StageController, TrackerState {}
 
 /** Create a fresh idle tracker (stage null, zeroed usage). */
 export function createTracker(): ProgressTracker {
-  const state: TrackerState & { fallbackTokens: number; primaryTokens: number } = {
+  const state: TrackerState & {
+    fallbackTokens: number;
+    primaryTokens: number;
+    cachedRoots: { count: number; viewTokens: number } | null;
+  } = {
     stage: null,
     pass: 1,
     batch: null,
@@ -115,6 +125,7 @@ export function createTracker(): ProgressTracker {
     selectedBaseline: null,
     fallbackTokens: 0,
     primaryTokens: 0,
+    cachedRoots: null,
   };
 
   return {
@@ -159,6 +170,7 @@ export function createTracker(): ProgressTracker {
       state.selectedCount = null;
       state.selectedViewTokens = null;
       state.selectedBaseline = null;
+      state.cachedRoots = null;
     },
     setPass(pass) {
       state.pass = pass;
@@ -176,6 +188,10 @@ export function createTracker(): ProgressTracker {
     },
     endStage() {
       state.stage = null;
+    },
+    rootViewCounts(graph) {
+      if (state.cachedRoots === null) state.cachedRoots = rootViewCounts(graph);
+      return state.cachedRoots;
     },
     onEvent(event) {
       if (event.type === "message_end") {
@@ -201,6 +217,9 @@ export function createTracker(): ProgressTracker {
           state.fallbackTokens += deltaTokens(delta);
         }
         state.streamingOutputTokens = state.primaryTokens > 0 ? state.primaryTokens : state.fallbackTokens;
+      } else if (event.type === "tool_execution_end") {
+        // a mutate happened → the cached root view is stale; rebuild on next snapshot.
+        state.cachedRoots = null;
       }
     },
   };
@@ -232,7 +251,10 @@ function currentRootBaseline(): Baseline {
 export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): WidgetSnapshot {
   const settings = getMemkeeperSettings();
   const { graph } = getGraphStore();
-  const roots = rootViewCounts(graph);
+  // The widget renders per streaming event, but the graph only changes on a
+  // tool_execution_end, so reuse the cached root counts across message_update
+  // deltas (invalidated on startStage + tool_execution_end inside the tracker).
+  const roots = tracker.rootViewCounts(graph);
   const baseline = tracker.baseline ?? { obsCount: 0, rootsCount: 0, rootsViewTokens: 0 };
   const obsCount = graph.observations.size;
   const ctxUsage = ctx.getContextUsage();

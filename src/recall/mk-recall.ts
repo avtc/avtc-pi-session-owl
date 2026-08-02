@@ -18,6 +18,7 @@ import {
   type RenderableNode,
   type RenderableObservation,
   type RenderViewer,
+  singleLine,
 } from "../format/render.js";
 import {
   DEFAULT_TAKE,
@@ -203,7 +204,7 @@ function importanceRankOf(level: Importance): number {
 /** Collapse a string to one line and cap its length, appending an ellipsis when
  *  truncated. Terse results stay compact; fullDetails shows the raw content. */
 function terseSingleLine(text: string): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
+  const oneLine = singleLine(text);
   if (oneLine.length <= TERSE_CONTENT_MAX) return oneLine;
   return `${oneLine.slice(0, TERSE_CONTENT_MAX - TRUNCATION_ELLIPSIS.length)}${TRUNCATION_ELLIPSIS}`;
 }

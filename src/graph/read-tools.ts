@@ -12,17 +12,26 @@
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import { formatNodeLine, formatObservationLine, indent, type RenderViewer } from "../format/render.js";
+import {
+  formatNodeLine,
+  formatObservationLine,
+  indent,
+  type RenderableNode,
+  type RenderViewer,
+} from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
 import { PageSchema } from "../schema.js";
 import {
   estimateContentTokens,
   IMPORTANCE_RANK,
   type MemkeeperGraph,
+  N_GOAL,
+  N_IRRELEVANT,
   type Node,
   type NodeId,
   type Observation,
   type ObsId,
+  ROOT_PARENT,
 } from "../types.js";
 import { isSafeRegex } from "./safe-regex.js";
 
@@ -47,7 +56,6 @@ export const TAKE_ALL = 0;
 export const FIND_QUERY_MAX = 500;
 
 const ROOT_DEPTH = 0;
-const ROOT_PARENT: NodeId | null = null;
 const NO_AFTER_ID: string | null = null;
 /** Default value for an `includeSuperseded` flag (hide obsolete unless asked). */
 const INCLUDE_DEFAULT = false;
@@ -124,6 +132,18 @@ export function compareNodeOrder<T extends OrderableNode>(a: T, b: T): number {
   const byImportance = IMPORTANCE_RANK[b.importance] - IMPORTANCE_RANK[a.importance];
   if (byImportance !== 0) return byImportance;
   return b.timestamps.rangeEnd.localeCompare(a.timestamps.rangeEnd);
+}
+
+/** The canonical active-set root ordering shared by the compaction summary and
+ *  the Selector working-tree render: nGoal first, nIrrelevant last, the rest by
+ *  importance desc / recency desc. Callers pass already-filtered non-obsolete
+ *  roots (structural `Node` or render-only `RenderableNode`); obsolete nodes
+ *  are never roots of the rendered view. */
+export function orderActiveSetRoots<T extends RenderableNode>(roots: readonly T[]): T[] {
+  const goal = roots.filter((n) => n.id === N_GOAL);
+  const irrelevant = roots.filter((n) => n.id === N_IRRELEVANT);
+  const rest = roots.filter((n) => n.id !== N_GOAL && n.id !== N_IRRELEVANT);
+  return [...goal, ...rest.sort(compareNodeOrder), ...irrelevant];
 }
 
 /** Recency desc by timestamp (newer first). */

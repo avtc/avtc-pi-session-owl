@@ -24,6 +24,7 @@ import {
   renderCatUnit,
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
+import { notify } from "../notify.js";
 import { getGraphStore } from "../store/graph-store.js";
 import type { NodeId, ObsId } from "../types.js";
 
@@ -64,20 +65,33 @@ function resolveCap(): number | null {
 
 // --- result channel --------------------------------------------------------
 
+const DISABLED_MESSAGE = "memkeeper is disabled.";
+
+/** Master-switch guard: when `enabled=false`, reply once and return true so the
+ *  caller short-circuits (the off-path contract — mirrors /mk:status). */
+async function replyIfDisabled(ctx: ExtensionCommandContext): Promise<boolean> {
+  if (!getMemkeeperSettings().enabled) {
+    notify(ctx, DISABLED_MESSAGE, "info");
+    return true;
+  }
+  return false;
+}
+
 /** Info notify (results render in the popup). */
 async function notifyInfo(ctx: ExtensionCommandContext, text: string): Promise<void> {
-  ctx.ui.notify(text, "info");
+  notify(ctx, text, "info");
 }
 
 /** Error notify (invalid id, empty/invalid regex, usage). */
 async function notifyError(ctx: ExtensionCommandContext, text: string): Promise<void> {
-  ctx.ui.notify(text, "error");
+  notify(ctx, text, "error");
 }
 
 // --- /mk:ls ----------------------------------------------------------------
 
 /** `/mk:ls [nodeId]` — list roots (no arg) or a node's direct children. */
 export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promise<void> {
+  if (await replyIfDisabled(ctx)) return;
   const graph = getGraphStore().graph;
   const idArg = trimArg(args);
 
@@ -117,6 +131,7 @@ const MK_CAT_USAGE = "Usage: /mk:cat <id> — give a node id or an observation i
 /** `/mk:cat <id>` — a node's header + its direct observations' full text, or an
  *  observation's full content + header. Mirrors the Builder `cat`. */
 export async function runMkCat(args: string, ctx: ExtensionCommandContext): Promise<void> {
+  if (await replyIfDisabled(ctx)) return;
   const idArg = trimArg(args);
   if (idArg === null) {
     await notifyError(ctx, MK_CAT_USAGE);
@@ -147,6 +162,7 @@ async function runFind(
   ctx: ExtensionCommandContext,
   includeSuperseded: IncludeSuperseded,
 ): Promise<void> {
+  if (await replyIfDisabled(ctx)) return;
   const query = trimArg(args);
   if (query === null) {
     await notifyError(ctx, MK_FIND_USAGE);
