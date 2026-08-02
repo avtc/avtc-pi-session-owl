@@ -60,7 +60,7 @@ describe("makeObservation", () => {
       content: "abcdefgh",
       importance: "medium" as Importance,
       sourceEntryIds: ["12"],
-      timestamp: "2026-07-29 14:30",
+      timestamp: "2026-07-29T14:30:00.000Z",
       parentNode: N_GOAL as NodeId,
     });
     expect(obs.contentTokens).toBe(2);
@@ -77,15 +77,15 @@ describe("makeNode", () => {
       importance: "high" as Importance,
       state: "active",
       parentNode: null,
-      createdAt: "2026-07-29 09:00",
+      createdAt: "2026-07-29T09:00:00.000Z",
     });
     expect(node.summaryTokens).toBe(2);
     expect(node.observationIds).toEqual([]);
     expect(node.childNodeIds).toEqual([]);
     expect(node.supersededBy).toBeNull();
-    expect(node.timestamps.createdAt).toBe("2026-07-29 09:00");
-    expect(node.timestamps.rangeStart).toBe("2026-07-29 09:00");
-    expect(node.timestamps.rangeEnd).toBe("2026-07-29 09:00");
+    expect(node.timestamps.createdAt).toBe("2026-07-29T09:00:00.000Z");
+    expect(node.timestamps.rangeStart).toBe("2026-07-29T09:00:00.000Z");
+    expect(node.timestamps.rangeEnd).toBe("2026-07-29T09:00:00.000Z");
   });
 
   it("defaults rangeEnd to rangeStart when only rangeStart is given", () => {
@@ -95,11 +95,11 @@ describe("makeNode", () => {
       importance: "low" as Importance,
       state: "active",
       parentNode: null,
-      createdAt: "2026-07-29 09:00",
-      rangeStart: "2026-07-29 08:00",
+      createdAt: "2026-07-29T09:00:00.000Z",
+      rangeStart: "2026-07-29T08:00:00.000Z",
     });
-    expect(node.timestamps.rangeStart).toBe("2026-07-29 08:00");
-    expect(node.timestamps.rangeEnd).toBe("2026-07-29 08:00");
+    expect(node.timestamps.rangeStart).toBe("2026-07-29T08:00:00.000Z");
+    expect(node.timestamps.rangeEnd).toBe("2026-07-29T08:00:00.000Z");
   });
 });
 
@@ -121,7 +121,7 @@ describe("MemkeeperGraph", () => {
         content: "the goal",
         importance: "critical" as Importance,
         sourceEntryIds: ["1"],
-        timestamp: "2026-07-29 09:00",
+        timestamp: "2026-07-29T09:00:00.000Z",
         parentNode: N_GOAL as NodeId,
       }),
     );
@@ -140,7 +140,7 @@ describe("MemkeeperGraph", () => {
       importance: "critical" as Importance,
       state: "active",
       parentNode: null,
-      createdAt: "2026-07-29 09:00",
+      createdAt: "2026-07-29T09:00:00.000Z",
     });
     expect(goal.state).toBe("active");
     expect(goal.importance).toBe("critical");

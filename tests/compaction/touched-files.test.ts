@@ -63,9 +63,9 @@ describe("extractTouchedFiles", () => {
     ];
     const files = extractTouchedFiles(ctxWith(entries), NO_CUT);
     expect(files).toEqual([
-      { path: "/a.ts", timestamp: "2026-07-28 10:05", op: "write" },
-      { path: "/b.ts", timestamp: "2026-07-28 10:06", op: "write" },
-      { path: "/c.ts", timestamp: "2026-07-28 10:07", op: "read" },
+      { path: "/a.ts", timestamp: "2026-07-28T10:05:00.000Z", op: "write" },
+      { path: "/b.ts", timestamp: "2026-07-28T10:06:00.000Z", op: "write" },
+      { path: "/c.ts", timestamp: "2026-07-28T10:07:00.000Z", op: "read" },
     ]);
   });
 
@@ -94,7 +94,7 @@ describe("extractTouchedFiles", () => {
       toolCallEntry("e3", "2026-07-28T10:06:00Z", "read", { path: "/a.ts" }),
     ];
     const files = extractTouchedFiles(ctxWith(entries), NO_CUT);
-    expect(files).toEqual([{ path: "/a.ts", timestamp: "2026-07-28 10:06", op: "write" }]);
+    expect(files).toEqual([{ path: "/a.ts", timestamp: "2026-07-28T10:06:00.000Z", op: "write" }]);
   });
 
   it("starts strictly after sinceEntryId (the cut entry excluded)", () => {
@@ -127,8 +127,8 @@ describe("extractTouchedFiles", () => {
 describe("renderTouchedFiles", () => {
   it("renders <DD> <HH:MM> ✎|👁 <path> lines", () => {
     const files: TouchedFile[] = [
-      { path: "/a.ts", timestamp: "2026-07-28 14:30", op: "write" },
-      { path: "/b.ts", timestamp: "2026-07-28 14:28", op: "read" },
+      { path: "/a.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "write" },
+      { path: "/b.ts", timestamp: "2026-07-28T14:28:00.000Z", op: "read" },
     ];
     expect(renderTouchedFiles(files)).toEqual(["28 14:30 ✎ /a.ts", "28 14:28 👁 /b.ts"]);
   });
@@ -139,7 +139,7 @@ describe("renderTouchedFiles", () => {
 
   it("collapses internal whitespace in a path so it cannot break the one-line render", () => {
     const files: TouchedFile[] = [
-      { path: "path/with\nnewline\tand tabs.ts", timestamp: "2026-07-28 14:30", op: "write" },
+      { path: "path/with\nnewline\tand tabs.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "write" },
     ];
     expect(renderTouchedFiles(files)).toEqual(["28 14:30 ✎ path/with newline and tabs.ts"]);
   });

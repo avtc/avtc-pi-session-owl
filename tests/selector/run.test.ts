@@ -18,7 +18,7 @@ import { makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
 import type { WidgetController } from "../../src/widget/tracker.js";
 import { NO_OP_WIDGET, recordingWidget, scriptRunStage, scriptRunStageWithError } from "../builder/run-helpers.js";
 
-const NOW = "2026-07-30 12:00";
+const NOW = "2026-07-30T12:00:00.000Z";
 const SET_SUMMARY = SELECTOR_SET_SUMMARY_TOOL;
 
 // --- pass tracker ----------------------------------------------------------

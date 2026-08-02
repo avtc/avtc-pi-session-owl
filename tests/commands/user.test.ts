@@ -16,9 +16,9 @@ import {
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import { MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
 
-const T0 = "2026-07-17 09:00";
-const T1 = "2026-07-17 14:30";
-const T3 = "2026-07-19 10:00";
+const T0 = "2026-07-17T09:00:00.000Z";
+const T1 = "2026-07-17T14:30:00.000Z";
+const T3 = "2026-07-19T10:00:00.000Z";
 
 /** Build a source graph with roots including obsolete + archived + new.
  *  Roots: nGoal (critical) · n7 (high, "Auth migration to JWT", child n8 + obs o5)

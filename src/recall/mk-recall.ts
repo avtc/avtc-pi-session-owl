@@ -41,12 +41,6 @@ const VIEWER: RenderViewer = "nonBuilder";
 const TERSE_CONTENT_MAX = 120;
 const TRUNCATION_ELLIPSIS = "…";
 const CHILD_DEPTH = 1;
-const DATE_ONLY_LENGTH = 10;
-const END_OF_DAY_TIME = "23:59";
-const START_OF_DAY_TIME = "00:00";
-/** Range-bound selector for normalizeRangeBound — named to keep call sites self-documenting. */
-const RANGE_BOUND_START = false;
-const RANGE_BOUND_END = true;
 const NO_AFTER_ID: string | null = null;
 
 // --- normalized recall target ----------------------------------------------
@@ -212,23 +206,14 @@ function terseSingleLine(text: string): string {
 
 // --- time-range normalization ----------------------------------------------
 
-/** Normalize a from/to bound (ISO 8601 or date-only) to the stored
- *  "YYYY-MM-DD HH:MM" comparison format (UTC). A date-only `from` uses start of
- *  day; the caller passes `endOfDay` true for a `to` bound so a date-only range
- *  includes the whole day. Returns null for an unparseable value. */
-function normalizeRangeBound(raw: string, endOfDay: boolean): string | null {
-  const trimmed = raw.trim();
-  if (trimmed.includes("T")) {
-    const parsed = new Date(trimmed);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return parsed.toISOString().slice(0, 16).replace("T", " ");
-  }
-  // date-only "YYYY-MM-DD": pad with start/end of day.
-  if (trimmed.length === DATE_ONLY_LENGTH) {
-    return `${trimmed} ${endOfDay ? END_OF_DAY_TIME : START_OF_DAY_TIME}`;
-  }
-  // already in stored contract format or unknown — pass through.
-  return trimmed;
+/** Parse a from/to bound the agent supplies (YYYY-MM-DD HH:mm, wall-clock)
+ *  into the stored UTC ISO contract so bounds compare against timestamps
+ *  consistently. A naive wall-clock string parses as the host local zone; an
+ *  ISO value with explicit offset/Z parses with its zone. Returns null for an
+ *  unparseable value. */
+function normalizeRangeBound(raw: string): string | null {
+  const parsed = new Date(raw.trim());
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 // --- ids path (exact lookup) -----------------------------------------------
@@ -294,17 +279,17 @@ interface ResolvedBounds {
 /** Resolve + validate from/to bounds. Returns an error string on an unparseable
  *  bound (surfaced to the agent rather than thrown). */
 function resolveBounds(from: string | undefined, to: string | undefined): ResolvedBounds {
-  const fromNorm = from === undefined ? null : normalizeRangeBound(from, RANGE_BOUND_START);
+  const fromNorm = from === undefined ? null : normalizeRangeBound(from);
   if (from !== undefined && fromNorm === null) {
     return {
       from: null,
       to: null,
-      error: `Invalid "from" datetime: ${from}. Use ISO 8601 (e.g. 2026-07-17T00:00:00Z).`,
+      error: `Invalid "from" datetime: ${from}. Use YYYY-MM-DD HH:mm.`,
     };
   }
-  const toNorm = to === undefined ? null : normalizeRangeBound(to, RANGE_BOUND_END);
+  const toNorm = to === undefined ? null : normalizeRangeBound(to);
   if (to !== undefined && toNorm === null) {
-    return { from: null, to: null, error: `Invalid "to" datetime: ${to}. Use ISO 8601 (e.g. 2026-07-17T23:59:00Z).` };
+    return { from: null, to: null, error: `Invalid "to" datetime: ${to}. Use YYYY-MM-DD HH:mm.` };
   }
   return { from: fromNorm, to: toNorm, error: null };
 }
@@ -340,7 +325,7 @@ function buildSearchCandidates(
     const textMatch = regex === null || regex.test(obs.content);
     if (!textMatch) continue;
     if (bounds.from !== null && obs.timestamp < bounds.from) continue;
-    if (bounds.to !== null && obs.timestamp > bounds.to) continue;
+    if (bounds.to !== null && obs.timestamp >= bounds.to) continue;
     candidates.push({
       id: obs.id,
       key: { importanceRank: observationImportanceRank(obs, parent), recency: obs.timestamp },
@@ -405,12 +390,12 @@ const MK_RECALL_PARAMS = Type.Object({
   ),
   from: Type.Optional(
     Type.String({
-      description: "Start of the time range (ISO datetime, inclusive). Observations at or after this timestamp.",
+      description: "Start of the time range, inclusive — YYYY-MM-DD HH:mm.",
     }),
   ),
   to: Type.Optional(
     Type.String({
-      description: "End of the time range (ISO datetime, inclusive). Observations at or before this timestamp.",
+      description: "End of the time range, exclusive — YYYY-MM-DD HH:mm.",
     }),
   ),
   includeSuperseded: Type.Optional(

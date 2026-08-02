@@ -14,7 +14,7 @@ import {
 import type { StoreContext } from "../../src/store/graph-store.js";
 import { MemkeeperGraph, makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
 
-const NOW = "2026-07-29 09:00";
+const NOW = "2026-07-29T09:00:00.000Z";
 
 // --- test graph ------------------------------------------------------------
 // roots: nGoal (critical, with oInitialPrompt) + n7 (active, JWT) + n12 (new).

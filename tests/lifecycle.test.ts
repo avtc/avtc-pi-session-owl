@@ -32,7 +32,7 @@ function userEntry(id: string, text: string): FakeEntry {
     id,
     type: "message",
     parentId: null,
-    timestamp: "2026-07-28 14:30",
+    timestamp: "2026-07-28T14:30:00.000Z",
     message: { role: "user", content: text, timestamp: Date.now() },
   };
 }
@@ -42,7 +42,7 @@ function assistantEntry(id: string, text: string): FakeEntry {
     id,
     type: "message",
     parentId: null,
-    timestamp: "2026-07-28 14:31",
+    timestamp: "2026-07-28T14:31:00.000Z",
     message: {
       role: "assistant",
       content: [{ type: "text", text }],

@@ -29,7 +29,7 @@ function sampleObs() {
     content: "abcdefgh", // 2 tokens at chars/4
     importance: "high" as Importance,
     sourceEntryIds: ["12", "13"],
-    timestamp: "2026-07-29 14:30",
+    timestamp: "2026-07-29T14:30:00.000Z",
     parentNode: N_GOAL,
   });
 }
@@ -42,9 +42,9 @@ function sampleNode() {
     state: "active",
     parentNode: N_GOAL,
     observationIds: ["o1" as ObsId],
-    createdAt: "2026-07-29 09:00",
-    rangeStart: "2026-07-29 08:00",
-    rangeEnd: "2026-07-29 10:00",
+    createdAt: "2026-07-29T09:00:00.000Z",
+    rangeStart: "2026-07-29T08:00:00.000Z",
+    rangeEnd: "2026-07-29T10:00:00.000Z",
   });
 }
 
@@ -75,7 +75,7 @@ describe("observation codec", () => {
     expect(wire.content).toBe("abcdefgh");
     expect(wire.importance).toBe("high");
     expect(wire.sourceEntryIds).toEqual(["12", "13"]);
-    expect(wire.timestamp).toBe("2026-07-29 14:30");
+    expect(wire.timestamp).toBe("2026-07-29T14:30:00.000Z");
     expect(wire.parentNode).toBe(N_GOAL);
 
     const decoded = decodeObservation(wire);
@@ -110,14 +110,14 @@ describe("node codec", () => {
     expect(wire.parentNode).toBe(N_GOAL);
     expect(wire.observationIds).toEqual(["o1"]);
     expect(wire.supersededBy).toBeNull();
-    expect(wire.timestamps.createdAt).toBe("2026-07-29 09:00");
-    expect(wire.timestamps.rangeStart).toBe("2026-07-29 08:00");
-    expect(wire.timestamps.rangeEnd).toBe("2026-07-29 10:00");
+    expect(wire.timestamps.createdAt).toBe("2026-07-29T09:00:00.000Z");
+    expect(wire.timestamps.rangeStart).toBe("2026-07-29T08:00:00.000Z");
+    expect(wire.timestamps.rangeEnd).toBe("2026-07-29T10:00:00.000Z");
 
     const decoded = decodeNode(wire);
     expect(decoded).not.toBeNull();
     expect(decoded?.id).toBe("n1");
-    expect(decoded?.timestamps.rangeStart).toBe("2026-07-29 08:00");
+    expect(decoded?.timestamps.rangeStart).toBe("2026-07-29T08:00:00.000Z");
     expect(decoded?.summaryTokens).toBe(wire.summaryTokens);
   });
 
@@ -159,7 +159,7 @@ describe("selection snapshot codec", () => {
       content: "build memkeeper",
       importance: "critical" as Importance,
       sourceEntryIds: [],
-      timestamp: "2026-07-29 09:00",
+      timestamp: "2026-07-29T09:00:00.000Z",
       parentNode: N_GOAL,
     });
     g.observations.set(prompt.id, prompt);

@@ -101,11 +101,14 @@ export function estimateContentTokens(content: string): number {
   return Math.ceil(content.length / CHARS_PER_TOKEN_ESTIMATE);
 }
 
-/** The current instant as a stored "YYYY-MM-DD HH:MM" timestamp (UTC). The
+/** The current instant as a stored UTC ISO 8601 timestamp (e.g.
+ *  "2026-07-29T10:00:00.000Z"). Absolute/TZ-agnostic (a session resumed in a
+ *  different timezone stays consistent); rendered to LOCAL at display time. The
  *  canonical source for any code generating a fresh model timestamp (the graph
- *  clock + the Observer's no-source fallback), so the format never drifts. */
+ *  clock + the Observer's no-source fallback), so the format never drifts.
+ *  Lexicographic order = chronological, so recency ranking is unaffected. */
 export function nowStoredTimestamp(): string {
-  return new Date().toISOString().slice(0, 16).replace("T", " ");
+  return new Date().toISOString();
 }
 
 /** Construct an observation, freezing `contentTokens` from `content`. */

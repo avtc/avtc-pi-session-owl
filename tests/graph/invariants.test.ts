@@ -200,10 +200,10 @@ function nodeWith(overrides: Partial<Node> & Pick<Node, "id">): Node {
     childNodeIds: overrides.childNodeIds ?? [],
     supersededBy: overrides.supersededBy ?? null,
     timestamps: overrides.timestamps ?? {
-      createdAt: "2026-07-29 09:00",
-      updatedAt: "2026-07-29 09:00",
-      rangeStart: "2026-07-29 09:00",
-      rangeEnd: "2026-07-29 09:00",
+      createdAt: "2026-07-29T09:00:00.000Z",
+      updatedAt: "2026-07-29T09:00:00.000Z",
+      rangeStart: "2026-07-29T09:00:00.000Z",
+      rangeEnd: "2026-07-29T09:00:00.000Z",
     },
   };
 }
@@ -216,7 +216,7 @@ function obsWith(overrides: Partial<Observation> & Pick<Observation, "id" | "par
     contentTokens: estimateContentTokens(content),
     importance: overrides.importance ?? "medium",
     sourceEntryIds: overrides.sourceEntryIds ?? ["1"],
-    timestamp: overrides.timestamp ?? "2026-07-29 09:00",
+    timestamp: overrides.timestamp ?? "2026-07-29T09:00:00.000Z",
     parentNode: overrides.parentNode,
   };
 }

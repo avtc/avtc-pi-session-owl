@@ -102,10 +102,10 @@ function seedStoreGraph(): void {
     childNodeIds: [],
     supersededBy: null,
     timestamps: {
-      createdAt: "2026-07-28 09:00",
-      updatedAt: "2026-07-28 09:00",
-      rangeStart: "2026-07-28 09:00",
-      rangeEnd: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
+      updatedAt: "2026-07-28T09:00:00.000Z",
+      rangeStart: "2026-07-28T09:00:00.000Z",
+      rangeEnd: "2026-07-28T09:00:00.000Z",
     },
   });
 }

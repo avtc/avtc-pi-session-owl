@@ -14,7 +14,7 @@ import {
 import type { Node, Observation } from "../../src/types.js";
 import { estimateContentTokens, N_GOAL } from "../../src/types.js";
 
-const FIXED_NOW = "2026-07-29 09:00";
+const FIXED_NOW = "2026-07-29T09:00:00.000Z";
 
 describe("importanceAbbr", () => {
   it("maps each importance to its render word", () => {
@@ -27,12 +27,12 @@ describe("importanceAbbr", () => {
 
 describe("formatTimestamp", () => {
   it("renders a stored YYYY-MM-DD HH:MM as Jul 28 14:30", () => {
-    expect(formatTimestamp("2026-07-28 14:30")).toBe("Jul 28 14:30");
+    expect(formatTimestamp("2026-07-28T14:30:00.000Z")).toBe("Jul 28 14:30");
   });
 
   it("maps every month to its abbreviation", () => {
-    expect(formatTimestamp("2026-01-05 08:00")).toBe("Jan 05 08:00");
-    expect(formatTimestamp("2026-12-31 23:59")).toBe("Dec 31 23:59");
+    expect(formatTimestamp("2026-01-05T08:00:00.000Z")).toBe("Jan 05 08:00");
+    expect(formatTimestamp("2026-12-31T23:59:00.000Z")).toBe("Dec 31 23:59");
   });
 
   it("renders an out-of-range month as a placeholder (defensive)", () => {
@@ -42,25 +42,27 @@ describe("formatTimestamp", () => {
 
 describe("formatTimestampRange", () => {
   it("renders a cross-day range with both dates", () => {
-    expect(formatTimestampRange("2026-07-28 14:30", "2026-07-29 09:15")).toBe("Jul 28 14:30 — Jul 29 09:15");
+    expect(formatTimestampRange("2026-07-28T14:30:00.000Z", "2026-07-29T09:15:00.000Z")).toBe(
+      "Jul 28 14:30 — Jul 29 09:15",
+    );
   });
 
   it("compresses a same-day range to a single date + end time", () => {
-    expect(formatTimestampRange("2026-07-28 14:30", "2026-07-28 17:00")).toBe("Jul 28 14:30 — 17:00");
+    expect(formatTimestampRange("2026-07-28T14:30:00.000Z", "2026-07-28T17:00:00.000Z")).toBe("Jul 28 14:30 — 17:00");
   });
 
   it("collapses an identical start/end to a single timestamp", () => {
-    expect(formatTimestampRange("2026-07-28 14:30", "2026-07-28 14:30")).toBe("Jul 28 14:30");
+    expect(formatTimestampRange("2026-07-28T14:30:00.000Z", "2026-07-28T14:30:00.000Z")).toBe("Jul 28 14:30");
   });
 });
 
 describe("toStoredTimestamp", () => {
-  it("converts a real ISO session-entry timestamp to the stored contract format", () => {
-    expect(toStoredTimestamp("2026-07-29T09:22:50.283Z")).toBe("2026-07-29 09:22");
+  it("normalizes a real ISO session-entry timestamp to the stored UTC ISO contract", () => {
+    expect(toStoredTimestamp("2026-07-29T09:22:50.283Z")).toBe("2026-07-29T09:22:50.283Z");
   });
 
   it("passes an already-contracted value through unchanged", () => {
-    expect(toStoredTimestamp("2026-07-29 09:22")).toBe("2026-07-29 09:22");
+    expect(toStoredTimestamp("2026-07-29T09:22:00.000Z")).toBe("2026-07-29T09:22:00.000Z");
   });
 
   it("passes an unparseable value through unchanged (tolerant)", () => {
@@ -76,8 +78,8 @@ describe("formatNodeLine", () => {
       importance: "high",
       observationIds: repeatObs(12),
       childNodeIds: ["n8", "n9", "n10"],
-      rangeStart: "2026-07-28 14:30",
-      rangeEnd: "2026-07-29 09:15",
+      rangeStart: "2026-07-28T14:30:00.000Z",
+      rangeEnd: "2026-07-29T09:15:00.000Z",
     });
     expect(formatNodeLine(node, { viewer: "builder" })).toBe(
       "📁 n7 · high · Auth migration to JWT · 3📁 12📄 · Jul 28 14:30 — Jul 29 09:15",
@@ -145,7 +147,7 @@ describe("formatObservationLine", () => {
       id: "o5",
       content: "Chose JWT for stateless auth",
       importance: "high",
-      timestamp: "2026-07-28 14:30",
+      timestamp: "2026-07-28T14:30:00.000Z",
     });
     expect(formatObservationLine(obs, { viewer: "builder" })).toBe(
       "📄 o5 · high · Chose JWT for stateless auth · Jul 28 14:30",
@@ -153,14 +155,24 @@ describe("formatObservationLine", () => {
   });
 
   it("appends 'in <parent>' when showParent is set", () => {
-    const obs = makeObservation({ id: "o5", content: "a fact", importance: "low", timestamp: "2026-07-28 14:30" });
+    const obs = makeObservation({
+      id: "o5",
+      content: "a fact",
+      importance: "low",
+      timestamp: "2026-07-28T14:30:00.000Z",
+    });
     expect(formatObservationLine(obs, { viewer: "nonBuilder", showParent: "n7" })).toBe(
       "📄 o5 · low · a fact · in n7 · Jul 28 14:30",
     );
   });
 
   it("applies formatContent to transform the content line", () => {
-    const obs = makeObservation({ id: "o5", content: "a fact", importance: "low", timestamp: "2026-07-28 14:30" });
+    const obs = makeObservation({
+      id: "o5",
+      content: "a fact",
+      importance: "low",
+      timestamp: "2026-07-28T14:30:00.000Z",
+    });
     const upper = (c: string) => c.toUpperCase();
     expect(formatObservationLine(obs, { viewer: "nonBuilder", formatContent: upper })).toBe(
       "📄 o5 · low · A FACT · Jul 28 14:30",
@@ -168,7 +180,12 @@ describe("formatObservationLine", () => {
   });
 
   it("omits the content segment when formatContent returns empty (content-free header)", () => {
-    const obs = makeObservation({ id: "o5", content: "a fact", importance: "low", timestamp: "2026-07-28 14:30" });
+    const obs = makeObservation({
+      id: "o5",
+      content: "a fact",
+      importance: "low",
+      timestamp: "2026-07-28T14:30:00.000Z",
+    });
     const none = () => "";
     expect(formatObservationLine(obs, { viewer: "nonBuilder", showParent: "n7", formatContent: none })).toBe(
       "📄 o5 · low · in n7 · Jul 28 14:30",
@@ -196,7 +213,12 @@ describe("singleLine rendering", () => {
   });
 
   it("collapses newlines in an observation's content", () => {
-    const obs = makeObservation({ id: "o1", content: "a\nb\nc", importance: "low", timestamp: "2026-07-28 14:30" });
+    const obs = makeObservation({
+      id: "o1",
+      content: "a\nb\nc",
+      importance: "low",
+      timestamp: "2026-07-28T14:30:00.000Z",
+    });
     const line = formatObservationLine(obs, { viewer: "nonBuilder" });
     expect(line).toContain("a b c");
   });

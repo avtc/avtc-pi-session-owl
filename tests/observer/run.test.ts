@@ -18,7 +18,7 @@ function userEntry(id: string, text: string): SessionEntry {
     id,
     type: "message",
     parentId: null,
-    timestamp: "2026-07-29 10:00",
+    timestamp: "2026-07-29T10:00:00.000Z",
     message: { role: "user", content: text },
   } as unknown as SessionEntry;
 }
@@ -27,7 +27,7 @@ function assistantEntry(id: string, text: string): SessionEntry {
     id,
     type: "message",
     parentId: null,
-    timestamp: "2026-07-29 10:01",
+    timestamp: "2026-07-29T10:01:00.000Z",
     message: { role: "assistant", content: [{ type: "text", text }] },
   } as unknown as SessionEntry;
 }
@@ -151,7 +151,7 @@ function makeArgs(opts: {
 describe("runObserver", () => {
   beforeEach(() => {
     resetForNewSession();
-    setClock(() => "2026-07-29 10:05");
+    setClock(() => "2026-07-29T10:05:00.000Z");
   });
   afterAll(() => {
     setClock(null);
@@ -202,12 +202,12 @@ describe("runObserver", () => {
     expect(getGraphStore().observerFrontier).toBe("a1");
   });
 
-  it("converts a real ISO source timestamp into the stored 'YYYY-MM-DD HH:MM' contract format", async () => {
+  it("stores a real ISO source timestamp as the UTC ISO contract (rendered to local at display)", async () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
     // real SessionEntry timestamps are ISO (e.g. '2026-07-29T09:22:50.283Z'); the
-    // observation's stored timestamp must be the 'YYYY-MM-DD HH:MM' format the
-    // render layer expects, not the raw ISO.
+    // observation's stored timestamp keeps the UTC ISO instant (absolute/
+    // TZ-agnostic) and the render layer converts it to local at display time.
     const unobserved: SessionEntry[] = [
       {
         id: "u1",
@@ -231,8 +231,8 @@ describe("runObserver", () => {
     const wrapper = [...getGraphStore().graph.nodes.values()].find((n) => n.state === "new");
     const obsId = wrapper !== undefined ? wrapper.observationIds[0] : undefined;
     const obs = obsId !== undefined ? getGraphStore().graph.observations.get(obsId) : undefined;
-    // contract format, not raw ISO: 'YYYY-MM-DD HH:MM' derived from '2026-07-29T09:22:50.283Z'
-    expect(obs?.timestamp).toBe("2026-07-29 09:22");
+    // the UTC ISO instant is preserved verbatim (render converts to local)
+    expect(obs?.timestamp).toBe("2026-07-29T09:22:50.283Z");
   });
 
   it("skips + notifies when the model cannot be resolved (no model available)", async () => {

@@ -52,10 +52,10 @@ function node(over: Partial<Node>): Node {
     childNodeIds: over.childNodeIds ?? [],
     supersededBy: over.supersededBy ?? null,
     timestamps: over.timestamps ?? {
-      createdAt: "2026-07-28 09:00",
-      updatedAt: "2026-07-28 09:00",
-      rangeStart: "2026-07-28 09:00",
-      rangeEnd: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
+      updatedAt: "2026-07-28T09:00:00.000Z",
+      rangeStart: "2026-07-28T09:00:00.000Z",
+      rangeEnd: "2026-07-28T09:00:00.000Z",
     },
   };
 }
@@ -78,7 +78,7 @@ function obs(
     contentTokens,
     importance: "medium",
     sourceEntryIds: [],
-    timestamps: { createdAt: "2026-07-28 09:00" },
+    timestamps: { createdAt: "2026-07-28T09:00:00.000Z" },
   };
 }
 
@@ -252,10 +252,10 @@ describe("gatherStatusInput", () => {
       importance: "medium",
       sourceEntryIds: [],
       timestamps: {
-        createdAt: "2026-07-28 09:00",
-        updatedAt: "2026-07-28 09:00",
-        rangeStart: "2026-07-28 09:00",
-        rangeEnd: "2026-07-28 09:00",
+        createdAt: "2026-07-28T09:00:00.000Z",
+        updatedAt: "2026-07-28T09:00:00.000Z",
+        rangeStart: "2026-07-28T09:00:00.000Z",
+        rangeEnd: "2026-07-28T09:00:00.000Z",
       },
     } as unknown as Observation);
     getGraphStore().usageLedger = ledger({

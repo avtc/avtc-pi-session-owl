@@ -24,7 +24,7 @@ import type { MemkeeperGraph } from "../../src/types.js";
 import { makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
 import { NO_OP_WIDGET, recordingWidget, scriptRunStage, scriptRunStageWithError } from "./run-helpers.js";
 
-const NOW = "2026-07-29 09:00";
+const NOW = "2026-07-29T09:00:00.000Z";
 
 // --- pass tracker ----------------------------------------------------------
 

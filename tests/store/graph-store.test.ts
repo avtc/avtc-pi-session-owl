@@ -622,10 +622,10 @@ describe("load edge cases", () => {
           childNodeIds: [],
           supersededBy: null,
           timestamps: {
-            createdAt: "2026-07-01 00:00",
-            updatedAt: "2026-07-01 00:00",
-            rangeStart: "2026-07-01 00:00",
-            rangeEnd: "2026-07-01 00:00",
+            createdAt: "2026-07-01T00:00:00.000Z",
+            updatedAt: "2026-07-01T00:00:00.000Z",
+            rangeStart: "2026-07-01T00:00:00.000Z",
+            rangeEnd: "2026-07-01T00:00:00.000Z",
           },
         },
       ],
@@ -646,7 +646,7 @@ describe("load edge cases", () => {
           content: "later",
           importance: "low",
           sourceEntryIds: ["2"],
-          timestamp: "2026-07-09 12:00",
+          timestamp: "2026-07-09T12:00:00.000Z",
           parentNode: "n1",
         },
       ],
@@ -658,6 +658,6 @@ describe("load edge cases", () => {
     const n1 = getGraphStore().graph.nodes.get("n1" as NodeId);
     expect(n1?.observationIds).toContain("o1");
     // the linked obs extended the node's range (not stale at the snapshot value)
-    expect(n1?.timestamps.rangeEnd).toBe("2026-07-09 12:00");
+    expect(n1?.timestamps.rangeEnd).toBe("2026-07-09T12:00:00.000Z");
   });
 });

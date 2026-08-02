@@ -18,7 +18,7 @@ import {
 import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/types.js";
 import { estimateContentTokens, MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
 
-const NOW = "2026-07-29 09:00";
+const NOW = "2026-07-29T09:00:00.000Z";
 
 beforeEach(() => {
   setClock(() => NOW);
@@ -79,7 +79,7 @@ describe("applyRecordObservation", () => {
       content: "first fact",
       importance: "high",
       sourceEntryIds: ["12"],
-      timestamp: "2026-07-29 10:00",
+      timestamp: "2026-07-29T10:00:00.000Z",
       parentNode: "n1",
     });
     const delta = applyRecordObservation(g, { obs });
@@ -91,12 +91,12 @@ describe("applyRecordObservation", () => {
 
   it("maintains the parent node's timestamp range across observations", () => {
     const g = bareGraphWithRoot("n1");
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
-    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29 10:00");
-    expect(nodeById(g, "n1").timestamps.rangeEnd).toBe("2026-07-29 10:00");
-    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29 08:00", parentNode: "n1" }) });
-    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29 08:00");
-    expect(nodeById(g, "n1").timestamps.rangeEnd).toBe("2026-07-29 10:00");
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
+    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29T10:00:00.000Z");
+    expect(nodeById(g, "n1").timestamps.rangeEnd).toBe("2026-07-29T10:00:00.000Z");
+    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T08:00:00.000Z", parentNode: "n1" }) });
+    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29T08:00:00.000Z");
+    expect(nodeById(g, "n1").timestamps.rangeEnd).toBe("2026-07-29T10:00:00.000Z");
   });
 
   it("rejects recording under a missing parent node", () => {
@@ -131,8 +131,8 @@ describe("applyFlushNew", () => {
 describe("applyMv", () => {
   it("moves an observation between nodes", () => {
     const g = graphWithTwoRoots();
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
-    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
     const delta = applyMv(g, { sourceIds: ["o1"], destId: "n2" }, MUTATE_SOURCE);
     expect(delta).toEqual({ type: "mv", sourceIds: ["o1"], destId: "n2" });
     expect(nodeById(g, "n1").observationIds).toEqual(["o2"]);
@@ -149,7 +149,7 @@ describe("applyMv", () => {
 
   it("dissolves a non-special source node emptied by the move", () => {
     const g = graphWithTwoRoots();
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
     applyMv(g, { sourceIds: ["o1"], destId: "n2" }, MUTATE_SOURCE);
     // n1 had only o1 and no children -> emptied -> dissolved
     expect(g.nodes.has("n1")).toBe(false);
@@ -158,7 +158,7 @@ describe("applyMv", () => {
 
   it("dissolves an emptied obsolete source node", () => {
     const g = graphWithTwoRoots();
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
     applySetMeta(g, { nodeId: "n1", importance: null, archived: null, obsolete: null, summary: null }, MUTATE_SOURCE);
     // mark n1 obsolete via supersede into n2
     applySupersede(g, { nodeId: "n2", supersededNodeIds: ["n1"] }, MUTATE_SOURCE);
@@ -199,8 +199,8 @@ describe("applyMv", () => {
 
   it("rejects moving an observation to the root (observations must stay under a node)", () => {
     const g = graphWithTwoRoots();
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
-    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
     expect(() => applyMv(g, { sourceIds: ["o1"], destId: null }, MUTATE_SOURCE)).toThrow(GraphInvariantError);
     // rejected call leaves the graph unchanged
     expect(nodeById(g, "n1").observationIds).toEqual(["o1", "o2"]);
@@ -213,16 +213,16 @@ describe("timestamp range propagation", () => {
     applyCreateNode(g, { id: "n1", summary: "root", importance: "medium", parentNode: null, state: "active" });
     applyCreateNode(g, { id: "n2", summary: "child", importance: "medium", parentNode: "n1", state: "active" });
     // record an obs under n2 at 10:00 -> n1 and n2 ranges must both span it
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n2" }) });
-    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29 10:00");
-    expect(nodeById(g, "n2").timestamps.rangeStart).toBe("2026-07-29 10:00");
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n2" }) });
+    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29T10:00:00.000Z");
+    expect(nodeById(g, "n2").timestamps.rangeStart).toBe("2026-07-29T10:00:00.000Z");
     // move the obs out of n2 to a new root n3 -> n2 and n1 ranges must update
     applyCreateNode(g, { id: "n3", summary: "other", importance: "medium", parentNode: null, state: "active" });
-    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29 10:00", parentNode: "n2" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n2" }) });
     applyMv(g, { sourceIds: ["o2"], destId: "n3" }, MUTATE_SOURCE);
     // n2 still has o1 (10:00); n3 now has o2 (10:00) — both stay 10:00
-    expect(nodeById(g, "n2").timestamps.rangeStart).toBe("2026-07-29 10:00");
-    expect(nodeById(g, "n3").timestamps.rangeEnd).toBe("2026-07-29 10:00");
+    expect(nodeById(g, "n2").timestamps.rangeStart).toBe("2026-07-29T10:00:00.000Z");
+    expect(nodeById(g, "n3").timestamps.rangeEnd).toBe("2026-07-29T10:00:00.000Z");
   });
 
   it("recomputes the ancestor range when a grandchild observation moves away", () => {
@@ -231,27 +231,27 @@ describe("timestamp range propagation", () => {
     applyCreateNode(g, { id: "n2", summary: "mid", importance: "medium", parentNode: "n1", state: "active" });
     applyCreateNode(g, { id: "n3", summary: "leaf", importance: "medium", parentNode: "n2", state: "active" });
     // n2 keeps its own observation so the chain survives n3's dissolution
-    applyRecordObservation(g, { obs: obsWith({ id: "o9", timestamp: "2026-07-29 09:00", parentNode: "n2" }) });
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 08:00", parentNode: "n3" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o9", timestamp: "2026-07-29T09:00:00.000Z", parentNode: "n2" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T08:00:00.000Z", parentNode: "n3" }) });
     // n1 (grandparent) range spans o1 (08:00) and oKeep (09:00)
-    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29 08:00");
-    expect(nodeById(g, "n1").timestamps.rangeEnd).toBe("2026-07-29 09:00");
+    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29T08:00:00.000Z");
+    expect(nodeById(g, "n1").timestamps.rangeEnd).toBe("2026-07-29T09:00:00.000Z");
     // move o1 out to a fresh root; n3 dissolves but n1/n2 survive on oKeep
     applyCreateNode(g, { id: "n4", summary: "fresh", importance: "medium", parentNode: null, state: "active" });
     applyMv(g, { sourceIds: ["o1"], destId: "n4" }, MUTATE_SOURCE);
     expect(g.nodes.has("n3")).toBe(false);
-    expect(nodeById(g, "n4").timestamps.rangeStart).toBe("2026-07-29 08:00");
+    expect(nodeById(g, "n4").timestamps.rangeStart).toBe("2026-07-29T08:00:00.000Z");
     // n1/n2 now reflect only oKeep (09:00) — the 08:00 obs is gone from their subtree
-    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29 09:00");
-    expect(nodeById(g, "n2").timestamps.rangeStart).toBe("2026-07-29 09:00");
+    expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29T09:00:00.000Z");
+    expect(nodeById(g, "n2").timestamps.rangeStart).toBe("2026-07-29T09:00:00.000Z");
   });
 });
 
 describe("applyMerge", () => {
   it("folds sources into a destination, relocating observations and dissolving sources", () => {
     const g = graphWithTwoRoots();
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
-    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29 11:00", parentNode: "n2" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T11:00:00.000Z", parentNode: "n2" }) });
     const delta = applyMerge(g, { sourceIds: ["n2"], destId: "n1", newSummary: "combined" }, MUTATE_SOURCE);
     expect(delta).toEqual({ type: "merge", sourceIds: ["n2"], destId: "n1", newSummary: "combined" });
     expect(g.nodes.has("n2")).toBe(false);
@@ -262,8 +262,8 @@ describe("applyMerge", () => {
 
   it("creates a new root when destId is null (newSummary required)", () => {
     const g = graphWithTwoRoots();
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
-    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29 11:00", parentNode: "n2" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T11:00:00.000Z", parentNode: "n2" }) });
     const before = g.nextNodeId;
     applyMerge(g, { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root" }, MUTATE_SOURCE);
     expect(g.nextNodeId).toBeGreaterThan(before);
@@ -276,8 +276,8 @@ describe("applyMerge", () => {
 
   it("records resolvedDestId for a new-root merge so replay is identity-stable", () => {
     const g = graphWithTwoRoots();
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
-    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29 11:00", parentNode: "n2" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T11:00:00.000Z", parentNode: "n2" }) });
     const delta = applyMerge(g, { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root" }, MUTATE_SOURCE);
     expect(delta.destId).toBeNull();
     expect(delta.resolvedDestId).toBeDefined();
@@ -295,7 +295,7 @@ describe("applyMerge", () => {
 
   it("merges into an existing destination without newSummary, keeping its summary", () => {
     const g = graphWithTwoRoots();
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n2" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n2" }) });
     applyMerge(g, { sourceIds: ["n2"], destId: "n1" }, MUTATE_SOURCE);
     expect(nodeById(g, "n1").summary).toBe("root one");
     expect(nodeById(g, "n1").observationIds).toContain("o1");
@@ -305,7 +305,7 @@ describe("applyMerge", () => {
 describe("applySupersede", () => {
   it("marks nodes obsolete pointing at the replacement and retains their observations", () => {
     const g = graphWithTwoRoots();
-    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29 10:00", parentNode: "n1" }) });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
     const delta = applySupersede(g, { nodeId: "n2", supersededNodeIds: ["n1"] }, MUTATE_SOURCE);
     expect(delta).toEqual({ type: "supersede", nodeId: "n2", supersededNodeIds: ["n1"] });
     expect(nodeById(g, "n1").state).toBe("obsolete");

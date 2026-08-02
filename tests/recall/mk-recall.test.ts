@@ -17,9 +17,9 @@ import { encodeSelection } from "../../src/store/codecs.js";
 import { getGraphStore, persistSelectedTree, resetForNewSession } from "../../src/store/graph-store.js";
 import { MemkeeperGraph, makeObservation, N_GOAL, type Node, type ObsId } from "../../src/types.js";
 
-const T0 = "2026-07-17 09:00";
-const T1 = "2026-07-17 14:30";
-const T3 = "2026-07-19 10:00";
+const T0 = "2026-07-17T09:00:00.000Z";
+const T1 = "2026-07-17T14:30:00.000Z";
+const T3 = "2026-07-19T10:00:00.000Z";
 
 const NO_OP_CTX = {
   appendEntry: () => {},
@@ -345,30 +345,28 @@ describe("mk_recall", () => {
   });
 
   describe("from/to — time range", () => {
-    it("filters observations by timestamp range", async () => {
+    it("filters observations by timestamp range (from inclusive, to exclusive)", async () => {
       seedSource();
-      // only T1 (o5 at Jul 17 14:30) — exclude T3 (o9 under obsolete anyway)
-      const out = text(await recall(tool(), { from: "2026-07-17T00:00:00Z", to: "2026-07-17T23:59:59Z" }));
-      expect(out).toContain("o5"); // T1 within range
-      // oInitialPrompt at T0 is also in range — both are Jul 17
+      // T1 (o5 at Jul 17 14:30) within [00:00, 23:59:59); oInitialPrompt (T0 09:00) too.
+      const out = text(await recall(tool(), { from: "2026-07-17 00:00", to: "2026-07-17 23:59:59" }));
+      expect(out).toContain("o5");
       expect(out).toContain("oInitialPrompt");
-      // n12/n20/n7 are nodes (not time-filtered) but only returned via query,
-      // so a from/to-only search returns observations only
+      // nodes are not time-filtered but only surface via query, so a from/to-only
+      // search returns observations only
       expect(out).not.toMatch(/^\s*📁 n7\b/m);
     });
 
-    it("date-only bounds pad from=start-of-day, to=end-of-day", async () => {
+    it("to is exclusive: an observation at the exact to bound is dropped", async () => {
       seedSource();
-      // date-only from/to for Jul 19 — o9 (obsolete parent, T3) is excluded by
-      // the parent-state gate, so use a non-obsolete observation at a known date.
-      // o5 is T1 (Jul 17); oInitialPrompt is T0 (Jul 17). Use Jul 17 date-only:
-      // from=2026-07-17 (00:00) to=2026-07-17 (23:59) → both included.
-      const sameDay = text(await recall(tool(), { from: "2026-07-17", to: "2026-07-17" }));
-      expect(sameDay).toContain("o5");
-      expect(sameDay).toContain("oInitialPrompt");
-      // a date-only range on a day with NO observations returns none
-      const empty = text(await recall(tool(), { from: "2026-07-20", to: "2026-07-20" }));
-      expect(empty).toContain("No matches");
+      // o5 is at Jul 17 14:30; a `to` of 14:30 (exclusive) drops it, a `to` of 14:31 keeps it
+      expect(text(await recall(tool(), { to: "2026-07-17 14:30" }))).not.toContain("o5");
+      expect(text(await recall(tool(), { to: "2026-07-17 14:31" }))).toContain("o5");
+    });
+
+    it("from is inclusive: an observation at the exact from bound is kept", async () => {
+      seedSource();
+      // o5 at 14:30; `from` 14:30 keeps it (inclusive)
+      expect(text(await recall(tool(), { from: "2026-07-17 14:30" }))).toContain("o5");
     });
   });
 

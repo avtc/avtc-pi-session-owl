@@ -27,10 +27,10 @@ function sNode(id: string, over: Partial<SerializedNode> & { summary: string }):
     childNodeIds: over.childNodeIds ?? [],
     supersededBy: over.supersededBy ?? null,
     timestamps: over.timestamps ?? {
-      createdAt: "2026-07-28 09:00",
-      updatedAt: "2026-07-28 14:30",
-      rangeStart: "2026-07-28 09:00",
-      rangeEnd: "2026-07-28 14:30",
+      createdAt: "2026-07-28T09:00:00.000Z",
+      updatedAt: "2026-07-28T14:30:00.000Z",
+      rangeStart: "2026-07-28T09:00:00.000Z",
+      rangeEnd: "2026-07-28T14:30:00.000Z",
     },
   };
 }
@@ -41,7 +41,7 @@ function sObs(id: string, content: string, over: Partial<SerializedObservation>)
     content,
     importance: over.importance ?? "critical",
     sourceEntryIds: over.sourceEntryIds ?? [],
-    timestamp: over.timestamp ?? "2026-07-28 09:00",
+    timestamp: over.timestamp ?? "2026-07-28T09:00:00.000Z",
     parentNode: over.parentNode ?? N_GOAL,
   };
 }
@@ -53,8 +53,8 @@ function selection(nodes: SerializedNode[], oInitialPrompt: SerializedObservatio
 }
 
 const TOUCHED: TouchedFile[] = [
-  { path: "designs/x.md", timestamp: "2026-07-28 14:30", op: "write" },
-  { path: "src/y.ts", timestamp: "2026-07-28 14:28", op: "read" },
+  { path: "designs/x.md", timestamp: "2026-07-28T14:30:00.000Z", op: "write" },
+  { path: "src/y.ts", timestamp: "2026-07-28T14:28:00.000Z", op: "read" },
 ];
 
 const PROMPT = sObs("oInitialPrompt", "Design the memkeeper extension. Brand-new; no 3rd-party reuse.", {});
@@ -142,10 +142,10 @@ describe("renderSummary — observations-root", () => {
           observationIds: ["o1"],
           // nGoal OLDER than n3 — a pure importance/recency sort would put n3 first.
           timestamps: {
-            createdAt: "2026-07-28 09:00",
-            updatedAt: "2026-07-28 09:00",
-            rangeStart: "2026-07-28 09:00",
-            rangeEnd: "2026-07-28 09:00",
+            createdAt: "2026-07-28T09:00:00.000Z",
+            updatedAt: "2026-07-28T09:00:00.000Z",
+            rangeStart: "2026-07-28T09:00:00.000Z",
+            rangeEnd: "2026-07-28T09:00:00.000Z",
           },
         }),
         sNode("n7", { summary: "Selector spec", importance: "high" }),
@@ -153,10 +153,10 @@ describe("renderSummary — observations-root", () => {
           summary: "Mechanical render",
           importance: "critical",
           timestamps: {
-            createdAt: "2026-07-28 14:00",
-            updatedAt: "2026-07-28 14:30",
-            rangeStart: "2026-07-28 14:00",
-            rangeEnd: "2026-07-28 14:30",
+            createdAt: "2026-07-28T14:00:00.000Z",
+            updatedAt: "2026-07-28T14:30:00.000Z",
+            rangeStart: "2026-07-28T14:00:00.000Z",
+            rangeEnd: "2026-07-28T14:30:00.000Z",
           },
         }),
         sNode("n9", { summary: "old idea", importance: "low", state: "obsolete", supersededBy: "n7" }),

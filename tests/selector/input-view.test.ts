@@ -15,7 +15,7 @@ function g(): MemkeeperGraph {
     importance: "critical",
     parentNode: null,
     state: "active",
-    createdAt: "2026-07-28 09:00",
+    createdAt: "2026-07-28T09:00:00.000Z",
   });
   const nActive = makeNode({
     id: "n3",
@@ -23,7 +23,7 @@ function g(): MemkeeperGraph {
     importance: "high",
     parentNode: null,
     state: "active",
-    createdAt: "2026-07-28 09:00",
+    createdAt: "2026-07-28T09:00:00.000Z",
   });
   const nNew = makeNode({
     id: "n4",
@@ -31,7 +31,7 @@ function g(): MemkeeperGraph {
     importance: "medium",
     parentNode: null,
     state: "new",
-    createdAt: "2026-07-28 09:00",
+    createdAt: "2026-07-28T09:00:00.000Z",
   });
   const nArchived = makeNode({
     id: "n5",
@@ -39,7 +39,7 @@ function g(): MemkeeperGraph {
     importance: "low",
     parentNode: null,
     state: "archived",
-    createdAt: "2026-07-28 09:00",
+    createdAt: "2026-07-28T09:00:00.000Z",
   });
   const nObsolete = makeNode({
     id: "n6",
@@ -48,7 +48,7 @@ function g(): MemkeeperGraph {
     parentNode: null,
     state: "obsolete",
     supersededBy: "n3",
-    createdAt: "2026-07-28 09:00",
+    createdAt: "2026-07-28T09:00:00.000Z",
   });
   nodes.set(N_GOAL, nGoal);
   nodes.set("n3", nActive);
@@ -61,7 +61,7 @@ function g(): MemkeeperGraph {
     importance: "critical",
     sourceEntryIds: ["u1"],
     parentNode: N_GOAL,
-    timestamp: "2026-07-28 09:00",
+    timestamp: "2026-07-28T09:00:00.000Z",
   });
   const o1 = makeObservation({
     id: "o1",
@@ -69,7 +69,7 @@ function g(): MemkeeperGraph {
     importance: "medium",
     sourceEntryIds: ["e2"],
     parentNode: "n3",
-    timestamp: "2026-07-28 10:00",
+    timestamp: "2026-07-28T10:00:00.000Z",
   });
   nGoal.observationIds = [O_INITIAL_PROMPT];
   nActive.observationIds = ["o1"];
@@ -127,7 +127,7 @@ describe("buildWorkingCopy", () => {
       parentNode: null,
       state: "obsolete",
       supersededBy: "n3",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     const nChild = makeNode({
       id: "n10",
@@ -135,7 +135,7 @@ describe("buildWorkingCopy", () => {
       importance: "high",
       parentNode: "n9",
       state: "active",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     nObs.childNodeIds = ["n10"];
     nodes.set(
@@ -146,7 +146,7 @@ describe("buildWorkingCopy", () => {
         importance: "critical",
         parentNode: null,
         state: "active",
-        createdAt: "2026-07-28 09:00",
+        createdAt: "2026-07-28T09:00:00.000Z",
       }),
     );
     nodes.set("n9", nObs);
@@ -167,7 +167,7 @@ describe("buildWorkingCopy", () => {
       importance: "critical",
       parentNode: null,
       state: "active",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     const nObs = makeNode({
       id: "n9",
@@ -176,7 +176,7 @@ describe("buildWorkingCopy", () => {
       parentNode: N_GOAL,
       state: "obsolete",
       supersededBy: "n3",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     nGoal.childNodeIds = ["n9"];
     nGoal.observationIds = [O_INITIAL_PROMPT];
@@ -187,7 +187,7 @@ describe("buildWorkingCopy", () => {
         content: "goal",
         importance: "critical",
         sourceEntryIds: ["u1"],
-        timestamp: "2026-07-28 09:00",
+        timestamp: "2026-07-28T09:00:00.000Z",
         parentNode: N_GOAL,
       }),
     );
@@ -211,7 +211,7 @@ describe("buildWorkingCopy", () => {
       importance: "critical",
       parentNode: null,
       state: "active",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     const nObs = makeNode({
       id: "n9",
@@ -220,7 +220,7 @@ describe("buildWorkingCopy", () => {
       parentNode: null,
       state: "obsolete",
       supersededBy: "n3",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     nObs.observationIds = ["o5"];
     observations.set(
@@ -230,7 +230,7 @@ describe("buildWorkingCopy", () => {
         content: "goal",
         importance: "critical",
         sourceEntryIds: ["u1"],
-        timestamp: "2026-07-28 09:00",
+        timestamp: "2026-07-28T09:00:00.000Z",
         parentNode: N_GOAL,
       }),
     );
@@ -241,7 +241,7 @@ describe("buildWorkingCopy", () => {
         content: "dead fact",
         importance: "low",
         sourceEntryIds: ["e5"],
-        timestamp: "2026-07-28 09:00",
+        timestamp: "2026-07-28T09:00:00.000Z",
         parentNode: "n9",
       }),
     );
@@ -267,7 +267,7 @@ describe("buildWorkingCopy", () => {
       importance: "critical",
       parentNode: null,
       state: "active",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     const n1 = makeNode({
       id: "n1",
@@ -276,7 +276,7 @@ describe("buildWorkingCopy", () => {
       parentNode: N_GOAL,
       state: "obsolete",
       supersededBy: "n3",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     const n2 = makeNode({
       id: "n2",
@@ -285,7 +285,7 @@ describe("buildWorkingCopy", () => {
       parentNode: "n1",
       state: "obsolete",
       supersededBy: "n3",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     const n3 = makeNode({
       id: "n3",
@@ -293,7 +293,7 @@ describe("buildWorkingCopy", () => {
       importance: "high",
       parentNode: "n2",
       state: "active",
-      createdAt: "2026-07-28 09:00",
+      createdAt: "2026-07-28T09:00:00.000Z",
     });
     observations.set(
       O_INITIAL_PROMPT,
@@ -302,7 +302,7 @@ describe("buildWorkingCopy", () => {
         content: "goal",
         importance: "critical",
         sourceEntryIds: ["u1"],
-        timestamp: "2026-07-28 09:00",
+        timestamp: "2026-07-28T09:00:00.000Z",
         parentNode: N_GOAL,
       }),
     );
@@ -581,7 +581,7 @@ function sourceGraphForAssembly(): MemkeeperGraph {
     importance: "critical",
     parentNode: null,
     state: "active",
-    createdAt: "2026-07-28 09:00",
+    createdAt: "2026-07-28T09:00:00.000Z",
   });
   const n3 = makeNode({
     id: "n3",
@@ -589,7 +589,7 @@ function sourceGraphForAssembly(): MemkeeperGraph {
     importance: "high",
     parentNode: null,
     state: "active",
-    createdAt: "2026-07-28 10:00",
+    createdAt: "2026-07-28T10:00:00.000Z",
   });
   nodes.set(N_GOAL, nGoal);
   nodes.set("n3", n3);
@@ -600,7 +600,7 @@ function sourceGraphForAssembly(): MemkeeperGraph {
       content: "build it",
       importance: "critical",
       sourceEntryIds: ["u1"],
-      timestamp: "2026-07-28 09:00",
+      timestamp: "2026-07-28T09:00:00.000Z",
       parentNode: N_GOAL,
     }),
   );
@@ -670,7 +670,7 @@ describe("buildSelectorInputView", () => {
         importance: "critical",
         parentNode: null,
         state: "active",
-        createdAt: "2026-07-28 09:00",
+        createdAt: "2026-07-28T09:00:00.000Z",
       }),
     );
     // high (newer) + high (older) + low → after nGoal: high-newer, high-older, low.
@@ -682,7 +682,7 @@ describe("buildSelectorInputView", () => {
         importance: "high",
         parentNode: null,
         state: "active",
-        createdAt: "2026-07-29 10:00",
+        createdAt: "2026-07-29T10:00:00.000Z",
       }),
     );
     nodes.set(
@@ -693,7 +693,7 @@ describe("buildSelectorInputView", () => {
         importance: "high",
         parentNode: null,
         state: "active",
-        createdAt: "2026-07-28 10:00",
+        createdAt: "2026-07-28T10:00:00.000Z",
       }),
     );
     nodes.set(
@@ -704,7 +704,7 @@ describe("buildSelectorInputView", () => {
         importance: "low",
         parentNode: null,
         state: "active",
-        createdAt: "2026-07-29 10:00",
+        createdAt: "2026-07-29T10:00:00.000Z",
       }),
     );
     observations.set(
@@ -714,7 +714,7 @@ describe("buildSelectorInputView", () => {
         content: "goal",
         importance: "critical",
         sourceEntryIds: ["u1"],
-        timestamp: "2026-07-28 09:00",
+        timestamp: "2026-07-28T09:00:00.000Z",
         parentNode: N_GOAL,
       }),
     );

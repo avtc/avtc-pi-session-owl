@@ -42,7 +42,7 @@ import {
   type ObsId,
 } from "../../src/types.js";
 
-const NOW = "2026-07-29 09:00";
+const NOW = "2026-07-29T09:00:00.000Z";
 
 // buildSource() overrides the clock per test; restore the real clock after the
 // file so the frozen-clock module state never leaks across files (isolate:false).

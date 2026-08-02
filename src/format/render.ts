@@ -49,6 +49,22 @@ interface ParsedTimestamp {
   time: string;
 }
 
+/** Parse a stored UTC ISO instant into LOCAL date + time strings for render
+ *  (locale-independent: hardcoded English month abbreviations, never
+ *  `toLocaleString` — a Russian/Ukrainian/Japanese host locale would emit
+ *  non-English month names that English-trained LLMs can't parse). Returns null
+ *  for a non-ISO stored value (caller falls back to the legacy split path). */
+function parseLocalParts(stored: string): ParsedTimestamp | null {
+  const d = new Date(stored);
+  if (Number.isNaN(d.getTime()) || !stored.includes("T")) return null;
+  const monthIndex = d.getMonth();
+  const day = d.getDate().toString().padStart(2, "0");
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  return { date: `${MONTH_ABBREVIATIONS[monthIndex] ?? "???"} ${day}`, time: `${hh}:${mm}` };
+}
+
+/** Split a legacy "YYYY-MM-DD HH:MM" stored value (tolerant fallback path). */
 function parseTimestamp(stored: string): ParsedTimestamp {
   const [date, time] = stored.split(" ");
   return { date: date ?? stored, time: time ?? "" };
@@ -61,28 +77,37 @@ function monthDay(date: string): string {
   return `${MONTH_ABBREVIATIONS[monthIndex] ?? "???"} ${day}`;
 }
 
-/** Render a stored "YYYY-MM-DD HH:MM" timestamp as "Jul 28 14:30". */
+/** Render a stored UTC ISO timestamp as a LOCAL "Jul 28 14:30" (English month
+ *  abbreviation, hardcoded — never locale-dependent). */
 export function formatTimestamp(stored: string): string {
+  const local = parseLocalParts(stored);
+  if (local !== null) return `${local.date} ${local.time}`;
   const { date, time } = parseTimestamp(stored);
   return `${monthDay(date)} ${time}`;
 }
 
 /** Convert a raw session-entry timestamp (pi stores ISO 8601, e.g.
- *  "2026-07-29T09:22:50.283Z") into the stored "YYYY-MM-DD HH:MM" contract
- *  format the in-memory model + render layer use (UTC, matching the in-memory
- *  clock convention). A value NOT in ISO form (already-contracted or
- *  unparseable) passes through unchanged — so the helper is idempotent and
- *  tolerant. */
+ *  "2026-07-29T09:22:50.283Z") into the stored UTC ISO contract the in-memory
+ *  model + render layer use. Absolute (TZ-agnostic); rendered to LOCAL at
+ *  display time. A value already in ISO form is normalized; a non-ISO value
+ *  passes through unchanged (tolerant/idempotent). */
 export function toStoredTimestamp(raw: string): string {
-  // ISO timestamps carry a 'T' separator; the stored contract format does not.
   if (!raw.includes("T")) return raw;
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
-  return parsed.toISOString().slice(0, 16).replace("T", " ");
+  return parsed.toISOString();
 }
 
 /** Render a [start, end] range, compressing identical or same-day endpoints. */
 export function formatTimestampRange(startStored: string, endStored: string): string {
+  const startLocal = parseLocalParts(startStored);
+  const endLocal = parseLocalParts(endStored);
+  if (startLocal !== null && endLocal !== null) {
+    if (startStored === endStored) return `${startLocal.date} ${startLocal.time}`;
+    const startText = `${startLocal.date} ${startLocal.time}`;
+    if (startLocal.date === endLocal.date) return `${startText} — ${endLocal.time}`;
+    return `${startText} — ${endLocal.date} ${endLocal.time}`;
+  }
   if (startStored === endStored) return formatTimestamp(startStored);
   const start = parseTimestamp(startStored);
   const end = parseTimestamp(endStored);

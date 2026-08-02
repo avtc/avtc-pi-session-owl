@@ -36,7 +36,7 @@ function userEntry(id: string, text: string): FakeEntry {
     id,
     type: "message",
     parentId: null,
-    timestamp: "2026-07-28 14:30",
+    timestamp: "2026-07-28T14:30:00.000Z",
     message: { role: "user", content: text, timestamp: 0 },
   };
 }
@@ -46,7 +46,7 @@ function assistantEntry(id: string, text: string): FakeEntry {
     id,
     type: "message",
     parentId: null,
-    timestamp: "2026-07-28 14:31",
+    timestamp: "2026-07-28T14:31:00.000Z",
     message: {
       role: "assistant",
       content: [{ type: "text", text }],
@@ -59,7 +59,13 @@ function assistantEntry(id: string, text: string): FakeEntry {
 }
 
 function customMessageEntry(id: string, text: string): FakeEntry {
-  return { id, type: "custom_message", parentId: null, timestamp: "2026-07-28 14:32", content: text } as FakeEntry;
+  return {
+    id,
+    type: "custom_message",
+    parentId: null,
+    timestamp: "2026-07-28T14:32:00.000Z",
+    content: text,
+  } as FakeEntry;
 }
 
 function modelChange(id: string): FakeEntry {
@@ -255,7 +261,7 @@ function addRootNode(id: NodeId, state: "new" | "active" | "archived" | "obsolet
       importance: "medium",
       state,
       parentNode: null,
-      createdAt: "2026-07-28 14:30",
+      createdAt: "2026-07-28T14:30:00.000Z",
     }),
   );
 }

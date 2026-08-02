@@ -7,5 +7,10 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     isolate: false,
+    // Pin the test process to UTC so LOCAL-time renders (timestamps render in
+    // the host timezone) are deterministic: stored UTC instants render their
+    // UTC clock values. Production is unaffected (no pin) — real users get
+    // their own timezone. Node 26 respects TZ on this platform.
+    env: { TZ: "UTC" },
   },
 });

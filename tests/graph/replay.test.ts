@@ -25,7 +25,7 @@ function seedGraph(): MemkeeperGraph {
     importance: "critical" as Importance,
     state: "active",
     parentNode: null,
-    createdAt: "2026-07-29 09:00",
+    createdAt: "2026-07-29T09:00:00.000Z",
   });
   const n1 = makeNode({
     id: "n1" as NodeId,
@@ -33,7 +33,7 @@ function seedGraph(): MemkeeperGraph {
     importance: "medium" as Importance,
     state: "active",
     parentNode: N_GOAL,
-    createdAt: "2026-07-29 10:00",
+    createdAt: "2026-07-29T10:00:00.000Z",
   });
   graph.nodes.set(N_GOAL, goal);
   graph.nodes.set("n1", n1);
@@ -43,7 +43,7 @@ function seedGraph(): MemkeeperGraph {
     content: "first fact",
     importance: "medium" as Importance,
     sourceEntryIds: ["5"],
-    timestamp: "2026-07-29 10:00",
+    timestamp: "2026-07-29T10:00:00.000Z",
     parentNode: "n1" as NodeId,
   });
   graph.observations.set("o1", o1);
@@ -81,7 +81,7 @@ describe("applyDelta replay dispatcher", () => {
       content: "fifth fact",
       importance: "low" as Importance,
       sourceEntryIds: ["7"],
-      timestamp: "2026-07-29 11:00",
+      timestamp: "2026-07-29T11:00:00.000Z",
       parentNode: "n1" as NodeId,
     });
     applyDelta(g, { type: "record_observation", obs }, MUTATE_SOURCE);
@@ -120,7 +120,7 @@ describe("applyDelta replay dispatcher", () => {
         content: "in n2",
         importance: "low" as Importance,
         sourceEntryIds: ["8"],
-        timestamp: "2026-07-29 12:00",
+        timestamp: "2026-07-29T12:00:00.000Z",
         parentNode: "n2" as NodeId,
       }),
     });

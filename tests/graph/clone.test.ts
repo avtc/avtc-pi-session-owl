@@ -12,7 +12,7 @@ function seededGraph(): MemkeeperGraph {
     importance: "critical",
     parentNode: null,
     state: "active",
-    createdAt: "2026-07-28 09:00",
+    createdAt: "2026-07-28T09:00:00.000Z",
   });
   const n3 = makeNode({
     id: "n3",
@@ -20,7 +20,7 @@ function seededGraph(): MemkeeperGraph {
     importance: "high",
     parentNode: N_GOAL,
     state: "active",
-    createdAt: "2026-07-28 09:00",
+    createdAt: "2026-07-28T09:00:00.000Z",
   });
   nGoal.childNodeIds = ["n3"];
   nodes.set(N_GOAL, nGoal);
@@ -31,7 +31,7 @@ function seededGraph(): MemkeeperGraph {
     importance: "critical",
     sourceEntryIds: ["u1"],
     parentNode: N_GOAL,
-    timestamp: "2026-07-28 09:00",
+    timestamp: "2026-07-28T09:00:00.000Z",
   });
   const o2 = makeObservation({
     id: "o1",
@@ -39,7 +39,7 @@ function seededGraph(): MemkeeperGraph {
     importance: "medium",
     sourceEntryIds: ["e2"],
     parentNode: "n3",
-    timestamp: "2026-07-28 10:00",
+    timestamp: "2026-07-28T10:00:00.000Z",
   });
   n3.observationIds = ["o1"];
   observations.set(O_INITIAL_PROMPT, o1);

@@ -14,7 +14,7 @@ import {
 import { makeReadTools } from "../../src/graph/read-tools.js";
 import { MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
 
-const NOW = "2026-07-29 09:00";
+const NOW = "2026-07-29T09:00:00.000Z";
 
 // --- test graph ------------------------------------------------------------
 // roots: nGoal (critical) + n7 (active, JWT auth) + n12 (active, build failed) +
