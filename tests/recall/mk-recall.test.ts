@@ -172,7 +172,7 @@ function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
   });
   // NOTE: in the curated tree o5 is regrouped under n8 (a child of n7), but in
   // the SOURCE graph o5 sits directly under n7. This divergence is what the
-  // R1-1 selected-root-search-parent test asserts (tree parent, not source).
+  // selected-root-search-parent test asserts (tree parent, not source).
   applyRecordObservation(curated, {
     obs: makeObservation({
       id: "o5",
