@@ -11,6 +11,9 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 // Mock the dependencies index.ts wires (isolate the activate WIRING from their
 // real implementations, which have their own tests).
+// Mock avtc-pi-settings-ui: registerSettingsCommand returns a fake handle whose
+// getSettings() yields enabled:true (the default-path tests rely on this; the
+// enabled-toggle tests override via _setGetMemkeeperSettings which takes precedence).
 vi.mock("avtc-pi-settings-ui", () => ({
   registerSettingsCommand: vi.fn(() => ({ getSettings: () => ({ enabled: true }), updateSetting: () => {} })),
   settingsFilePaths: () => ({
@@ -109,6 +112,10 @@ describe("memkeeperExtension (activate wiring)", () => {
     vi.clearAllMocks();
     resetForNewSession();
     _resetGetMemkeeperSettings();
+    // Pin the settings read to DEFAULT_CONFIG (override takes precedence over the
+    // real handle, so the default-path tests get enabled=true without depending on
+    // the real settings-ui storage read against the fake pi).
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG }));
     memkeeperExtension(makeFakePi());
   });
   afterEach(() => _resetGetMemkeeperSettings());

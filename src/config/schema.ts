@@ -12,6 +12,17 @@ import type {
 } from "avtc-pi-settings-ui";
 import { registerSettingsCommand, settingsFilePaths } from "avtc-pi-settings-ui";
 
+/** Indirection over registerSettingsCommand so tests can inject a fake WITHOUT
+ *  vi.mock(avtc-pi-settings-ui) — under isolate:false a module mock of this dep
+ *  races against the many test files that import schema.ts (loading the REAL
+ *  module), causing flaky clobbering. The seam keeps the mock local + deterministic. */
+let registerFn: typeof registerSettingsCommand = registerSettingsCommand;
+
+/** Test-only: inject a fake registerSettingsCommand (or restore the real one with null). */
+export function _setRegisterSettingsCommand(fn: typeof registerSettingsCommand | null): void {
+  registerFn = fn ?? registerSettingsCommand;
+}
+
 // ---------------------------------------------------------------------------
 // MemkeeperConfig — the typed shape returned by getMemkeeperSettings()
 // ---------------------------------------------------------------------------
@@ -390,7 +401,7 @@ const REGISTRATION_OPTIONS: RegisterSettingsOptions = {
 
 /** Register the /mk:settings command + tabbed modal once (from activate); stores the handle. */
 export function initMemkeeperSettings(pi: ExtensionAPI): SettingsHandle<MemkeeperConfig> {
-  handle = registerSettingsCommand<MemkeeperConfig>(pi, MEMKEEPER_SCHEMA, REGISTRATION_OPTIONS);
+  handle = registerFn<MemkeeperConfig>(pi, MEMKEEPER_SCHEMA, REGISTRATION_OPTIONS);
   return handle;
 }
 

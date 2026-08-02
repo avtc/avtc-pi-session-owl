@@ -522,9 +522,10 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
       undefined,
       undefined,
     )) as { content: { type: string; text?: string }[] };
-    // selected-root mode: the result is non-empty (the tree + its observations
-    // are reachable). The render text references the graph content.
+    // selected-root mode: the render references the graph content (the
+    // oInitialPrompt-seeded nGoal summary 'Fix the login bug' is in the tree).
     const text = result.content.map((c) => c.text ?? "").join("\n");
     expect(text.length).toBeGreaterThan(0);
+    expect(text).toContain("login");
   });
 });

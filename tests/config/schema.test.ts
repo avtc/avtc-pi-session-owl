@@ -1,41 +1,38 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-
-// Hoisted mock: registerSettingsCommand returns a fake handle whose getSettings() yields a
-// distinct live value so the "after init" test can prove getMemkeeperSettings reads the handle.
-const LIVE_AFTER_INIT = vi.hoisted(() => {
-  // A sentinel config distinct from DEFAULT_CONFIG (enabled flipped) — the mock handle returns it.
-  return { enabled: false, commandResultCap: 25 };
-});
-
-vi.mock("avtc-pi-settings-ui", () => ({
-  registerSettingsCommand: vi.fn(() => ({
-    getSettings: () => LIVE_AFTER_INIT,
-    updateSetting: () => {},
-    storageLevels: ["session", "project", "global"],
-  })),
-  settingsFilePaths: (name: string) => ({
-    globalPath: (globalDir?: string) => `${globalDir ?? "~/.pi"}/agent/${name}-settings.json`,
-    projectPath: (cwd: string) => `${cwd}/.pi/${name}-settings.json`,
-  }),
-}));
-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import * as settingsUi from "avtc-pi-settings-ui";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MemkeeperConfig } from "../../src/config/schema.js";
-// schema.ts imports registerSettingsCommand + settingsFilePaths as runtime values from
-// avtc-pi-settings-ui; the mock above replaces that module. Import the schema AFTER the mock.
 import {
   _resetGetMemkeeperSettings,
   _resetMemkeeperSettingsHandle,
   _setGetMemkeeperSettings,
+  _setRegisterSettingsCommand,
   DEFAULT_CONFIG,
   getMemkeeperSettings,
   initMemkeeperSettings,
   MEMKEEPER_SCHEMA,
 } from "../../src/config/schema.js";
+
+// Inject a fake registerSettingsCommand via the schema.ts seam (NOT vi.mock of
+// avtc-pi-settings-ui — under isolate:false a module mock of that dep races
+// against the many test files that import schema.ts loading the REAL module,
+// causing flaky clobbering). The fake handle returns a sentinel config (enabled
+// flipped) so the "after init" test proves getMemkeeperSettings reads the handle.
+const LIVE_AFTER_INIT = { enabled: false, commandResultCap: 25 } as const;
+// A vi.fn typed as the real registerSettingsCommand signature; the body returns
+// a fake handle. Used via _setRegisterSettingsCommand (cast at the call site).
+const registerSpy = vi.fn((_pi: ExtensionAPI, _schema: unknown, opts: unknown) => ({
+  getSettings: () => LIVE_AFTER_INIT,
+  updateSetting: () => {},
+  storageLevels: (opts as { storageLevels?: string[] })?.storageLevels ?? ["session", "project", "global"],
+})) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand & {
+  mock: ReturnType<typeof vi.fn>["mock"];
+};
+
+beforeAll(() => _setRegisterSettingsCommand(registerSpy));
+afterAll(() => _setRegisterSettingsCommand(null));
 
 const EXPECTED_IDS = [
   // General
@@ -218,7 +215,7 @@ describe("getMemkeeperSettings — initialized", () => {
   afterEach(() => _resetGetMemkeeperSettings());
 
   it("initMemkeeperSettings registers the /mk:settings command with the documented options", () => {
-    const spy = vi.mocked(settingsUi.registerSettingsCommand);
+    const spy = registerSpy;
     expect(spy).toHaveBeenCalled();
     const [piArg, schemaArg, optsArg] = spy.mock.calls.at(-1) ?? [];
     expect(piArg).toBe(fakePi);
