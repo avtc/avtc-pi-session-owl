@@ -9,12 +9,12 @@ import {
   type TouchedFilesContext,
 } from "../compaction/touched-files.js";
 import { formatNodeLine, RENDER_LEGEND } from "../format/render.js";
-import { cloneGraph } from "../graph/clone.js";
+import { cloneNode, cloneObservation } from "../graph/clone.js";
 import { orderActiveSetRoots } from "../graph/read-tools.js";
 import { isUnstuckAutoContinue } from "../lifecycle.js";
 import { buildChunks, type ChunkOptions, renderAssistantTextBlock } from "../observer/chunk.js";
-import type { MemkeeperGraph, NodeId, ObsId } from "../types.js";
-import { makeNode, N_IRRELEVANT, nowStoredTimestamp, ROOT_PARENT } from "../types.js";
+import type { Node, NodeId, Observation, ObsId } from "../types.js";
+import { MemkeeperGraph, makeNode, N_IRRELEVANT, nowStoredTimestamp, ROOT_PARENT } from "../types.js";
 
 /**
  * The Selector's working copy: a deep-copied, in-memory graph the Selector
@@ -37,41 +37,42 @@ export interface SelectorWorkingCopy {
  * The clone is fully independent — mutating it never touches the source graph.
  */
 export function buildWorkingCopy(source: MemkeeperGraph): SelectorWorkingCopy {
-  const clone = cloneGraph(source);
-
-  // Drop obsolete nodes; collect their children for reparenting and note each
-  // dropped node's parent so its childNodeIds can be cleaned (no phantom links).
-  const toReparent: NodeId[] = [];
-  const droppedParents: Array<{ parent: NodeId | null; dropped: NodeId }> = [];
-  for (const [id, node] of clone.nodes) {
+  // Selective clone: copy ONLY non-obsolete nodes (active + new + archived) and
+  // the observations under them, never deep-copying the obsolete portion. A
+  // non-obsolete descendant of a dropped obsolete node is reparented to the
+  // root so no active content is lost and the copy stays structurally valid.
+  const nodes = new Map<NodeId, Node>();
+  const droppedObsolete = new Set<NodeId>();
+  for (const [id, node] of source.nodes) {
     if (node.state === "obsolete") {
-      toReparent.push(...node.childNodeIds);
-      droppedParents.push({ parent: node.parentNode, dropped: id });
-      clone.nodes.delete(id);
+      droppedObsolete.add(id);
+    } else {
+      nodes.set(id, cloneNode(node));
     }
   }
-  // Remove each dropped obsolete id from its parent's childNodeIds.
-  for (const { parent, dropped } of droppedParents) {
-    if (parent === null) continue;
-    const parentNode = clone.nodes.get(parent);
-    if (parentNode === undefined) continue; // parent itself dropped (nested obsolete)
-    parentNode.childNodeIds = parentNode.childNodeIds.filter((cid) => cid !== dropped);
-  }
-  // Reparent a non-obsolete orphan whose parent was dropped to the root.
-  for (const childId of toReparent) {
-    const child = clone.nodes.get(childId);
-    if (child !== undefined && child.parentNode !== null && !clone.nodes.has(child.parentNode)) {
-      child.parentNode = null;
+  // Reparent a non-obsolete node whose parent was dropped (obsolete) to root,
+  // and strip dropped obsolete ids from every cloned parent's childNodeIds.
+  for (const node of nodes.values()) {
+    if (node.parentNode !== null && droppedObsolete.has(node.parentNode)) {
+      node.parentNode = null;
+    }
+    if (node.childNodeIds.length > 0) {
+      node.childNodeIds = node.childNodeIds.filter((cid) => !droppedObsolete.has(cid));
     }
   }
-  // Drop observations whose parent node was excluded (obsolete subtree).
-  const obsToDrop: ObsId[] = [];
-  for (const [obsId, obs] of clone.observations) {
-    if (!clone.nodes.has(obs.parentNode)) {
-      obsToDrop.push(obsId);
+  // Copy only observations whose parent survived the obsolete drop.
+  const observations = new Map<ObsId, Observation>();
+  for (const [obsId, obs] of source.observations) {
+    if (nodes.has(obs.parentNode)) {
+      observations.set(obsId, cloneObservation(obs));
     }
   }
-  for (const obsId of obsToDrop) clone.observations.delete(obsId);
+  const clone = new MemkeeperGraph({
+    nodes,
+    observations,
+    nextObsId: source.nextObsId,
+    nextNodeId: source.nextNodeId,
+  });
 
   // Inject nIrrelevant (predefined demote bin; summary "Irrelevant", empty, root).
   if (!clone.nodes.has(N_IRRELEVANT)) {

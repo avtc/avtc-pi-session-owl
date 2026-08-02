@@ -71,4 +71,15 @@ describe("isSafeRegex", () => {
   it("treats a safe pattern as safe regardless of flags (flags are caller's concern)", () => {
     expect(isSafeRegex("hello")).toBe(true);
   });
+
+  it("rejects a quantified backreference (a distinct ReDoS shape the star-height/alternation checks miss)", () => {
+    expect(isSafeRegex("(a+)\\1+")).toBe(false);
+    expect(isSafeRegex("(a*)\\1*")).toBe(false);
+    expect(isSafeRegex("(ab)\\1{3}")).toBe(false);
+  });
+
+  it("accepts a safe (non-quantified) backreference", () => {
+    expect(isSafeRegex("(foo)\\1")).toBe(true);
+    expect(isSafeRegex("(a|b)\\1bar")).toBe(true);
+  });
 });

@@ -30,7 +30,7 @@ export function cloneGraph(graph: MemkeeperGraph): MemkeeperGraph {
   });
 }
 
-function cloneNode(node: Node): Node {
+export function cloneNode(node: Node): Node {
   return {
     ...node,
     observationIds: [...node.observationIds],
@@ -40,7 +40,7 @@ function cloneNode(node: Node): Node {
   };
 }
 
-function cloneObservation(obs: Observation): Observation {
+export function cloneObservation(obs: Observation): Observation {
   return {
     ...obs,
     sourceEntryIds: [...obs.sourceEntryIds],

@@ -280,10 +280,34 @@ function topLevelAlternationOverlaps(body: string): boolean {
   return false;
 }
 
+/** A quantified backreference (`\1+`, `(a+)\1*`) is a distinct ReDoS shape the
+ *  star-height + alternation checks miss: the engine must try every split of a
+ *  run between the capture and the backreference. Conservative: any backref
+ *  (`\1`–`\9`) directly followed by a quantifier is rejected. */
+function hasQuantifiedBackreference(pattern: string): boolean {
+  let escaped = false;
+  for (let i = 0; i < pattern.length; i += 1) {
+    const ch = pattern[i];
+    if (escaped) {
+      escaped = false;
+      // a backreference is \ followed by a non-zero digit
+      if (ch >= "1" && ch <= "9") {
+        const next = pattern[i + 1];
+        if (next === "*" || next === "+" || next === "?" || next === "{") return true;
+      }
+      continue;
+    }
+    if (ch === "\\") escaped = true;
+  }
+  return false;
+}
+
 /** True iff `pattern` passes the safe-regex heuristics (no nested quantifiers,
- *  no imprecise alternation under a quantifier). Conservative. */
+ *  no imprecise alternation under a quantifier, no quantified backreference).
+ *  Conservative. */
 export function isSafeRegex(pattern: string): boolean {
   if (starHeight(pattern) >= 2) return false;
   if (hasImpreciseAlternationUnderQuantifier(pattern)) return false;
+  if (hasQuantifiedBackreference(pattern)) return false;
   return true;
 }
