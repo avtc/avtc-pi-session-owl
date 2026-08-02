@@ -40,6 +40,10 @@ const TARGETS = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const TOKEN_RES = [
   /see commit [0-9a-f]{7,40}\b/gi,
   /\bcommit [0-9a-f]{7,40}\b/gi,
+  // hex cross-reference ids (recall observation/reflection ids, decision
+  // hashes) like `#9af4c87d573c` / `#b3e3ea63ccc4` — 10+ hex after `#` so 6/8-char
+  // color codes (`#rrggbb`/`#rrggbbaa`) never collide.
+  /(?<!\w)#[0-9a-f]{10,}\b/gi,
   /\bDesign ref: Section \d+[^\n]*/gi,
   /\bDesign ref\b[^\n]*/gi,
   /\bdesign ref\b[^\n]*/gi,
@@ -47,6 +51,9 @@ const TOKEN_RES = [
   /(?<!\w)§[\w/-]+(?:\.[\w/-]+)*(?: step \d+)?/g,
   /design D\d{1,2}(?: line \d+)?\b/gi,
   /\bD\d{1,2}(?: line \d+)?\b/g,
+  // architectural-decision refs (AD1-AD16+): the `\bD\d` pattern above misses
+  // these because A→D has no word boundary.
+  /\bAD\d{1,2}\b/g,
   /\bR\d{1,2}-\d{1,3}\b/g,
   /\bAC\d+\w?\b/g,
   /\bTask \d+\.\d+\b/g,

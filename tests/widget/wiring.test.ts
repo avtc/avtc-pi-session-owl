@@ -3,7 +3,7 @@
 
 // Wiring smoke test: initWidget()'s controller publishes via ctx.ui.setWidget
 // with a factory when a stage is active + TUI mode, and hides (undefined) when
-// idle or non-TUI (§S-Widget.4). The factory produces a renderable Text.
+// idle or non-TUI. The factory produces a renderable Text.
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it } from "vitest";

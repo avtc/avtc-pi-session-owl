@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// renderSummary: the mechanical compaction-summary renderer (§8.2). Preamble +
+// renderSummary: the mechanical compaction-summary renderer. Preamble +
 // legend, the verbatim initial prompt, the active-set root one-liners (nGoal
 // first; nIrrelevant last in selected-root), and recently-touched files. Non-Builder
 // viewer (new→active, no 🆕); obsolete roots excluded; never truncated.

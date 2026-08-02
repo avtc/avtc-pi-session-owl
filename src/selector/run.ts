@@ -123,7 +123,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   const graphStore = getGraphStore();
   const runStageFn = input.runStageFn ?? runStage;
 
-  // Ensure-ready fast-path (AD9 + #b3e3ea63ccc4): a cached tree whose root view
+  // Ensure-ready fast-path: a cached tree whose root view
   // is under threshold AND still covers the current observation frontier is
   // reused — no pass runs. No stage is opened (no startStage).
   if (canReuseCachedTree(graphStore, input.settings.selectorRootViewThreshold)) return;

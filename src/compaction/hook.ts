@@ -132,15 +132,15 @@ export async function compactionHook(
     // (a) Observer catch-up — GAP-DRIVEN (regardless of observerMode): observe
     // the renderable entries strictly between the frontier and the compaction
     // cut (the compacted-away block). A lagging on-threshold frontier is the
-    // safety net AD9 provides.
+    // safety net the ensure-ready gate provides.
     const gap = observerCatchUpGap(ctx, firstKeptEntryId);
     if (gap.length > EMPTY_GAP) {
       await stageRuns.runObserver({ ctx, pi, settings, unobserved: gap, signal, widget });
     }
     if (signal.aborted) return cancelAborted(ctx);
 
-    // (b) Builder — fast-path skip when the root view is already under threshold
-    // (AD9); otherwise run bounded to the compacted block.
+    // (b) Builder — fast-path skip when the root view is already under threshold;
+    // otherwise run bounded to the compacted block.
     const graph = getGraphStore().graph;
     if (measureRootViewTokens(graph, "builder") >= settings.builderRootViewThreshold) {
       await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget });

@@ -535,7 +535,7 @@ describe("SELECTOR_SYSTEM (used by runSelector)", () => {
 
   it("names the budget levers (demote + condense), no 'remove' tool", () => {
     // The Selector's budget levers are demote (mv into nIrrelevant) + condense
-    // (set_summary) — never remove (rollback risk, decision #70ba7e86613a).
+    // (set_summary) — never remove (rollback risk).
     expect(SELECTOR_SYSTEM).toContain("set_summary");
     expect(SELECTOR_SYSTEM).toContain("nIrrelevant");
     expect(SELECTOR_SYSTEM).not.toMatch(/\bremove\b/);

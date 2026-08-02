@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Unit tests for formatWidgetLine (§S-Widget.3) — pure over a WidgetSnapshot.
+// Unit tests for formatWidgetLine — pure over a WidgetSnapshot.
 // A fake Theme marks each fg(color, text) as «color|text» so structure + color
 // assignment are both assertable without a real terminal. Structural assertions
 // strip the markers (visible text); color assertions check the marked fragments.

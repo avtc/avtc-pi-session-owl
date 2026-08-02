@@ -97,7 +97,7 @@ const OBSERVER_SKIP_THRESHOLD = "unobserved tokens below observerThresholdTokens
 /**
  * The Observer trigger (on-threshold): fire when ≥1 unobserved entry AND the rendered
  * unobserved tokens ≥ `observerThresholdTokens`. Skips when disabled/on-compaction or
- * when a run is in flight. No turn-count gate (decision #9af4c87d573c — single token gate).
+ * when a run is in flight. No turn-count gate — a single token gate.
  */
 export function evaluateObserverTrigger(input: TriggerInput & { unobserved: SessionEntry[] }): ObserverTriggerResult {
   const { settings, unobserved } = input;

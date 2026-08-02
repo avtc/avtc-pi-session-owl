@@ -106,7 +106,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   const graph = getGraphStore().graph;
   const runStageFn = input.runStageFn ?? runStage;
 
-  // Ensure-ready fast-path (AD9): a root view already under the threshold is
+  // Ensure-ready fast-path: a root view already under the threshold is
   // render-ready — skip the LLM passes entirely, just flush `new` arrivals so
   // they never linger as stale glyphs. A deliberate skip IS a normal stage-end
   // for flush purposes. No stage is opened (no startStage).

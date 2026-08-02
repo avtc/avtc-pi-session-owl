@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Unit tests for the real ProgressTracker (widget state object, §S-Widget.2).
+// Unit tests for the real ProgressTracker (widget state object).
 // The tracker is pure state — startStage/endStage/onEvent/setPass/setBatch — and
 // exposes a snapshot() the render formats. No ctx/ui coupling here (that lives on
 // the WidgetController wrapper, tested via the wiring smoke test).
