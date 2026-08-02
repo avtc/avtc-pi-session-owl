@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { GraphDelta } from "../../src/graph/mutations.js";
-import { applyCreateNode } from "../../src/graph/mutations.js";
+import { applyCreateNode, applyMerge, MUTATE_SOURCE } from "../../src/graph/mutations.js";
 import {
   EMPTY_LEDGER,
   encodeDetails,
@@ -466,6 +466,62 @@ describe("load reconstruction", () => {
     getGraphStore().usageLedger.observe.input += 1000;
     expect(getGraphStore().lastCompactionLedger?.observe.input).toBe(50);
     expect(getGraphStore().usageLedger).not.toBe(getGraphStore().lastCompactionLedger);
+  });
+
+  it("event-sourcing round-trip: real mutator deltas persist + reload to an identical graph", async () => {
+    // Producer↔consumer contract: apply the REAL mutators (the producer side),
+    // persist each returned delta verbatim, then load() into a fresh store and
+    // assert the reconstructed graph matches — catching any drift between the
+    // delta a mutator emits and the shape replay() expects (e.g. merge's
+    // resolvedDestId, create_node's id).
+    freshStore();
+    const producer = getGraphStore().graph;
+    const persist = new FakeStore();
+    const deltas: GraphDelta[] = [];
+    // a fresh root + observation + merge into a new root + supersede + set_meta
+    deltas.push(
+      applyCreateNode(producer, {
+        id: "n1" as NodeId,
+        summary: "root one",
+        importance: "high",
+        parentNode: null,
+        state: "active",
+      }),
+    );
+    deltas.push(
+      applyCreateNode(producer, {
+        id: "n2" as NodeId,
+        summary: "root two",
+        importance: "medium",
+        parentNode: null,
+        state: "active",
+      }),
+    );
+    const mergeDelta = applyMerge(
+      producer,
+      {
+        sourceIds: ["n1", "n2"],
+        destId: null,
+        newSummary: "merged root",
+      },
+      MUTATE_SOURCE,
+    );
+    deltas.push(mergeDelta);
+    // pin the resolved new-root id for assertions
+    expect(mergeDelta.resolvedDestId).toBeDefined();
+    for (const delta of deltas) appendGraphDelta(persist, delta);
+    persist.leafId = "e3";
+
+    // consumer: fresh store, replay the persisted entries
+    resetForNewSession();
+    await load(persist);
+    const reconstructed = getGraphStore().graph;
+    // the merged new-root id survives (identity-stable via resolvedDestId)
+    expect(reconstructed.nodes.has(mergeDelta.resolvedDestId as NodeId)).toBe(true);
+    expect(reconstructed.nodes.get(mergeDelta.resolvedDestId as NodeId)?.summary).toBe("merged root");
+    // the two source roots dissolved
+    expect(reconstructed.nodes.has("n1" as NodeId)).toBe(false);
+    expect(reconstructed.nodes.has("n2" as NodeId)).toBe(false);
   });
 });
 

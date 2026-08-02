@@ -36,6 +36,21 @@ describe("isSafeRegex", () => {
     expect(isSafeRegex("(?!a*)*+")).toBe(false);
   });
 
+  it("rejects nested quantifiers inside lookbehind, named, and flag groups", () => {
+    expect(isSafeRegex("(?<=a+)+")).toBe(false);
+    expect(isSafeRegex("(?<!a*)*+")).toBe(false);
+    expect(isSafeRegex("(?<x>a+)+")).toBe(false);
+    expect(isSafeRegex("(?<name>a*)*+")).toBe(false);
+    expect(isSafeRegex("(?i:a+)+")).toBe(false);
+  });
+
+  it("accepts safe lookbehind/named/flag groups under a quantifier", () => {
+    expect(isSafeRegex("(?<=ab)cd")).toBe(true);
+    expect(isSafeRegex("(?<x>ab)+")).toBe(true);
+    expect(isSafeRegex("(?i:ab)+")).toBe(true);
+    expect(isSafeRegex("(?<word>foo|bar)*")).toBe(true);
+  });
+
   it("rejects overlapping alternation under a quantifier", () => {
     expect(isSafeRegex("(a|a)+")).toBe(false);
     expect(isSafeRegex("(a|ab)*")).toBe(false);

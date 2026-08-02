@@ -81,20 +81,31 @@ export function childLinksConsistent(graph: MemkeeperGraph): boolean {
 
 /**
  * Containment is a strict tree: every non-root node has one parent, and
- * following `parentNode` pointers never loops. Detects a cycle by walking each
- * node's ancestor chain.
+ * following `parentNode` pointers never loops. Single-pass functional-graph
+ * cycle detection (O(N) total, one status map): each node has ≤1 parent, so a
+ * walk from any node is a linear chain; coloring (unvisited → on-path → done)
+ * lets every node's chain share work — a node already known acyclic short-
+ * circuits any later walk that reaches it.
  */
 export function noCycles(graph: MemkeeperGraph): boolean {
+  const DONE = 2; // fully walked, chain reaches the root without looping
+  const ON_PATH = 1; // on the current walk
+  const status = new Map<string, number>();
   for (const start of graph.nodes.keys()) {
-    const seen = new Set<string>();
+    if (status.get(start) === DONE) continue;
+    const path: string[] = [];
     let current: string | null = start;
     while (current !== null) {
-      if (seen.has(current)) return false;
-      seen.add(current);
+      const s = status.get(current);
+      if (s === ON_PATH) return false; // revisited a node on this walk → cycle
+      if (s === DONE) break; // reaches a known-acyclic chain → safe
+      status.set(current, ON_PATH);
+      path.push(current);
       const node = graph.nodes.get(current as Node["id"]);
       if (node === undefined) return false;
       current = node.parentNode;
     }
+    for (const id of path) status.set(id, DONE);
   }
   return true;
 }
