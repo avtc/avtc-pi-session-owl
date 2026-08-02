@@ -20,9 +20,9 @@ import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { BUILDER_SYSTEM } from "../prompts/builder.js";
-import { runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
+import { runStage, type StageRunInput, type StageRunResult, type StageUsage } from "../runtime/agent-loop.js";
 import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } from "../runtime/convergence.js";
-import { makeLedgerHook } from "../runtime/ledger-hook.js";
+import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import type { MemkeeperGraph, NodeId } from "../types.js";
@@ -124,6 +124,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   let normalEnd = true;
   let stageOpened = false;
   let pass = FIRST_PASS;
+  const ledger = makeLedgerHook(store, "build");
   try {
     input.widget.startStage(BUILD_STAGE, { pass });
     stageOpened = true;
@@ -135,7 +136,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
         break;
       }
 
-      const { outcome } = await runPass(input, graph, resolved, tools, runStageFn, pass);
+      const { outcome } = await runPass(input, graph, resolved, tools, runStageFn, pass, ledger.onStageEnd);
 
       // try_finish success → converged, stop (normal end).
       if (outcome.converged) break;
@@ -154,6 +155,10 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   } finally {
     // Flush `new`→`active` only on a normal stage-end; abort/error preserve it.
     if (normalEnd) flushNew(input.widget, store);
+    // Persist the cumulative usage ledger ONCE at run end (fold-per-pass,
+    // persist-once — mirroring the Observer). Skipped on abort/error (matching
+    // the Observer's no-usage-on-abort) and when no pass reported usage.
+    if (normalEnd && ledger.hasUsage()) persistLedger(store);
     if (stageOpened) input.widget.endStage();
   }
 }
@@ -170,10 +175,10 @@ async function runPass(
   tools: ReturnType<typeof makeBuilderTools>,
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>,
   pass: number,
+  onStageEnd: (usage: StageUsage) => void,
 ): Promise<{ outcome: PassOutcome }> {
   const { outcome, onEvent } = makePassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(graph, pass);
-  const store = toStoreContext(input.pi, input.ctx);
   await runConvergencePass({
     systemPrompt: BUILDER_SYSTEM,
     messages,
@@ -182,7 +187,7 @@ async function runPass(
     apiKey: resolved.apiKey,
     signal: input.signal,
     onEvent,
-    onStageEnd: makeLedgerHook(store, "build"),
+    onStageEnd,
     outcome,
     runStageFn,
     stageLabel: BUILD_STAGE,

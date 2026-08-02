@@ -22,9 +22,9 @@ import { measureRootViewTokens, nonObsoleteRoots } from "../graph/read-tools.js"
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
-import { runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
+import { runStage, type StageRunInput, type StageRunResult, type StageUsage } from "../runtime/agent-loop.js";
 import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } from "../runtime/convergence.js";
-import { makeLedgerHook } from "../runtime/ledger-hook.js";
+import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { decodeNode, encodeSelection } from "../store/codecs.js";
 import { getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
@@ -137,7 +137,9 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   const { contextView, workingCopy } = buildInputView(graphStore.graph, input);
 
   let stageOpened = false;
+  let normalEnd = true;
   let pass = FIRST_PASS;
+  const ledger = makeLedgerHook(store, "select");
   try {
     input.widget.startStage(SELECT_STAGE, { pass });
     stageOpened = true;
@@ -152,9 +154,21 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
     pushSelectedCounts(input.widget, workingCopy.graph);
     // convergence loop — bounded by the break conditions below (budget met / no-op / context limit / signal)
     while (true) {
-      if (input.signal.aborted) break; // abort → run ended early
+      if (input.signal.aborted) {
+        normalEnd = false; // abort → run ended early
+        break;
+      }
 
-      const { outcome } = await runPass(input, workingCopy, contextView, resolved, tools, runStageFn, pass);
+      const { outcome } = await runPass(
+        input,
+        workingCopy,
+        contextView,
+        resolved,
+        tools,
+        runStageFn,
+        pass,
+        ledger.onStageEnd,
+      );
       pushSelectedCounts(input.widget, workingCopy.graph);
 
       // try_finish success → converged, stop.
@@ -169,6 +183,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   } catch (cause) {
     // A run-ending error (error-before-any-mutate rethrown by runPass). Applied
     // mutates on the working copy are kept; whatever tree exists is committed.
+    normalEnd = false;
     log.error("selector run failed", cause);
   } finally {
     // Persist the resulting tree whenever a stage opened (a working copy exists)
@@ -177,6 +192,10 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
     // is the best available curation and committing it keeps mk_recall's target
     // alive. (Aborted-before-start leaves no working copy; stageOpened is false.)
     if (stageOpened) persistResult(store, graphStore, workingCopy.graph);
+    // Persist the cumulative usage ledger ONCE at run end (fold-per-pass,
+    // persist-once — mirroring the Observer + Builder). Skipped on abort/error
+    // and when no pass reported usage.
+    if (normalEnd && ledger.hasUsage()) persistLedger(store);
     if (stageOpened) input.widget.endStage();
   }
 }
@@ -194,10 +213,10 @@ async function runPass(
   tools: ReturnType<typeof makeSelectorTools>,
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>,
   pass: number,
+  onStageEnd: (usage: StageUsage) => void,
 ): Promise<{ outcome: SelectorPassOutcome }> {
   const { outcome, onEvent } = makeSelectorPassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(working, contextView, pass);
-  const store = toStoreContext(input.pi, input.ctx);
   await runConvergencePass({
     systemPrompt: SELECTOR_SYSTEM,
     messages,
@@ -206,7 +225,7 @@ async function runPass(
     apiKey: resolved.apiKey,
     signal: input.signal,
     onEvent,
-    onStageEnd: makeLedgerHook(store, "select"),
+    onStageEnd,
     outcome,
     runStageFn,
     stageLabel: SELECT_STAGE,

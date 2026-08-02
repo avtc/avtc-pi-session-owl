@@ -2,13 +2,14 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Tests for the ledger-feed hook factory: each stage run wires `onStageEnd`
-// (the agentLoop's end-of-run seam) to this hook, which folds the stage's
-// accumulated usage into the store's cumulative ledger and persists a
-// `memkeeper.usage` delta. One stage = one ledger increment + one persist.
+// (the agentLoop's end-of-run seam) to the fold hook built here, which folds the
+// stage's accumulated usage into the store's cumulative ledger IN-MEMORY. The
+// RUN persists the ledger as a single `memkeeper.usage` delta once at run end
+// (fold-per-pass, persist-once — mirroring the Observer).
 
 import { beforeEach, describe, expect, it } from "vitest";
 import type { StageUsage } from "../../src/runtime/agent-loop.js";
-import { makeLedgerHook } from "../../src/runtime/ledger-hook.js";
+import { makeLedgerHook, persistLedger } from "../../src/runtime/ledger-hook.js";
 import { cloneLedger, EMPTY_LEDGER } from "../../src/store/codecs.js";
 import { getGraphStore, type StoreContext, type StoreEntry } from "../../src/store/graph-store.js";
 
@@ -48,20 +49,20 @@ describe("makeLedgerHook", () => {
     getGraphStore().usageLedger = cloneLedger(EMPTY_LEDGER);
   });
 
-  it("folds a stage's usage into the store ledger's named phase + persists one delta", () => {
+  it("folds a stage's usage into the store ledger's named phase WITHOUT persisting", () => {
     const { ctx, usageDeltaCount } = recordingStore();
-    const hook = makeLedgerHook(ctx, "build");
+    const { onStageEnd } = makeLedgerHook(ctx, "build");
     expect(usageDeltaCount()).toBe(0);
-    hook(USAGE_A);
+    onStageEnd(USAGE_A);
     expect(getGraphStore().usageLedger.build).toEqual({ ...USAGE_A, runs: 1 });
-    expect(usageDeltaCount()).toBe(1);
+    expect(usageDeltaCount()).toBe(0); // fold only — no persist yet
   });
 
-  it("accumulates across multiple invocations (one hook = the same phase each call)", () => {
+  it("accumulates across multiple folds (one hook = the same phase each call)", () => {
     const { ctx } = recordingStore();
-    const hook = makeLedgerHook(ctx, "observe");
-    hook(USAGE_A);
-    hook(USAGE_A);
+    const { onStageEnd } = makeLedgerHook(ctx, "observe");
+    onStageEnd(USAGE_A);
+    onStageEnd(USAGE_A);
     expect(getGraphStore().usageLedger.observe).toEqual({
       input: 2000,
       output: 1000,
@@ -74,10 +75,40 @@ describe("makeLedgerHook", () => {
 
   it("each phase's hook is independent (observe hook doesn't touch build)", () => {
     const { ctx } = recordingStore();
-    makeLedgerHook(ctx, "observe")(USAGE_A);
-    makeLedgerHook(ctx, "select")(USAGE_A);
+    makeLedgerHook(ctx, "observe").onStageEnd(USAGE_A);
+    makeLedgerHook(ctx, "select").onStageEnd(USAGE_A);
     expect(getGraphStore().usageLedger.observe.runs).toBe(1);
     expect(getGraphStore().usageLedger.select.runs).toBe(1);
     expect(getGraphStore().usageLedger.build.runs).toBe(0);
+  });
+
+  it("hasUsage() reports false before any fold, true after", () => {
+    const { ctx } = recordingStore();
+    const ledger = makeLedgerHook(ctx, "build");
+    expect(ledger.hasUsage()).toBe(false);
+    ledger.onStageEnd(USAGE_A);
+    expect(ledger.hasUsage()).toBe(true);
+  });
+
+  it("persistLedger writes ONE memkeeper.usage delta for the folded ledger (run-end persist)", () => {
+    const { ctx, usageDeltaCount } = recordingStore();
+    const ledger = makeLedgerHook(ctx, "build");
+    // two passes fold into the same phase — only ONE persist at run end
+    ledger.onStageEnd(USAGE_A);
+    ledger.onStageEnd(USAGE_A);
+    expect(usageDeltaCount()).toBe(0);
+    persistLedger(ctx);
+    expect(usageDeltaCount()).toBe(1); // single persist regardless of pass count
+  });
+
+  it("persistLedger writes nothing across a full multi-pass run until called once", () => {
+    // simulates a 3-pass Builder run: 3 folds, 1 persist (the design's per-run batch)
+    const { ctx, usageDeltaCount } = recordingStore();
+    const ledger = makeLedgerHook(ctx, "build");
+    for (let i = 0; i < 3; i += 1) ledger.onStageEnd(USAGE_A);
+    expect(usageDeltaCount()).toBe(0);
+    if (ledger.hasUsage()) persistLedger(ctx);
+    expect(usageDeltaCount()).toBe(1);
+    expect(getGraphStore().usageLedger.build.runs).toBe(3);
   });
 });
