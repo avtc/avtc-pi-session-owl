@@ -14,7 +14,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings } from "../config/schema.js";
-import { formatNodeLine, formatObservationLine, type RenderViewer } from "../format/render.js";
+import { formatNodeLine, formatObservationLine, indent, type RenderViewer } from "../format/render.js";
 import {
   buildCatUnits,
   collectFindMatches,
@@ -30,7 +30,6 @@ import type { NodeId, ObsId } from "../types.js";
 // --- named constants (no bare literals at call sites) ----------------------
 
 const VIEWER: RenderViewer = "nonBuilder";
-const INDENT_STEP = 2;
 const CHILD_DEPTH = 1;
 const EXCLUDE_SUPERSEDED: IncludeSuperseded = false;
 const INCLUDE_SUPERSEDED: IncludeSuperseded = true;
@@ -102,10 +101,10 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
   lines.push(formatNodeLine(parent, { viewer: VIEWER }));
   const { nodes, observations } = directChildren(graph, parent);
   for (const node of nodes) {
-    lines.push(`${" ".repeat(CHILD_DEPTH * INDENT_STEP)}${formatNodeLine(node, { viewer: VIEWER })}`);
+    lines.push(indent(formatNodeLine(node, { viewer: VIEWER }), CHILD_DEPTH));
   }
   for (const obs of observations) {
-    lines.push(`${" ".repeat(CHILD_DEPTH * INDENT_STEP)}${formatObservationLine(obs, { viewer: VIEWER })}`);
+    lines.push(indent(formatObservationLine(obs, { viewer: VIEWER }), CHILD_DEPTH));
   }
   const { text } = formatList(lines, resolveCap());
   await notifyInfo(ctx, text);

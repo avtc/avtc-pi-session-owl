@@ -138,10 +138,15 @@ export interface ObservationEntry {
   tokenCount: number;
 }
 
-/** `memkeeper.graph_delta` — one applied mutate (envelope over a GraphDelta). */
+/** `memkeeper.graph_delta` — one or more applied mutates (envelope over
+ *  GraphDelta(s)). Singular `delta` is a Builder per-mutate entry; `deltas`
+ *  (array) is an Observer wrapper batch (additive; tolerant-reader safe). */
 export interface GraphDeltaEntry {
   kind: "graph_delta";
-  delta: GraphDelta;
+  /** One applied mutate (Builder per-mutate entry). */
+  delta?: GraphDelta;
+  /** A batch of applied mutates (Observer wrapper batch). */
+  deltas?: GraphDelta[];
 }
 
 /** `memkeeper.selection` — the Selector's selected-tree snapshot. */

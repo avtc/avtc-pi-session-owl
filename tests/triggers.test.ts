@@ -15,6 +15,7 @@ import {
   launchBackgroundRun,
   onTurnEnd,
   type RunFn,
+  resetStageRuns,
   setStageRuns,
   type TriggerInput,
 } from "../src/triggers.js";
@@ -89,6 +90,7 @@ beforeEach(() => {
 afterEach(() => {
   _resetRunLock();
   resetForNewSession();
+  resetStageRuns();
 });
 
 // ===========================================================================

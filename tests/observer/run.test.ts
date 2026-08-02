@@ -170,10 +170,13 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
 
-    // exactly one create_node graph_delta + one memkeeper.observation entry
+    // exactly one create_node graph_delta (a batched envelope) + one
+    // memkeeper.observation entry
     const graphDeltas = appended.filter((e) => e.type === "memkeeper.graph_delta");
     const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
     expect(graphDeltas).toHaveLength(1);
+    // the batched envelope carries the create_node in a `deltas` array
+    expect(Array.isArray((graphDeltas[0].data as { deltas?: unknown[] }).deltas)).toBe(true);
     expect(obsEntries).toHaveLength(1);
 
     // the single observation delta covers the whole unobserved range and carries
@@ -399,8 +402,9 @@ describe("runObserver", () => {
     // exact tokenCount = sum of the two records' chars/4 estimates.
     const expectedTokens = Math.ceil("Initial goal stated.".length / 4) + Math.ceil("Chose vitest.".length / 4);
     expect(entry.tokenCount).toBe(expectedTokens);
-    // two wrapper create_node deltas (one per record)
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(2);
+    // two wrapper create_node deltas batched into ONE memkeeper.graph_delta
+    // entry (the Observer persists its wrapper batch as a single envelope).
+    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(1);
     // frontier advanced to the last entry of the whole run
     expect(getGraphStore().observerFrontier).toBe("a1");
   });
@@ -500,8 +504,8 @@ describe("runObserver", () => {
     expect(calls).toContain("end");
   });
 
-  it("feeds each chunk's stage usage into the store ledger (onStageEnd seam)", async () => {
-    const { pi } = makeFakePi();
+  it("feeds each chunk's stage usage into the store ledger (persisted once at run end)", async () => {
+    const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
     // two small chunks (low threshold forces a chunk per entry) → two stage runs
     const unobserved = [userEntry("u1", "x".repeat(50)), assistantEntry("a1", "y".repeat(50))];
@@ -531,5 +535,8 @@ describe("runObserver", () => {
     // build/select untouched.
     expect(getGraphStore().usageLedger.build.runs).toBe(0);
     expect(getGraphStore().usageLedger.select.runs).toBe(0);
+    // the ledger is persisted ONCE at run end, not once per chunk (two chunks
+    // here but one durable memkeeper.usage entry).
+    expect(appended.filter((e) => e.type === "memkeeper.usage")).toHaveLength(1);
   });
 });

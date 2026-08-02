@@ -22,8 +22,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { BuilderRunInput } from "../builder/run.js";
 import { runBuilder as realRunBuilder } from "../builder/run.js";
-import { measureRootViewTokens } from "../builder/tools.js";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
+import { measureRootViewTokens } from "../graph/read-tools.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
 import { isRenderableEntry } from "../observer/chunk.js";

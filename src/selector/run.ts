@@ -21,12 +21,11 @@ import type { MemkeeperConfig } from "../config/schema.js";
 import { measureRootViewTokens, nonObsoleteRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
-import { notify } from "../notify.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
 import { runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
 import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook } from "../runtime/ledger-hook.js";
-import { resolveStageModel } from "../runtime/model.js";
+import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { decodeNode, encodeSelection } from "../store/codecs.js";
 import { getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
 import {
@@ -113,9 +112,12 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   // Aborted before start → nothing to do.
   if (input.signal.aborted) return;
 
-  const resolved = await resolveStageModel(input.ctx, input.settings.selectorModel ?? input.settings.defaultModel);
+  const resolved = await resolveStageModelOrNotify(
+    input.ctx,
+    "Selector",
+    input.settings.selectorModel ?? input.settings.defaultModel,
+  );
   if (!resolved.ok) {
-    notify(input.ctx, `Selector skipped a run: ${resolved.error}`, "warning");
     return;
   }
 

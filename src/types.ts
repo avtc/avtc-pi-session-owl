@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // In-memory domain model for the memory graph: plain types + a graph container.
-// No I/O, no singletons, no mutations here (mutations live in graph/mutations.ts).
+// No I/O, no singletons, no mutations here (the mutation layer owns those).
 
 /** Chars-per-token estimate (chars/4), memkeeper's own heuristic. */
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
@@ -187,7 +187,7 @@ export function makeNode(args: {
 /**
  * Plain in-memory data container: the containment-tree nodes, the immutable
  * observation leaves, and the per-session id counters. Mutations are applied
- * elsewhere (graph/mutations.ts); this struct only holds state + the computed
+ * elsewhere; this struct only holds state + the computed
  * `hasInitialPrompt` getter (never stored — always consistent with the map,
  * survives /reload·/new·fork).
  */
@@ -213,12 +213,4 @@ export class MemkeeperGraph {
   get hasInitialPrompt(): boolean {
     return this.observations.has(O_INITIAL_PROMPT as ObsId);
   }
-}
-
-// --- Builder stage-end flush delta -----------------------------------------
-
-/** Mechanical stage-end event: flush listed `new` nodes → `active`. */
-export interface FlushNewDelta {
-  type: "flush_new";
-  nodeIds: NodeId[];
 }

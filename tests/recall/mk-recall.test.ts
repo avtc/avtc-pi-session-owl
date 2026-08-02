@@ -555,6 +555,61 @@ Third line that concludes the lengthy multi-line observation body fully.`;
         clearRenderMode();
       }
     });
+
+    it("selected-root skips a tree obsRef absent from the source store (defense-in-depth, no crash)", async () => {
+      // fork#3 makes a dangling obsRef impossible by construction (the snapshot
+      // is self-contained), but the guard exists as defense-in-depth — pin it:
+      // a tree referencing an obs id NOT in the source graph is skipped gracefully.
+      resetForNewSession();
+      const source = buildGraph();
+      setClock(() => T0);
+      const curated = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(curated, {
+        id: "n50",
+        summary: "node carrying a real + a phantom obs",
+        importance: "high",
+        parentNode: null,
+        state: "active",
+      });
+      // o5 exists in the source graph (kept); o50 does NOT (skipped).
+      applyRecordObservation(curated, {
+        obs: makeObservation({
+          id: "o5",
+          content: "Chose JWT for stateless auth",
+          importance: "high",
+          sourceEntryIds: ["2"],
+          timestamp: T1,
+          parentNode: "n50",
+        }),
+      });
+      applyRecordObservation(curated, {
+        obs: makeObservation({
+          id: "o50",
+          content: "ghost observation with no source",
+          importance: "low",
+          sourceEntryIds: ["99"],
+          timestamp: T1,
+          parentNode: "n50",
+        }),
+      });
+      setClock(null);
+      const store = getGraphStore();
+      store.graph = source;
+      persistSelectedTree(NO_OP_CTX, encodeSelection(curated, null, store.observerFrontier));
+      setRenderMode("selected-root");
+      try {
+        // ids lookup of the phantom resolves nothing; the real o5 still resolves.
+        const idsOut = text(await recall(tool(), { ids: ["o50"] }));
+        expect(idsOut.toLowerCase()).toMatch(/no node|not found|unknown|empty/);
+        const realOut = text(await recall(tool(), { ids: ["o5"] }));
+        expect(realOut).toContain("Chose JWT for stateless auth");
+        // a search does not surface the phantom (no crash, no orphan line).
+        const searchOut = text(await recall(tool(), { query: "ghost|JWT" }));
+        expect(searchOut).not.toContain("o50");
+      } finally {
+        clearRenderMode();
+      }
+    });
   });
 
   describe("render identity (agent == user)", () => {

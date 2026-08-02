@@ -7,12 +7,12 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import type { MemkeeperConfig } from "../src/config/schema.js";
-import { buildStatusReport, gatherStatusInput, runMkStatus, type StatusInput } from "../src/status/command.js";
-import type { UsageLedger } from "../src/store/codecs.js";
-import { cloneLedger, EMPTY_LEDGER } from "../src/store/codecs.js";
-import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
-import type { Node, Observation, ObsId } from "../src/types.js";
+import type { MemkeeperConfig } from "../../src/config/schema.js";
+import { buildStatusReport, gatherStatusInput, runMkStatus, type StatusInput } from "../../src/status/command.js";
+import type { UsageLedger } from "../../src/store/codecs.js";
+import { cloneLedger, EMPTY_LEDGER } from "../../src/store/codecs.js";
+import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
+import type { Node, Observation, ObsId } from "../../src/types.js";
 
 function settings(over: Partial<MemkeeperConfig>): MemkeeperConfig {
   return {

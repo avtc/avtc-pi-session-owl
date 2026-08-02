@@ -19,12 +19,11 @@ import type { MemkeeperConfig } from "../config/schema.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
-import { notify } from "../notify.js";
 import { BUILDER_SYSTEM } from "../prompts/builder.js";
 import { runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
 import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook } from "../runtime/ledger-hook.js";
-import { resolveStageModel } from "../runtime/model.js";
+import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import type { MemkeeperGraph, NodeId } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
@@ -96,9 +95,12 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   // Aborted before start → nothing to do; `new` nodes stay `new`.
   if (input.signal.aborted) return;
 
-  const resolved = await resolveStageModel(input.ctx, input.settings.builderModel ?? input.settings.defaultModel);
+  const resolved = await resolveStageModelOrNotify(
+    input.ctx,
+    "Builder",
+    input.settings.builderModel ?? input.settings.defaultModel,
+  );
   if (!resolved.ok) {
-    notify(input.ctx, `Builder skipped a run: ${resolved.error}`, "warning");
     return;
   }
 

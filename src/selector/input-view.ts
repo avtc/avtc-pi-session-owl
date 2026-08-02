@@ -7,10 +7,11 @@ import {
 } from "../compaction/touched-files.js";
 import { formatNodeLine, RENDER_LEGEND } from "../format/render.js";
 import { cloneGraph } from "../graph/clone.js";
+import { compareNodeOrder } from "../graph/read-tools.js";
 import { isUnstuckAutoContinue } from "../lifecycle.js";
 import { buildChunks, type ChunkOptions, renderAssistantTextBlock } from "../observer/chunk.js";
 import type { MemkeeperGraph, NodeId, ObsId } from "../types.js";
-import { IMPORTANCE_RANK, makeNode, N_GOAL, N_IRRELEVANT, nowStoredTimestamp, ROOT_PARENT } from "../types.js";
+import { makeNode, N_GOAL, N_IRRELEVANT, nowStoredTimestamp, ROOT_PARENT } from "../types.js";
 
 /**
  * The Selector's working copy: a deep-copied, in-memory graph the Selector
@@ -317,11 +318,7 @@ export function renderWorkingRoots(workingCopy: SelectorWorkingCopy): string {
   const goal = roots.filter((node) => node.id === N_GOAL);
   const irrelevant = roots.filter((node) => node.id === N_IRRELEVANT);
   const rest = roots.filter((node) => node.id !== N_GOAL && node.id !== N_IRRELEVANT);
-  rest.sort((a, b) => {
-    const byImportance = IMPORTANCE_RANK[b.importance] - IMPORTANCE_RANK[a.importance];
-    if (byImportance !== 0) return byImportance;
-    return b.timestamps.rangeEnd.localeCompare(a.timestamps.rangeEnd);
-  });
+  rest.sort(compareNodeOrder);
   const ordered = [...goal, ...rest, ...irrelevant];
   return ordered.map((node) => formatNodeLine(node, { viewer: "nonBuilder" })).join("\n");
 }

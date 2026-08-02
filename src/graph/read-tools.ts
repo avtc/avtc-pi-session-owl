@@ -12,7 +12,7 @@
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import { formatNodeLine, formatObservationLine, type RenderViewer } from "../format/render.js";
+import { formatNodeLine, formatObservationLine, indent, type RenderViewer } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
 import { PageSchema } from "../schema.js";
 import {
@@ -24,6 +24,7 @@ import {
   type Observation,
   type ObsId,
 } from "../types.js";
+import { isSafeRegex } from "./safe-regex.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -44,7 +45,7 @@ export const TAKE_ALL = 0;
  *  (short) and the graph is session-bounded, so the realistic blast radius is
  *  a brief synchronous hang, not a crash. */
 export const FIND_QUERY_MAX = 500;
-const INDENT_STEP = 2;
+
 const ROOT_DEPTH = 0;
 const ROOT_PARENT: NodeId | null = null;
 const NO_AFTER_ID: string | null = null;
@@ -103,20 +104,23 @@ function footer(lastId: string, remaining: number): string {
 }
 
 /** Actionable message for a stale cursor (the afterId item was removed between
- *  calls) — tells the caller to re-query from null instead of looping. */
-function staleCursorMessage(afterId: string): string {
-  return `Cursor afterId=${afterId} not found (the graph changed since the last page). Re-query without afterId to start fresh.`;
-}
-
-/** Indent a line by `depth` levels (2 spaces each). */
-function indent(line: string, depth: number): string {
-  return `${" ".repeat(depth * INDENT_STEP)}${line}`;
+ *  calls) — tells the caller to re-query from null instead of looping. Shared by
+ *  the graph read tools and mk_recall (which reads the rendered tree). */
+export function staleCursorMessage(afterId: string | null): string {
+  return `Cursor afterId=${afterId ?? ""} not found (changed since the last page). Re-query without afterId to start fresh.`;
 }
 
 // --- ordering --------------------------------------------------------------
 
+/** The node fields `compareNodeOrder` reads — structural, so it orders both the
+ *  live `Node` and the render-only `RenderableNode` (snapshot/working-copy). */
+export interface OrderableNode {
+  importance: Node["importance"];
+  timestamps: { rangeEnd: string };
+}
+
 /** Importance desc (critical→low), then rangeEnd recency desc (newer first). */
-export function compareNodeOrder(a: Node, b: Node): number {
+export function compareNodeOrder<T extends OrderableNode>(a: T, b: T): number {
   const byImportance = IMPORTANCE_RANK[b.importance] - IMPORTANCE_RANK[a.importance];
   if (byImportance !== 0) return byImportance;
   return b.timestamps.rangeEnd.localeCompare(a.timestamps.rangeEnd);
@@ -351,11 +355,17 @@ interface FindMatch {
   render: string;
 }
 
-/** Compile a `find` regex with the shared length cap + error handling. Returns
- *  the compiled regex, or an error string the caller surfaces verbatim. */
+/** Compile a `find` regex with the shared length cap + ReDoS guard + error
+ *  handling. Returns the compiled regex, or an error string the caller surfaces
+ *  verbatim. */
 export function tryCompileFindRegex(query: string): { regex: RegExp } | { error: string } {
   if (query.length > FIND_QUERY_MAX) {
     return { error: `Query too long (max ${FIND_QUERY_MAX} chars). Use a shorter regex.` };
+  }
+  if (!isSafeRegex(query)) {
+    return {
+      error: `Regex "${query}" may backtrack catastrophically (nested/overlapping quantifiers). Rewrite it without overlapping repetition.`,
+    };
   }
   try {
     return { regex: new RegExp(query) };

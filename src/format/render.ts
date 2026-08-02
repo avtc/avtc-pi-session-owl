@@ -160,3 +160,11 @@ export function formatObservationLine(obs: RenderableObservation, options: LineO
   parts.push(formatTimestamp(obs.timestamp));
   return parts.join(" · ");
 }
+
+/** Spaces per render-tree depth level (shared by every indented listing). */
+export const INDENT_STEP = 2;
+
+/** Indent a line by `depth` levels (INDENT_STEP spaces each). */
+export function indent(line: string, depth: number): string {
+  return `${" ".repeat(depth * INDENT_STEP)}${line}`;
+}

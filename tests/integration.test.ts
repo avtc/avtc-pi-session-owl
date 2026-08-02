@@ -364,7 +364,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     expect(newNodes.length).toBe(0);
     // the selected tree was built + persisted (selected-root default).
     expect(getGraphStore().selectedTree).not.toBeNull();
-    // invariant: every observation is attached to exactly one node.
+    // attachment invariant: every observation's parentNode exists as a node.
     for (const o of graph.observations.values()) {
       expect(graph.nodes.has(o.parentNode)).toBe(true);
     }

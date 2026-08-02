@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { GraphInvariantError } from "../../src/graph/invariants.js";
+import { exactlyOneNodePerObservation, GraphInvariantError } from "../../src/graph/invariants.js";
 import {
   applyCreateNode,
   applyFlushNew,
@@ -467,6 +467,63 @@ describe("working-copy policy", () => {
     const g = graphWithTwoRoots();
     applyMv(g, { sourceIds: ["n2"], destId: "n1" }, MUTATE_WORKING_COPY);
     expect(() => applyMv(g, { sourceIds: ["n1"], destId: "n2" }, MUTATE_WORKING_COPY)).toThrow(GraphInvariantError);
+  });
+});
+
+// --- C4 invariant: every observation is attached to exactly one node -------
+// (never orphaned, never double-parented) — asserted independently after each
+// core relocate/merge/supersede, the highest-risk paths for parent drift.
+describe("C4 invariant holds after core mutations", () => {
+  /** nGoal(root) + n1(root, obs o1) + n2(root, child n3, obs o2 under n3). */
+  function graphWithObs(): MemkeeperGraph {
+    const g = graphWithNGoal();
+    applyRecordObservation(g, {
+      obs: makeObservation({
+        id: "o1",
+        content: "first",
+        importance: "high",
+        sourceEntryIds: ["1"],
+        timestamp: NOW,
+        parentNode: "n1",
+      }),
+    });
+    applyCreateNode(g, { id: "n2", summary: "second root", importance: "medium", parentNode: null, state: "active" });
+    applyCreateNode(g, { id: "n3", summary: "child", importance: "medium", parentNode: "n2", state: "active" });
+    applyRecordObservation(g, {
+      obs: makeObservation({
+        id: "o2",
+        content: "second",
+        importance: "low",
+        sourceEntryIds: ["2"],
+        timestamp: NOW,
+        parentNode: "n3",
+      }),
+    });
+    return g;
+  }
+
+  it("holds after mv-ing an observation between nodes", () => {
+    const g = graphWithObs();
+    applyMv(g, { sourceIds: ["o2"], destId: "n1" }, MUTATE_SOURCE);
+    expect(exactlyOneNodePerObservation(g)).toBe(true);
+  });
+
+  it("holds after mv-ing a subtree (node + its obs) under another node", () => {
+    const g = graphWithObs();
+    applyMv(g, { sourceIds: ["n3"], destId: "n1" }, MUTATE_SOURCE);
+    expect(exactlyOneNodePerObservation(g)).toBe(true);
+  });
+
+  it("holds after merge: absorbed node's obs + children relocate, source dissolves", () => {
+    const g = graphWithObs();
+    applyMerge(g, { sourceIds: ["n3"], destId: "n1", newSummary: "combined" }, MUTATE_SOURCE);
+    expect(exactlyOneNodePerObservation(g)).toBe(true);
+  });
+
+  it("holds after supersede: retained (tombstone) node keeps its obs under it", () => {
+    const g = graphWithObs();
+    applySupersede(g, { nodeId: "n2", supersededNodeIds: ["n1"] }, MUTATE_SOURCE);
+    expect(exactlyOneNodePerObservation(g)).toBe(true);
   });
 });
 

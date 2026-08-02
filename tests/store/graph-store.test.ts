@@ -305,6 +305,51 @@ describe("load reconstruction", () => {
     expect(store.observerFrontier).toBe("e2");
   });
 
+  it("reconstructs from a batched graph_delta entry (deltas array, e.g. an Observer run)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    // one memkeeper.graph_delta entry carrying an ARRAY of two create_node
+    // deltas (how the Observer persists its wrapper batch).
+    fake.addCustomAt("e1", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      deltas: [
+        {
+          type: "create_node",
+          id: "n1",
+          summary: "",
+          importance: "high",
+          parentNode: null,
+          state: "new",
+        },
+        {
+          type: "create_node",
+          id: "n2",
+          summary: "",
+          importance: "low",
+          parentNode: null,
+          state: "new",
+        },
+      ],
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("e2", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e2",
+      records: [
+        { id: "o1", content: "a", importance: "high", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
+        { id: "o2", content: "b", importance: "low", sourceEntryIds: ["2"], timestamp: "t", parentNode: "n2" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.leafId = "e2";
+
+    await load(fake);
+    const store = getGraphStore();
+    expect(store.graph.nodes.has("n1" as NodeId)).toBe(true);
+    expect(store.graph.nodes.has("n2" as NodeId)).toBe(true);
+    expect(store.graph.observations.has("o1")).toBe(true);
+    expect(store.graph.observations.has("o2")).toBe(true);
+  });
+
   it("falls back to deltas-only and does not throw on a corrupt details snapshot", async () => {
     freshStore();
     const fake = new FakeStore();

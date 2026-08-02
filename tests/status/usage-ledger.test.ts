@@ -2,14 +2,14 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import type { StageUsage } from "../src/runtime/agent-loop.js";
+import type { StageUsage } from "../../src/runtime/agent-loop.js";
 import {
   addPhaseUsage,
   sinceLastCompaction,
   sinceSessionStart,
   snapshotAtCompaction,
-} from "../src/status/usage-ledger.js";
-import { cloneLedger, EMPTY_LEDGER, type PhaseUsage, type UsageLedger } from "../src/store/codecs.js";
+} from "../../src/status/usage-ledger.js";
+import { cloneLedger, EMPTY_LEDGER, type PhaseUsage, type UsageLedger } from "../../src/store/codecs.js";
 
 const STAGE_USAGE_A: StageUsage = { input: 1000, output: 500, cacheRead: 300, cost: 0.05, turns: 3 };
 const STAGE_USAGE_B: StageUsage = { input: 2000, output: 1500, cacheRead: 700, cost: 0.11, turns: 5 };

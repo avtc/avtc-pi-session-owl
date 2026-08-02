@@ -14,11 +14,19 @@ import { getMemkeeperSettings } from "../config/schema.js";
 import {
   formatNodeLine,
   formatObservationLine,
+  indent,
   type RenderableNode,
   type RenderableObservation,
   type RenderViewer,
 } from "../format/render.js";
-import { DEFAULT_TAKE, paginate, type ResolvedPage, resolvePage, tryCompileFindRegex } from "../graph/read-tools.js";
+import {
+  DEFAULT_TAKE,
+  paginate,
+  type ResolvedPage,
+  resolvePage,
+  staleCursorMessage,
+  tryCompileFindRegex,
+} from "../graph/read-tools.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeState, type ObsId } from "../types.js";
@@ -30,7 +38,6 @@ const VIEWER: RenderViewer = "nonBuilder";
 /** Single-line content cap for terse results (full content shows in fullDetails). */
 const TERSE_CONTENT_MAX = 120;
 const TRUNCATION_ELLIPSIS = "…";
-const INDENT_STEP = 2;
 const CHILD_DEPTH = 1;
 const DATE_ONLY_LENGTH = 10;
 const END_OF_DAY_TIME = "23:59";
@@ -274,10 +281,6 @@ function observationHeader(obs: RenderableObservation, showParent: string | unde
   return formatObservationLine(obs, { viewer: VIEWER, showParent, formatContent: () => "" });
 }
 
-function indent(line: string, depth: number): string {
-  return `${" ".repeat(depth * INDENT_STEP)}${line}`;
-}
-
 // --- search/list path ------------------------------------------------------
 
 interface ResolvedBounds {
@@ -377,12 +380,6 @@ function searchFooter(total: number, lastId: string, more: boolean): string {
   const parts = [`· ${total} results`];
   if (more) parts.push(`afterId=${lastId}`);
   return parts.join(" · ");
-}
-
-/** Actionable message for a stale cursor (the afterId item is gone — memory
- *  changed between pages) — shared by the ids + search paths. */
-function staleCursorMessage(afterId: string | null): string {
-  return `Cursor afterId=${afterId ?? ""} not found (memory changed since the last page). Re-query without afterId to start fresh.`;
 }
 
 // --- pagination (top-level take/afterId → ResolvedPage) --------------------

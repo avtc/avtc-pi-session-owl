@@ -2,15 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import { estimateTokens, formatCost, formatCount, formatDuration, formatTokens } from "../../src/format/tokens.js";
-
-describe("estimateTokens", () => {
-  it("divides content length by the chars-per-token constant (ceil)", () => {
-    expect(estimateTokens("")).toBe(0);
-    expect(estimateTokens("abcdefgh")).toBe(2);
-    expect(estimateTokens("abcdefghi")).toBe(3);
-  });
-});
+import { formatCost, formatCount, formatDuration, formatTokens } from "../../src/format/tokens.js";
 
 describe("formatTokens", () => {
   it("renders raw integers below 1000", () => {

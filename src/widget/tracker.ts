@@ -4,7 +4,7 @@
 // The live progress tracker + the WidgetController surface the
 // lifecycle + stages touch. A singleton tracker holds the run state (stage,
 // pass, batch, baseline, usage, streaming tokens, context) updated by the runs +
-// agent events; the render (render.ts) formats a snapshot of it into the widget
+// agent events; the render layer formats a snapshot of it into the widget
 // line. The controller wraps the tracker with a ctx/ui ref and publishes via
 // ctx.ui.setWidget (event-driven, NO timer).
 
@@ -14,6 +14,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import type { StageUsage } from "../runtime/agent-loop.js";
+import { deltaTextOf, deltaTokens, messageEndUsage, streamedOutputUsage } from "../runtime/streaming-tokens.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { estimateContentTokens, type MemkeeperGraph } from "../types.js";
 import { formatWidgetLine } from "./render.js";
@@ -95,39 +96,10 @@ interface TrackerState {
 export interface ProgressTracker extends StageController, TrackerState {}
 
 // --- streaming-token helpers (two-tier, decision #37) ---------------------
-
-/** Read the streamed cumulative output-token count off a message_update when the
- *  provider reports usage mid-stream. Returns null when not present. */
-function streamedOutputUsage(ev: AgentEvent): number | null {
-  if (ev.type !== "message_update") return null;
-  const usage = (ev as { message?: { usage?: { output?: number } } }).message?.usage;
-  const output = usage?.output;
-  return typeof output === "number" ? output : null;
-}
-
-/** Extract the delta string from a streamed assistant-message event (fallback tier). */
-function deltaTextOf(ev: AgentEvent): string | null {
-  if (ev.type !== "message_update") return null;
-  const inner = (ev as { assistantMessageEvent?: { type?: string; delta?: string } }).assistantMessageEvent;
-  if (inner?.type === "text_delta" || inner?.type === "thinking_delta" || inner?.type === "toolcall_delta") {
-    return inner.delta ?? null;
-  }
-  return null;
-}
-
-/** Read cumulative usage off a message_end (only assistant messages carry usage). */
-function messageEndUsage(message: unknown): StageUsage | null {
-  const u = (message as { usage?: { input?: number; output?: number; cacheRead?: number; cost?: { total?: number } } })
-    ?.usage;
-  if (u === undefined) return null;
-  return {
-    input: u.input ?? 0,
-    output: u.output ?? 0,
-    cacheRead: u.cacheRead ?? 0,
-    cost: u.cost?.total ?? 0,
-    turns: 0,
-  };
-}
+// Extraction primitives live in src/runtime/streaming-tokens.ts (shared with
+// the agent-loop run accumulator). The tracker owns its own ACCUMULATE
+// strategy here: a running primary max (mid-stream message_update usage.output)
+// + a chars/4 fallback, so the live widget counter always moves.
 
 /** Create a fresh idle tracker (stage null, zeroed usage). */
 export function createTracker(): ProgressTracker {
@@ -207,7 +179,7 @@ export function createTracker(): ProgressTracker {
     },
     onEvent(event) {
       if (event.type === "message_end") {
-        const u = messageEndUsage((event as { message?: unknown }).message);
+        const u = messageEndUsage(event.message);
         if (u !== null) {
           state.usage.input += u.input;
           state.usage.output += u.output;
@@ -226,7 +198,7 @@ export function createTracker(): ProgressTracker {
         // fallback tier (chars/4 over deltas): accumulates so the counter always moves.
         const delta = deltaTextOf(event);
         if (delta !== null) {
-          state.fallbackTokens += estimateContentTokens(delta);
+          state.fallbackTokens += deltaTokens(delta);
         }
         state.streamingOutputTokens = state.primaryTokens > 0 ? state.primaryTokens : state.fallbackTokens;
       }

@@ -89,7 +89,7 @@ export interface ObserverTriggerResult {
   reason: string;
 }
 
-const OBSERVER_SKIP_INFLIGHT = "a run is already in flight";
+const SKIP_INFLIGHT = "a run is already in flight";
 const OBSERVER_SKIP_MODE = "observerMode is on-compaction (compaction catch-up owns it)";
 const OBSERVER_SKIP_EMPTY = "no unobserved entries";
 const OBSERVER_SKIP_THRESHOLD = "unobserved tokens below observerThresholdTokens";
@@ -108,7 +108,7 @@ export function evaluateObserverTrigger(input: TriggerInput & { unobserved: Sess
     return { shouldFire: false, unobserved, reason: OBSERVER_SKIP_EMPTY };
   }
   if (inFlight()) {
-    return { shouldFire: false, unobserved, reason: OBSERVER_SKIP_INFLIGHT };
+    return { shouldFire: false, unobserved, reason: SKIP_INFLIGHT };
   }
   const tokens = estimateUnobservedTokens(unobserved, settings);
   if (tokens < settings.observerThresholdTokens) {
@@ -151,7 +151,6 @@ export interface StageTriggerResult {
   reason: string;
 }
 
-const SKIP_INFLIGHT = "a run is already in flight";
 const SKIP_MODE_COMPACTION = "mode is on-compaction (compaction owns it)";
 
 /** The Builder trigger (the non-default builderModes at turn_end). */
@@ -248,11 +247,26 @@ export interface StageRuns {
 
 const NOOP_RUN: RunFn = async () => {};
 
-let stageRuns: StageRuns = { runObserver: NOOP_RUN, runBuilder: NOOP_RUN, runSelector: NOOP_RUN };
+/** The default (no-op) stage runs — the registry's value before activate wires
+ *  the real runs, and the value tests reset to between files. */
+const DEFAULT_STAGE_RUNS: StageRuns = {
+  runObserver: NOOP_RUN,
+  runBuilder: NOOP_RUN,
+  runSelector: NOOP_RUN,
+};
+
+let stageRuns: StageRuns = { ...DEFAULT_STAGE_RUNS };
 
 /** Register the real stage run functions (called once at activate by the wiring layer). */
 export function setStageRuns(runs: StageRuns): void {
   stageRuns = runs;
+}
+
+/** Reset the stage-run registry to the no-op defaults (test isolation: undoes a
+ *  test's `setStageRuns(fakes)` so they don't leak across files under
+ *  isolate:false). */
+export function resetStageRuns(): void {
+  stageRuns = { ...DEFAULT_STAGE_RUNS };
 }
 
 /** The turn_end entry point the hook calls fire-and-forget. Evaluates Observer,

@@ -23,11 +23,17 @@ import { log } from "../log.js";
 import { notify } from "../notify.js";
 import { OBSERVER_SYSTEM } from "../prompts/observer.js";
 import { NO_REASONING, runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
-import { makeLedgerHook } from "../runtime/ledger-hook.js";
-import { resolveStageModel } from "../runtime/model.js";
+import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { ImportanceSchema } from "../schema.js";
+import { addPhaseUsage } from "../status/usage-ledger.js";
 import { encodeObservation, type ObservationEntry } from "../store/codecs.js";
-import { appendGraphDelta, appendObservation, getGraphStore, type StoreContext } from "../store/graph-store.js";
+import {
+  appendGraphDeltaBatch,
+  appendObservation,
+  appendUsage,
+  getGraphStore,
+  type StoreContext,
+} from "../store/graph-store.js";
 import { type Importance, makeObservation, type NodeId, nowStoredTimestamp, type ObsId } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 import { buildChunks, type ChunkOptions } from "./chunk.js";
@@ -157,9 +163,12 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   if (input.unobserved.length === EMPTY_GAP) return;
 
   // model resolution (observerModel -> defaultModel -> session).
-  const resolved = await resolveStageModel(input.ctx, input.settings.observerModel ?? input.settings.defaultModel);
+  const resolved = await resolveStageModelOrNotify(
+    input.ctx,
+    "Observer",
+    input.settings.observerModel ?? input.settings.defaultModel,
+  );
   if (!resolved.ok) {
-    notify(input.ctx, `Observer skipped a run: ${resolved.error}`, "warning");
     return;
   }
 
@@ -181,6 +190,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   const totalChunks = chunks.length;
   let stageOpened = false;
   let done = 0;
+  let usageAccumulated = false;
   try {
     input.widget.startStage("observe", { batch: { done: 0, total: totalChunks } });
     stageOpened = true;
@@ -197,7 +207,13 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         reasoning: NO_REASONING,
         maxTurns: NO_MAX_TURNS,
         onEvent: (event) => input.widget.onEvent(event),
-        onStageEnd: makeLedgerHook(store, "observe"),
+        onStageEnd: (usage) => {
+          // fold this chunk's usage into the live ledger in-memory only; the
+          // ledger is persisted ONCE at run end (atomic with the observation
+          // batch — an aborted run writes no usage, matching no observations).
+          addPhaseUsage(getGraphStore().usageLedger, "observe", usage);
+          usageAccumulated = true;
+        },
         loopFn: NO_LOOP_OVERRIDE,
       };
 
@@ -223,6 +239,11 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     }
 
     if (input.signal.aborted) return;
+
+    // persist the accumulated usage ledger ONCE at run end (atomic with the
+    // run's other persists — an aborted run wrote no usage, matching no
+    // observations). Skipped when no chunk reported usage.
+    if (usageAccumulated) appendUsage(store, getGraphStore().usageLedger);
 
     if (allRecords.length === EMPTY_RECORDS) {
       // nothing worth keeping — no delta, frontier unchanged (re-runs next trigger).
@@ -260,10 +281,11 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       pairs.push({ nodeId, obsId });
     }
 
-    // persist: the wrapper create_node deltas (one per record), then the single
-    // observation entry for the whole run (coversFromId/coversUpToId). The
-    // record_observation delta is NOT persisted — observations enter via
-    // the observation entry's content index + reconcileLinks on load).
+    // persist: the wrapper create_node deltas batched into ONE entry, the
+    // single observation entry for the whole run (coversFromId/coversUpToId),
+    // and the usage ledger persisted ONCE at run end. The record_observation
+    // delta is NOT persisted — observations enter via the observation entry's
+    // content index + reconcileLinks on load.
     persistWrappers(store, pairs);
     persistObservationBatch(store, input.unobserved, pairs);
   } finally {
@@ -273,21 +295,24 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
 
 // --- persist helpers -------------------------------------------------------
 
-/** Append one `create_node` graph_delta per wrapper (the structural mutations). */
+/** Append ONE `memkeeper.graph_delta` entry holding all wrapper create_node
+ *  deltas (a batched envelope), one structural mutate per record. */
 function persistWrappers(store: StoreContext, pairs: WrappedPair[]): void {
+  const graph = getGraphStore().graph;
+  const deltas: GraphDelta[] = [];
   for (const pair of pairs) {
-    const node = getGraphStore().graph.nodes.get(pair.nodeId);
+    const node = graph.nodes.get(pair.nodeId);
     if (node === undefined) continue; // tolerant: a dissolved wrapper is skipped
-    const delta: GraphDelta = {
+    deltas.push({
       type: "create_node",
       id: node.id,
       summary: node.summary,
       importance: node.importance,
       parentNode: null,
       state: node.state,
-    };
-    appendGraphDelta(store, delta);
+    });
   }
+  appendGraphDeltaBatch(store, deltas);
 }
 
 /** Append the single `memkeeper.observation` delta covering the whole run. */

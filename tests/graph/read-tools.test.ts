@@ -285,6 +285,11 @@ describe("Builder read tools", () => {
       expect(out.toLowerCase()).toContain("too long");
     });
 
+    it("rejects a catastrophic-backtracking regex with an error string (ReDoS guard)", async () => {
+      const out = textOf(await callTool(tools(), "find", { query: "(a+)+" }));
+      expect(out.toLowerCase()).toContain("backtrack");
+    });
+
     it("returns 'No matches.' when nothing matches", async () => {
       const out = textOf(await callTool(tools(), "find", { query: "zzznomatch" }));
       expect(out).toContain("No matches");

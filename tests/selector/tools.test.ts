@@ -14,7 +14,7 @@
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { MemkeeperConfig } from "../../src/config/schema.js";
 import { validateGraph } from "../../src/graph/invariants.js";
 import { applyCreateNode, applyRecordObservation, setClock } from "../../src/graph/mutations.js";
@@ -43,6 +43,10 @@ import {
 } from "../../src/types.js";
 
 const NOW = "2026-07-29 09:00";
+
+// buildSource() overrides the clock per test; restore the real clock after the
+// file so the frozen-clock module state never leaks across files (isolate:false).
+afterAll(() => setClock(null));
 
 // --- source-graph fixture --------------------------------------------------
 // nGoal(critical) + oInitialPrompt under it; n7(active, has obs o5) + n8(active,

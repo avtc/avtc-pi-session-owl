@@ -126,6 +126,15 @@ export function appendGraphDelta(ctx: StoreContext, delta: GraphDelta): void {
   ctx.appendEntry(GRAPH_DELTA_TYPE, envelope);
 }
 
+/** Persist a batch of recorded graph deltas in ONE entry (the caller already
+ *  applied them in-memory) — e.g. an Observer run's wrapper create_node set.
+ *  Reduces N per-delta writes to one on the background/compaction path. */
+export function appendGraphDeltaBatch(ctx: StoreContext, deltas: GraphDelta[]): void {
+  if (deltas.length === 0) return;
+  const envelope: GraphDeltaEntry = { kind: "graph_delta", deltas };
+  ctx.appendEntry(GRAPH_DELTA_TYPE, envelope);
+}
+
 /** Persist + hold the selected-tree snapshot. */
 export function persistSelectedTree(ctx: StoreContext, snapshot: SerializedSelection): void {
   ctx.appendEntry(SELECTION_TYPE, snapshot);
@@ -271,11 +280,14 @@ export async function load(ctx: StoreContext): Promise<void> {
     if (e === undefined || !isCustomEntry(e) || e.customType !== GRAPH_DELTA_TYPE) continue;
     const payload = e.data as GraphDeltaEntry | undefined;
     if (payload === undefined || payload.kind !== "graph_delta") continue;
-    try {
-      applyDelta(graph, payload.delta, "source");
-    } catch (err) {
-      // skip corrupt/inapplicable delta — reconstruction continues (logged)
-      log.warn(`graph-store: skipping inapplicable graph_delta at ${e.id}: ${String(err)}`);
+    const batch = payload.deltas ?? (payload.delta !== undefined ? [payload.delta] : []);
+    for (const delta of batch) {
+      try {
+        applyDelta(graph, delta, "source");
+      } catch (err) {
+        // skip corrupt/inapplicable delta — reconstruction continues (logged)
+        log.warn(`graph-store: skipping inapplicable graph_delta at ${e.id}: ${String(err)}`);
+      }
     }
   }
 

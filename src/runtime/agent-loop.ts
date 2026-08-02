@@ -16,7 +16,7 @@
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { agentLoop } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model, ThinkingLevel } from "@earendil-works/pi-ai";
-import { estimateContentTokens } from "../types.js";
+import { deltaTextOf, deltaTokens, messageEndUsage } from "./streaming-tokens.js";
 
 // --- named sentinels (no bare literals at call sites) ----------------------
 
@@ -105,42 +105,6 @@ export function makeTurnCap(
   };
 }
 
-/** Read cumulative usage off a `message_end` message.
- *
- * The loop emits a `message_end` for EVERY appended message, including prompt /
- * steering user + toolResult messages, which carry no `usage`. The optional-
- * chaining `?? 0` is therefore load-bearing (not defensive) — those messages
- * contribute zero and only assistant messages carry token usage. */
-function messageEndUsage(message: AgentMessage): {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cost: number;
-} {
-  // Only assistant messages carry usage; prompt/steering messages have none.
-  const u = (
-    message as {
-      usage?: { input?: number; output?: number; cacheRead?: number; cost?: { total?: number } };
-    }
-  ).usage;
-  return {
-    input: u?.input ?? 0,
-    output: u?.output ?? 0,
-    cacheRead: u?.cacheRead ?? 0,
-    cost: u?.cost?.total ?? 0,
-  };
-}
-
-/** Extract the delta string from a streamed assistant-message event (fallback tier). */
-function deltaTextOf(ev: AgentEvent): string | null {
-  if (ev.type !== "message_update") return null;
-  const inner = ev.assistantMessageEvent;
-  if (inner.type === "text_delta" || inner.type === "thinking_delta" || inner.type === "toolcall_delta") {
-    return inner.delta;
-  }
-  return null;
-}
-
 /**
  * Run one LLM stage: build the agentLoop context + config, drain its event
  * stream, accumulate usage + streaming tokens, honour abort, and settle the
@@ -175,11 +139,15 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       if (input.onEvent !== null) input.onEvent(event);
 
       if (event.type === "message_end") {
+        // Only assistant messages carry usage; prompt/steering messages have none
+        // (messageEndUsage returns null) and contribute zero.
         const u = messageEndUsage(event.message);
-        usage.input += u.input;
-        usage.output += u.output;
-        usage.cacheRead += u.cacheRead;
-        usage.cost += u.cost;
+        if (u !== null) {
+          usage.input += u.input;
+          usage.output += u.output;
+          usage.cacheRead += u.cacheRead;
+          usage.cost += u.cost;
+        }
       } else if (event.type === "turn_end") {
         usage.turns += 1;
       } else if (event.type === "message_update") {
@@ -189,7 +157,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
         // read from each message_end below (usage.output).
         const delta = deltaTextOf(event);
         if (delta !== null) {
-          fallbackTokens += estimateContentTokens(delta);
+          fallbackTokens += deltaTokens(delta);
         }
       }
     }

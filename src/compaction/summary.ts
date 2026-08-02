@@ -9,8 +9,9 @@
 // truncated (bounded by the Selector/Builder try_finish, not here).
 
 import { formatNodeLine, RENDER_LEGEND, type RenderableNode } from "../format/render.js";
+import { compareNodeOrder } from "../graph/read-tools.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
-import { IMPORTANCE_RANK, N_GOAL, N_IRRELEVANT } from "../types.js";
+import { N_GOAL, N_IRRELEVANT } from "../types.js";
 import { renderTouchedFiles, type TouchedFile } from "./touched-files.js";
 
 /** Which tree the active-set renders. */
@@ -121,13 +122,9 @@ function selectedRoots(tree: SerializedSelection): RenderableNode[] {
   return [...goal, ...orderRoots(rest), ...irrelevant];
 }
 
-/** Importance desc then recency desc (mirrors the Builder's root ordering). */
+/** Importance desc then recency desc (shared ordering with the Builder). */
 function orderRoots(roots: RenderableNode[]): RenderableNode[] {
-  return [...roots].sort((a, b) => {
-    const byImportance = IMPORTANCE_RANK[b.importance] - IMPORTANCE_RANK[a.importance];
-    if (byImportance !== 0) return byImportance;
-    return b.timestamps.rangeEnd.localeCompare(a.timestamps.rangeEnd);
-  });
+  return [...roots].sort(compareNodeOrder);
 }
 
 const ROOT_PARENT = null;

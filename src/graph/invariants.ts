@@ -2,8 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Pure validators over a MemkeeperGraph — no mutation. Used by the mutation
-// engine (graph/mutations.ts) as the live per-call validation gate, and by
-// tests.
+// engine as the live per-call validation gate, and by tests.
 
 import { type MemkeeperGraph, N_GOAL, N_IRRELEVANT, type Node, O_INITIAL_PROMPT } from "../types.js";
 

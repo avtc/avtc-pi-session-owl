@@ -12,6 +12,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { notify } from "../notify.js";
 
 export type ResolvedStageModel =
   | { ok: true; model: Model<Api>; apiKey: string | undefined }
@@ -54,4 +55,19 @@ export async function resolveStageModel(
     return { ok: false, error: auth.error };
   }
   return { ok: true, model, apiKey: auth.apiKey };
+}
+
+/** Resolve a stage model + api key, notifying + returning `{ ok: false }` on
+ *  failure so the caller can `return` (the stage is skipped). The `stageLabel`
+ *  ("Observer"/"Builder"/"Selector") names the run in the warning. */
+export async function resolveStageModelOrNotify(
+  ctx: ExtensionContext,
+  stageLabel: "Observer" | "Builder" | "Selector",
+  modelSetting: string | null,
+): Promise<ResolvedStageModel> {
+  const resolved = await resolveStageModel(ctx, modelSetting);
+  if (!resolved.ok) {
+    notify(ctx, `${stageLabel} skipped a run: ${resolved.error}`, "warning");
+  }
+  return resolved;
 }
