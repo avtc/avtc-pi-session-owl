@@ -137,7 +137,7 @@ export interface RenderableObservation {
 
 /** Render one node as a line (no indent — callers apply depth indentation). */
 export function formatNodeLine(node: RenderableNode, options: LineOptions): string {
-  const parts: string[] = [`📁 ${node.id} ${stateGlyph(node, options.viewer)}${importanceAbbr(node.importance)}`];
+  const parts: string[] = [`📁 ${node.id} · ${stateGlyph(node, options.viewer)}${importanceAbbr(node.importance)}`];
   const summary = singleLine(node.summary);
   if (summary !== "") parts.push(summary);
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
@@ -149,7 +149,7 @@ export function formatNodeLine(node: RenderableNode, options: LineOptions): stri
 
 /** Render one observation as a line (no indent — callers apply depth indentation). */
 export function formatObservationLine(obs: RenderableObservation, options: LineOptions): string {
-  const parts: string[] = [`📄 ${obs.id} ${importanceAbbr(obs.importance)}`];
+  const parts: string[] = [`📄 ${obs.id} · ${importanceAbbr(obs.importance)}`];
   const content = singleLine(obs.content);
   if (content !== "") parts.push(content);
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);

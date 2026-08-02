@@ -33,14 +33,16 @@ At compaction, the active set is rendered into the compaction summary that pi in
 The graph is a containment tree of **nodes** (folders) holding **observations** (leaves). It renders the same way everywhere — the agent's `mk_recall`, the Builder and Selector tools, and the `/mk:ls`/`/mk:cat`/`/mk:find` commands:
 
 ```
-📁 nGoal  crit · The session goal · 3📁 1📄 · Jul 28 14:30
-  📁 n12  high · Auth flow redesign · 2📁 4📄
-    📄 o31  med · JWT validation moved to middleware
-  📁 n8   high · Decisions · 5📄
-📁 n5   med · Scratch · 2📄
+📁 nGoal · crit · The session goal · 3📁 1📄 · Jul 28 14:30
+  📁 n12 · high · Auth flow redesign · 2📁 4📄 · Jul 28 14:30 — Jul 29 09:15
+    📄 o31 · med · JWT validation moved to middleware · Jul 28 14:30
+  📁 n8 · high · Decisions · 5📄 · Jul 28 14:30 — Jul 29 09:15
+  📁 n6 · 📦low · Old login form · 2📄 · Jul 27 09:00 — Jul 27 18:00
+  📁 n3 · 🪦med · YAML config · → n8 · Jul 27 09:00
+📁 n5 · med · Scratch · 2📄 · Jul 28 14:30 — Jul 29 09:15
 ```
 
-(*📁* node · *📄* observation; importance *crit*/*high*/*med*/*low*; state glyphs *📦* archived · *🪦* obsolete.)
+(*📁* node · *📄* observation; importance *crit*/*high*/*med*/*low*; state glyphs *📦* archived · *🪦* obsolete · *🆕* new, Builder view only.)
 
 **How the agent operates it.** The Builder and Selector navigate and edit the graph with filesystem-style tools — `ls`, `cat`, `find` to read; `mkdir`, `mv`, `merge`, `supersede`, `set_meta` (Builder) / `set_summary` (Selector) to reorganize; `try_finish` to converge the root view on its budget. The Builder maintains the source graph; the Selector builds a curated copy (the active set) for the summary. The agent itself uses the read-only `mk_recall` to fetch and search on demand.
 

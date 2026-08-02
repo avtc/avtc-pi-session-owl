@@ -22,6 +22,7 @@
   "files": [
     "index.ts",
     "src/",
+    "docs/",
     "LICENSE",
     "README.md"
   ],
