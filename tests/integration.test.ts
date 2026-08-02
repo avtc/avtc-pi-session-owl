@@ -37,11 +37,20 @@ import {
   DEFAULT_CONFIG,
 } from "../src/config/schema.js";
 import memkeeperExtension from "../src/index.js";
-import { runStage } from "../src/runtime/agent-loop.js";
+import { runStage, type StageRunResult } from "../src/runtime/agent-loop.js";
 import { _resetRunLock, inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
 import { N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
-import { EMPTY_RESULT } from "./helpers/integration-fakes.js";
+
+/** A no-op agent-loop result (no messages, zero usage). The default per-scenario
+ *  runStage script; the module mock in this file delegates to a script set via
+ *  `vi.mocked(runStage).mockImplementation`. */
+const EMPTY_RESULT: StageRunResult = {
+  messages: [],
+  usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
+  streamingOutputTokens: 0,
+  aborted: false,
+};
 
 // --- fake session entries --------------------------------------------------
 
