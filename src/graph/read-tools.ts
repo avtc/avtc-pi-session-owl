@@ -12,13 +12,7 @@
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import {
-  formatNodeLine,
-  formatObservationLine,
-  formatTimestamp,
-  importanceAbbr,
-  type RenderViewer,
-} from "../format/render.js";
+import { formatNodeLine, formatObservationLine, type RenderViewer } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
 import { PageSchema } from "../schema.js";
 import {
@@ -276,10 +270,12 @@ export function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentT
   };
 }
 
-/** A content-free header for a cat observation block: id · importance · timestamp
- *  (NO content — that's the body; NO sourceEntryIds — provenance is internal). */
+/** A content-free header for a cat observation block: `📄 id · importance · timestamp`
+ *  (NO content — that's the body; NO sourceEntryIds — provenance is internal).
+ *  Delegates to the shared formatObservationLine with content omitted, so the
+ *  header stays byte-identical to every other observation line prefix. */
 export function catObsHeader(obs: Observation): string {
-  return `📄 ${obs.id} ${importanceAbbr(obs.importance)} · ${formatTimestamp(obs.timestamp)}`;
+  return formatObservationLine(obs, { viewer: "nonBuilder", formatContent: () => "" });
 }
 
 /** A paginated cat unit: one observation full-text (header + content), with an

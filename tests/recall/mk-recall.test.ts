@@ -241,6 +241,9 @@ describe("mk_recall", () => {
       const out = text(await recall(tool(), { ids: ["o5"] }));
       expect(out).toContain("o5");
       expect(out).toContain("Chose JWT for stateless auth");
+      // observation line uses the shared ·-delimited format (no stale space between
+      // id and importance); the default terse path carries content + timestamp.
+      expect(out).toContain("📄 o5 · high · Chose JWT for stateless auth · Jul 17 14:30");
     });
 
     it("bypasses includeSuperseded — a superseded node still returns with its replacement", async () => {

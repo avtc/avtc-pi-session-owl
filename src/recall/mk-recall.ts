@@ -13,8 +13,7 @@ import { Type } from "typebox";
 import { getMemkeeperSettings } from "../config/schema.js";
 import {
   formatNodeLine,
-  formatTimestamp,
-  importanceAbbr,
+  formatObservationLine,
   type RenderableNode,
   type RenderableObservation,
   type RenderViewer,
@@ -262,22 +261,17 @@ function renderObservationBlock(
   return terseObservationLine(obs, options.showParent);
 }
 
-/** A terse observation line: single-lined + capped content with parent + time. */
+/** A terse observation line: delegates to the shared formatObservationLine with
+ *  terse (truncated) content, so the prefix stays byte-identical to every other
+ *  observation line. */
 function terseObservationLine(obs: RenderableObservation, showParent: string | undefined): string {
-  const parts: string[] = [`📄 ${obs.id} ${importanceAbbr(obs.importance)}`];
-  const content = terseSingleLine(obs.content);
-  if (content !== "") parts.push(content);
-  if (showParent !== undefined) parts.push(`in ${showParent}`);
-  parts.push(formatTimestamp(obs.timestamp));
-  return parts.join(" · ");
+  return formatObservationLine(obs, { viewer: VIEWER, showParent, formatContent: terseSingleLine });
 }
 
-/** An observation header carrying no content: `📄 id importance · [in parent] · timestamp`. */
+/** An observation header carrying no content: the shared format with content
+ *  omitted (`📄 id · importance · [in parent] · timestamp`). */
 function observationHeader(obs: RenderableObservation, showParent: string | undefined): string {
-  const parts: string[] = [`📄 ${obs.id} ${importanceAbbr(obs.importance)}`];
-  if (showParent !== undefined) parts.push(`in ${showParent}`);
-  parts.push(formatTimestamp(obs.timestamp));
-  return parts.join(" · ");
+  return formatObservationLine(obs, { viewer: VIEWER, showParent, formatContent: () => "" });
 }
 
 function indent(line: string, depth: number): string {

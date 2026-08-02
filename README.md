@@ -38,7 +38,7 @@ The graph is a containment tree of **nodes** (folders) holding **observations** 
     📄 o31 · med · JWT validation moved to middleware · Jul 28 14:30
   📁 n8 · high · Decisions · 5📄 · Jul 28 14:30 — Jul 29 09:15
   📁 n6 · 📦low · Old login form · 2📄 · Jul 27 09:00 — Jul 27 18:00
-  📁 n3 · 🪦med · YAML config · → n8 · Jul 27 09:00
+  📁 n3 · 🪦med · YAML config · → n8 · 1📄 · Jul 27 09:00
 📁 n5 · med · Scratch · 2📄 · Jul 28 14:30 — Jul 29 09:15
 ```
 

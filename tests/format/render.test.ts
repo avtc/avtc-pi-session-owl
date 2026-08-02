@@ -158,6 +158,22 @@ describe("formatObservationLine", () => {
       "📄 o5 · low · a fact · in n7 · Jul 28 14:30",
     );
   });
+
+  it("applies formatContent to transform the content line", () => {
+    const obs = makeObservation({ id: "o5", content: "a fact", importance: "low", timestamp: "2026-07-28 14:30" });
+    const upper = (c: string) => c.toUpperCase();
+    expect(formatObservationLine(obs, { viewer: "nonBuilder", formatContent: upper })).toBe(
+      "📄 o5 · low · A FACT · Jul 28 14:30",
+    );
+  });
+
+  it("omits the content segment when formatContent returns empty (content-free header)", () => {
+    const obs = makeObservation({ id: "o5", content: "a fact", importance: "low", timestamp: "2026-07-28 14:30" });
+    const none = () => "";
+    expect(formatObservationLine(obs, { viewer: "nonBuilder", showParent: "n7", formatContent: none })).toBe(
+      "📄 o5 · low · in n7 · Jul 28 14:30",
+    );
+  });
 });
 
 describe("RENDER_LEGEND", () => {

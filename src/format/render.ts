@@ -110,6 +110,9 @@ function childCounts(node: RenderableNode): string {
 interface LineOptions {
   viewer: RenderViewer;
   showParent?: string;
+  /** Transform (or omit) the observation content line. Default: `singleLine`.
+   *  Return "" to render a content-free header. Node lines ignore this. */
+  formatContent?: (content: string) => string;
 }
 
 /** Structural node shape the line helpers read (satisfied by both the in-memory
@@ -150,7 +153,8 @@ export function formatNodeLine(node: RenderableNode, options: LineOptions): stri
 /** Render one observation as a line (no indent — callers apply depth indentation). */
 export function formatObservationLine(obs: RenderableObservation, options: LineOptions): string {
   const parts: string[] = [`📄 ${obs.id} · ${importanceAbbr(obs.importance)}`];
-  const content = singleLine(obs.content);
+  const formatContent = options.formatContent ?? singleLine;
+  const content = formatContent(obs.content);
   if (content !== "") parts.push(content);
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
   parts.push(formatTimestamp(obs.timestamp));

@@ -188,7 +188,9 @@ describe("Builder read tools", () => {
       const out = textOf(await callTool(tools(), "cat", { ids: ["o5"] }));
       expect(out).toContain("Chose JWT for stateless auth");
       expect(out).toContain("o5");
-      // header is id · importance · timestamp; no sourceEntryIds provenance rendered.
+      // header is exactly `📄 id · importance · timestamp` (· separators, matching
+      // the shared one-line render format); no sourceEntryIds provenance rendered.
+      expect(out).toContain("📄 o5 · high · Jul 29 09:00");
       expect(out).not.toContain("sourceEntryIds");
       // content appears EXACTLY ONCE — the header is content-free (id·importance·timestamp).
       const occurrences = out.split("Chose JWT for stateless auth").length - 1;
