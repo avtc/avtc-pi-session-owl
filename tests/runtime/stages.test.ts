@@ -3,7 +3,8 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { makeObserverRun } from "../../src/runtime/stages.js";
+import { makeObserverRun, makeSelectorRun } from "../../src/runtime/stages.js";
+import type { SelectorRunInput } from "../../src/selector/run.js";
 import { onTurnEnd, setStageRuns } from "../../src/triggers.js";
 import { NO_OP_WIDGET } from "../../src/widget/tracker.js";
 
@@ -78,5 +79,52 @@ describe("makeObserverRun (Observer stage wiring)", () => {
 
     // restore no-op stage runs so other tests aren't affected
     setStageRuns({ runObserver: async () => {}, runBuilder: async () => {}, runSelector: async () => {} });
+  });
+});
+
+describe("makeSelectorRun (Selector stage wiring)", () => {
+  it("forwards ctx/pi/settings/signal/scope/widget into SelectorRunInput + reads todo live", async () => {
+    const captured: SelectorRunInput[] = [];
+    const fakeRunSelector = async (input: SelectorRunInput) => {
+      captured.push(input);
+    };
+    const pi = { marker: "pi-instance" } as unknown as ExtensionAPI;
+    const widget = { marker: "widget-instance" } as unknown as typeof NO_OP_WIDGET;
+    // a mutable todo wiring — simulates avtc-pi-todo appearing mid-session.
+    let todoContext: unknown = null;
+    let todoBridge: unknown = null;
+    const todo = {
+      getContext: () => todoContext as SelectorRunInput["todo"],
+      getBridge: () => todoBridge as SelectorRunInput["todoBridge"],
+    };
+
+    const runFn = makeSelectorRun(pi, widget, fakeRunSelector, todo);
+
+    const ctx = { marker: "ctx" } as unknown as ExtensionContext;
+    const signal = new AbortController().signal;
+    const settings = { marker: "settings" } as unknown as Parameters<typeof runFn>[0]["settings"];
+
+    // before avtc-pi-todo appears: todo context + bridge are null.
+    await runFn({ ctx, settings, signal, scope: null, unobserved: null });
+
+    // now avtc-pi-todo fires pi-todo:ready — the live read picks it up.
+    todoContext = { marker: "todo-context" } as unknown;
+    todoBridge = { marker: "todo-bridge" } as unknown;
+    await runFn({ ctx, settings, signal, scope: { firstKeptEntryId: "cut-1" }, unobserved: null });
+
+    expect(captured.length).toBe(2);
+    // first call: background scope (null) + no todo.
+    expect(captured[0]?.scope).toBeNull();
+    expect(captured[0]?.todo).toBeNull();
+    expect(captured[0]?.todoBridge).toBeNull();
+    expect(captured[0]?.widget).toBe(widget);
+    const firstPi = captured[0]?.pi as { marker?: string } | undefined;
+    expect(firstPi?.marker).toBe("pi-instance");
+    // second call: compaction scope + live todo (picked up mid-session).
+    expect(captured[1]?.scope).toEqual({ firstKeptEntryId: "cut-1" });
+    const secondTodo = captured[1]?.todo as { marker?: string } | null;
+    const secondBridge = captured[1]?.todoBridge as { marker?: string } | null;
+    expect(secondTodo?.marker).toBe("todo-context");
+    expect(secondBridge?.marker).toBe("todo-bridge");
   });
 });

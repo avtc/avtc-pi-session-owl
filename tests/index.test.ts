@@ -7,7 +7,7 @@ import type {
   SessionBeforeCompactEvent,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the dependencies index.ts wires (isolate the activate WIRING from their
 // real implementations, which have their own tests).
@@ -68,7 +68,12 @@ vi.mock("../src/todo/wiring.js", () => ({
 }));
 
 import { compactionHook } from "../src/compaction/hook.js";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
+import {
+  _resetGetMemkeeperSettings,
+  _resetMemkeeperSettingsHandle,
+  _setGetMemkeeperSettings,
+  DEFAULT_CONFIG,
+} from "../src/config/schema.js";
 import memkeeperExtension from "../src/index.js";
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "../src/lifecycle.js";
 import { makeBuilderRun, makeObserverRun, makeSelectorRun } from "../src/runtime/stages.js";
@@ -107,6 +112,11 @@ describe("memkeeperExtension (activate wiring)", () => {
     memkeeperExtension(makeFakePi());
   });
   afterEach(() => _resetGetMemkeeperSettings());
+
+  // activate sets the module `handle` via initMemkeeperSettings; clear it so it
+  // does not leak to later test files under isolate:false (same leak class as
+  // schema.test.ts / integration.test.ts).
+  afterAll(() => _resetMemkeeperSettingsHandle());
 
   it("registers all four lifecycle hooks", () => {
     // activate ran in beforeEach via a fresh pi; re-run to capture the handlers

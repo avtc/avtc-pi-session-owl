@@ -9,9 +9,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type BuilderRunInput, runBuilder } from "../builder/run.js";
 import { type ObserverRunInput, runObserver } from "../observer/run.js";
-import type { TodoContext } from "../selector/input-view.js";
 import { runSelector, type SelectorRunInput } from "../selector/run.js";
-import type { TodoBridge } from "../selector/tools.js";
+import type { TodoWiring } from "../todo/wiring.js";
 import type { RunFn } from "../triggers.js";
 import type { WidgetController } from "../widget/tracker.js";
 
@@ -74,14 +73,6 @@ export function makeBuilderRun(pi: ExtensionAPI, widget: WidgetController, runBu
   };
 }
 
-/** The optional avtc-pi-todo wiring the Selector reads live. `getContext()` /
- *  `getBridge()` return null until `pi-todo:ready` fires (avtc-pi-todo absent →
- *  the todo section + tool are omitted; graceful degrade, not an error). */
-export interface SelectorTodoAccess {
-  getContext(): TodoContext | null;
-  getBridge(): TodoBridge | null;
-}
-
 /**
  * Build the Selector's `RunFn`: forwards the trigger's `{ctx, settings, signal,
  *  scope}` into the run function along with the widget controller and the
@@ -94,7 +85,7 @@ export function makeSelectorRun(
   pi: ExtensionAPI,
   widget: WidgetController,
   runSelectorFn: RunSelectorFn,
-  todo: SelectorTodoAccess,
+  todo: TodoWiring,
 ): RunFn {
   return async (args) => {
     await runSelectorFn({

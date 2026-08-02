@@ -15,7 +15,7 @@ import type {
   SessionEntry,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Fake the LLM stage-runner: the real Observer/Builder/Selector orchestration
 // runs; only the agentLoop step is scripted (per-scenario via
@@ -30,7 +30,12 @@ vi.mock("../src/runtime/agent-loop.js", () => ({
   SEQUENTIAL: "sequential",
 }));
 
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
+import {
+  _resetGetMemkeeperSettings,
+  _resetMemkeeperSettingsHandle,
+  _setGetMemkeeperSettings,
+  DEFAULT_CONFIG,
+} from "../src/config/schema.js";
 import memkeeperExtension from "../src/index.js";
 import { runStage } from "../src/runtime/agent-loop.js";
 import { inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
@@ -171,6 +176,14 @@ beforeEach(() => {
 
 afterEach(() => {
   _resetGetMemkeeperSettings();
+});
+
+// activate sets the module `handle` via initMemkeeperSettings (the REAL
+// registerSettingsCommand against the fake pi). Clear it so it does not leak to
+// later test files under isolate:false (the exact leak class the worth-notes
+// warned about — schema.test.ts does the same in its file-level afterAll).
+afterAll(() => {
+  _resetMemkeeperSettingsHandle();
 });
 
 /** Parse the `E=<id>` citation markers out of a chunk's text (the Observer's
