@@ -25,6 +25,7 @@ import { OBSERVER_SYSTEM } from "../prompts/observer.js";
 import {
   NO_LOOP_OVERRIDE,
   NO_REASONING,
+  NO_TURN_LIMIT,
   runStage,
   type StageRunInput,
   type StageRunResult,
@@ -42,7 +43,6 @@ import { buildChunks, type ChunkOptions, type RenderedChunk } from "./chunk.js";
 
 export const RECORD_OBS_TOOL = "record_observations";
 const OBSERVE_STAGE = "observe" as const;
-const NO_MAX_TURNS = null;
 const NO_SOURCE_ENTRY: SessionEntry | undefined = undefined;
 const EMPTY_GAP = 0;
 const EMPTY_RECORDS = 0;
@@ -215,7 +215,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         apiKey: resolved.apiKey,
         signal: input.signal,
         reasoning: NO_REASONING,
-        maxTurns: NO_MAX_TURNS,
+        maxTurns: NO_TURN_LIMIT,
         onEvent: (event) => input.widget.onEvent(event),
         onStageEnd: ledger.onStageEnd,
         loopFn: NO_LOOP_OVERRIDE,

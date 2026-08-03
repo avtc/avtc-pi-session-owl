@@ -8,6 +8,7 @@ import type {
   SessionEntry,
   SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
+import { stripAnsi } from "../format/sanitize.js";
 import { CHARS_PER_TOKEN_ESTIMATE } from "../types.js";
 
 /**
@@ -60,21 +61,10 @@ export function isRenderableEntry(entry: SessionEntry): boolean {
 }
 
 const TRUNCATION_MARKER = "[…truncated…]";
-/** ANSI/VT escape sequences stripped from all rendered text: CSI (SGR colors,
- *  24-bit color with ':' params, cursor moves, '?' private modes) via \x1b[ or the
- *  8-bit control introducer \x9b; OSC (terminal titles, OSC-8 hyperlinks) via
- *  BEL or the String Terminator (ESC \ or \x9c). */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are the explicit target here
-const ANSI_ESCAPE_PATTERN = /\x1b\][^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)|\x1b\[[0-9;:?]*[A-Za-z]|\x9b[0-9;:?]*[A-Za-z]/g;
 const THINKING_PREFIX_PATTERN = /^Thinking:\s*/;
 const ATTR_ERROR = "error";
 
 // --- sanitization & truncation ---------------------------------------------
-
-/** Strip ANSI/VT escape sequences from text (applied to all rendered text/thinking). */
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_ESCAPE_PATTERN, "");
-}
 
 function sanitizeThinking(text: string): string {
   return stripAnsi(text).replace(THINKING_PREFIX_PATTERN, "");

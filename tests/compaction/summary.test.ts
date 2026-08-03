@@ -95,6 +95,18 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
     expect(out).toContain("Design the memkeeper extension. Brand-new; no 3rd-party reuse.");
   });
 
+  it("renders the '(none captured yet)' placeholder when oInitialPrompt is null (compaction before first user message)", () => {
+    const out = renderSummary({
+      graph: emptyGraph(),
+      selectedTree: null,
+      oInitialPrompt: null,
+      renderMode: "observations-root",
+      touchedFiles: [],
+    });
+    expect(out).toContain("## Initial prompt");
+    expect(out).toContain("(none captured yet)");
+  });
+
   it("renders the ## Recently touched section with the touched-file lines", () => {
     const out = renderSummary({
       graph: emptyGraph(),

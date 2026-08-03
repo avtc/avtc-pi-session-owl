@@ -217,6 +217,10 @@ export function applyCreateNode(
     importance: Importance;
     parentNode: NodeId | null;
     state: Node["state"];
+    /** Skip the trailing assertStructural when the caller asserts itself right
+     *  after (e.g. applyMerge creates a new root then validates the whole merge).
+     *  Default false — standalone mkdir keeps its check. */
+    skipStructural?: boolean;
   },
 ): CreateNodeDelta {
   if (graph.nodes.has(args.id)) {
@@ -244,8 +248,10 @@ export function applyCreateNode(
     }
   }
   if (graph.nextNodeId <= parseSeq(args.id)) graph.nextNodeId = parseSeq(args.id) + 1;
-  assertStructural(graph, "create_node");
-  return { ...args, type: "create_node" };
+  if (args.skipStructural !== true) assertStructural(graph, "create_node");
+  const { skipStructural: _omit, ...delta } = args;
+  void _omit;
+  return { ...delta, type: "create_node" };
 }
 
 export function applyRecordObservation(graph: MemkeeperGraph, args: { obs: Observation }): RecordObservationDelta {
@@ -407,6 +413,7 @@ export function applyMerge(
       importance: "medium",
       parentNode: null,
       state: "active",
+      skipStructural: true,
     });
     dest = requireNode(graph, newId, "merge");
   } else {

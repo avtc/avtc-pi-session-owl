@@ -18,6 +18,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings } from "./config/schema.js";
 import { toStoredTimestamp } from "./format/render.js";
+import { stripAnsi } from "./format/sanitize.js";
 import { applyCreateNode, applyRecordObservation, applySetMeta, MUTATE_SOURCE } from "./graph/mutations.js";
 import { abortInFlight } from "./runtime/run-lock.js";
 import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
@@ -147,7 +148,7 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
     (entry): entry is SessionMessageEntry => entry.type === "message" && entry.message.role === "user",
   );
   if (firstUser === undefined) return; // no user message yet
-  const text = extractMessageText(firstUser.message);
+  const text = stripAnsi(extractMessageText(firstUser.message));
   if (text.length === 0) return;
 
   // record oInitialPrompt under nGoal (built once via makeObservation; the

@@ -236,6 +236,18 @@ describe("runObserver", () => {
     expect(obs?.timestamp).toBe("2026-07-29T09:22:50.283Z");
   });
 
+  it("writes no memkeeper.usage entry when no chunk reports usage (the hasUsage guard)", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // empty unobserved → zero chunks → the stage opens with 0 batches but no
+    // per-chunk onStageEnd fires, so hasUsage() stays false and no usage delta
+    // is persisted.
+    const script = scriptedRunStage([]);
+    await runObserver(makeArgs({ pi, ctx, unobserved: [], runStageFn: script.fn }));
+    expect(script.calls).toBe(0);
+    expect(appended.filter((e) => e.type === "memkeeper.usage")).toHaveLength(0);
+  });
+
   it("skips + notifies when the model cannot be resolved (no model available)", async () => {
     const { pi, appended } = makeFakePi();
     // a ctx with no resolvable model and no session model

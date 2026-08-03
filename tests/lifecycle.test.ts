@@ -263,6 +263,19 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(getGraphStore().graph.nodes.get(N_GOAL)?.summary).toBe("Build the memory extension");
   });
 
+  it("strips ANSI escape sequences from the captured prompt (same surface as Observer)", async () => {
+    // A pasted ANSI sequence (e.g. a color code) must not leak into the stored
+    // oInitialPrompt / injected summary — every observation is sanitized.
+    const ansiRed = "\u001b[31m";
+    const branch = [userEntry("u1", `${ansiRed}Build the memory extension`)];
+    const { ctx, pi } = makeCtx(branch);
+    await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
+    captureInitialPromptIfAbsent(ctx, pi);
+    const obs = getGraphStore().graph.observations.get(O_INITIAL_PROMPT);
+    expect(obs?.content).toBe("Build the memory extension");
+    expect(obs?.content).not.toContain(ansiRed);
+  });
+
   it("persist the capture (observation entry + graph deltas incl. set_meta)", async () => {
     const branch = [userEntry("u1", "do the thing")];
     const { ctx, pi, appended } = makeCtx(branch);
