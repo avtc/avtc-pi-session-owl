@@ -102,7 +102,7 @@ function makeSupersedeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool
           applySupersede(
             graph,
             { nodeId: params.nodeId as NodeId, supersededNodeIds: params.supersededNodeIds as NodeId[] },
-            MUTATE_SOURCE,
+            ctx.policy,
           ),
         () => `Superseded ${params.supersededNodeIds.length} node(s) with ${params.nodeId}.`,
       );
@@ -146,7 +146,7 @@ function makeSetMetaTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<t
               obsolete: params.obsolete ?? null,
               summary: params.summary ?? null,
             },
-            MUTATE_SOURCE,
+            ctx.policy,
           ),
         () => `Updated ${params.nodeId}.`,
       );

@@ -27,8 +27,8 @@ import type { ConvergenceOutcome } from "../runtime/convergence.js";
 import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify } from "../runtime/model.js";
-import { decodeNode, encodeSelection } from "../store/codecs.js";
-import { getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
+import { decodeNode, encodeSelection, type SerializedSelection } from "../store/codecs.js";
+import { type GraphStore, getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
 import {
   estimateContentTokens,
   type MemkeeperGraph as Graph,
@@ -260,7 +260,7 @@ function passMessages(working: SelectorInputView["workingCopy"], contextView: st
 /** Reuse the cached tree when it exists, fits the threshold, and still covers
  *  the current observation frontier (not stale). */
 function canReuseCachedTree(
-  store: ReturnType<typeof getGraphStore>,
+  store: GraphStore,
   threshold: number,
   ctx: ExtensionContext,
   firstKeptEntryId: string | null,
@@ -295,7 +295,7 @@ function canReuseCachedTree(
  *  `renderRootView` measures it exactly as try_finish would. Bounded by the
  *  cached tree size (≤ selectorRootViewThreshold); cheap for a fast-path that
  *  skips an LLM run. */
-function materializeSnapshot(cached: NonNullable<ReturnType<typeof getGraphStore>["selectedTree"]>): Graph {
+function materializeSnapshot(cached: SerializedSelection): Graph {
   const nodes = new Map<NodeId, Node>();
   for (const sn of cached.nodes) {
     const node = decodeNode(sn);
@@ -333,7 +333,7 @@ function buildInputView(sourceGraph: Graph, input: SelectorRunInput): SelectorIn
 // --- persist ---------------------------------------------------------------
 
 /** Persist the working copy as a self-contained selected-tree snapshot. */
-function persistResult(store: StoreContext, graphStore: ReturnType<typeof getGraphStore>, workingGraph: Graph): void {
+function persistResult(store: StoreContext, graphStore: GraphStore, workingGraph: Graph): void {
   const oInitialPromptId = workingGraph.observations.has(O_INITIAL_PROMPT) ? O_INITIAL_PROMPT : NO_PROMPT_OBS;
   const snapshot = encodeSelection(workingGraph, oInitialPromptId, graphStore.observerFrontier);
   persistSelectedTree(store, snapshot);

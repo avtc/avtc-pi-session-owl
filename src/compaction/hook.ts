@@ -23,7 +23,6 @@ import type {
 import type { BuilderRunInput } from "../builder/run.js";
 import { runBuilder as realRunBuilder } from "../builder/run.js";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
-import { measureRootViewTokens } from "../graph/read-tools.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
 import { isRenderableEntry } from "../observer/chunk.js";
@@ -140,12 +139,10 @@ export async function compactionHook(
     }
     if (signal.aborted) return cancelAborted(ctx);
 
-    // (b) Builder — fast-path skip when the root view is already under threshold;
-    // otherwise process all unstructured (new) nodes across the whole graph.
-    const graph = getGraphStore().graph;
-    if (measureRootViewTokens(graph, "builder") >= settings.builderRootViewThreshold) {
-      await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget });
-    }
+    // (b) Builder — always called; it owns the internal fast-path (root view
+    // under threshold → flush `new` nodes and skip LLM passes). Processing all
+    // `new` nodes across the whole graph (no firstKeptEntryId filtering).
+    await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget });
     if (signal.aborted) return cancelAborted(ctx);
 
     // (c) Selector — only selected-root; always called (the Selector owns the internal

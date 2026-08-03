@@ -365,9 +365,57 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     expect(newNodes.length).toBe(0);
     // the selected tree was built + persisted (selected-root default).
     expect(getGraphStore().selectedTree).not.toBeNull();
-    // C4 structural invariant: every observation under exactly one existing
+    // structural invariant: every observation under exactly one existing
     // node, containment tree acyclic + consistent, nGoal invariants hold.
     expect(() => validateGraph(getGraphStore().graph)).not.toThrow();
+  });
+
+  it("compaction flushes new nodes to active even when the Builder fast-path skips LLM passes (root view under threshold)", async () => {
+    // The R7-2 scenario: in the default profile, when the root view stays under
+    // builderRootViewThreshold at compaction, the Builder is fast-path-skipped
+    // — but its flush_new must STILL run so new wrapper nodes (from Observer
+    // catch-up) don't linger as state:'new' indefinitely.
+    const branch: FakeEntry[] = [
+      userEntry("u1", "Fix the login bug"),
+      assistantEntry("a1", "x".repeat(600)),
+      userEntry("u2", "keep working"),
+      assistantEntry("a2", "z".repeat(600)),
+    ];
+    const state: FakePiState = { branch, appendedEntries: [] };
+    _setGetMemkeeperSettings(() => ({
+      ...DEFAULT_CONFIG,
+      observerThresholdTokens: 50,
+      // HIGH threshold → Builder fast-path skips (root view well under it); the
+      // hook still calls runBuilder (no pre-gate) and runBuilder flushes new.
+      builderRootViewThreshold: 1_000_000,
+      selectorRootViewThreshold: 1_000_000,
+    }));
+    scriptObserverRecordsOnePerChunk();
+    const pi = makeFakePi() as FakePi;
+    memkeeperExtension(pi);
+    const ctx = makeFakeCtx(state);
+    await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
+    await pi.emit("turn_end", {}, ctx); // observe → new wrapper nodes at root
+    await new Promise((r) => setTimeout(r, 20));
+    // sanity: there is at least one `new` node from the catch-up before compaction.
+    const hadNew = [...getGraphStore().graph.nodes.values()].some((n) => n.state === "new");
+    expect(hadNew).toBe(true);
+
+    const compactEvt: SessionBeforeCompactEvent = {
+      type: "session_before_compact",
+      preparation: { firstKeptEntryId: "u2", tokensBefore: 50000 } as SessionBeforeCompactEvent["preparation"],
+      branchEntries: branch as unknown as SessionEntry[],
+      reason: "threshold",
+      willRetry: false,
+      signal: new AbortController().signal,
+    } as unknown as SessionBeforeCompactEvent;
+    await pi.emit("session_before_compact", compactEvt, ctx);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // the Builder fast-path ran its flush_new even though it skipped LLM passes
+    // (root view under threshold) → no node remains state:'new'.
+    const stillNew = [...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new");
+    expect(stillNew).toHaveLength(0);
   });
 
   it("enabled=false off-path: turn_end no-ops + compaction returns undefined (Pi native)", async () => {

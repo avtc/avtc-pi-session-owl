@@ -129,7 +129,7 @@ const OBSERVER_THRESHOLD_PRESETS: readonly PresetElement[] = [
 ];
 const OBSERVER_TOOL_CAP_PRESETS: readonly PresetElement[] = [100, 200, 400, 800, 1600, ["No limit", NO_LIMIT]];
 const BUILDER_EVERY_N_PRESETS: readonly PresetElement[] = [10, 20, 40, 80, 160];
-const BUILDER_CONTEXT_THRESHOLD_PRESETS: readonly PresetElement[] = [["200K", 200000]];
+const CONTEXT_THRESHOLD_PRESETS: readonly PresetElement[] = [["200K", 200000]];
 const ROOT_VIEW_PRESETS: readonly PresetElement[] = [
   ["10K", 10000],
   ["20K", 20000],
@@ -260,7 +260,7 @@ const SETTINGS: readonly SettingSchema[] = [
     type: "number",
     defaultValue: DEFAULT_CONFIG.builderSessionContextThresholdTokens,
     min: 1,
-    presets: BUILDER_CONTEXT_THRESHOLD_PRESETS,
+    presets: CONTEXT_THRESHOLD_PRESETS,
   }),
   setting("builderRootViewThreshold", {
     label: "Builder root view threshold",
@@ -294,7 +294,7 @@ const SETTINGS: readonly SettingSchema[] = [
     type: "number",
     defaultValue: DEFAULT_CONFIG.selectorSessionContextThresholdTokens,
     min: 1,
-    presets: BUILDER_CONTEXT_THRESHOLD_PRESETS,
+    presets: CONTEXT_THRESHOLD_PRESETS,
   }),
   setting("selectorRootViewThreshold", {
     label: "Selector root view threshold",

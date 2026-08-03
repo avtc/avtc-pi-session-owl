@@ -170,7 +170,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
  *  ≥1 applied mutates → swallowed (counts as a finished pass, partial kept). */
 async function runPass(
   input: BuilderRunInput,
-  graph: ReturnType<typeof getGraphStore>["graph"],
+  graph: MemkeeperGraph,
   resolved: { model: StageRunInput["model"]; apiKey: string | undefined },
   tools: ReturnType<typeof makeBuilderTools>,
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>,

@@ -203,13 +203,15 @@ describe("compactionHook", () => {
     expect(calls.order).toEqual(["observer", "builder", "selector"]);
   });
 
-  it("skips Builder when the root view is under builderRootViewThreshold (fast-path)", async () => {
-    seedStoreGraph(); // only nGoal → tiny root view
+  it("calls Builder unconditionally — the run owns the internal fast-path (no hook pre-gate)", async () => {
+    seedStoreGraph(); // only nGoal → tiny root view (under threshold)
     const calls = newCalls();
     setCompactionStageRuns(fakeRuns(calls));
 
     await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET, TODO_ABSENT);
-    expect(calls.builder).toBe(0);
+    // the hook no longer pre-gates; runBuilder is always called and does the
+    // fast-path (flush `new` + skip LLM passes) itself when under threshold.
+    expect(calls.builder).toBe(1);
   });
 
   it("skips the Selector when renderMode is observations-root", async () => {
@@ -220,8 +222,8 @@ describe("compactionHook", () => {
 
     await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET, TODO_ABSENT);
     expect(calls.selector).toBe(0);
-    // Builder + Observer still ran.
-    expect(calls.builder).toBe(0); // fast-path (tiny root view)
+    // Observer + Builder still ran (Builder always called; owns the fast-path).
+    expect(calls.builder).toBe(1);
   });
 
   it("skips Observer catch-up when the frontier-to-cut gap is empty", async () => {

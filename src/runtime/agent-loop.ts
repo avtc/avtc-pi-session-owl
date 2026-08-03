@@ -69,16 +69,14 @@ export interface StageRunInput {
   loopFn: typeof agentLoop | null;
 }
 
-/** A stage run failure carrying the partial usage accumulated before the throw. */
+/** A stage run failure. The `onStageEnd` hook fires in `runStage`'s finally
+ *  regardless of success/failure, so the ledger already folds partial usage —
+ *  this error carries only the cause (no redundant usage/aborted fields). */
 export class StageRunError extends Error {
-  readonly partialUsage: StageUsage;
-  readonly aborted: boolean;
-  constructor(cause: unknown, partialUsage: StageUsage, aborted: boolean) {
+  constructor(cause: unknown) {
     const msg = cause instanceof Error ? cause.message : String(cause);
     super(`stage run failed: ${msg}`, { cause });
     this.name = "StageRunError";
-    this.partialUsage = partialUsage;
-    this.aborted = aborted;
   }
 }
 
@@ -171,7 +169,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     const outputTokens = usage.output > 0 ? usage.output : fallbackTokens;
     return { messages, usage, outputTokens, aborted: input.signal.aborted };
   } catch (cause) {
-    throw new StageRunError(cause, usage, input.signal.aborted);
+    throw new StageRunError(cause);
   } finally {
     if (input.onStageEnd !== null) input.onStageEnd(usage);
   }

@@ -24,6 +24,7 @@ import {
   DEFAULT_TAKE,
   isVisible,
   NO_AFTER_ID,
+  orderActiveSetRoots,
   paginate,
   type ResolvedPage,
   resolvePage,
@@ -440,18 +441,21 @@ function buildSearchCandidates(
  *  `includeSuperseded` is true, obsolete roots are included too (shown with 🪦
  *  + → supersededBy) so the modifier is never silently dropped. */
 function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean): SearchCandidate[] {
-  const candidates: SearchCandidate[] = [];
+  const roots: RenderableNode[] = [];
   for (const node of target.nodes.values()) {
     if (node.parentNode !== null) continue;
     if (!isVisible(node.state, includeSuperseded)) continue;
-    candidates.push({
-      id: node.id,
-      key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
-      line: formatNodeLine(node, { viewer: VIEWER }),
-    });
+    roots.push(node);
   }
-  candidates.sort(compareCandidates);
-  return candidates;
+  // nGoal first, nIrrelevant last, the rest by importance/recency — the same
+  // canonical ordering as the compaction summary and /mk:ls, so the agent's
+  // browse view matches its injected memory.
+  const ordered = orderActiveSetRoots(roots);
+  return ordered.map((node) => ({
+    id: node.id,
+    key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
+    line: formatNodeLine(node, { viewer: VIEWER }),
+  }));
 }
 
 // --- footer ----------------------------------------------------------------

@@ -436,7 +436,7 @@ describe("runStage — abort", () => {
 });
 
 describe("runStage — error propagation", () => {
-  it("throws StageRunError carrying partial usage + aborted flag", async () => {
+  it("throws StageRunError on a stage failure", async () => {
     const events: AgentEvent[] = [messageEnd(usageOf(5, 2, 0, 0))];
     const rejecting: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _c, _cfg, signal) =>
       new RejectingStream(events, signal) as unknown as EventStream<AgentEvent, AgentMessage[]>;
@@ -445,9 +445,6 @@ describe("runStage — error propagation", () => {
       throw new Error("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(StageRunError);
-      const e = err as StageRunError;
-      expect(e.partialUsage).toEqual({ input: 5, output: 2, cacheRead: 0, cost: 0, turns: 0 });
-      expect(e.aborted).toBe(false);
     }
   });
 });

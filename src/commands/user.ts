@@ -21,6 +21,7 @@ import {
   directChildren,
   type IncludeSuperseded,
   nonObsoleteRoots,
+  orderActiveSetRoots,
   renderCatUnit,
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
@@ -98,7 +99,7 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
   const lines: string[] = [];
   if (idArg === null) {
     // roots: non-obsolete only (obsolete hidden by default — use /mk:find-all).
-    for (const node of nonObsoleteRoots(graph)) {
+    for (const node of orderActiveSetRoots(nonObsoleteRoots(graph))) {
       lines.push(formatNodeLine(node, { viewer: VIEWER }));
     }
     const { text } = formatList(lines, resolveCap());
