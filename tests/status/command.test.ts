@@ -333,6 +333,36 @@ describe("runMkStatus (handler)", () => {
     expect(notified[0].text).toContain("1 compaction");
   });
 
+  it("empty branch → sessionStartMs falls back to Date.now() (no NaN duration)", async () => {
+    resetForNewSession();
+    const notified: { text: string; level: string }[] = [];
+    const ctx = {
+      ui: { notify: async (text: string, level: string) => notified.push({ text, level }) },
+      sessionManager: { getLeafId: () => "leaf-1", getBranch: () => [] },
+    } as unknown as ExtensionCommandContext;
+    await runMkStatus("", ctx);
+    expect(notified[0].level).toBe("info");
+    // duration must be a finite number (NaN would render as “NaN” in the Session line)
+    expect(notified[0].text).toContain("Session");
+    expect(notified[0].text).not.toContain("NaN");
+  });
+
+  it("malformed (non-numeric) timestamp → sessionStartMs falls back to Date.now() (no NaN duration)", async () => {
+    resetForNewSession();
+    const notified: { text: string; level: string }[] = [];
+    const ctx = {
+      ui: { notify: async (text: string, level: string) => notified.push({ text, level }) },
+      sessionManager: {
+        getLeafId: () => "leaf-1",
+        getBranch: () => [{ type: "message", timestamp: "not-a-date" }],
+      },
+    } as unknown as ExtensionCommandContext;
+    await runMkStatus("", ctx);
+    expect(notified[0].level).toBe("info");
+    expect(notified[0].text).toContain("Session");
+    expect(notified[0].text).not.toContain("NaN");
+  });
+
   it("error path → notifies at error level with the reason", async () => {
     const notified: { text: string; level: string }[] = [];
     const ctx = {

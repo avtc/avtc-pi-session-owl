@@ -112,10 +112,7 @@ export async function compactionHook(
   const settings = settingsGetter();
 
   // Honor Pi's compaction signal: if Pi already gave up before we start, bail.
-  if (event.signal.aborted) {
-    notify(ctx, "memkeeper compaction canceled: compaction aborted", "warning");
-    return CANCEL_RESULT;
-  }
+  if (event.signal.aborted) return cancelAborted(ctx);
 
   const firstKeptEntryId = event.preparation.firstKeptEntryId;
 

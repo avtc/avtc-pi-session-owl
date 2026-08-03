@@ -307,11 +307,13 @@ type CharClass =
   | { kind: "unknown" }; // can't statically classify → conservative overlap
 
 const DIGIT_CHARS = "0123456789";
-/** Reject a chain of this many (or more) imprecise quantifiers in one path —
- *  k such quantifiers cost O(n^k); k≥3 is polynomially dangerous on realistic
- *  observation/summary lengths (hundreds of chars). Conservative per the
- *  stated policy (false positives acceptable, false negatives not). */
-const IMPRECISE_CHAIN_MAX = 3;
+/** Reject a run of this many (or more) ADJACENT OVERLAPPING unbounded
+ *  quantifiers in one path — k such quantifiers that partition a common span
+ *  cost O(n^k) when a later part fails to match. k≥2 is the danger threshold:
+ *  `a+a+b` (2) freezes V8 for ~0.8s at 2000 chars, `a+a+a+b` (3) for ~29s at
+ *  1000. Conservative per the stated policy (false positives acceptable, false
+ *  negatives not). */
+const IMPRECISE_CHAIN_MAX = 2;
 const WORD_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
 const SPACE_CHARS =
   " \f\n\r\t\v\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
@@ -346,6 +348,29 @@ function expandClassBody(classBody: string): Set<string> {
   return chars;
 }
 
+/** Parse a `[...]` character class starting at the `[` (index `start`) into a
+ *  CharClass, returning the class and the index just past the closing `]`
+ *  (or past the scanned body if no `]` closes it). Shared by `firstCharClass`
+ *  and the operand scanner in `polynomialQuantifierChain`. */
+function parseCharClass(s: string, start: number): { cls: CharClass; next: number } {
+  let end = start + 1;
+  while (end < s.length) {
+    if (s[end] === "\\") end += 1;
+    if (s[end] === "]") break;
+    end += 1;
+  }
+  const inner = s.slice(start + 1, end);
+  const negated = inner.startsWith("^");
+  const body = negated ? inner.slice(1) : inner;
+  const cls: CharClass =
+    body === ""
+      ? { kind: "universal" }
+      : negated
+        ? { kind: "complement", exclude: expandClassBody(body) }
+        : { kind: "explicit", chars: expandClassBody(body) };
+  return { cls, next: end + 1 };
+}
+
 /** First character class a branch can match (skipping zero-width anchors `^$` and
  *  `\b`/`\B`). Recurses one level into a leading `(` group. Returns `unknown`
  *  when the leading element can't be statically classified (e.g. a backreference
@@ -369,18 +394,8 @@ function firstCharClass(branch: string): CharClass {
     if (c === ".") return { kind: "universal" };
     if (c === "[") {
       // parse the char class up to its closing ]
-      let end = k + 1;
-      while (end < branch.length) {
-        if (branch[end] === "\\") end += 1;
-        if (branch[end] === "]") break;
-        end += 1;
-      }
-      const inner = branch.slice(k + 1, end);
-      const negated = inner.startsWith("^");
-      const body = negated ? inner.slice(1) : inner;
-      if (body === "") return { kind: "universal" }; // `[^]` matches everything
-      const chars = expandClassBody(body);
-      return negated ? { kind: "complement", exclude: chars } : { kind: "explicit", chars };
+      const { cls } = parseCharClass(branch, k);
+      return cls;
     }
     if (c === "(") return { kind: "unknown" }; // group/lookahead — recurse not worth it here
     return { kind: "explicit", chars: new Set([c]) }; // literal char
@@ -457,103 +472,136 @@ function hasQuantifiedBackreference(pattern: string): boolean {
   return false;
 }
 
+/** New adjacent-overlapping run length after seeing an unbounded quantifier
+ *  over `operand`: extend the prior run (`chain + 1`) when the previous
+ *  quantifier is exactly one operand atom away with an intersecting operand
+ *  class, else start a fresh run (1). Pure — no shared mutable state. */
+function adjacentOverlapChain(
+  chain: number,
+  lastQuant: { operand: CharClass; atomsSince: number } | null,
+  operand: CharClass,
+): number {
+  if (lastQuant && lastQuant.atomsSince === 1 && classesIntersect(lastQuant.operand, operand)) return chain + 1;
+  return 1;
+}
+
 /** Detect a polynomial-backtracking shape the star-height + alternation
- *  checks miss: a CHAIN of imprecise quantifiers in one matching path
- *  (e.g. `.*a.*a.*a.*b`, `\d+\s+\d+`). Each imprecise quantifier (`*`/`+`/
- *  `{n,}` over a wide operand — `.`, `[...]`, `\d`/`\w`/`\s`, or a group) lets
- *  the engine try many ways to split the input among the chain; k such
- *  quantifiers cost O(n^k). Returns the longest imprecise-quantifier chain
- *  found. A literal-operand quantifier (`a+`, `foo*`) is NOT imprecise (its
- *  backtracking is bounded to one char) and does not extend the chain.
- *  Conservative: the chain resets at alternation `|`, anchors `^`/`$`, and
- *  group open/close. */
+ *  checks miss: a run of ADJACENT unbounded quantifiers whose operands can
+ *  match a common character (e.g. `a+a+b`, `.*.*b`, `[a-z]+[a-z]+b`,
+ *  `(.+)(.+)b`). Two unbounded quantifiers that partition a common span let
+ *  the engine try O(n^k) ways to split the input among them when a later part
+ *  fails to match; empirically `a+a+a+b` freezes V8 for ~7 minutes at 2000
+ *  chars. Returns the longest adjacent-overlapping unbounded-quantifier run.
+ *
+ *  ADJACENCY: the two quantifiers must be separated by only the second's
+ *  operand (and transparent group boundaries) — exactly one operand atom
+ *  between them. A literal atom between the quantifiers (`.*foo.*bar`, `a+b+a+`)
+ *  fails fast and BREAKS the run, so those stay safe. OVERLAP: the operands'
+ *  char-classes must intersect (both can consume the same char); disjoint
+ *  operands (`a+b+`) can't partition a common span. Literal-operand quantifiers
+ *  (`a+`) DO extend the run when their operand overlaps the prior quantifier's
+ *  operand — `a+a+b` is evil even though each operand is a single literal char.
+ *  Conservative: `unknown` operand classes (groups, backreferences) count as
+ *  overlapping; alternation `|` and anchors `^`/`$` reset the run. */
 function polynomialQuantifierChain(pattern: string): number {
   let longest = 0;
   let chain = 0;
-  let prevImprecise = false; // was the last scanned atom a wide operand?
-  let inClass = false;
-  let escaped = false;
+  // operand class of the atom immediately preceding the cursor (what a
+  // following quantifier would bind to); null after a quantifier / boundary.
+  let pendingOperand: CharClass | null = null;
+  // the most recent unbounded quantifier, tracked to detect an adjacent-
+  // overlapping continuation; `atomsSince` counts operand atoms scanned since
+  // it (group boundaries are transparent and don't count).
+  let lastQuant: { operand: CharClass; atomsSince: number } | null = null;
   let i = 0;
   while (i < pattern.length) {
     const ch = pattern[i];
-    if (escaped) {
-      escaped = false;
-      // shorthand classes are wide; any other escape is a single literal char
-      prevImprecise = ch === "d" || ch === "D" || ch === "w" || ch === "W" || ch === "s" || ch === "S";
-      i += 1;
-      continue;
-    }
     if (ch === "\\") {
-      escaped = true;
-      i += 1;
-      continue;
-    }
-    if (inClass) {
-      if (ch === "]") {
-        inClass = false;
-        prevImprecise = true; // a char class is a wide operand
-      }
-      i += 1;
+      const next = pattern[i + 1];
+      if (next === "d") pendingOperand = { kind: "explicit", chars: new Set(DIGIT_CHARS) };
+      else if (next === "w") pendingOperand = { kind: "explicit", chars: new Set(WORD_CHARS) };
+      else if (next === "s") pendingOperand = { kind: "explicit", chars: new Set(SPACE_CHARS) };
+      else if (next === "D") pendingOperand = { kind: "complement", exclude: new Set(DIGIT_CHARS) };
+      else if (next === "W") pendingOperand = { kind: "complement", exclude: new Set(WORD_CHARS) };
+      else if (next === "S") pendingOperand = { kind: "complement", exclude: new Set(SPACE_CHARS) };
+      else if (next !== undefined) pendingOperand = { kind: "explicit", chars: new Set([next]) };
+      else pendingOperand = null;
+      if (lastQuant) lastQuant.atomsSince += 1;
+      i += 2;
       continue;
     }
     if (ch === "[") {
-      inClass = true;
-      i += 1;
+      const { cls, next } = parseCharClass(pattern, i);
+      pendingOperand = cls;
+      if (lastQuant) lastQuant.atomsSince += 1;
+      i = next;
       continue;
     }
     if (ch === ".") {
-      prevImprecise = true;
+      pendingOperand = { kind: "universal" };
+      if (lastQuant) lastQuant.atomsSince += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === "(" || ch === ")") {
+      // transparent to an adjacent-quantifier run (groups don't change the
+      // matching path); don't touch pendingOperand or atomsSince.
       i += 1;
       continue;
     }
     if (ch === "|" || ch === "^" || ch === "$") {
       if (chain > longest) longest = chain;
       chain = 0;
-      prevImprecise = false;
+      lastQuant = null;
+      pendingOperand = null;
       i += 1;
       continue;
     }
-    // Group open/close `(`/`)` are TRANSPARENT to an imprecise-quantifier
-    // chain: capturing groups don't change the matching path, so a polynomial
-    // shape like `(.+a)(.+a)(.+a)b` (each group one imprecise quantifier, the
-    // groups sequential) must chain across the boundaries. Falling through to
-    // the ordinary-char branch (which leaves prevImprecise=false so a literal/
-    // group boundary correctly separates two wide quantifiers only when an
-    // intervening atom resets it) keeps the chain alive across the boundary.
-    if ((ch === "*" || ch === "+") && prevImprecise) {
-      chain += 1;
+    const operand = pendingOperand;
+    if ((ch === "*" || ch === "+") && operand) {
+      chain = adjacentOverlapChain(chain, lastQuant, operand);
       if (chain > longest) longest = chain;
-      prevImprecise = false; // a quantified atom is not itself a fresh wide operand
+      lastQuant = { operand, atomsSince: 0 };
+      pendingOperand = null;
       i += 1;
       if (pattern[i] === "?") i += 1; // non-greedy marker
       continue;
     }
     if (ch === "{") {
-      // bounded {n} or {n,m} do not extend an unbounded chain; {n,} does.
       let j = i + 1;
       while (j < pattern.length && /[\d,]/.test(pattern[j])) j += 1;
       const closed = pattern[j] === "}";
       const unbounded =
         closed && pattern.slice(i + 1, j).includes(",") && !/\d/.test(pattern.slice(i + 1, j).split(",")[1] ?? "");
-      if (closed && unbounded && prevImprecise) {
-        chain += 1;
+      if (closed && unbounded && operand) {
+        chain = adjacentOverlapChain(chain, lastQuant, operand);
         if (chain > longest) longest = chain;
+        lastQuant = { operand, atomsSince: 0 };
+      } else {
+        // bounded {n}/{n,m} or a malformed { : a bounded quantifier breaks the
+        // adjacency between two unbounded quantifiers (it can't partition a
+        // span the way an unbounded one can).
+        lastQuant = null;
       }
-      prevImprecise = false;
+      pendingOperand = null;
       i = closed ? j + 1 : j;
       if (pattern[i] === "?") i += 1;
       continue;
     }
-    // any quantifier over a precise operand, or an ordinary char: not imprecise
     if (ch === "*" || ch === "+" || ch === "?") {
-      prevImprecise = false;
+      // quantifier with no scannable operand, or a bounded `?` — breaks adjacency
+      lastQuant = null;
+      pendingOperand = null;
       i += 1;
       if (pattern[i] === "?") i += 1;
       continue;
     }
-    prevImprecise = false;
+    // ordinary literal char
+    pendingOperand = { kind: "explicit", chars: new Set([ch]) };
+    if (lastQuant) lastQuant.atomsSince += 1;
     i += 1;
   }
+  if (chain > longest) longest = chain;
   return longest;
 }
 

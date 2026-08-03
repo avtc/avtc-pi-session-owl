@@ -130,35 +130,46 @@ describe("isSafeRegex", () => {
     expect(isSafeRegex("(a|b)\\1bar")).toBe(true);
   });
 
-  it("rejects a chain of imprecise quantifiers (polynomial backtracking)", () => {
-    // k imprecise quantifiers in one path cost O(n^k); these hang V8 on
-    // realistic content lengths even though star-height is only 1.
-    expect(isSafeRegex(".*a.*a.*a.*b")).toBe(false); // 4 wildcard quantifiers
-    expect(isSafeRegex("\\d+\\s+\\d+")).toBe(false); // 3 shorthand quantifiers
-    expect(isSafeRegex("[0-9]+[a-z]+[0-9]+")).toBe(false); // 3 class quantifiers
-    expect(isSafeRegex("\\w+\\w+\\w+")).toBe(false); // 3 shorthand quantifiers
-    expect(isSafeRegex(".+.+.+")).toBe(false); // 3 wildcard quantifiers
+  it("rejects adjacent overlapping unbounded-quantifier runs (polynomial backtracking)", () => {
+    // Two (or more) unbounded quantifiers that partition a common span cost
+    // O(n^k) when a later part fails. EMPIRICALLY catastrophic: `a+a+a+b`
+    // freezes V8 ~29s @1000 chars, `\w+\w+\w+b` ~20s @500. Literal-operand
+    // quantifiers DO chain when their operand overlaps the prior one (`a+a+b`).
+    expect(isSafeRegex("a+a+b")).toBe(false); // literal operands overlap (a,a)
+    expect(isSafeRegex("a+a+a+b")).toBe(false); // 3 overlapping literal-operand quantifiers
+    expect(isSafeRegex(".*.*b")).toBe(false); // 2 adjacent wildcard quantifiers
+    expect(isSafeRegex("[a-z]+[a-z]+b")).toBe(false); // 2 overlapping class-quantifiers
+    expect(isSafeRegex("\\w+\\w+\\w+")).toBe(false); // 3 adjacent shorthand-quantifiers (overlap)
+    expect(isSafeRegex(".+.+.+")).toBe(false); // 3 adjacent wildcard quantifiers
   });
 
-  it("does NOT over-reject a short imprecise chain or precise quantifiers", () => {
-    expect(isSafeRegex("a+a+a+")).toBe(true); // literal-operand quantifiers (bounded)
-    expect(isSafeRegex("foo.*bar")).toBe(true); // 1 imprecise
-    expect(isSafeRegex(".*foo.*bar")).toBe(true); // 2 imprecise
-    expect(isSafeRegex("a.*b.*c")).toBe(true); // 2 imprecise
-    expect(isSafeRegex("\\d+")).toBe(true); // 1 imprecise
-    expect(isSafeRegex("^.*$")).toBe(true); // anchors reset the chain
+  it("does NOT over-reject disjoint or literal-separated quantifiers", () => {
+    // A literal atom between two unbounded quantifiers fails fast and BREAKS the
+    // partition, so these common search patterns stay safe even though they have
+    // multiple quantifiers. Disjoint operands (`[0-9]+[a-z]+`) can't share a span.
+    expect(isSafeRegex("foo.*bar")).toBe(true); // 1 unbounded
+    expect(isSafeRegex(".*foo.*bar")).toBe(true); // 2 unbounded, literal `foo` between
+    expect(isSafeRegex("a.*b.*c")).toBe(true); // 2 unbounded, literals between
+    expect(isSafeRegex("a+b+a+")).toBe(true); // 2 unbounded, disjoint operands (a vs b)
+    expect(isSafeRegex("[0-9]+[a-z]+[0-9]+")).toBe(true); // disjoint class-operand quantifiers
+    expect(isSafeRegex(".*a.*a.*a.*b")).toBe(true); // literals `a` between the .* (fail fast)
+    expect(isSafeRegex("\\d+\\s+\\d+")).toBe(true); // shorthand operands separated by literal-free fail
+    expect(isSafeRegex("\\d+\\.\\d+")).toBe(true); // version-number search (disjoint: digit vs dot)
+    expect(isSafeRegex("\\d+")).toBe(true); // 1 unbounded
+    expect(isSafeRegex("^.*$")).toBe(true); // anchors reset the run
   });
 
-  it("rejects a polynomial chain split across capturing groups (boundary bypass)", () => {
-    // Capturing groups are transparent to a matching path: each group holds one
-    // imprecise quantifier and the groups are sequential, so the chain must
-    // accumulate across the `(`/`)` boundaries. `(.+a)(.+a)(.+a)b` takes ~1s at
-    // 400 chars and ~29s at 800 — catastrophic if it slips through.
-    expect(isSafeRegex("(.+a)(.+a)(.+a)b")).toBe(false);
-    expect(isSafeRegex("(.*a)(.*a)(.*a)b")).toBe(false);
-    expect(isSafeRegex("(.+)(.+)(.+)")).toBe(false);
-    // k=2 across groups stays safe (consistent with the ungrouped >=3 policy)
-    expect(isSafeRegex("(.+a)(.+a)b")).toBe(true);
+  it("accumulates an adjacent-overlapping run across capturing-group boundaries", () => {
+    // Capturing groups are transparent to a matching path: two adjacent
+    // overlapping quantifiers split across `(`/`)` (`(.+)(.+)b`) are the same
+    // polynomial shape as `.*.*b` and must be rejected. `(.+)(.+)b` is
+    // EMPIRICALLY catastrophic (timed out >25s @2000).
+    expect(isSafeRegex("(.+)(.+)b")).toBe(false); // 2 adjacent wildcards across groups
+    expect(isSafeRegex("(.+)(.+)(.+)b")).toBe(false); // 3 adjacent wildcards across groups
+    expect(isSafeRegex("([a-z]+)([a-z]+)b")).toBe(false); // 2 overlapping class-quantifiers across groups
+    // a single quantifier (even in a group) is fine
+    expect(isSafeRegex("(.+)foo")).toBe(true);
+    expect(isSafeRegex("(foo)+")).toBe(true);
   });
 
   it("rejects overlapping alternation with a complement (negated) class branch", () => {

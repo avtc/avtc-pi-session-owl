@@ -233,6 +233,28 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(getGraphStore().graph.hasInitialPrompt).toBe(false);
   });
 
+  it("is a no-op when the first user message has no extractable text (image-only)", async () => {
+    // An image-only first message (content parts with no text part) extracts to
+    // ""; the empty-text guard must skip capture rather than record an empty
+    // oInitialPrompt under nGoal.
+    const branch = [
+      {
+        type: "message",
+        id: "u1",
+        timestamp: "2026-07-29T10:00:00.000Z",
+        message: { role: "user", content: [{ type: "image", source: { data: "<bytes>" } }], timestamp: Date.now() },
+      },
+    ] as unknown as FakeEntry[];
+    const { ctx, pi } = makeCtx(branch);
+    await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
+    captureInitialPromptIfAbsent(ctx, pi);
+    const graph = getGraphStore().graph;
+    expect(graph.hasInitialPrompt).toBe(false);
+    expect(graph.observations.has(O_INITIAL_PROMPT)).toBe(false);
+    // nGoal summary stays empty (no first line to seed from)
+    expect(graph.nodes.get(N_GOAL)?.summary).toBe("");
+  });
+
   it("seeds nGoal.summary from the first non-empty line (multi-line prompt)", async () => {
     const branch = [userEntry("u1", "  \nBuild the memory extension\nDetails follow")];
     const { ctx, pi } = makeCtx(branch);

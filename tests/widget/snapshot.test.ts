@@ -102,10 +102,11 @@ describe("buildSnapshot", () => {
   });
 
   it("selected section is null in observations-root renderMode even during Select", () => {
-    // observations-root is the default in this test store's settings? No — default
-    // is selected-root. Flip by re-init: buildSnapshot reads getMemkeeperSettings();
-    // verify the selected-root default shows it, then confirm gating logic via stage.
-    tracker.startStage("observe"); // not select → null regardless of renderMode
+    // Exercises the renderMode arm of the gate: stage IS select and counts ARE
+    // pushed, but renderMode is observations-root → the selected section is
+    // suppressed (observations-root has no curated selected tree).
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, renderMode: "observations-root" }));
+    tracker.startStage("select");
     tracker.setSelectedCounts(20, 15_000);
     const snap = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
     expect(snap.selected).toBeNull();

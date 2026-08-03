@@ -371,7 +371,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
   });
 
   it("compaction flushes new nodes to active even when the Builder fast-path skips LLM passes (root view under threshold)", async () => {
-    // The R7-2 scenario: in the default profile, when the root view stays under
+    // In the default profile, when the root view stays under
     // builderRootViewThreshold at compaction, the Builder is fast-path-skipped
     // — but its flush_new must STILL run so new wrapper nodes (from Observer
     // catch-up) don't linger as state:'new' indefinitely.

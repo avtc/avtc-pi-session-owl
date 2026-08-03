@@ -107,6 +107,19 @@ describe("extractTouchedFiles", () => {
     expect(files.map((f) => f.path)).toEqual(["/new.ts"]);
   });
 
+  it("scans the whole branch when sinceEntryId is not on the branch", () => {
+    // The cut id is absent (e.g. it belonged to a compacted-away block not in
+    // this active branch) → fall back to scanning from the first entry, so no
+    // file is missed. The PATH_NOT_FOUND → FIRST_ENTRY fallback.
+    const entries: SessionEntry[] = [
+      toolCallEntry("e1", "2026-07-28T10:00:00Z", "write", { path: "/old.ts" }),
+      toolCallEntry("e2", "2026-07-28T11:00:00Z", "write", { path: "/cut.ts" }),
+      toolCallEntry("e3", "2026-07-28T12:00:00Z", "write", { path: "/new.ts" }),
+    ];
+    const files = extractTouchedFiles(ctxWith(entries), "gone-entry");
+    expect(files.map((f) => f.path)).toEqual(["/old.ts", "/cut.ts", "/new.ts"]);
+  });
+
   it("returns oldest-first chronological order", () => {
     const entries: SessionEntry[] = [
       toolCallEntry("e1", "2026-07-28T15:00:00Z", "write", { path: "/late.ts" }),
