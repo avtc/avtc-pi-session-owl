@@ -38,6 +38,7 @@ function settings(over: Partial<MemkeeperConfig>): MemkeeperConfig {
     maxSelectorPasses: 5,
     renderMode: "selected-root",
     commandResultCap: 50,
+    regexTimeoutMs: 5000,
     ...over,
   };
 }

@@ -39,6 +39,9 @@ export interface MemkeeperConfig {
   builderMode: "on-compaction" | "each-N-observations" | "on-session-context-threshold" | "on-root-view-threshold";
   selectorMode: "on-compaction" | "on-session-context-threshold";
   commandResultCap: number | null;
+  /** Regex execution timeout (ms). find/mk_recall run in a worker thread; a
+   *  pattern still running past this is killed. 0 = no timeout (not advised). */
+  regexTimeoutMs: number;
   // Observer
   observerModel: string | null;
   observerThresholdTokens: number;
@@ -69,6 +72,7 @@ const DEFAULT_BUILDER_MODE = "on-compaction";
 const DEFAULT_SELECTOR_MODE = "on-compaction";
 const NO_MODEL: string | null = null;
 const NO_LIMIT: number | null = null;
+const DEFAULT_REGEX_TIMEOUT_MS = 5000;
 
 export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   // General
@@ -79,6 +83,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   builderMode: DEFAULT_BUILDER_MODE,
   selectorMode: DEFAULT_SELECTOR_MODE,
   commandResultCap: 50,
+  regexTimeoutMs: DEFAULT_REGEX_TIMEOUT_MS,
   // Observer
   observerModel: NO_MODEL,
   observerThresholdTokens: 4000,
@@ -120,6 +125,13 @@ const SELECTOR_MODE_PRESETS: readonly PresetElement[] = [
   ["On session context threshold", "on-session-context-threshold"],
 ];
 const COMMAND_RESULT_CAP_PRESETS: readonly PresetElement[] = [10, 25, 50, 100, ["No limit", NO_LIMIT]];
+const REGEX_TIMEOUT_PRESETS: readonly PresetElement[] = [
+  ["1s", 1000],
+  ["5s", 5000],
+  ["10s", 10_000],
+  ["30s", 30_000],
+  ["Off", 0],
+];
 const OBSERVER_THRESHOLD_PRESETS: readonly PresetElement[] = [
   ["1K", 1000],
   ["2K", 2000],
@@ -207,6 +219,16 @@ const SETTINGS: readonly SettingSchema[] = [
     defaultValue: DEFAULT_CONFIG.commandResultCap,
     min: 0,
     presets: COMMAND_RESULT_CAP_PRESETS,
+  }),
+  setting("regexTimeoutMs", {
+    label: "Regex timeout",
+    description:
+      "Max ms a find/mk_recall regex may run before it is killed (runs in a worker thread so pi " +
+      "stays responsive). Off = no timeout (not advised — a bad pattern can freeze pi).",
+    type: "number",
+    defaultValue: DEFAULT_CONFIG.regexTimeoutMs,
+    min: 0,
+    presets: REGEX_TIMEOUT_PRESETS,
   }),
 
   // ── Observer ───────────────────────────────────────────────────────────────
@@ -325,6 +347,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "builderMode",
       "selectorMode",
       "commandResultCap",
+      "regexTimeoutMs",
     ],
   },
   {

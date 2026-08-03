@@ -31,6 +31,7 @@ import {
   staleCursorMessage,
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
+import { runRegexTests } from "../graph/regex-runner.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, type ObsId } from "../types.js";
@@ -394,21 +395,49 @@ function resolveBounds(from: string | undefined, to: string | undefined): Resolv
   return { from: fromNorm, to: toNorm, error: null };
 }
 
-/** Build the ranked candidate list for the search/list path. */
-function buildSearchCandidates(
+/** Build the ranked candidate list for the search/list path. Async because the
+ *  regex tests run in a worker thread bounded by `regexTimeoutMs`. Returns the
+ *  candidates, or an error string the caller surfaces verbatim. */
+async function buildSearchCandidates(
   target: RecallTarget,
   regex: RegExp | null,
   bounds: ResolvedBounds,
   includeSuperseded: boolean,
   fullDetails: boolean,
-): SearchCandidate[] {
-  const candidates: SearchCandidate[] = [];
-
-  // node candidates: regex on summary only (nodes are never time-filtered)
+): Promise<{ candidates: SearchCandidate[] } | { error: string }> {
+  // gather node + observation jobs (and the text each is tested against), then
+  // batch-test every text in ONE worker round-trip.
+  const nodeJobs: { node: RenderableNode }[] = [];
+  const obsJobs: { obs: RecallObservation; parent: RenderableNode | null }[] = [];
   for (const node of target.nodes.values()) {
     if (!isVisible(node.state, includeSuperseded)) continue;
     if (regex === null) continue; // nodes are query-only
-    if (regex.test(node.summary)) {
+    nodeJobs.push({ node });
+  }
+  for (const obs of target.observations.values()) {
+    const parent = obs.parentNode === null ? null : (target.nodes.get(obs.parentNode) ?? null);
+    // parent-state gate: an obs under an obsolete node is hidden unless includeSuperseded
+    if (parent !== null && !isVisible(parent.state, includeSuperseded)) continue;
+    obsJobs.push({ obs, parent });
+  }
+
+  let nodeHits: boolean[];
+  let obsHits: boolean[];
+  if (regex === null) {
+    nodeHits = [];
+    obsHits = obsJobs.map(() => true); // no query → every obs is a text match
+  } else {
+    const texts = [...nodeJobs.map((j) => j.node.summary), ...obsJobs.map((j) => j.obs.content)];
+    const outcome = await runRegexTests(regex, texts, getMemkeeperSettings().regexTimeoutMs);
+    if ("error" in outcome) return { error: outcome.error };
+    nodeHits = outcome.results.slice(0, nodeJobs.length);
+    obsHits = outcome.results.slice(nodeJobs.length);
+  }
+
+  const candidates: SearchCandidate[] = [];
+  for (let i = 0; i < nodeJobs.length; i += 1) {
+    if (nodeHits[i]) {
+      const { node } = nodeJobs[i];
       candidates.push({
         id: node.id,
         key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
@@ -416,14 +445,10 @@ function buildSearchCandidates(
       });
     }
   }
-
-  // observation candidates: text match (when query set) AND time range
-  for (const obs of target.observations.values()) {
-    const parent = obs.parentNode === null ? null : (target.nodes.get(obs.parentNode) ?? null);
-    // parent-state gate: an obs under an obsolete node is hidden unless includeSuperseded
-    if (parent !== null && !isVisible(parent.state, includeSuperseded)) continue;
-    const textMatch = regex === null || regex.test(obs.content);
-    if (!textMatch) continue;
+  for (let i = 0; i < obsJobs.length; i += 1) {
+    if (!obsHits[i]) continue;
+    const { obs, parent } = obsJobs[i];
+    // time range applies to observations only (nodes are never time-filtered)
     if (bounds.from !== null && obs.timestamp < bounds.from) continue;
     if (bounds.to !== null && obs.timestamp >= bounds.to) continue;
     candidates.push({
@@ -434,7 +459,7 @@ function buildSearchCandidates(
   }
 
   candidates.sort(compareCandidates);
-  return candidates;
+  return { candidates };
 }
 
 /** Non-obsolete root nodes for the default browse (no filters) path. When
@@ -544,7 +569,7 @@ export function createMkRecallTool(): ToolDefinition<typeof MK_RECALL_PARAMS> {
     description: MK_RECALL_DESCRIPTION,
     parameters: MK_RECALL_PARAMS,
     async execute(_toolCallId, params) {
-      const result = executeRecall(params as MkRecallParams);
+      const result = await executeRecall(params as MkRecallParams);
       return {
         content: [{ type: "text", text: result.text }],
         details: result.error ? { error: true } : { ok: true },
@@ -571,7 +596,7 @@ function err(text: string): RecallResult {
 }
 
 /** Pure recall logic (extracted for testability + so the tool shell stays thin). */
-function executeRecall(params: MkRecallParams): RecallResult {
+async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   const fullDetails = params.fullDetails ?? false;
   const includeSuperseded = params.includeSuperseded ?? false;
 
@@ -599,12 +624,17 @@ function executeRecall(params: MkRecallParams): RecallResult {
   if (bounds.error !== null) return err(bounds.error);
 
   const noFilters = regex === null && bounds.from === null && bounds.to === null;
-  const candidates = noFilters
-    ? rootBrowseCandidates(target, includeSuperseded)
-    : buildSearchCandidates(target, regex, bounds, includeSuperseded, fullDetails);
+  let list: SearchCandidate[];
+  if (noFilters) {
+    list = rootBrowseCandidates(target, includeSuperseded);
+  } else {
+    const result = await buildSearchCandidates(target, regex, bounds, includeSuperseded, fullDetails);
+    if ("error" in result) return err(result.error);
+    list = result.candidates;
+  }
 
   const page = pageOf(params.take, params.afterId);
-  const { window, more, stale } = paginate(candidates, page);
+  const { window, more, stale } = paginate(list, page);
   if (stale) return err(staleCursorMessage(page.afterId));
 
   if (window.length === 0) {
@@ -612,7 +642,7 @@ function executeRecall(params: MkRecallParams): RecallResult {
   }
 
   const lines = window.map((c) => c.line);
-  lines.push(searchFooter(candidates.length, window[window.length - 1].id, more));
+  lines.push(searchFooter(list.length, window[window.length - 1].id, more));
   return ok(lines.join("\n"));
 }
 

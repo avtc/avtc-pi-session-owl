@@ -175,12 +175,16 @@ async function runFind(
     return;
   }
   const graph = getGraphStore().graph;
-  const matches = collectFindMatches(graph, compiled.regex, includeSuperseded, VIEWER);
-  if (matches.length === 0) {
+  const collected = await collectFindMatches(graph, compiled.regex, includeSuperseded, VIEWER);
+  if ("error" in collected) {
+    await notifyError(ctx, collected.error);
+    return;
+  }
+  if (collected.matches.length === 0) {
     await notifyInfo(ctx, "No matches.");
     return;
   }
-  const lines = matches.map((m) => m.render);
+  const lines = collected.matches.map((m) => m.render);
   const { text } = formatList(lines, resolveCap());
   await notifyInfo(ctx, text);
 }

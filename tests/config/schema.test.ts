@@ -45,6 +45,7 @@ const EXPECTED_IDS = [
   "builderMode",
   "selectorMode",
   "commandResultCap",
+  "regexTimeoutMs",
   // Observer
   "observerModel",
   "observerThresholdTokens",
@@ -137,6 +138,7 @@ describe("MEMKEEPER_SCHEMA", () => {
       builderMode: "string",
       selectorMode: "string",
       commandResultCap: "number",
+      regexTimeoutMs: "number",
       observerModel: "model",
       observerThresholdTokens: "number",
       observerIncludeThinking: "boolean",

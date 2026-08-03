@@ -12,6 +12,7 @@
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
+import { getMemkeeperSettings } from "../config/schema.js";
 import {
   formatNodeLine,
   formatObservationLine,
@@ -33,6 +34,7 @@ import {
   type ObsId,
   ROOT_PARENT,
 } from "../types.js";
+import { runRegexTests } from "./regex-runner.js";
 import { isSafeRegex } from "./safe-regex.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
@@ -428,43 +430,65 @@ export function tryCompileFindRegex(query: string): { regex: RegExp } | { error:
  *  nodes and their evidence are skipped. Nodes-first (importance desc, then
  *  recency), then observations (recency) — consistent with `ls`. Each match
  *  carries `in <parent>`. Shared by the agent `find` tool and the user
- *  `/mk:find` commands. */
-export function collectFindMatches(
+ *  `/mk:find` commands.
+ *
+ *  Async because the regex tests run in a worker thread bounded by
+ *  `regexTimeoutMs` (a catastrophic pattern is killed instead of freezing pi).
+ *  Returns the matches, or an error string the caller surfaces verbatim. */
+export async function collectFindMatches(
   graph: MemkeeperGraph,
   regex: RegExp,
   includeSuperseded: IncludeSuperseded,
   viewer: RenderViewer,
-): FindMatch[] {
-  const nodeMatches: NodeMatch[] = [];
-  const obsMatches: ObsMatch[] = [];
+): Promise<{ matches: FindMatch[] } | { error: string }> {
+  // gather candidates first (preserving node-then-obs grouping), then batch-test
+  // every text in ONE worker round-trip rather than per entity.
+  const nodeJobs: { node: Node; text: string }[] = [];
+  const obsJobs: { obs: Observation; parent: NodeId }[] = [];
   for (const node of graph.nodes.values()) {
     // obsolete-visibility gate: skip the node (and its evidence) unless the
     // caller opted into superseded items.
     if (!isVisible(node.state, includeSuperseded)) continue;
-    if (regex.test(node.summary)) {
+    nodeJobs.push({ node, text: node.summary });
+    for (const obsId of node.observationIds) {
+      const obs = graph.observations.get(obsId);
+      if (obs === undefined) continue;
+      obsJobs.push({ obs, parent: node.id });
+    }
+  }
+  const texts: string[] = [...nodeJobs.map((j) => j.text), ...obsJobs.map((j) => j.obs.content)];
+  const outcome = await runRegexTests(regex, texts, getMemkeeperSettings().regexTimeoutMs);
+  if ("error" in outcome) return { error: outcome.error };
+
+  const nodeHits = outcome.results.slice(0, nodeJobs.length);
+  const obsHits = outcome.results.slice(nodeJobs.length);
+  const nodeMatches: NodeMatch[] = [];
+  const obsMatches: ObsMatch[] = [];
+  for (let i = 0; i < nodeJobs.length; i += 1) {
+    if (nodeHits[i]) {
+      const { node } = nodeJobs[i];
       nodeMatches.push({
         id: node.id,
         node,
         render: formatNodeLine(node, { viewer, showParent: node.parentNode ?? undefined }),
       });
     }
-    for (const obsId of node.observationIds) {
-      const obs = graph.observations.get(obsId);
-      if (obs === undefined) continue;
-      if (regex.test(obs.content)) {
-        obsMatches.push({
-          id: obs.id,
-          obs,
-          render: formatObservationLine(obs, { viewer, showParent: node.id }),
-        });
-      }
+  }
+  for (let i = 0; i < obsJobs.length; i += 1) {
+    if (obsHits[i]) {
+      const { obs, parent } = obsJobs[i];
+      obsMatches.push({
+        id: obs.id,
+        obs,
+        render: formatObservationLine(obs, { viewer, showParent: parent }),
+      });
     }
   }
   // nodes-first (importance desc, then recency), then observations (recency) —
   // consistent with `ls`.
   nodeMatches.sort((a, b) => compareNodeOrder(a.node, b.node));
   obsMatches.sort((a, b) => compareObservationOrder(a.obs, b.obs));
-  return [...nodeMatches, ...obsMatches];
+  return { matches: [...nodeMatches, ...obsMatches] };
 }
 
 /** A sortable wrapper carrying the entity for ordering. */
@@ -492,7 +516,11 @@ export function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): Agent
         return { content: [{ type: "text", text: compiled.error }], details: { error: true } };
       }
 
-      const matches = collectFindMatches(graph, compiled.regex, includeSuperseded, viewer);
+      const collected = await collectFindMatches(graph, compiled.regex, includeSuperseded, viewer);
+      if ("error" in collected) {
+        return { content: [{ type: "text", text: collected.error }], details: { error: true } };
+      }
+      const matches = collected.matches;
       const page = resolvePage(params.page);
       const { window, more, remaining, stale } = paginate(matches, page);
       if (stale) {

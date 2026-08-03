@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { makeBuilderReadTools } from "../../src/builder/tools.js";
+import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import {
   applyCreateNode,
   applyRecordObservation,
@@ -299,6 +300,29 @@ describe("Builder read tools", () => {
       const out = textOf(await callTool(tools(), "find", { query: "zzznomatch" }));
       expect(out).toContain("No matches");
     });
+
+    it("kills a slow regex past the timeout and surfaces a timeout error (worker-thread backstop)", async () => {
+      // A guard-slipping polynomial shape (each .+ greedily splits on a long
+      // run of 'a's) over a large observation content — slow enough to exceed a
+      // short timeout. This exercises the worker-thread kill path end-to-end.
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, regexTimeoutMs: 300 }));
+      const g = buildGraph();
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "o100",
+          content: "a".repeat(4000).concat("!"),
+          importance: "medium",
+          sourceEntryIds: [],
+          timestamp: NOW,
+          parentNode: "n7",
+        }),
+      });
+      const localTools = makeBuilderReadTools(g);
+      const out = textOf(await callTool(localTools, "find", { query: "(.+a)(.+a)b" }));
+      expect(out.toLowerCase()).toContain("timed out");
+    });
+
+    afterEach(() => _resetGetMemkeeperSettings());
   });
 
   describe("cursor pagination round-trip", () => {

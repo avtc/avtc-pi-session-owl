@@ -3,7 +3,7 @@
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { _setGetMemkeeperSettings, type MemkeeperConfig } from "../../src/config/schema.js";
+import { _setGetMemkeeperSettings, DEFAULT_CONFIG, type MemkeeperConfig } from "../../src/config/schema.js";
 import {
   applyCreateNode,
   applyRecordObservation,
@@ -290,6 +290,37 @@ describe("mk_recall", () => {
       seedSource();
       const out = text(await recall(tool(), { query: "(" }));
       expect(out.toLowerCase()).toMatch(/invalid|regex|pattern/);
+    });
+
+    it("kills a slow regex past the timeout and surfaces a timeout error (worker-thread backstop)", async () => {
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, regexTimeoutMs: 300 }));
+      seedSource();
+      // a guard-slipping polynomial shape over a large observation content
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(g, {
+        id: "n1",
+        summary: "slow target",
+        importance: "medium",
+        parentNode: null,
+        state: "active",
+      });
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "o1",
+          content: "a".repeat(4000).concat("!"),
+          importance: "medium",
+          sourceEntryIds: [],
+          timestamp: T0,
+          parentNode: "n1",
+        }),
+      });
+      const store = getGraphStore();
+      store.graph = g;
+      const out = text(await recall(tool(), { query: "(.+a)(.+a)b" }));
+      expect(out.toLowerCase()).toContain("timed out");
+      _setGetMemkeeperSettings(null);
     });
 
     it("obs ranking importance = max(obs, parent node) — a low obs under a critical node ranks as critical", async () => {

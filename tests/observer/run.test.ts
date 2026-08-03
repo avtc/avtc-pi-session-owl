@@ -140,6 +140,7 @@ function makeArgs(opts: {
       maxSelectorPasses: 5,
       renderMode: "selected-root",
       commandResultCap: 50,
+      regexTimeoutMs: 5000,
     },
     unobserved: opts.unobserved,
     signal: new AbortController().signal,
