@@ -13,6 +13,10 @@
 //      input (`(a|a)+`, `(a|ab)*`) or a branch is nullable (`(a?)+`,
 //      `(a*)+`): the engine can take either branch for the same char.
 //
+//   3. a chain of imprecise quantifiers (`.`, `[...]`, `\d`/`\w`/`\s`) in one
+//      matching path — k such quantifiers cost O(n^k); `.*a.*a.*a.*b` is
+//      polynomially catastrophic even at star-height 1.
+//
 // False positives (rejecting a safe-but-tricky pattern) are acceptable here —
 // the user/agent can always rephrase — but false negatives (letting an evil
 // pattern through) are not, so the analyzer stays conservative.
@@ -303,6 +307,11 @@ type CharClass =
   | { kind: "unknown" }; // can't statically classify → conservative overlap
 
 const DIGIT_CHARS = "0123456789";
+/** Reject a chain of this many (or more) imprecise quantifiers in one path —
+ *  k such quantifiers cost O(n^k); k≥3 is polynomially dangerous on realistic
+ *  observation/summary lengths (hundreds of chars). Conservative per the
+ *  stated policy (false positives acceptable, false negatives not). */
+const IMPRECISE_CHAIN_MAX = 3;
 const WORD_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
 const SPACE_CHARS =
   " \f\n\r\t\v\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
@@ -448,12 +457,113 @@ function hasQuantifiedBackreference(pattern: string): boolean {
   return false;
 }
 
+/** Detect a polynomial-backtracking shape the star-height + alternation
+ *  checks miss: a CHAIN of imprecise quantifiers in one matching path
+ *  (e.g. `.*a.*a.*a.*b`, `\d+\s+\d+`). Each imprecise quantifier (`*`/`+`/
+ *  `{n,}` over a wide operand — `.`, `[...]`, `\d`/`\w`/`\s`, or a group) lets
+ *  the engine try many ways to split the input among the chain; k such
+ *  quantifiers cost O(n^k). Returns the longest imprecise-quantifier chain
+ *  found. A literal-operand quantifier (`a+`, `foo*`) is NOT imprecise (its
+ *  backtracking is bounded to one char) and does not extend the chain.
+ *  Conservative: the chain resets at alternation `|`, anchors `^`/`$`, and
+ *  group open/close. */
+function polynomialQuantifierChain(pattern: string): number {
+  let longest = 0;
+  let chain = 0;
+  let prevImprecise = false; // was the last scanned atom a wide operand?
+  let inClass = false;
+  let escaped = false;
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i];
+    if (escaped) {
+      escaped = false;
+      // shorthand classes are wide; any other escape is a single literal char
+      prevImprecise = ch === "d" || ch === "D" || ch === "w" || ch === "W" || ch === "s" || ch === "S";
+      i += 1;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      i += 1;
+      continue;
+    }
+    if (inClass) {
+      if (ch === "]") {
+        inClass = false;
+        prevImprecise = true; // a char class is a wide operand
+      }
+      i += 1;
+      continue;
+    }
+    if (ch === "[") {
+      inClass = true;
+      i += 1;
+      continue;
+    }
+    if (ch === ".") {
+      prevImprecise = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "|" || ch === "^" || ch === "$") {
+      if (chain > longest) longest = chain;
+      chain = 0;
+      prevImprecise = false;
+      i += 1;
+      continue;
+    }
+    if (ch === "(" || ch === ")") {
+      if (chain > longest) longest = chain;
+      chain = 0;
+      prevImprecise = false;
+      i += 1;
+      continue;
+    }
+    if ((ch === "*" || ch === "+") && prevImprecise) {
+      chain += 1;
+      if (chain > longest) longest = chain;
+      prevImprecise = false; // a quantified atom is not itself a fresh wide operand
+      i += 1;
+      if (pattern[i] === "?") i += 1; // non-greedy marker
+      continue;
+    }
+    if (ch === "{") {
+      // bounded {n} or {n,m} do not extend an unbounded chain; {n,} does.
+      let j = i + 1;
+      while (j < pattern.length && /[\d,]/.test(pattern[j])) j += 1;
+      const closed = pattern[j] === "}";
+      const unbounded =
+        closed && pattern.slice(i + 1, j).includes(",") && !/\d/.test(pattern.slice(i + 1, j).split(",")[1] ?? "");
+      if (closed && unbounded && prevImprecise) {
+        chain += 1;
+        if (chain > longest) longest = chain;
+      }
+      prevImprecise = false;
+      i = closed ? j + 1 : j;
+      if (pattern[i] === "?") i += 1;
+      continue;
+    }
+    // any quantifier over a precise operand, or an ordinary char: not imprecise
+    if (ch === "*" || ch === "+" || ch === "?") {
+      prevImprecise = false;
+      i += 1;
+      if (pattern[i] === "?") i += 1;
+      continue;
+    }
+    prevImprecise = false;
+    i += 1;
+  }
+  return longest;
+}
+
 /** True iff `pattern` passes the safe-regex heuristics (no nested quantifiers,
- *  no imprecise alternation under a quantifier, no quantified backreference).
- *  Conservative. */
+ *  no imprecise alternation under a quantifier, no quantified backreference,
+ *  no long chain of imprecise quantifiers). Conservative. */
 export function isSafeRegex(pattern: string): boolean {
   if (starHeight(pattern) >= 2) return false;
   if (hasImpreciseAlternationUnderQuantifier(pattern)) return false;
   if (hasQuantifiedBackreference(pattern)) return false;
+  if (polynomialQuantifierChain(pattern) >= IMPRECISE_CHAIN_MAX) return false;
   return true;
 }

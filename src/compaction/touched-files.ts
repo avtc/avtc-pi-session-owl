@@ -36,6 +36,7 @@ const READ_TOOLS = new Set(["read"]);
 const FILE_TOOLS = new Set<string>([...WRITE_TOOLS, ...READ_TOOLS]);
 
 const NO_CUT: string | null = null;
+const NO_PATH_LENGTH = 0;
 const PATH_NOT_FOUND = -1;
 const START_AFTER_CUT_OFFSET = 1;
 const FIRST_ENTRY = 0;
@@ -113,8 +114,6 @@ function fileTouches(entry: SessionEntry): TouchedFile[] {
   }
   return touches;
 }
-
-const NO_PATH_LENGTH = 0;
 
 /** Render touched files as `<DD> <HH:MM> ✎|👁 <path>` lines (one per file). */
 export function renderTouchedFiles(files: readonly TouchedFile[]): string[] {

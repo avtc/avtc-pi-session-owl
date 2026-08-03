@@ -409,7 +409,7 @@ describe("runSelector", () => {
     // The compacted-away block is [e0, e1]; firstKeptEntryId e2 is the FIRST
     // RETAINED entry. A cached tree covering up to e1 (the block's LAST entry =
     // prev(e2)) MUST be reused — a naive >= firstKeptEntryId check would wrongly
-    // rebuild (the off-by-one decision #48 corrects).
+    // rebuild (off-by-one: the compacted block ends one before firstKeptEntryId).
     const branch = [
       { id: "e0", type: "message" },
       { id: "e1", type: "message" },
@@ -449,6 +449,67 @@ describe("runSelector", () => {
     });
     // covered up to prev(e2) → reused (the off-by-one: e1 suffices, e2 not required)
     expect(runStageCalls).toBe(0);
+  });
+
+  it("legacy cached tree with null coveredFrontier rebuilds (compaction path)", async () => {
+    seedGraph([{ id: "n3", summary: "a" }]);
+    const store = getGraphStore();
+    const branch = [
+      { id: "e0", type: "message", timestamp: "2026-07-29T10:00:00.000Z" } as unknown as StoreEntry,
+      { id: "e1", type: "message", timestamp: "2026-07-29T10:00:01.000Z" } as unknown as StoreEntry,
+      { id: "e2", type: "message", timestamp: "2026-07-29T10:00:02.000Z" } as unknown as StoreEntry,
+    ];
+    // a LEGACY cached tree carries no coveredFrontier (null) → cannot prove it
+    // covers the compacted block, so it must rebuild.
+    const cached = encodeSelection(store.graph, "oInitialPrompt", null);
+    persistSelectedTree({ appendEntry: () => {}, getLeafId: () => "leaf-1", getBranch: () => branch }, cached);
+    let runStageCalls = 0;
+    const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
+    await runSelector({
+      ctx: makeFakeCtx(),
+      pi: recordingPi().pi,
+      settings: settings({ selectorRootViewThreshold: 10_000_000 }),
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: (input) => {
+        runStageCalls += 1;
+        return scripted(input);
+      },
+    });
+    expect(runStageCalls).toBeGreaterThanOrEqual(1); // legacy null frontier → rebuild
+  });
+
+  it("stale coveredFrontier (entry no longer on the current branch) rebuilds", async () => {
+    seedGraph([{ id: "n3", summary: "a" }]);
+    const store = getGraphStore();
+    // the current branch does NOT contain "stale-frontier" → coveredIndex -1 → rebuild
+    const branch = [
+      { id: "e0", type: "message", timestamp: "2026-07-29T10:00:00.000Z" } as unknown as StoreEntry,
+      { id: "e1", type: "message", timestamp: "2026-07-29T10:00:01.000Z" } as unknown as StoreEntry,
+      { id: "e2", type: "message", timestamp: "2026-07-29T10:00:02.000Z" } as unknown as StoreEntry,
+    ];
+    const cached = encodeSelection(store.graph, "oInitialPrompt", "stale-frontier");
+    persistSelectedTree({ appendEntry: () => {}, getLeafId: () => "leaf-1", getBranch: () => branch }, cached);
+    let runStageCalls = 0;
+    const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
+    await runSelector({
+      ctx: makeFakeCtx(),
+      pi: recordingPi().pi,
+      settings: settings({ selectorRootViewThreshold: 10_000_000 }),
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: (input) => {
+        runStageCalls += 1;
+        return scripted(input);
+      },
+    });
+    expect(runStageCalls).toBeGreaterThanOrEqual(1); // coveredFrontier not on branch → rebuild
   });
 
   it("no-op pass ends the run; whatever tree exists is still persisted", async () => {

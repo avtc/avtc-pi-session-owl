@@ -224,6 +224,26 @@ describe("applyMv", () => {
     // rejected call leaves the graph unchanged
     expect(nodeById(g, "n1").observationIds).toEqual(["o1", "o2"]);
   });
+
+  it("cascades dissolution up a multi-level emptied chain in one move", () => {
+    // chain: n1 -> n2 -> n3, where n3 holds the only observation. Moving that
+    // obs out empties n3 → dissolves → empties n2 → dissolves → empties n1 →
+    // dissolves. The whole chain collapses from a SINGLE applyMv.
+    const g = graphWithTwoRoots();
+    // reparent n2 under n1, add n3 under n2
+    applyMv(g, { sourceIds: ["n2"], destId: "n1" }, MUTATE_SOURCE);
+    applyCreateNode(g, { id: "n3", summary: "leaf", importance: "medium", parentNode: "n2", state: "active" });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n3" }) });
+    // move the sole observation to n2's sibling root (the other root from graphWithTwoRoots)
+    applyMv(g, { sourceIds: ["o1"], destId: "n1" }, MUTATE_SOURCE);
+    // the whole n2->n3 chain (both emptied) dissolved in the one move
+    expect(g.nodes.has("n3")).toBe(false);
+    expect(g.nodes.has("n2")).toBe(false);
+    // n1 survives — it now holds o1 (the moved obs)
+    expect(g.nodes.has("n1")).toBe(true);
+    expect(nodeById(g, "n1").observationIds).toEqual(["o1"]);
+    expect(nodeById(g, "n1").childNodeIds).toEqual([]);
+  });
 });
 
 describe("timestamp range propagation", () => {
@@ -538,10 +558,10 @@ describe("working-copy policy", () => {
   });
 });
 
-// --- C4 invariant: every observation is attached to exactly one node -------
+// --- always-attached invariant: every observation is attached to exactly one node ---
 // (never orphaned, never double-parented) — asserted independently after each
 // core relocate/merge/supersede, the highest-risk paths for parent drift.
-describe("C4 invariant holds after core mutations", () => {
+describe("always-attached invariant holds after core mutations", () => {
   /** nGoal(root) + n1(root, obs o1) + n2(root, child n3, obs o2 under n3). */
   function graphWithObs(): MemkeeperGraph {
     const g = graphWithNGoal();

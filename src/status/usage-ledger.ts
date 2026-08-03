@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Pure usage-ledger math (no callbacks, no I/O). The ledger is a per-phase
-// cumulative token/cost/turn/run tracker; the stage runs feed it via
+// cumulative token/cost/turn tracker; the stage passes feed it via
 // addPhaseUsage at each stage end and /mk:status reads it.
 
 import type { StageUsage } from "../runtime/agent-loop.js";
@@ -13,9 +13,10 @@ export type Phase = "observe" | "build" | "select";
 
 /**
  * Add a stage's accumulated usage to its phase total, in place, and bump the
- * run counter. `StageUsage` carries input/output/cacheRead/cost/turns (no runs);
- * the phase adds those five fields and counts the call as one run. Returns the
- * same ledger object (convenience for `appendUsage(store, addPhaseUsage(...))`).
+ * pass counter. `StageUsage` carries input/output/cacheRead/cost/turns (no
+ * passes); the phase adds those five fields and counts the call as one pass (a
+ * Builder/Selector convergence pass, or one Observer chunk). Returns the same
+ * ledger object (convenience for `appendUsage(store, addPhaseUsage(...))`).
  */
 export function addPhaseUsage(ledger: UsageLedger, phase: Phase, usage: StageUsage): UsageLedger {
   const p = ledger[phase];
@@ -24,7 +25,7 @@ export function addPhaseUsage(ledger: UsageLedger, phase: Phase, usage: StageUsa
   p.cacheRead += usage.cacheRead;
   p.cost += usage.cost;
   p.turns += usage.turns;
-  p.runs += 1;
+  p.passes += 1;
   return ledger;
 }
 
@@ -44,7 +45,7 @@ export function sinceSessionStart(ledger: UsageLedger): UsageLedger {
   return ledger;
 }
 
-/** Per-phase field-wise subtraction (ledger − baseline), `runs` included. Pure:
+/** Per-phase field-wise subtraction (ledger − baseline), `passes` included. Pure:
  *  returns a fresh ledger, leaves both inputs untouched. */
 export function sinceLastCompaction(ledger: UsageLedger, baseline: UsageLedger): UsageLedger {
   return {
@@ -61,6 +62,6 @@ function subtractPhase(a: PhaseUsage, b: PhaseUsage): PhaseUsage {
     cacheRead: a.cacheRead - b.cacheRead,
     cost: a.cost - b.cost,
     turns: a.turns - b.turns,
-    runs: a.runs - b.runs,
+    passes: a.passes - b.passes,
   };
 }

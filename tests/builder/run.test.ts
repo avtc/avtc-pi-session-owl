@@ -4,7 +4,7 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { makePassTracker, runBuilder } from "../../src/builder/run.js";
+import { makeBuilderPassTracker, runBuilder } from "../../src/builder/run.js";
 import {
   CAT_TOOL,
   FIND_TOOL,
@@ -42,9 +42,9 @@ function endEvent(toolName: string, ok: boolean, isError: boolean): AgentEvent {
   } as unknown as AgentEvent;
 }
 
-describe("makePassTracker", () => {
+describe("makeBuilderPassTracker", () => {
   it("counts applied mutates (ok, not error) for all five mutate tools", () => {
-    const { outcome, onEvent } = makePassTracker(() => {});
+    const { outcome, onEvent } = makeBuilderPassTracker(() => {});
     onEvent(toolEndEvent(MKDIR_TOOL, true));
     onEvent(toolEndEvent(MV_TOOL, true));
     onEvent(toolEndEvent(MERGE_TOOL, true));
@@ -55,13 +55,13 @@ describe("makePassTracker", () => {
   });
 
   it("ignores a rejected mutate (isError)", () => {
-    const { outcome, onEvent } = makePassTracker(() => {});
+    const { outcome, onEvent } = makeBuilderPassTracker(() => {});
     onEvent(endEvent(MV_TOOL, true, true));
     expect(outcome.mutates).toBe(0);
   });
 
   it("ignores a mutate whose result lacks ok (an error result)", () => {
-    const { outcome, onEvent } = makePassTracker(() => {});
+    const { outcome, onEvent } = makeBuilderPassTracker(() => {});
     onEvent({
       type: "tool_execution_end",
       toolCallId: "c1",
@@ -73,20 +73,20 @@ describe("makePassTracker", () => {
   });
 
   it("marks converged on try_finish success", () => {
-    const { outcome, onEvent } = makePassTracker(() => {});
+    const { outcome, onEvent } = makeBuilderPassTracker(() => {});
     onEvent(toolEndEvent(TRY_FINISH_TOOL, true));
     expect(outcome.converged).toBe(true);
     expect(outcome.mutates).toBe(0);
   });
 
   it("does not mark converged on try_finish reject", () => {
-    const { outcome, onEvent } = makePassTracker(() => {});
+    const { outcome, onEvent } = makeBuilderPassTracker(() => {});
     onEvent(toolEndEvent(TRY_FINISH_TOOL, false));
     expect(outcome.converged).toBe(false);
   });
 
   it("ignores read tools", () => {
-    const { outcome, onEvent } = makePassTracker(() => {});
+    const { outcome, onEvent } = makeBuilderPassTracker(() => {});
     onEvent(toolEndEvent(LS_TOOL, true));
     onEvent(toolEndEvent(CAT_TOOL, true));
     onEvent(toolEndEvent(FIND_TOOL, true));
@@ -96,7 +96,7 @@ describe("makePassTracker", () => {
 
   it("forwards every event to the downstream sink", () => {
     const forwarded: unknown[] = [];
-    const { onEvent } = makePassTracker((e) => forwarded.push(e));
+    const { onEvent } = makeBuilderPassTracker((e) => forwarded.push(e));
     const a = { type: "message_end", message: {} } as unknown as AgentEvent;
     const b = toolEndEvent(MKDIR_TOOL, true);
     onEvent(a);
@@ -105,7 +105,7 @@ describe("makePassTracker", () => {
   });
 
   it("ignores non-tool_execution_end events", () => {
-    const { outcome, onEvent } = makePassTracker(() => {});
+    const { outcome, onEvent } = makeBuilderPassTracker(() => {});
     onEvent({ type: "turn_end" } as unknown as AgentEvent);
     onEvent({ type: "message_update" } as unknown as AgentEvent);
     expect(outcome.mutates).toBe(0);

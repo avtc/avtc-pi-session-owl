@@ -58,7 +58,7 @@ class FakeStore implements StoreContext {
     return [...this.entries];
   };
 
-  /** A NO-OP that the store must never call (decision #38). */
+  /** A NO-OP that the store must never call (branch-scoped graph reads use getBranch). */
   getEntries = (): StoreEntry[] => {
     this.getEntriesCalls += 1;
     return [...this.entries];
@@ -516,7 +516,7 @@ describe("load reconstruction", () => {
     expect(getGraphStore().graph.observations.has("o1")).toBe(true);
   });
 
-  it("calls getBranch, never getEntries (decision #38)", async () => {
+  it("calls getBranch, never getEntries", async () => {
     freshStore();
     const fake = new FakeStore();
     fake.leafId = null;
@@ -528,11 +528,11 @@ describe("load reconstruction", () => {
   it("restores the usage ledger from a usage delta + lastCompactionLedger baseline", async () => {
     freshStore();
     const fake = new FakeStore();
-    const baselineLedger = { ...EMPTY_LEDGER, observe: { ...EMPTY_LEDGER.observe, input: 50, runs: 1 } };
+    const baselineLedger = { ...EMPTY_LEDGER, observe: { ...EMPTY_LEDGER.observe, input: 50, passes: 1 } };
     const details = encodeDetails(getGraphStore().graph, null, baselineLedger);
     fake.addCompaction("e1", details);
     const laterLedger = {
-      observe: { input: 100, output: 20, cacheRead: 5, cost: 0.01, turns: 2, runs: 2 },
+      observe: { input: 100, output: 20, cacheRead: 5, cost: 0.01, turns: 2, passes: 2 },
       build: { ...EMPTY_LEDGER.build },
       select: { ...EMPTY_LEDGER.select },
     };
@@ -547,7 +547,7 @@ describe("load reconstruction", () => {
     freshStore();
     const fake = new FakeStore();
     const baselineLedger = {
-      observe: { ...EMPTY_LEDGER.observe, input: 50, runs: 1 },
+      observe: { ...EMPTY_LEDGER.observe, input: 50, passes: 1 },
       build: { ...EMPTY_LEDGER.build },
       select: { ...EMPTY_LEDGER.select },
     };

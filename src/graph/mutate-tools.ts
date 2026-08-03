@@ -44,10 +44,9 @@ export interface MutateContext {
 }
 
 /** A success mutate result: the ack text + the applied delta recorded in
- *  `details` (the Builder surfaces it for inspection; the Selector passes a
- *  no-op persist so no delta leaks). */
-function okResult(text: string, delta: GraphDelta, ctx: MutateContext): AgentToolResult<unknown> {
-  return { content: [{ type: "text", text }], details: { ok: true as const, delta, persisted: ctx.policy } };
+ *  `details` for inspection. */
+function okResult(text: string, delta: GraphDelta): AgentToolResult<unknown> {
+  return { content: [{ type: "text", text }], details: { ok: true as const, delta } };
 }
 
 /** An error mutate result: the model sees the message and can retry. The graph
@@ -79,7 +78,7 @@ export function runMutate(
     throw cause;
   }
   ctx.persist(delta);
-  return okResult(describe(delta), delta, ctx);
+  return okResult(describe(delta), delta);
 }
 
 // --- schemas ---------------------------------------------------------------

@@ -403,7 +403,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
   });
 
   it("compaction with an already-aborted signal → {cancel:true} (clean degrade, never half-built)", async () => {
-    // Decision #39: an aborted compaction signal cancels cleanly (no stages run,
+    // An aborted compaction signal cancels cleanly (no stages run,
     // no partial summary). This is the deterministic cancel seam — the hook
     // never throws and never returns a half-built summary.
     const state: FakePiState = {

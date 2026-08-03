@@ -210,9 +210,9 @@ describe("selection snapshot codec", () => {
 describe("usage codec", () => {
   it("round-trips a cumulative usage ledger", () => {
     const ledger = {
-      observe: { input: 100, output: 50, cacheRead: 10, cost: 0.02, turns: 3, runs: 1 },
-      build: { input: 200, output: 80, cacheRead: 20, cost: 0.05, turns: 5, runs: 1 },
-      select: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, runs: 0 },
+      observe: { input: 100, output: 50, cacheRead: 10, cost: 0.02, turns: 3, passes: 1 },
+      build: { input: 200, output: 80, cacheRead: 20, cost: 0.05, turns: 5, passes: 1 },
+      select: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, passes: 0 },
     };
     const decoded = decodeUsage(ledger);
     expect(decoded).toEqual(ledger);

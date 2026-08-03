@@ -171,8 +171,8 @@ describe("compactionHook", () => {
     expect(compaction.details).toBeDefined();
   });
 
-  it("runs Observer catch-up (gap-driven), Builder, Selector in order", async () => {
-    // threshold 0 → Builder always runs (no fast-path skip) so the ordering is observable.
+  it("passes Observer catch-up (gap-driven), Builder, Selector in order", async () => {
+    // threshold 0 → Builder always passes (no fast-path skip) so the ordering is observable.
     setCompactionSettingsGetter(() => settings({ builderRootViewThreshold: 0 }));
     // entries after the frontier (null → starts after first user msg; no user msg
     // here so the gap is empty) — use entries that computeUnobserved treats as a
@@ -280,17 +280,17 @@ describe("compactionHook", () => {
     setCompactionSettingsGetter(() => settings({ builderRootViewThreshold: 0 }));
     const eventAc = new AbortController();
     const calls = newCalls();
-    const runs = fakeRuns(calls);
+    const passes = fakeRuns(calls);
     // The Observer stage aborts Pi's compaction signal mid-gate (simulating Pi
     // giving up the compaction); the hook links event.signal into its own
     // controller, so the next between-stage check cancels.
-    runs.runObserver = vi.fn(async (args) => {
+    passes.runObserver = vi.fn(async (args) => {
       calls.observer += 1;
       calls.observerUnobservedLen.push(args.unobserved.length);
       calls.order.push("observer");
       eventAc.abort();
     });
-    setCompactionStageRuns(runs);
+    setCompactionStageRuns(passes);
 
     const result = await compactionHook(
       compactEvent({ signal: eventAc.signal }),
@@ -369,10 +369,10 @@ describe("compactionHook", () => {
     const snapshot = getGraphStore().lastCompactionLedger;
     expect(snapshot).not.toBeNull();
     expect(snapshot?.observe.input).toBe(5000);
-    expect(snapshot?.observe.runs).toBe(1);
+    expect(snapshot?.observe.passes).toBe(1);
     // deep copy: later stage activity must not mutate the captured baseline.
     addPhaseUsage(getGraphStore().usageLedger, "observe", { input: 1000, output: 0, cacheRead: 0, cost: 0, turns: 1 });
     expect(getGraphStore().lastCompactionLedger?.observe.input).toBe(5000);
-    expect(getGraphStore().lastCompactionLedger?.observe.runs).toBe(1);
+    expect(getGraphStore().lastCompactionLedger?.observe.passes).toBe(1);
   });
 });

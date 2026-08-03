@@ -37,6 +37,7 @@ import { snapshotAtCompaction } from "../status/usage-ledger.js";
 import { encodeDetails } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { computeUnobserved } from "../triggers.js";
+import { O_INITIAL_PROMPT } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 import { renderSummary } from "./summary.js";
 import { extractTouchedFiles } from "./touched-files.js";
@@ -140,7 +141,7 @@ export async function compactionHook(
     if (signal.aborted) return cancelAborted(ctx);
 
     // (b) Builder — fast-path skip when the root view is already under threshold;
-    // otherwise run bounded to the compacted block.
+    // otherwise process all unstructured (new) nodes across the whole graph.
     const graph = getGraphStore().graph;
     if (measureRootViewTokens(graph, "builder") >= settings.builderRootViewThreshold) {
       await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget });
@@ -166,7 +167,7 @@ export async function compactionHook(
     // Render + snapshot. The summary IS the injection.
     const store = getGraphStore();
     const touchedFiles = extractTouchedFiles(ctx.sessionManager, firstKeptEntryId);
-    const oInitialPromptObs = store.graph.observations.get("oInitialPrompt") ?? null;
+    const oInitialPromptObs = store.graph.observations.get(O_INITIAL_PROMPT) ?? null;
     const summary = renderSummary({
       graph: store.graph,
       selectedTree: store.selectedTree,

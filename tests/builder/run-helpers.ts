@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Test helpers for the Builder run (T13): a no-op + recording widget
+// Test helpers for the Builder run: a no-op + recording widget
 // controller, and a scripted runStage that emits tool_execution_end events to
 // drive the multi-pass loop without a real LLM.
 

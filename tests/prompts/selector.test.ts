@@ -29,7 +29,7 @@ describe("SELECTOR_SYSTEM prompt", () => {
     }
   });
 
-  it("includes the drill-in line (decision #7)", () => {
+  it("includes the drill-in line", () => {
     expect(SELECTOR_SYSTEM).toContain("Drill into any node to inspect its children and detail");
     expect(SELECTOR_SYSTEM).toContain("ls");
     expect(SELECTOR_SYSTEM).toContain("cat");

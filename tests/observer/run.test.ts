@@ -358,7 +358,7 @@ describe("runObserver", () => {
       await tool.execute("c1", {
         observations: [{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }],
       });
-      // ...then abort fires before chunk 2 starts (chunk 2 never runs)
+      // ...then abort fires before chunk 2 starts (chunk 2 never passes)
       if (chunk === 1) controller.abort();
       return {
         messages: [] as AgentMessage[],
@@ -444,6 +444,55 @@ describe("runObserver", () => {
     expect(getGraphStore().observerFrontier).toBe("a1");
   });
 
+  it("stops at the first failed chunk: frontier advances only over the successful prefix (later entries re-observable)", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // three chunks (threshold 1 → each entry its own chunk): [u1], [a1], [a2].
+    const unobserved = [
+      userEntry("u1", "initial prompt captured mechanically"),
+      assistantEntry("a1", "chose vitest"),
+      assistantEntry("a2", "picked biome"),
+    ];
+    let chunk = 0;
+    const fn = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
+      chunk += 1;
+      // chunk 1 succeeds (records a valid observation)...
+      if (chunk === 1) {
+        const tool = input.tools[0] as AgentTool;
+        await tool.execute("c1", {
+          observations: [{ content: "Initial goal stated.", importance: "high", sourceEntryIds: ["u1"] }],
+        });
+        return {
+          messages: [] as AgentMessage[],
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
+          outputTokens: 0,
+          aborted: false,
+        };
+      }
+      // ...chunk 2 THROWS a non-abort error (LLM failure)...
+      if (chunk === 2) throw new Error("LLM boom");
+      // ...chunk 3 must never run (the run stops at the first failure).
+      throw new Error("chunk 3 should not run");
+    };
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: fn, thresholdTokens: 1 }));
+
+    // only chunks 1 + 2 ran (chunk 3 was never reached)
+    expect(chunk).toBe(2);
+    // chunk 1's record WAS persisted (partial work kept)
+    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    expect(obsEntries).toHaveLength(1);
+    const entry = obsEntries[0].data as {
+      coversFromId: string | null;
+      coversUpToId: string;
+      records: { content: string }[];
+    };
+    expect(entry.records.map((r) => r.content)).toEqual(["Initial goal stated."]);
+    // frontier advanced ONLY to chunk 1's last entry (u1), NOT the gap tail (a2)
+    expect(entry.coversUpToId).toBe("u1");
+    expect(getGraphStore().observerFrontier).toBe("u1");
+  });
+
   it("opens the observe widget stage, reports batch progress, and closes it", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
@@ -508,7 +557,7 @@ describe("runObserver", () => {
   it("closes the observe stage when the run aborts mid-loop (endStage in finally)", async () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
-    // two chunks so the loop iterates; abort fires before the second chunk runs.
+    // two chunks so the loop iterates; abort fires before the second chunk passes.
     const unobserved = [userEntry("u1", "x".repeat(50)), assistantEntry("a1", "y".repeat(50))];
     const controller = new AbortController();
     let chunk = 0;
@@ -542,7 +591,7 @@ describe("runObserver", () => {
   it("feeds each chunk's stage usage into the store ledger (persisted once at run end)", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
-    // two small chunks (low threshold forces a chunk per entry) → two stage runs
+    // two small chunks (low threshold forces a chunk per entry) → two stage passes
     const unobserved = [userEntry("u1", "x".repeat(50)), assistantEntry("a1", "y".repeat(50))];
     // a runStage that behaves like the real one: invokes onStageEnd with usage,
     // then returns the result. Returns a distinct non-zero usage per call.
@@ -561,15 +610,15 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn, thresholdTokens: 10 }));
 
-    // observe phase accumulated BOTH chunks' usage + counted two runs.
+    // observe phase accumulated BOTH chunks' usage + counted two passes.
     const obs = getGraphStore().usageLedger.observe;
     expect(obs.input).toBe(3000);
     expect(obs.output).toBe(2000);
     expect(obs.cacheRead).toBe(1000);
-    expect(obs.runs).toBe(2);
+    expect(obs.passes).toBe(2);
     // build/select untouched.
-    expect(getGraphStore().usageLedger.build.runs).toBe(0);
-    expect(getGraphStore().usageLedger.select.runs).toBe(0);
+    expect(getGraphStore().usageLedger.build.passes).toBe(0);
+    expect(getGraphStore().usageLedger.select.passes).toBe(0);
     // the ledger is persisted ONCE at run end, not once per chunk (two chunks
     // here but one durable memkeeper.usage entry).
     expect(appended.filter((e) => e.type === "memkeeper.usage")).toHaveLength(1);

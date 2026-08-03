@@ -48,7 +48,7 @@ export interface PassOutcome extends ConvergenceOutcome {}
  *
  * Delegates to the shared convergence tracker (the Builder and Selector share
  * the same tracking shape; only the mutate-name set differs). */
-export function makePassTracker(downstream: (event: AgentEvent) => void): {
+export function makeBuilderPassTracker(downstream: (event: AgentEvent) => void): {
   outcome: PassOutcome;
   onEvent: (event: AgentEvent) => void;
 } {
@@ -177,7 +177,7 @@ async function runPass(
   pass: number,
   onStageEnd: (usage: StageUsage) => void,
 ): Promise<{ outcome: PassOutcome }> {
-  const { outcome, onEvent } = makePassTracker((event) => input.widget.onEvent(event));
+  const { outcome, onEvent } = makeBuilderPassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(graph, pass);
   await runConvergencePass({
     systemPrompt: BUILDER_SYSTEM,

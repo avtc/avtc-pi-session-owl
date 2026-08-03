@@ -28,7 +28,7 @@ describe("isSafeRegex", () => {
     expect(isSafeRegex("(\\d+)+")).toBe(false);
   });
 
-  it("rejects nested quantifiers inside a non-capturing/lookahead group (R1-1 bypass fix)", () => {
+  it("rejects nested quantifiers inside a non-capturing/lookahead group", () => {
     expect(isSafeRegex("(?:a+)+")).toBe(false);
     expect(isSafeRegex("(?:a*)*")).toBe(false);
     expect(isSafeRegex("(?:a+)*")).toBe(false);
@@ -62,7 +62,7 @@ describe("isSafeRegex", () => {
     expect(isSafeRegex("(?:a|ab)*")).toBe(false);
   });
 
-  it("rejects overlapping alternation nested one group deep under a quantifier (R4-1 bypass fix)", () => {
+  it("rejects overlapping alternation nested one group deep under a quantifier", () => {
     // wrapping the evil alternation in one extra group hid it from the old
     // top-level-only check
     expect(isSafeRegex("((a|a))+")).toBe(false);
@@ -91,7 +91,7 @@ describe("isSafeRegex", () => {
     expect(isSafeRegex("((ab|cd))+")).toBe(true);
   });
 
-  it("rejects overlapping alternation where a branch starts with a wildcard/class (R5-1 bypass fix)", () => {
+  it("rejects overlapping alternation where a branch starts with a wildcard/class", () => {
     // firstLiteralChar returned null for . / [..] / \d / \w so these evaded the
     // literal-overlap check, yet each is catastrophic backtracking.
     expect(isSafeRegex("(a|.)+")).toBe(false); // . overlaps a
@@ -128,5 +128,38 @@ describe("isSafeRegex", () => {
   it("accepts a safe (non-quantified) backreference", () => {
     expect(isSafeRegex("(foo)\\1")).toBe(true);
     expect(isSafeRegex("(a|b)\\1bar")).toBe(true);
+  });
+
+  it("rejects a chain of imprecise quantifiers (polynomial backtracking)", () => {
+    // k imprecise quantifiers in one path cost O(n^k); these hang V8 on
+    // realistic content lengths even though star-height is only 1.
+    expect(isSafeRegex(".*a.*a.*a.*b")).toBe(false); // 4 wildcard quantifiers
+    expect(isSafeRegex("\\d+\\s+\\d+")).toBe(false); // 3 shorthand quantifiers
+    expect(isSafeRegex("[0-9]+[a-z]+[0-9]+")).toBe(false); // 3 class quantifiers
+    expect(isSafeRegex("\\w+\\w+\\w+")).toBe(false); // 3 shorthand quantifiers
+    expect(isSafeRegex(".+.+.+")).toBe(false); // 3 wildcard quantifiers
+  });
+
+  it("does NOT over-reject a short imprecise chain or precise quantifiers", () => {
+    expect(isSafeRegex("a+a+a+")).toBe(true); // literal-operand quantifiers (bounded)
+    expect(isSafeRegex("foo.*bar")).toBe(true); // 1 imprecise
+    expect(isSafeRegex(".*foo.*bar")).toBe(true); // 2 imprecise
+    expect(isSafeRegex("a.*b.*c")).toBe(true); // 2 imprecise
+    expect(isSafeRegex("\\d+")).toBe(true); // 1 imprecise
+    expect(isSafeRegex("^.*$")).toBe(true); // anchors reset the chain
+  });
+
+  it("rejects overlapping alternation with a complement (negated) class branch", () => {
+    // complement CharClasses (\D/\W/\S/[^…]) are load-bearing overlap
+    // detectors; a regression would silently let evil patterns through.
+    expect(isSafeRegex("(\\D|\\W)+")).toBe(false); // complement-vs-complement (universal overlap)
+    expect(isSafeRegex("(a|\\D)+")).toBe(false); // explicit-vs-complement
+    expect(isSafeRegex("(\\D|a)+")).toBe(false); // reversed complement-vs-explicit
+    expect(isSafeRegex("([a-z]|[^0-9])+")).toBe(false); // letters overlap a negated-digit set
+  });
+
+  it("does NOT over-reject a complement branch disjoint from the other", () => {
+    // [0-9] and [^0-9] are complementary (no char matches both) → no ambiguity
+    expect(isSafeRegex("([0-9]|[^0-9])+")).toBe(true);
   });
 });

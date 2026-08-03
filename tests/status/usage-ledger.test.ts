@@ -20,14 +20,14 @@ function phase(
   cacheRead: number,
   cost: number,
   turns: number,
-  runs: number,
+  passes: number,
 ): PhaseUsage {
-  return { input, output, cacheRead, cost, turns, runs };
+  return { input, output, cacheRead, cost, turns, passes };
 }
 
 describe("usage-ledger", () => {
   describe("addPhaseUsage", () => {
-    it("accumulates a stage's usage into the named phase + increments runs", () => {
+    it("accumulates a stage's usage into the named phase + increments passes", () => {
       const ledger: UsageLedger = cloneLedger(EMPTY_LEDGER);
       addPhaseUsage(ledger, "observe", STAGE_USAGE_A);
       expect(ledger.observe).toEqual(phase(1000, 500, 300, 0.05, 3, 1));
@@ -47,9 +47,9 @@ describe("usage-ledger", () => {
       addPhaseUsage(ledger, "observe", STAGE_USAGE_A);
       addPhaseUsage(ledger, "build", STAGE_USAGE_B);
       addPhaseUsage(ledger, "select", STAGE_USAGE_A);
-      expect(ledger.observe.runs).toBe(1);
-      expect(ledger.build.runs).toBe(1);
-      expect(ledger.select.runs).toBe(1);
+      expect(ledger.observe.passes).toBe(1);
+      expect(ledger.build.passes).toBe(1);
+      expect(ledger.select.passes).toBe(1);
       expect(ledger.build.input).toBe(2000);
       expect(ledger.observe.input).toBe(1000);
       expect(ledger.select.input).toBe(1000);
@@ -74,7 +74,7 @@ describe("usage-ledger", () => {
   });
 
   describe("sinceLastCompaction", () => {
-    it("subtracts the snapshot phase-by-phase, field by field (runs included)", () => {
+    it("subtracts the snapshot phase-by-phase, field by field (passes included)", () => {
       const ledger: UsageLedger = {
         observe: phase(3000, 2000, 1000, 0.16, 8, 3),
         build: phase(2000, 1500, 700, 0.11, 5, 1),
@@ -142,7 +142,7 @@ describe("usage-ledger", () => {
       expect(diff.observe.cacheRead).toBe(300);
       expect(diff.observe.cost).toBeCloseTo(0.05, 10);
       expect(diff.observe.turns).toBe(3);
-      expect(diff.observe.runs).toBe(1);
+      expect(diff.observe.passes).toBe(1);
       expect(diff.build).toEqual(phase(0, 0, 0, 0, 0, 0));
     });
   });

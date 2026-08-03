@@ -44,7 +44,7 @@ export interface PhaseUsage {
   cacheRead: number;
   cost: number;
   turns: number;
-  runs: number;
+  passes: number;
 }
 
 export interface UsageLedger {
@@ -59,7 +59,7 @@ export const EMPTY_PHASE_USAGE: PhaseUsage = {
   cacheRead: 0,
   cost: 0,
   turns: 0,
-  runs: 0,
+  passes: 0,
 };
 
 export const EMPTY_LEDGER: UsageLedger = {
@@ -330,14 +330,14 @@ export function decodeSelection(raw: unknown): SerializedSelection | null {
 
 function isPhaseUsage(v: unknown): v is PhaseUsage {
   if (!isObject(v)) return false;
-  const { input, output, cacheRead, cost, turns, runs } = v;
+  const { input, output, cacheRead, cost, turns, passes } = v;
   return (
     typeof input === "number" &&
     typeof output === "number" &&
     typeof cacheRead === "number" &&
     typeof cost === "number" &&
     typeof turns === "number" &&
-    typeof runs === "number"
+    typeof passes === "number"
   );
 }
 
@@ -352,7 +352,15 @@ export function decodeUsage(raw: unknown): UsageLedger | null {
 /** Known MemkeeperDetails schema versions (tolerant reader rejects others). */
 const KNOWN_DETAILS_VERSIONS = new Set<string>([DETAILS_VERSION]);
 
-/** Decode compaction details; null if malformed/non-memkeeper (native rejected). */
+/** Decode compaction details; null if malformed/non-memkeeper (native rejected).
+ *  A KNOWN version is required: additive field changes do NOT bump the version
+ *  (they're handled by the per-delta optional-field coalescing in `load`), so a
+ *  bumped version signals a breaking schema change we cannot safely migrate at
+ *  read. Returning null makes `load` fall back to deltas-only reconstruction
+ *  (lossless for the graph + counters; the lastCompactionLedger baseline is
+ *  lost until the next compaction re-captures it — cosmetic, /mk:status only).
+ *  The drop is logged by `findLatestSnapshot` when the details carries a
+ *  `version` field. */
 export function decodeDetails(raw: unknown): MemkeeperDetails | null {
   if (!isObject(raw)) return null;
   const { version, nodes, oInitialPrompt, nextObsId, nextNodeId, selectedTree, lastCompactionLedger } = raw;

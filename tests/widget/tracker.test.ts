@@ -144,7 +144,7 @@ describe("ProgressTracker state", () => {
     });
   });
 
-  describe("onEvent — two-tier streamingOutputTokens (#37)", () => {
+  describe("onEvent — two-tier streamingOutputTokens", () => {
     it("primary tier: uses usage.output from message_update when the provider streams usage", () => {
       tracker.startStage("build", { pass: 1 });
       // simulate a provider that streams cumulative output usage via message_update
