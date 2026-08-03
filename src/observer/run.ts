@@ -47,7 +47,6 @@ const NO_SOURCE_ENTRY: SessionEntry | undefined = undefined;
 const EMPTY_GAP = 0;
 const EMPTY_RECORDS = 0;
 const FIRST = 0;
-const NO_INDEX = -1;
 
 /** A captured observation (validated; before id/timestamp/wrap assignment). */
 export interface RecordObservation {
@@ -187,7 +186,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   // the frontier only over the CONTIGUOUS successful prefix: if chunk K fails,
   // its entries (and every later chunk's) must stay re-observable, so the
   // frontier stops at chunk K-1's last entry rather than the whole gap's tail.
-  const chunkLastIds = computeChunkLastIds(input.unobserved, chunks);
+  const chunkLastIds = computeChunkLastIds(chunks);
 
   // index entries by id for timestamp lookup (mechanical from source).
   const entryById = new Map<string, SessionEntry>();
@@ -314,17 +313,11 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
 
 // --- persist helpers -------------------------------------------------------
 
-/** The last source entry (by branch position) of each chunk — the entry whose
- *  id is in `chunk.allowedIds` with the highest index in `unobserved`. Used to
- *  advance the frontier only over the contiguous successful prefix. */
-function computeChunkLastIds(unobserved: SessionEntry[], chunks: RenderedChunk[]): string[] {
-  return chunks.map((chunk) => {
-    let lastIndex = NO_INDEX;
-    for (let i = 0; i < unobserved.length; i += 1) {
-      if (chunk.allowedIds.has(unobserved[i].id)) lastIndex = i;
-    }
-    return unobserved[lastIndex]?.id ?? "";
-  });
+/** The last source entry id of each chunk — the highest-branch-position entry
+ *  in the chunk, captured at flush time (blocks are in entry order) so the
+ *  frontier advances over the contiguous successful prefix without a re-scan. */
+function computeChunkLastIds(chunks: RenderedChunk[]): string[] {
+  return chunks.map((chunk) => chunk.lastEntryId);
 }
 
 /** Append ONE `memkeeper.graph_delta` entry holding all wrapper create_node

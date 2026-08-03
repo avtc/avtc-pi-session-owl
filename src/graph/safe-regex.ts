@@ -513,13 +513,13 @@ function polynomialQuantifierChain(pattern: string): number {
       i += 1;
       continue;
     }
-    if (ch === "(" || ch === ")") {
-      if (chain > longest) longest = chain;
-      chain = 0;
-      prevImprecise = false;
-      i += 1;
-      continue;
-    }
+    // Group open/close `(`/`)` are TRANSPARENT to an imprecise-quantifier
+    // chain: capturing groups don't change the matching path, so a polynomial
+    // shape like `(.+a)(.+a)(.+a)b` (each group one imprecise quantifier, the
+    // groups sequential) must chain across the boundaries. Falling through to
+    // the ordinary-char branch (which leaves prevImprecise=false so a literal/
+    // group boundary correctly separates two wide quantifiers only when an
+    // intervening atom resets it) keeps the chain alive across the boundary.
     if ((ch === "*" || ch === "+") && prevImprecise) {
       chain += 1;
       if (chain > longest) longest = chain;

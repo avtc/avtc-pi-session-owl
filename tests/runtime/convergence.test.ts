@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 avtc <tarensenkov@gmail.com>
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";

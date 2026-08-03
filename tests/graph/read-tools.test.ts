@@ -11,8 +11,8 @@ import {
   MUTATE_SOURCE,
   setClock,
 } from "../../src/graph/mutations.js";
-import { makeReadTools, nonObsoleteRootsOf } from "../../src/graph/read-tools.js";
-import { MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
+import { makeReadTools, nonObsoleteRootsOf, orderActiveSetRoots } from "../../src/graph/read-tools.js";
+import { MemkeeperGraph, makeObservation, N_GOAL, N_IRRELEVANT } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 
@@ -395,5 +395,37 @@ describe("nonObsoleteRootsOf (shared root filter)", () => {
     ] as unknown as import("../../src/format/render.js").RenderableNode[];
     const roots = nonObsoleteRootsOf(arbitrary);
     expect(roots.map((n) => n.id)).toEqual(["a"]);
+  });
+});
+
+describe("orderActiveSetRoots — canonical active-set ordering", () => {
+  // Renders directly the contract loop-7 routed /mk:ls and mk_recall browse
+  // through (nGoal first, nIrrelevant last, the rest by importance then
+  // recency) — a partition regression would otherwise pass the whole suite.
+  const R = (over: Partial<Record<string, unknown>> & { id: string }) =>
+    over as unknown as import("../../src/format/render.js").RenderableNode;
+  const HIGH_RECENT = R({ id: "n7", importance: "high", timestamps: { rangeEnd: "2026-07-29T09:00:00Z" } });
+  const HIGH_OLDER = R({ id: "n8", importance: "high", timestamps: { rangeEnd: "2026-07-28T09:00:00Z" } });
+  const MED = R({ id: "n12", importance: "medium", timestamps: { rangeEnd: "2026-07-29T10:00:00Z" } });
+  const GOAL = R({ id: N_GOAL, importance: "critical", timestamps: { rangeEnd: "2026-07-28T08:00:00Z" } });
+  const IRRELEVANT = R({ id: N_IRRELEVANT, importance: "medium", timestamps: { rangeEnd: "2026-07-29T11:00:00Z" } });
+
+  it("places nGoal first and nIrrelevant last regardless of importance/recency", () => {
+    // feed them out of order: irrelevant + med first, goal last
+    const ordered = orderActiveSetRoots([IRRELEVANT, MED, HIGH_RECENT, GOAL, HIGH_OLDER]);
+    const ids = ordered.map((n) => n.id);
+    expect(ids[0]).toBe(N_GOAL);
+    expect(ids[ids.length - 1]).toBe(N_IRRELEVANT);
+  });
+
+  it("orders the rest by importance desc then recency desc", () => {
+    const ordered = orderActiveSetRoots([MED, HIGH_OLDER, HIGH_RECENT, GOAL, IRRELEVANT]);
+    // nGoal → high(recent) → high(older) → med → nIrrelevant
+    expect(ordered.map((n) => n.id)).toEqual([N_GOAL, "n7", "n8", "n12", N_IRRELEVANT]);
+  });
+
+  it("works with neither special node present (plain importance/recency)", () => {
+    const ordered = orderActiveSetRoots([MED, HIGH_OLDER, HIGH_RECENT]);
+    expect(ordered.map((n) => n.id)).toEqual(["n7", "n8", "n12"]);
   });
 });

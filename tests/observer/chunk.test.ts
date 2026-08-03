@@ -328,7 +328,7 @@ describe("renderBlocks: entry-type filtering", () => {
 // --- buildChunks: token gating & C-R atomicity -----------------------------
 
 describe("buildChunks", () => {
-  it("returns {text, allowedIds} per chunk where allowedIds is exactly the E= ids in text", () => {
+  it("returns {text, allowedIds, lastEntryId} per chunk where allowedIds is exactly the E= ids in text", () => {
     const entries: SessionEntry[] = [userEntry("u1", "hello world"), userEntry("u2", "bye now")];
     const chunks = buildChunks(entries, {
       tokenThreshold: Number.POSITIVE_INFINITY,
@@ -339,6 +339,8 @@ describe("buildChunks", () => {
     const only = chunks[0];
     expect(only.text).toBe("<U E=u1>hello world</U><U E=u2>bye now</U>");
     expect(only.allowedIds).toEqual(new Set(["u1", "u2"]));
+    // lastEntryId = the highest-branch-position entry in the chunk (blocks in entry order)
+    expect(only.lastEntryId).toBe("u2");
   });
 
   it("splits at the token threshold (entry-bounded)", () => {
@@ -355,6 +357,10 @@ describe("buildChunks", () => {
     expect(chunks.length).toBe(2);
     expect(chunks[0].text).toBe(`<U E=u1>${"a".repeat(400)}</U>`);
     expect(chunks[1].text).toBe(`<U E=u2>${"b".repeat(400)}</U>`);
+    // each chunk's lastEntryId is its own tail (entry-order blocks) — the basis
+    // for advancing the frontier without re-scanning the gap per chunk.
+    expect(chunks[0].lastEntryId).toBe("u1");
+    expect(chunks[1].lastEntryId).toBe("u2");
   });
 
   it("never splits a C from its R across chunk boundaries", () => {

@@ -43,6 +43,10 @@ export interface ChunkOptions {
 export interface RenderedChunk {
   readonly text: string;
   readonly allowedIds: ReadonlySet<string>;
+  /** The highest-branch-position source entry id in this chunk — used to advance
+   *  the observer frontier over the contiguous successful prefix. Captured at
+   *  flush time (blocks are in entry order) so callers need not re-scan the gap. */
+  readonly lastEntryId: string;
 }
 
 // --- constants --------------------------------------------------------------
@@ -307,7 +311,8 @@ export function buildChunks(entries: readonly SessionEntry[], options: ChunkOpti
     if (current.length === 0) return;
     const text = current.map((block) => block.text).join("");
     const allowedIds = new Set(current.map((block) => block.entryId));
-    chunks.push({ text, allowedIds });
+    const lastEntryId = current[current.length - 1]?.entryId ?? "";
+    chunks.push({ text, allowedIds, lastEntryId });
     current = [];
     currentTokens = 0;
   };

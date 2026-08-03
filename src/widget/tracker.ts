@@ -406,6 +406,9 @@ function hideWidget(ctx: ExtensionContext | null): void {
   ctx.ui.setWidget(WIDGET_KEY, HIDE_WIDGET, { placement: WIDGET_PLACEMENT });
 }
 
+const TEXT_PAD_X = 0;
+const TEXT_PAD_Y = 0;
+
 /** Publish the widget line (or hide it) via ctx.ui.setWidget. */
 function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null): void {
   if (ctx === null) return;
@@ -421,6 +424,3 @@ function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null): v
     placement: WIDGET_PLACEMENT,
   });
 }
-
-const TEXT_PAD_X = 0;
-const TEXT_PAD_Y = 0;

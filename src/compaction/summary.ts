@@ -41,6 +41,9 @@ const PREAMBLE = "Your session memory. Each item cites an id (n../o..) — use m
 const LEGEND_PREFIX = "Legend: ";
 const INITIAL_PROMPT_HEADING = "## Initial prompt";
 const ACTIVE_SET_HEADING = "## Active set";
+const NO_TOUCHED = 0;
+const NO_TOUCHED_PLACEHOLDER = "(none)";
+
 const TOUCHED_HEADING = "## Recently touched";
 const NO_INITIAL_PROMPT = "(none captured yet)";
 
@@ -78,9 +81,6 @@ export function renderSummary(args: RenderSummaryArgs): string {
 
   return lines.join("\n");
 }
-
-const NO_TOUCHED = 0;
-const NO_TOUCHED_PLACEHOLDER = "(none)";
 
 /** The root nodes to render in the active-set section, per renderMode. */
 function activeSetRoots(args: RenderSummaryArgs): RenderableNode[] {

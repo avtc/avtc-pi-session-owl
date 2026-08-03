@@ -149,6 +149,18 @@ describe("isSafeRegex", () => {
     expect(isSafeRegex("^.*$")).toBe(true); // anchors reset the chain
   });
 
+  it("rejects a polynomial chain split across capturing groups (boundary bypass)", () => {
+    // Capturing groups are transparent to a matching path: each group holds one
+    // imprecise quantifier and the groups are sequential, so the chain must
+    // accumulate across the `(`/`)` boundaries. `(.+a)(.+a)(.+a)b` takes ~1s at
+    // 400 chars and ~29s at 800 — catastrophic if it slips through.
+    expect(isSafeRegex("(.+a)(.+a)(.+a)b")).toBe(false);
+    expect(isSafeRegex("(.*a)(.*a)(.*a)b")).toBe(false);
+    expect(isSafeRegex("(.+)(.+)(.+)")).toBe(false);
+    // k=2 across groups stays safe (consistent with the ungrouped >=3 policy)
+    expect(isSafeRegex("(.+a)(.+a)b")).toBe(true);
+  });
+
   it("rejects overlapping alternation with a complement (negated) class branch", () => {
     // complement CharClasses (\D/\W/\S/[^…]) are load-bearing overlap
     // detectors; a regression would silently let evil patterns through.

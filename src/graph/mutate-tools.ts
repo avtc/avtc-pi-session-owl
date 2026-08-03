@@ -202,9 +202,6 @@ export function makeMergeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
       if (destId === null && (params.newSummary === undefined || params.newSummary.length === 0)) {
         return errorResult("merge: newSummary is required when destId is null (names the new root node).");
       }
-      // When destId is null, applyMerge creates a new root at n<nextNodeId>; capture
-      // the id BEFORE the call so the result can surface it to the model.
-      const newRootId = destId === null ? (`n${graph.nextNodeId}` as NodeId) : null;
       return runMutate(
         ctx,
         "merge",
@@ -218,8 +215,11 @@ export function makeMergeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
             },
             ctx.policy,
           ),
-        () => {
-          const where = newRootId ?? destId;
+        // Read the resolved destination id from the APPLIED delta (set by
+        // applyMerge when destId === null) so the id derivation lives in one place.
+        (delta) => {
+          const resolved = delta.type === "merge" ? delta.resolvedDestId : undefined;
+          const where = resolved ?? destId;
           return `Merged ${params.sourceIds.length} node(s) into ${where}.`;
         },
       );

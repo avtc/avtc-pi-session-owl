@@ -261,9 +261,9 @@ export interface SelectorInputViewArgs {
 /** Result of assembling the Selector input view. */
 export interface SelectorInputView {
   /** The stable context (everything EXCEPT the working-tree section): the
-   *  current-task context (tail + todo + touched files) + legends. Re-rendered
-   *  fresh each pass so the per-pass message reflects the live working copy
-   *  (the working tree mutates across passes; the context does not). */
+   *  current-task context (tail + todo + touched files) + legends. Built ONCE
+   *  before the pass loop and reused each pass — the working tree mutates
+   *  across passes, but this context does not. */
   contextView: string;
   workingCopy: SelectorWorkingCopy;
 }
