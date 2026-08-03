@@ -9,9 +9,8 @@
 // truncated (bounded by the Selector/Builder try_finish, not here).
 
 import { formatNodeLine, RENDER_LEGEND, type RenderableNode } from "../format/render.js";
-import { orderActiveSetRoots } from "../graph/read-tools.js";
-import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
-import { ROOT_PARENT } from "../types.js";
+import { nonObsoleteRootsOf, orderActiveSetRoots } from "../graph/read-tools.js";
+import type { SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { renderTouchedFiles, type TouchedFile } from "./touched-files.js";
 
 /** Which tree the active-set renders. */
@@ -95,24 +94,12 @@ function activeSetRoots(args: RenderSummaryArgs): RenderableNode[] {
 
 /** Non-obsolete source roots, nGoal first then importance/recency. */
 function sourceRoots(graph: SummaryGraph): RenderableNode[] {
-  const roots: RenderableNode[] = [];
-  for (const node of graph.nodes.values()) {
-    if (node.parentNode !== ROOT_PARENT) continue;
-    if (node.state === "obsolete") continue;
-    roots.push(node);
-  }
   // nGoal first, the rest by importance/recency (nIrrelevant is source-absent).
-  return orderActiveSetRoots(roots);
+  return orderActiveSetRoots(nonObsoleteRootsOf(graph.nodes.values()));
 }
 
 /** Non-obsolete selected-tree roots, nGoal first, nIrrelevant last. */
 function selectedRoots(tree: SerializedSelection): RenderableNode[] {
-  const roots: SerializedNode[] = [];
-  for (const node of tree.nodes) {
-    if (node.parentNode !== ROOT_PARENT) continue;
-    if (node.state === "obsolete") continue;
-    roots.push(node);
-  }
   // nGoal first, nIrrelevant last, the rest by importance/recency.
-  return orderActiveSetRoots(roots);
+  return orderActiveSetRoots(nonObsoleteRootsOf(tree.nodes));
 }

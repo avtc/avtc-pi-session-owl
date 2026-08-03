@@ -11,7 +11,7 @@ import {
   MUTATE_SOURCE,
   setClock,
 } from "../../src/graph/mutations.js";
-import { makeReadTools } from "../../src/graph/read-tools.js";
+import { makeReadTools, nonObsoleteRootsOf } from "../../src/graph/read-tools.js";
 import { MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
@@ -370,5 +370,30 @@ describe("read-tool viewer parameterization (Builder vs nonBuilder)", () => {
     const out = textOf(await callTool(nonBuilderTools, "ls", {}));
     expect(out).toContain("n12");
     expect(out).not.toContain("🆕");
+  });
+});
+
+describe("nonObsoleteRootsOf (shared root filter)", () => {
+  it("returns root nodes (parentNode null) and drops obsolete, unsorted", () => {
+    const graph = buildGraph();
+    const roots = nonObsoleteRootsOf([...graph.nodes.values()]);
+    const ids = roots.map((n) => n.id).toSorted();
+    // buildGraph has nGoal, n7, n12(new), n20(archived) as non-obsolete roots;
+    // n99 is obsolete → dropped.
+    expect(ids).toContain("nGoal");
+    expect(ids).toContain("n7");
+    expect(ids).toContain("n12");
+    expect(ids).toContain("n20");
+    expect(ids).not.toContain("n99");
+  });
+
+  it("works on any iterable of renderable nodes (no graph required)", () => {
+    const arbitrary = [
+      { id: "a", parentNode: null, state: "active" },
+      { id: "b", parentNode: null, state: "obsolete" },
+      { id: "c", parentNode: "a", state: "active" }, // not a root
+    ] as unknown as import("../../src/format/render.js").RenderableNode[];
+    const roots = nonObsoleteRootsOf(arbitrary);
+    expect(roots.map((n) => n.id)).toEqual(["a"]);
   });
 });

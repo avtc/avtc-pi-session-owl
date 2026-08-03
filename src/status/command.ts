@@ -8,7 +8,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
-import { renderRootViewFromRoots } from "../graph/read-tools.js";
+import { nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { notify } from "../notify.js";
 import { cloneLedger, decodeNode, EMPTY_LEDGER, type SerializedNode, type UsageLedger } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -153,7 +153,7 @@ export function gatherStatusInput(
   const graph = store.graph;
   const nodes = [...graph.nodes.values()];
   const observations = [...graph.observations.values()];
-  const nonObsoleteRoots = nodes.filter((n) => n.parentNode === null && n.state !== "obsolete");
+  const nonObsoleteRoots = nonObsoleteRootsOf(nodes);
   const rootsViewTokens = estimateContentTokens(renderRootViewFromRoots(nonObsoleteRoots, "builder"));
   const selectedViewTokens = measureSelectedViewTokens(config.renderMode, store.selectedTree?.nodes ?? null);
   return {
@@ -181,11 +181,7 @@ function measureSelectedViewTokens(
   serializedNodes: SerializedNode[] | null,
 ): number | null {
   if (renderMode !== "selected-root" || serializedNodes === null) return null;
-  const decoded: Node[] = [];
-  for (const sn of serializedNodes) {
-    const n = decodeNode(sn);
-    if (n !== null && n.parentNode === null) decoded.push(n);
-  }
+  const decoded = nonObsoleteRootsOf(serializedNodes.map(decodeNode).filter((n): n is Node => n !== null));
   if (decoded.length === 0) return null;
   return estimateContentTokens(renderRootViewFromRoots(decoded, "nonBuilder"));
 }

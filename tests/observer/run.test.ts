@@ -88,7 +88,7 @@ function scriptedRunStage(batchesPerChunk: RecordObservationInput[][]): {
     return {
       messages: [] as AgentMessage[],
       usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
-      streamingOutputTokens: 0,
+      outputTokens: 0,
       aborted: false,
     };
   };
@@ -363,7 +363,7 @@ describe("runObserver", () => {
       return {
         messages: [] as AgentMessage[],
         usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
-        streamingOutputTokens: 0,
+        outputTokens: 0,
         aborted: controller.signal.aborted,
       };
     };
@@ -518,7 +518,7 @@ describe("runObserver", () => {
       return {
         messages: [] as AgentMessage[],
         usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
-        streamingOutputTokens: 0,
+        outputTokens: 0,
         aborted: controller.signal.aborted,
       };
     };
@@ -556,7 +556,7 @@ describe("runObserver", () => {
       const usage = usages[call - 1] ?? usages[0];
       // the real runStage invokes onStageEnd with the accumulated usage.
       input.onStageEnd?.(usage);
-      return { messages: [], usage, streamingOutputTokens: 0, aborted: false };
+      return { messages: [], usage, outputTokens: 0, aborted: false };
     };
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn, thresholdTokens: 10 }));

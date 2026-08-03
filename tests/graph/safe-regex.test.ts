@@ -91,6 +91,24 @@ describe("isSafeRegex", () => {
     expect(isSafeRegex("((ab|cd))+")).toBe(true);
   });
 
+  it("rejects overlapping alternation where a branch starts with a wildcard/class (R5-1 bypass fix)", () => {
+    // firstLiteralChar returned null for . / [..] / \d / \w so these evaded the
+    // literal-overlap check, yet each is catastrophic backtracking.
+    expect(isSafeRegex("(a|.)+")).toBe(false); // . overlaps a
+    expect(isSafeRegex("(a|\\w)+")).toBe(false); // \w overlaps a
+    expect(isSafeRegex("(\\d|[0-9])+")).toBe(false); // \d overlaps [0-9]
+    expect(isSafeRegex("([a-z]|[a-m])+")).toBe(false); // [a-m] subset of [a-z]
+    expect(isSafeRegex("(.|a)+")).toBe(false); // order reversed
+    expect(isSafeRegex("(\\w|\\d)+")).toBe(false); // \w overlaps \d (both match digits)
+  });
+
+  it("does NOT over-reject a class branch whose first chars are disjoint from the other branch", () => {
+    // safe alternations — no overlap between the branches' first chars
+    expect(isSafeRegex("(apple|\\d)+")).toBe(true); // 'a' vs digit — disjoint
+    expect(isSafeRegex("(yes|no)+")).toBe(true); // distinct literals
+    expect(isSafeRegex("([a-z]|\\d)+")).toBe(true); // letters vs digits — disjoint
+  });
+
   it("accepts a safe non-capturing group under a quantifier", () => {
     expect(isSafeRegex("(?:ab)+")).toBe(true);
     expect(isSafeRegex("(?:foo|bar)*")).toBe(true);

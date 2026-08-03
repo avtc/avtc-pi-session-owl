@@ -12,10 +12,18 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { TRY_FINISH_TOOL } from "../graph/read-tools.js";
 import { log } from "../log.js";
-import { NO_REASONING, NO_TURN_LIMIT, type StageRunInput, type StageRunResult, type StageUsage } from "./agent-loop.js";
+import {
+  NO_LOOP_OVERRIDE,
+  NO_REASONING,
+  NO_TURN_LIMIT,
+  type StageRunInput,
+  type StageRunResult,
+  type StageUsage,
+} from "./agent-loop.js";
 
-const NO_MUTATES = 0;
-const NO_LOOP_OVERRIDE = null;
+/** Shared loop sentinels used by the Builder + Selector convergence runs. */
+export const NO_MUTATES = 0;
+export const FIRST_PASS = 1;
 
 /** A per-pass outcome: applied mutate count + whether try_finish converged. */
 export interface ConvergenceOutcome {

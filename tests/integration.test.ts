@@ -49,7 +49,7 @@ import { N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
 const EMPTY_RESULT: StageRunResult = {
   messages: [],
   usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
-  streamingOutputTokens: 0,
+  outputTokens: 0,
   aborted: false,
 };
 

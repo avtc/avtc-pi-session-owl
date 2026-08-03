@@ -7,14 +7,17 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type TSchema, Type } from "typebox";
+import { IMPORTANCE_VALUES, NODE_STATE_VALUES } from "./types.js";
 
-/** The four importance levels (critical/high/medium/low). */
-export const ImportanceSchema: TSchema = StringEnum(["critical", "high", "medium", "low"], {
+/** The four importance levels, derived from the canonical IMPORTANCE_VALUES so
+ *  the schema enum cannot drift from the Importance union. */
+export const ImportanceSchema: TSchema = StringEnum([...IMPORTANCE_VALUES], {
   description: "How load-bearing this item is by nature — critical, high, medium, or low.",
 });
 
-/** The four node states (new/active/archived/obsolete). */
-export const NodeStateSchema: TSchema = StringEnum(["new", "active", "archived", "obsolete"], {
+/** The four node states, derived from the canonical NODE_STATE_VALUES so the
+ *  schema enum cannot drift from the NodeState union. */
+export const NodeStateSchema: TSchema = StringEnum([...NODE_STATE_VALUES], {
   description: "The node's state.",
 });
 

@@ -21,7 +21,8 @@ import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { BUILDER_SYSTEM } from "../prompts/builder.js";
 import { runStage, type StageRunInput, type StageRunResult, type StageUsage } from "../runtime/agent-loop.js";
-import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } from "../runtime/convergence.js";
+import type { ConvergenceOutcome } from "../runtime/convergence.js";
+import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
@@ -31,9 +32,7 @@ import { MUTATE_TOOL_NAMES, makeBuilderTools, measureRootViewTokens, renderRootV
 
 // --- named constants (no bare literals at call sites) ----------------------
 
-const BUILD_STAGE = "build";
-const FIRST_PASS = 1;
-const NO_MUTATES = 0;
+const BUILD_STAGE = "build" as const;
 const NO_NEW_NODES = 0;
 const EMPTY_ROOT_VIEW = "";
 
@@ -66,9 +65,10 @@ export interface BuilderRunInput {
   settings: MemkeeperConfig;
   signal: AbortSignal;
   widget: WidgetController;
-  /** The compaction cut; null at turn_end. Carried for contract completeness —
-   *  the Builder processes all current `new` nodes (the Observer's gap-driven
-   *  catch-up scopes them to the compacted block in the default profile). */
+  /** The compaction cut; null at turn_end. Carried for contract completeness
+   *  (the Observer uses it for its gap-driven catch-up). The Builder ignores it:
+   *  at compaction it processes ALL `new` nodes across the whole graph, not just
+   *  the compacted block. */
   scope: { firstKeptEntryId: string | null } | null;
   /** Test seam — fake stage runner, or omitted for the real `runStage`. */
   runStageFn?: (input: StageRunInput) => Promise<StageRunResult>;
@@ -124,7 +124,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   let normalEnd = true;
   let stageOpened = false;
   let pass = FIRST_PASS;
-  const ledger = makeLedgerHook("build");
+  const ledger = makeLedgerHook(BUILD_STAGE);
   try {
     input.widget.startStage(BUILD_STAGE, { pass });
     stageOpened = true;

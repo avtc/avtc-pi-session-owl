@@ -8,11 +8,13 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import type { MemkeeperConfig } from "../../src/config/schema.js";
+import { renderRootViewFromRoots } from "../../src/graph/read-tools.js";
 import { buildStatusReport, gatherStatusInput, runMkStatus, type StatusInput } from "../../src/status/command.js";
 import type { UsageLedger } from "../../src/store/codecs.js";
-import { cloneLedger, EMPTY_LEDGER } from "../../src/store/codecs.js";
+import { cloneLedger, EMPTY_LEDGER, encodeSelection } from "../../src/store/codecs.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import type { Node, Observation, ObsId } from "../../src/types.js";
+import { estimateContentTokens } from "../../src/types.js";
 
 function settings(over: Partial<MemkeeperConfig>): MemkeeperConfig {
   return {
@@ -271,6 +273,38 @@ describe("gatherStatusInput", () => {
     expect(gathered.selectedViewTokens).toBeNull(); // no persisted selected tree
     expect(gathered.usageLedger.observe.input).toBe(500);
     expect(gathered.lastCompactionLedger).toBeNull();
+  });
+
+  it("measureSelectedViewTokens drops obsolete roots from the persisted tree", () => {
+    // the selected tree normally never holds obsolete roots (the Selector's working
+    // copy excludes obsolete before persisting), but the filter must enforce it
+    // explicitly rather than relying on the upstream invariant.
+    resetForNewSession();
+    const graph = getGraphStore().graph;
+    graph.nodes.set("n1", node({ id: "n1", summary: "active root", parentNode: null, summaryTokens: 40 }));
+    graph.nodes.set(
+      "n2",
+      node({ id: "n2", summary: "obsolete root", parentNode: null, state: "obsolete", summaryTokens: 40 }),
+    );
+    getGraphStore().selectedTree = encodeSelection(graph, null, null);
+
+    const gathered = gatherStatusInput(settings({ renderMode: "selected-root" }), {
+      sessionStartMs: 1000,
+      compactionCount: 0,
+    });
+    // only n1's render counts; n2 (obsolete) is dropped → the view is the single
+    // active root line, NOT both.
+    expect(gathered.selectedViewTokens).not.toBeNull();
+    const withObsolete = estimateContentTokens(
+      renderRootViewFromRoots(
+        [
+          node({ id: "n1", summary: "active root", summaryTokens: 40 }),
+          node({ id: "n2", summary: "obsolete root", summaryTokens: 40 }),
+        ],
+        "nonBuilder",
+      ),
+    );
+    expect(gathered.selectedViewTokens).toBeLessThan(withObsolete);
   });
 });
 

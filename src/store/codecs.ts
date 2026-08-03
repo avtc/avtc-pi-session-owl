@@ -12,10 +12,12 @@
 
 import type { GraphDelta } from "../graph/mutations.js";
 import {
+  IMPORTANCE_VALUES,
   type Importance,
   type MemkeeperGraph,
   makeNode,
   makeObservation,
+  NODE_STATE_VALUES,
   type Node,
   type NodeId,
   type NodeState,
@@ -176,19 +178,19 @@ export interface MemkeeperDetails {
 
 // --- decoders (tolerant) ---------------------------------------------------
 
-const IMPORTANCE_VALUES = new Set<string>(["critical", "high", "medium", "low"]);
-const STATE_VALUES = new Set<string>(["new", "active", "archived", "obsolete"]);
+const IMPORTANCE_SET = new Set<string>(IMPORTANCE_VALUES);
+const STATE_SET = new Set<string>(NODE_STATE_VALUES);
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
 function isImportance(v: unknown): v is Importance {
-  return typeof v === "string" && IMPORTANCE_VALUES.has(v);
+  return typeof v === "string" && IMPORTANCE_SET.has(v);
 }
 
 function isState(v: unknown): v is NodeState {
-  return typeof v === "string" && STATE_VALUES.has(v);
+  return typeof v === "string" && STATE_SET.has(v);
 }
 
 /** Decode a serialized observation; recompute contentTokens. Null if malformed. */

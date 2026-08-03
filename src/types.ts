@@ -61,9 +61,19 @@ export const IMPORTANCE_ABBR: Record<Importance, string> = {
   low: "low",
 };
 
+/** The canonical importance value list, derived from IMPORTANCE_RANK so the
+ *  union, the settings schema enum, and the codecs decoder set cannot drift.
+ *  Order is critical→low (matches the union + IMPORTANCE_RANK key order). */
+export const IMPORTANCE_VALUES = Object.keys(IMPORTANCE_RANK) as readonly Importance[];
+
 // --- Node state ------------------------------------------------------------
 
 export type NodeState = "new" | "active" | "archived" | "obsolete";
+
+/** The canonical node-state value list, the single source of truth for the
+ *  settings schema enum and the codecs decoder set so they cannot drift from
+ *  the union. Order is new→obsolete (matches the union declaration order). */
+export const NODE_STATE_VALUES = ["new", "active", "archived", "obsolete"] as const satisfies readonly NodeState[];
 
 // --- Timestamps ------------------------------------------------------------
 

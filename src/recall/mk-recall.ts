@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_TAKE,
   isVisible,
+  NO_AFTER_ID,
   paginate,
   type ResolvedPage,
   resolvePage,
@@ -41,7 +42,6 @@ const VIEWER: RenderViewer = "nonBuilder";
 const TERSE_CONTENT_MAX = 120;
 const TRUNCATION_ELLIPSIS = "…";
 const CHILD_DEPTH = 1;
-const NO_AFTER_ID: string | null = null;
 
 // --- normalized recall target ----------------------------------------------
 
@@ -67,6 +67,34 @@ interface RecallObservation extends RenderableObservation {
   readonly parentNode: string;
 }
 
+/** Map each observation id to its tree-node parent (the Selector's curated
+ *  placement, which may differ from the source-graph parent). */
+function buildTreeObsParent(selection: SerializedSelection): Map<string, string> {
+  const treeObsParent = new Map<string, string>();
+  for (const sn of selection.nodes) {
+    for (const obsId of sn.observationIds) treeObsParent.set(obsId, sn.id);
+  }
+  return treeObsParent;
+}
+
+/** Resolve a tree observation to a recall view: oInitialPrompt is carried
+ *  verbatim in its own field; any other obs id is resolved from the immutable
+ *  source store and re-parented to its curated tree node. Returns undefined if
+ *  the id is not present (caller skips). */
+function resolveTreeObs(
+  selection: SerializedSelection,
+  sourceGraph: MemkeeperGraph,
+  obsId: string,
+  treeObsParent: Map<string, string>,
+): RecallObservation | undefined {
+  if (selection.oInitialPrompt !== null && obsId === selection.oInitialPrompt.id) {
+    return withTreeParent(serializedObservationToView(selection.oInitialPrompt), treeObsParent);
+  }
+  const source = sourceGraph.observations.get(obsId as ObsId);
+  if (source === undefined) return undefined;
+  return withTreeParent(source, treeObsParent);
+}
+
 /** Build a recall target over the live source graph. */
 function targetFromSourceGraph(graph: MemkeeperGraph): RecallTarget {
   const nodes = new Map<string, RenderableNode>();
@@ -87,24 +115,11 @@ function targetFromSelection(selection: SerializedSelection, sourceGraph: Memkee
   const nodes = new Map<string, RenderableNode>();
   for (const sn of selection.nodes) nodes.set(sn.id, serializedNodeToView(sn));
 
-  // Map each observation id to its tree-node parent (the curated placement).
-  const treeObsParent = new Map<string, string>();
-  for (const sn of selection.nodes) {
-    for (const obsId of sn.observationIds) treeObsParent.set(obsId, sn.id);
-  }
-
+  const treeObsParent = buildTreeObsParent(selection);
   const observations = new Map<string, RecallObservation>();
   for (const ref of selection.obsRefs) {
-    // oInitialPrompt is carried verbatim in its own field (resolved below) — skip
-    // the redundant source-resolution here so it is not added twice.
-    if (selection.oInitialPrompt !== null && ref === selection.oInitialPrompt.id) continue;
-    const source = sourceGraph.observations.get(ref as ObsId);
-    if (source === undefined) continue;
-    observations.set(source.id, withTreeParent(source, treeObsParent));
-  }
-  if (selection.oInitialPrompt !== null) {
-    const view = serializedObservationToView(selection.oInitialPrompt);
-    observations.set(view.id, withTreeParent(view, treeObsParent));
+    const view = resolveTreeObs(selection, sourceGraph, ref, treeObsParent);
+    if (view !== undefined) observations.set(view.id, view);
   }
   return { renderMode: "selected-root", nodes, observations };
 }
@@ -138,8 +153,8 @@ function targetFromSourceGraphForIds(graph: MemkeeperGraph, ids: readonly string
 /** Build a FOCUSED recall target over the persisted selected tree for an `ids`
  *  drill: materialize only the requested nodes + their direct children +
  *  requested observations (resolved from the immutable source store). The
- *  tree-parent map is built once (cheap id mapping) so observation parents use
- *  the curated placement, mirroring the full targetFromSelection path. */
+ *  tree-parent map is built once so observation parents use the curated
+ *  placement, mirroring the full targetFromSelection path. */
 function targetFromSelectionForIds(
   selection: SerializedSelection,
   sourceGraph: MemkeeperGraph,
@@ -148,23 +163,13 @@ function targetFromSelectionForIds(
   const byId = new Map<string, SerializedNode>();
   for (const sn of selection.nodes) byId.set(sn.id, sn);
 
-  // tree-parent map (built once — a cheap id sweep, not a full obs resolution)
-  const treeObsParent = new Map<string, string>();
-  for (const sn of selection.nodes) {
-    for (const obsId of sn.observationIds) treeObsParent.set(obsId, sn.id);
-  }
-
+  const treeObsParent = buildTreeObsParent(selection);
   const nodes = new Map<string, RenderableNode>();
   const observations = new Map<string, RecallObservation>();
   const wantObs = (obsId: string): void => {
     if (observations.has(obsId)) return;
-    // oInitialPrompt is carried verbatim in its own field
-    if (selection.oInitialPrompt !== null && obsId === selection.oInitialPrompt.id) {
-      observations.set(obsId, withTreeParent(serializedObservationToView(selection.oInitialPrompt), treeObsParent));
-      return;
-    }
-    const source = sourceGraph.observations.get(obsId as ObsId);
-    if (source !== undefined) observations.set(obsId, withTreeParent(source, treeObsParent));
+    const view = resolveTreeObs(selection, sourceGraph, obsId, treeObsParent);
+    if (view !== undefined) observations.set(obsId, view);
   };
 
   for (const id of ids) {

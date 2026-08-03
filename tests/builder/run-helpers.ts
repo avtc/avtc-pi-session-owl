@@ -56,7 +56,7 @@ export function scriptRunStage(script: FakeRunScript): (input: StageRunInput) =>
     return {
       messages: [] as AgentMessage[],
       usage: zeroUsage(),
-      streamingOutputTokens: 0,
+      outputTokens: 0,
       aborted: false,
     };
   };

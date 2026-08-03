@@ -22,18 +22,18 @@ import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
 import { OBSERVER_SYSTEM } from "../prompts/observer.js";
-import { NO_REASONING, runStage, type StageRunInput, type StageRunResult } from "../runtime/agent-loop.js";
+import {
+  NO_LOOP_OVERRIDE,
+  NO_REASONING,
+  runStage,
+  type StageRunInput,
+  type StageRunResult,
+} from "../runtime/agent-loop.js";
+import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { ImportanceSchema } from "../schema.js";
-import { addPhaseUsage } from "../status/usage-ledger.js";
 import { encodeObservation, type ObservationEntry } from "../store/codecs.js";
-import {
-  appendGraphDeltaBatch,
-  appendObservation,
-  appendUsage,
-  getGraphStore,
-  type StoreContext,
-} from "../store/graph-store.js";
+import { appendGraphDeltaBatch, appendObservation, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import { type Importance, makeObservation, type NodeId, nowStoredTimestamp, type ObsId } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 import { buildChunks, type ChunkOptions } from "./chunk.js";
@@ -41,8 +41,8 @@ import { buildChunks, type ChunkOptions } from "./chunk.js";
 // --- named constants (no bare literals at call sites) ----------------------
 
 export const RECORD_OBS_TOOL = "record_observations";
+const OBSERVE_STAGE = "observe" as const;
 const NO_MAX_TURNS = null;
-const NO_LOOP_OVERRIDE = null;
 const NO_SOURCE_ENTRY: SessionEntry | undefined = undefined;
 const EMPTY_GAP = 0;
 const EMPTY_RECORDS = 0;
@@ -190,9 +190,9 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   const totalChunks = chunks.length;
   let stageOpened = false;
   let done = 0;
-  let usageAccumulated = false;
+  const ledger = makeLedgerHook(OBSERVE_STAGE);
   try {
-    input.widget.startStage("observe", { batch: { done: 0, total: totalChunks } });
+    input.widget.startStage(OBSERVE_STAGE, { batch: { done: 0, total: totalChunks } });
     stageOpened = true;
     for (const chunk of chunks) {
       if (input.signal.aborted) return;
@@ -207,13 +207,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         reasoning: NO_REASONING,
         maxTurns: NO_MAX_TURNS,
         onEvent: (event) => input.widget.onEvent(event),
-        onStageEnd: (usage) => {
-          // fold this chunk's usage into the live ledger in-memory only; the
-          // ledger is persisted ONCE at run end (atomic with the observation
-          // batch — an aborted run writes no usage, matching no observations).
-          addPhaseUsage(getGraphStore().usageLedger, "observe", usage);
-          usageAccumulated = true;
-        },
+        onStageEnd: ledger.onStageEnd,
         loopFn: NO_LOOP_OVERRIDE,
       };
 
@@ -243,7 +237,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     // persist the accumulated usage ledger ONCE at run end (atomic with the
     // run's other persists — an aborted run wrote no usage, matching no
     // observations). Skipped when no chunk reported usage.
-    if (usageAccumulated) appendUsage(store, getGraphStore().usageLedger);
+    if (ledger.hasUsage()) persistLedger(store);
 
     if (allRecords.length === EMPTY_RECORDS) {
       // nothing worth keeping — no delta, frontier unchanged (re-runs next trigger).
@@ -288,6 +282,12 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     // content index + reconcileLinks on load.
     persistWrappers(store, pairs);
     persistObservationBatch(store, input.unobserved, pairs);
+  } catch (cause) {
+    // a persist-phase throw (e.g. a wrapper missing its node) is logged, not
+    // re-thrown — matching the Builder/Selector runs' error contract (never
+    // throw to the caller, keep partial work). Per-chunk LLM failures are
+    // caught + notified inline above; this catches the rest.
+    log.error("observer run failed", cause);
   } finally {
     if (stageOpened) input.widget.endStage();
   }

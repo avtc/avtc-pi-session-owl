@@ -214,6 +214,20 @@ function renderMessageBlocks(
   return [];
 }
 
+/** The cleaned non-empty text of each text part of an assistant message, in
+ *  content order (thinking / tool-call parts skipped). Shared by the chunk
+ *  pipeline's assistant renderer and the Selector's text-only preceding-agent
+ *  prelude so the text-extraction logic lives in one place. */
+function assistantTextParts(message: AssistantMessage): string[] {
+  const out: string[] = [];
+  for (const part of message.content) {
+    if (part.type !== "text") continue;
+    const text = cleanText([part]);
+    if (text.length > 0) out.push(text);
+  }
+  return out;
+}
+
 function renderAssistantBlocks(
   message: AssistantMessage,
   id: string,
@@ -320,11 +334,7 @@ export function buildChunks(entries: readonly SessionEntry[], options: ChunkOpti
 export function renderAssistantTextBlock(entry: SessionEntry): string {
   if (entry.type !== "message") return "";
   if (entry.message.role !== "assistant") return "";
-  const blocks: string[] = [];
-  for (const part of entry.message.content) {
-    if (part.type !== "text") continue;
-    const text = cleanText([part]);
-    if (text.length > 0) blocks.push(aBlock(entry.id, text).text);
-  }
-  return blocks.join("");
+  return assistantTextParts(entry.message)
+    .map((text) => aBlock(entry.id, text).text)
+    .join("");
 }

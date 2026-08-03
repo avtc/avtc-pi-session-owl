@@ -23,7 +23,8 @@ import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
 import { runStage, type StageRunInput, type StageRunResult, type StageUsage } from "../runtime/agent-loop.js";
-import { type ConvergenceOutcome, makeConvergenceTracker, runConvergencePass } from "../runtime/convergence.js";
+import type { ConvergenceOutcome } from "../runtime/convergence.js";
+import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { decodeNode, encodeSelection } from "../store/codecs.js";
@@ -50,11 +51,11 @@ import { makeSelectorTools, SELECTOR_MUTATE_TOOL_NAMES, type TodoBridge } from "
 
 // --- named constants (no bare literals at call sites) ----------------------
 
-const SELECT_STAGE = "select";
-const FIRST_PASS = 1;
-const NO_MUTATES = 0;
+const SELECT_STAGE = "select" as const;
 const NO_PROMPT_OBS = null;
 const NON_BUILDER = "nonBuilder" as const;
+const INDEX_NOT_FOUND = -1;
+const PREV_ENTRY = 1; // prev(firstKeptEntryId) = firstKeptEntryId position − 1
 
 /** A per-pass outcome: applied mutate count + whether try_finish converged. */
 export interface SelectorPassOutcome extends ConvergenceOutcome {}
@@ -127,9 +128,18 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   const runStageFn = input.runStageFn ?? runStage;
 
   // Ensure-ready fast-path: a cached tree whose root view
-  // is under threshold AND still covers the current observation frontier is
-  // reused — no pass runs. No stage is opened (no startStage).
-  if (canReuseCachedTree(graphStore, input.settings.selectorRootViewThreshold)) return;
+  // is under threshold AND still covers the compacted-away block (compaction)
+  // or the current frontier (background) is reused — no pass runs. No stage is
+  // opened (no startStage).
+  if (
+    canReuseCachedTree(
+      graphStore,
+      input.settings.selectorRootViewThreshold,
+      input.ctx,
+      input.scope?.firstKeptEntryId ?? null,
+    )
+  )
+    return;
 
   // Build the input-view once (the working copy + task context). The working
   // copy persists across passes within this run; the context (tail/todo/touched/
@@ -140,7 +150,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   let stageOpened = false;
   let normalEnd = true;
   let pass = FIRST_PASS;
-  const ledger = makeLedgerHook("select");
+  const ledger = makeLedgerHook(SELECT_STAGE);
   try {
     input.widget.startStage(SELECT_STAGE, { pass });
     stageOpened = true;
@@ -249,14 +259,36 @@ function passMessages(working: SelectorInputView["workingCopy"], contextView: st
 
 /** Reuse the cached tree when it exists, fits the threshold, and still covers
  *  the current observation frontier (not stale). */
-function canReuseCachedTree(store: ReturnType<typeof getGraphStore>, threshold: number): boolean {
+function canReuseCachedTree(
+  store: ReturnType<typeof getGraphStore>,
+  threshold: number,
+  ctx: ExtensionContext,
+  firstKeptEntryId: string | null,
+): boolean {
   const cached = store.selectedTree;
   if (cached === null) return false; // nothing cached → build
   const rootViewTokens = measureRootViewTokens(materializeSnapshot(cached), NON_BUILDER);
   if (rootViewTokens >= threshold) return false; // over budget → rebuild
-  // Staleness: the cached tree's frontier must match the current frontier
-  // (no new observations since build). A mismatch → rebuild.
-  return cached.coveredFrontier === store.observerFrontier;
+  // Staleness = the cached tree must COVER the compacted-away block.
+  // Compaction path (firstKeptEntryId non-null): the compacted block is
+  //   branch[0..cutIndex), whose last entry is prev(firstKeptEntryId) at
+  //   cutIndex - 1; the cached tree's coveredFrontier (the observerFrontier at
+  //   build time) must be at or past that position. Compared by BRANCH POSITION
+  //   (indexOf), not string equality — firstKeptEntryId is the first RETAINED
+  //   entry, so a naive id comparison would be off by one.
+  // Background path (firstKeptEntryId null, mid-session): no compaction cut →
+  //   fall back to strict frontier-equality (rebuild on any new observations).
+  if (firstKeptEntryId === null) {
+    return cached.coveredFrontier === store.observerFrontier;
+  }
+  if (cached.coveredFrontier === null) return false; // legacy tree → rebuild
+  const branch = ctx.sessionManager.getBranch(ctx.sessionManager.getLeafId() ?? undefined);
+  const cutIndex = branch.findIndex((entry) => entry.id === firstKeptEntryId);
+  if (cutIndex === INDEX_NOT_FOUND) return false; // cut absent on this branch → rebuild (safe)
+  const lastCompactedIndex = cutIndex - PREV_ENTRY;
+  const coveredIndex = branch.findIndex((entry) => entry.id === cached.coveredFrontier);
+  if (coveredIndex === INDEX_NOT_FOUND) return false; // coveredFrontier stale → rebuild
+  return coveredIndex >= lastCompactedIndex;
 }
 
 /** Materialize a cached snapshot's nodes into a throwaway graph so the shared

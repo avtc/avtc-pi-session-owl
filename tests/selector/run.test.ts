@@ -12,8 +12,13 @@ import { SELECTOR_SYSTEM } from "../../src/prompts/selector.js";
 import type { StageRunInput, StageRunResult } from "../../src/runtime/agent-loop.js";
 import { makeSelectorPassTracker, runSelector } from "../../src/selector/run.js";
 import { SET_SUMMARY_TOOL as SELECTOR_SET_SUMMARY_TOOL } from "../../src/selector/tools.js";
-import { encodeSelection, SELECTION_TYPE } from "../../src/store/codecs.js";
-import { getGraphStore, persistSelectedTree, resetForNewSession } from "../../src/store/graph-store.js";
+import { encodeSelection, SELECTION_TYPE, USAGE_TYPE } from "../../src/store/codecs.js";
+import {
+  getGraphStore,
+  persistSelectedTree,
+  resetForNewSession,
+  type StoreEntry,
+} from "../../src/store/graph-store.js";
 import { makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
 import type { WidgetController } from "../../src/widget/tracker.js";
 import { NO_OP_WIDGET, recordingWidget, scriptRunStage, scriptRunStageWithError } from "../builder/run-helpers.js";
@@ -331,15 +336,27 @@ describe("runSelector", () => {
     expect(sel?.oInitialPrompt?.id).toBe("oInitialPrompt");
   });
 
-  it("fast-path: reuses a cached tree under threshold covering the frontier (no agentLoop)", async () => {
+  it("fast-path: reuses a cached tree under threshold covering the compacted block (no agentLoop)", async () => {
+    // Branch: [e0, e1, e2(cut), e3]. Compaction cut = e2 (firstKeptEntryId), so
+    // the compacted-away block is [e0, e1] (last entry e1 at index 1). A cached
+    // tree whose coveredFrontier is e1 (index 1 >= 1) covers the block → reuse.
+    const branch = [
+      { id: "e0", type: "message" },
+      { id: "e1", type: "message" },
+      { id: "e2", type: "message" },
+      { id: "e3", type: "message" },
+    ] as unknown as StoreEntry[];
     seedGraph([{ id: "n3", summary: "a" }]);
-    // pre-seed a cached tree: under threshold, frontier matches the store
     const store = getGraphStore();
-    const cached = encodeSelection(store.graph, "oInitialPrompt", store.observerFrontier);
-    persistSelectedTree({ appendEntry: () => {}, getLeafId: () => "leaf-1", getBranch: () => [] }, cached);
+    store.observerFrontier = "e1"; // frontier at the last compacted-block entry
+    const cached = encodeSelection(store.graph, "oInitialPrompt", "e1");
+    persistSelectedTree({ appendEntry: () => {}, getLeafId: () => "leaf-1", getBranch: () => branch }, cached);
     let runStageCalls = 0;
     await runSelector({
-      ctx: makeFakeCtx(),
+      ctx: {
+        ...makeFakeCtx(),
+        sessionManager: { getLeafId: () => "leaf-1", getBranch: () => branch },
+      } as unknown as ExtensionContext,
       pi: recordingPi().pi,
       // threshold high enough that the cached tree's root view fits
       settings: settings({ selectorRootViewThreshold: 10_000_000 }),
@@ -353,7 +370,7 @@ describe("runSelector", () => {
         return Promise.resolve({
           messages: [],
           usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
-          streamingOutputTokens: 0,
+          outputTokens: 0,
           aborted: false,
         });
       },
@@ -386,6 +403,52 @@ describe("runSelector", () => {
       },
     });
     expect(runStageCalls).toBeGreaterThanOrEqual(1); // stale → rebuild
+  });
+
+  it("fast-path coverage is >= prev(firstKeptEntryId), NOT firstKeptEntryId (off-by-one fix)", async () => {
+    // The compacted-away block is [e0, e1]; firstKeptEntryId e2 is the FIRST
+    // RETAINED entry. A cached tree covering up to e1 (the block's LAST entry =
+    // prev(e2)) MUST be reused — a naive >= firstKeptEntryId check would wrongly
+    // rebuild (the off-by-one decision #48 corrects).
+    const branch = [
+      { id: "e0", type: "message" },
+      { id: "e1", type: "message" },
+      { id: "e2", type: "message" },
+      { id: "e3", type: "message" },
+    ] as unknown as StoreEntry[];
+    seedGraph([{ id: "n3", summary: "a" }]);
+    const store = getGraphStore();
+    // coveredFrontier = e1 (index 1 = prev(e2) at index 1) → covers the block
+    store.observerFrontier = "e1";
+    persistSelectedTree(
+      { appendEntry: () => {}, getLeafId: () => "leaf-1", getBranch: () => branch },
+      encodeSelection(store.graph, "oInitialPrompt", "e1"),
+    );
+    let runStageCalls = 0;
+    await runSelector({
+      ctx: {
+        ...makeFakeCtx(),
+        sessionManager: { getLeafId: () => "leaf-1", getBranch: () => branch },
+      } as unknown as ExtensionContext,
+      pi: recordingPi().pi,
+      settings: settings({ selectorRootViewThreshold: 10_000_000 }),
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: () => {
+        runStageCalls += 1;
+        return Promise.resolve({
+          messages: [],
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          outputTokens: 0,
+          aborted: false,
+        });
+      },
+    });
+    // covered up to prev(e2) → reused (the off-by-one: e1 suffices, e2 not required)
+    expect(runStageCalls).toBe(0);
   });
 
   it("no-op pass ends the run; whatever tree exists is still persisted", async () => {
@@ -487,13 +550,60 @@ describe("runSelector", () => {
         return Promise.resolve({
           messages: [],
           usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
-          streamingOutputTokens: 0,
+          outputTokens: 0,
           aborted: false,
         });
       },
     });
     expect(runStageCalls).toBe(0);
     expect(selectionEntries(cap.appended).length).toBe(0);
+  });
+
+  it("aborts during run: applied mutates kept (partial tree persisted), ledger persist skipped", async () => {
+    // Distinguishes from abort-before-start: a stage opened + a working copy
+    // exists, so the finally commits the partial tree. Mirrors the Builder's
+    // abort-between-passes shape, but the Selector persists the working-copy
+    // tree (load-bearing) and skips persistLedger (normalEnd false).
+    seedGraph([{ id: "n3", summary: "keep", state: "active" }]);
+    const ac = new AbortController();
+    let passCount = 0;
+    // pass 1 demotes n3 into nIrrelevant via the real mv tool, reports non-zero
+    // usage (so the in-memory ledger folds it), then aborts the signal.
+    const scripted = scriptRunStage({
+      passes: [
+        {
+          tools: [
+            { name: MV_TOOL, ok: true },
+            { name: TRY_FINISH_TOOL, ok: false },
+          ],
+        },
+      ],
+    });
+    const countingRunStage = async (input: StageRunInput): Promise<StageRunResult> => {
+      passCount += 1;
+      const res = await scripted(input);
+      // report non-zero usage so the ledger folds it in-memory
+      ac.abort();
+      return { ...res, usage: { ...res.usage, input: 500, output: 10, turns: 1 } };
+    };
+    const cap = recordingPi();
+    await runSelector({
+      ctx: makeFakeCtx(),
+      pi: cap.pi,
+      settings: settings({ selectorRootViewThreshold: 0, maxSelectorPasses: 5 }),
+      signal: ac.signal,
+      widget: NO_OP_WIDGET,
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: countingRunStage,
+    });
+    // only pass 1 ran (the signal-abort break stopped the loop before pass 2)
+    expect(passCount).toBe(1);
+    // partial tree persisted: a memkeeper.selection entry was written
+    expect(selectionEntries(cap.appended).length).toBe(1);
+    // persistLedger skipped on abort (normalEnd false): no memkeeper.usage entry
+    expect(cap.appended.filter((e) => e.type === USAGE_TYPE).length).toBe(0);
   });
 
   it("skips when the model is unavailable (no pass, no persist)", async () => {
@@ -515,7 +625,7 @@ describe("runSelector", () => {
         return Promise.resolve({
           messages: [],
           usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
-          streamingOutputTokens: 0,
+          outputTokens: 0,
           aborted: false,
         });
       },

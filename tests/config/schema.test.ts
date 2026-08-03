@@ -14,6 +14,8 @@ import {
   initMemkeeperSettings,
   MEMKEEPER_SCHEMA,
 } from "../../src/config/schema.js";
+import { ImportanceSchema, NodeStateSchema } from "../../src/schema.js";
+import { IMPORTANCE_VALUES, NODE_STATE_VALUES } from "../../src/types.js";
 
 // Inject a fake registerSettingsCommand via the schema.ts seam (NOT vi.mock of
 // avtc-pi-settings-ui — under isolate:false a module mock of that dep races
@@ -249,5 +251,15 @@ describe("getMemkeeperSettings — initialized", () => {
     // Override cleared -> falls through to the handle (set by beforeEach) -> LIVE_AFTER_INIT.
     expect(getMemkeeperSettings().enabled).toBe(false);
     expect(getMemkeeperSettings().commandResultCap).toBe(25);
+  });
+});
+
+describe("tool schemas derive from canonical types (no drift)", () => {
+  it("ImportanceSchema enum equals IMPORTANCE_VALUES", () => {
+    expect([...(ImportanceSchema as { enum: string[] }).enum]).toEqual([...IMPORTANCE_VALUES]);
+  });
+
+  it("NodeStateSchema enum equals NODE_STATE_VALUES", () => {
+    expect([...(NodeStateSchema as { enum: string[] }).enum]).toEqual([...NODE_STATE_VALUES]);
   });
 });

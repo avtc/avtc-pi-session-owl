@@ -291,20 +291,115 @@ function splitTopLevelAlternatives(body: string): string[] {
   return out;
 }
 
-/** First literal char of a branch (skipping a leading quantifier/anchor), or null. */
-function firstLiteralChar(branch: string): string | null {
-  for (let k = 0; k < branch.length; k += 1) {
-    const c = branch[k];
+/** A character class describing what a branch can match at its first position:
+ *  universal (`.` / `[^]`), an explicit finite set (literal, `\d`/`\w`/`\s`, `[abc]`,
+ *  `[a-z]`), or a complement of a finite set (`[^abc]`, `\D`/`\W`/`\S`). Used to
+ *  detect alternation overlap — two branches under a quantifier whose first-char
+ *  classes intersect (`(a|.)+`, `(\d|[0-9])+`) are a ReDoS shape. */
+type CharClass =
+  | { kind: "universal" }
+  | { kind: "explicit"; chars: Set<string> }
+  | { kind: "complement"; exclude: Set<string> }
+  | { kind: "unknown" }; // can't statically classify → conservative overlap
+
+const DIGIT_CHARS = "0123456789";
+const WORD_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+const SPACE_CHARS =
+  " \f\n\r\t\v\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+
+/** Expand a `[...]` class body (without the brackets) into an explicit char set,
+ *  applying ranges (`a-z`) and the standard shorthand escapes. */
+function expandClassBody(classBody: string): Set<string> {
+  const chars = new Set<string>();
+  let i = 0;
+  while (i < classBody.length) {
+    const c = classBody[i];
     if (c === "\\") {
-      const next = branch[k + 1];
-      if (next !== undefined && !/^[0-9dDsSwWbB]/.test(next)) return next;
-      k += 1;
+      const next = classBody[i + 1];
+      if (next === "d") for (const ch of DIGIT_CHARS) chars.add(ch);
+      else if (next === "w") for (const ch of WORD_CHARS) chars.add(ch);
+      else if (next === "s") for (const ch of SPACE_CHARS) chars.add(ch);
+      else if (next !== undefined) chars.add(next); // any other escape → that char
+      i += 2;
       continue;
     }
-    if (c === "[" || c === "(" || c === "." || c === "^" || c === "$") return null;
-    return c;
+    // range a-z (only when both endpoints are literals and a `-` follows)
+    if (classBody[i + 1] === "-" && i + 2 < classBody.length && classBody[i + 2] !== "]") {
+      const lo = c.charCodeAt(0);
+      const hi = classBody.charCodeAt(i + 2);
+      for (let code = lo; code <= hi; code += 1) chars.add(String.fromCharCode(code));
+      i += 3;
+      continue;
+    }
+    chars.add(c);
+    i += 1;
   }
-  return null;
+  return chars;
+}
+
+/** First character class a branch can match (skipping zero-width anchors `^$` and
+ *  `\b`/`\B`). Recurses one level into a leading `(` group. Returns `unknown`
+ *  when the leading element can't be statically classified (e.g. a backreference
+ *  or a lookahead group) so the caller treats it conservatively. */
+function firstCharClass(branch: string): CharClass {
+  for (let k = 0; k < branch.length; k += 1) {
+    const c = branch[k];
+    if (c === "^" || c === "$") continue; // zero-width anchors
+    if (c === "\\") {
+      const next = branch[k + 1];
+      if (next === "b" || next === "B") continue; // word-boundary assertions (zero-width)
+      if (next === "d") return { kind: "explicit", chars: new Set(DIGIT_CHARS) };
+      if (next === "w") return { kind: "explicit", chars: new Set(WORD_CHARS) };
+      if (next === "s") return { kind: "explicit", chars: new Set(SPACE_CHARS) };
+      if (next === "D") return { kind: "complement", exclude: new Set(DIGIT_CHARS) };
+      if (next === "W") return { kind: "complement", exclude: new Set(WORD_CHARS) };
+      if (next === "S") return { kind: "complement", exclude: new Set(SPACE_CHARS) };
+      if (next !== undefined) return { kind: "explicit", chars: new Set([next]) }; // any other escaped char
+      return { kind: "unknown" };
+    }
+    if (c === ".") return { kind: "universal" };
+    if (c === "[") {
+      // parse the char class up to its closing ]
+      let end = k + 1;
+      while (end < branch.length) {
+        if (branch[end] === "\\") end += 1;
+        if (branch[end] === "]") break;
+        end += 1;
+      }
+      const inner = branch.slice(k + 1, end);
+      const negated = inner.startsWith("^");
+      const body = negated ? inner.slice(1) : inner;
+      if (body === "") return { kind: "universal" }; // `[^]` matches everything
+      const chars = expandClassBody(body);
+      return negated ? { kind: "complement", exclude: chars } : { kind: "explicit", chars };
+    }
+    if (c === "(") return { kind: "unknown" }; // group/lookahead — recurse not worth it here
+    return { kind: "explicit", chars: new Set([c]) }; // literal char
+  }
+  return { kind: "unknown" }; // empty / all-zero-width branch
+}
+
+/** True if two char classes can match a common character. Conservative: unknown
+ *  or complement-vs-complement defaults to overlap (reject) since their match
+ *  sets are large and intersect in practice. */
+function classesIntersect(a: CharClass, b: CharClass): boolean {
+  if (a.kind === "unknown" || b.kind === "unknown") return true;
+  if (a.kind === "universal" || b.kind === "universal") return true;
+  if (a.kind === "complement" && b.kind === "complement") return true; // both match almost everything
+  if (a.kind === "explicit" && b.kind === "explicit") {
+    for (const ch of a.chars) if (b.chars.has(ch)) return true;
+    return false;
+  }
+  // explicit vs complement (either order): overlap iff the explicit set has a char NOT excluded
+  if (a.kind === "explicit" && b.kind === "complement") {
+    for (const ch of a.chars) if (!b.exclude.has(ch)) return true;
+    return false;
+  }
+  if (b.kind === "explicit" && a.kind === "complement") {
+    for (const ch of b.chars) if (!a.exclude.has(ch)) return true;
+    return false;
+  }
+  return false;
 }
 
 /** A branch is nullable if it can match the empty string (e.g. `a?`, `a*`, empty). */
@@ -321,13 +416,11 @@ function topLevelAlternationOverlaps(body: string): boolean {
   if (alts.length < 2) return false;
   // any nullable branch under a quantifier is ambiguous (matches empty)
   if (alts.some(branchIsNullable)) return true;
-  // two branches sharing a first literal char overlap
-  const firsts = new Set<string>();
-  for (const a of alts) {
-    const f = firstLiteralChar(a);
-    if (f !== null) {
-      if (firsts.has(f)) return true;
-      firsts.add(f);
+  // two branches whose first-char classes intersect can match the same input
+  const classes = alts.map(firstCharClass);
+  for (let i = 0; i < classes.length; i += 1) {
+    for (let j = i + 1; j < classes.length; j += 1) {
+      if (classesIntersect(classes[i], classes[j])) return true;
     }
   }
   return false;

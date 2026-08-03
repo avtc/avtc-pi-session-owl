@@ -11,70 +11,30 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 // Mock the dependencies index.ts wires (isolate the activate WIRING from their
 // real implementations, which have their own tests).
-// Mock avtc-pi-settings-ui: registerSettingsCommand returns a fake handle whose
-// getSettings() yields enabled:true (the default-path tests rely on this; the
-// enabled-toggle tests override via _setGetMemkeeperSettings which takes precedence).
-vi.mock("avtc-pi-settings-ui", () => ({
-  registerSettingsCommand: vi.fn(() => ({ getSettings: () => ({ enabled: true }), updateSetting: () => {} })),
-  settingsFilePaths: () => ({
-    globalPath: () => "global.json",
-    projectPath: () => "project.json",
-  }),
-}));
+// avtc-pi-settings-ui is NOT vi.mock'd here. Under isolate:false that module
+// mock races against the many files that import schema.ts (loading the REAL
+// module), so the mock intermittently fails to apply → the real
+// registerSettingsCommand runs → it registers /mk:settings via pi.registerCommand
+// (a 6th command) AND a session_start reload handler (displacing [0]). Instead
+// schema.ts exposes the _setRegisterSettingsCommand seam; beforeEach injects a
+// fake that returns a handle yielding enabled:true WITHOUT touching
+// pi.registerCommand. settingsFilePaths is left real (the test ignores its paths).
 
-vi.mock("../src/lifecycle.js", () => ({
-  // track capture calls without running the real graph mutation logic
-  captureInitialPromptIfAbsent: vi.fn(),
-  onSessionStart: vi.fn().mockResolvedValue(undefined),
-  onSessionShutdown: vi.fn(),
-  toStoreContext: vi.fn(),
-  isUnstuckAutoContinue: vi.fn().mockReturnValue(false),
-  extractMessageText: vi.fn(),
-}));
-
-vi.mock("../src/triggers.js", () => ({
-  onTurnEnd: vi.fn(),
-  setStageRuns: vi.fn(),
-}));
-
-vi.mock("../src/compaction/hook.js", () => ({
-  compactionHook: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock("../src/widget/tracker.js", () => ({
-  initWidget: vi.fn(() => ({
-    setCtx: vi.fn(),
-    clearCtx: vi.fn(),
-    render: vi.fn(),
-    startStage: vi.fn(),
-    setPass: vi.fn(),
-    setBatch: vi.fn(),
-    endStage: vi.fn(),
-    onEvent: vi.fn(),
-  })),
-}));
-
-vi.mock("../src/runtime/stages.js", () => ({
-  makeObserverRun: vi.fn(() => vi.fn()),
-  runObserver: vi.fn(),
-  makeBuilderRun: vi.fn(() => vi.fn()),
-  runBuilder: vi.fn(),
-  makeSelectorRun: vi.fn(() => vi.fn()),
-  runSelector: vi.fn(),
-}));
-
-vi.mock("../src/todo/wiring.js", () => ({
-  createTodoWiring: vi.fn(() => ({
-    getContext: vi.fn(() => ({ getInProgress: () => null, getPending: () => [] })),
-    getBridge: vi.fn(() => ({ getItems: () => [] })),
-  })),
-}));
+// The shared-module mocks (lifecycle, triggers, compaction/hook, widget/tracker,
+// runtime/stages, todo/wiring) live in tests/setup.ts as flag-gated forwarders
+// (avtc-pi-portrait pattern): under isolate:false a per-file vi.mock here would
+// race against the real imports in lifecycle.test.ts / triggers.test.ts / etc.
+// (whichever loads first wins for the process), surfacing as intermittent
+// "called 0 times" / double-registration flakes. This file opts into the stubs
+// via useStubs({...}) in beforeEach; the module exports it imports ARE the
+// gated vi.fns, so `.toHaveBeenCalledTimes` / `.mock` keep working.
 
 import { compactionHook } from "../src/compaction/hook.js";
 import {
   _resetGetMemkeeperSettings,
   _resetMemkeeperSettingsHandle,
   _setGetMemkeeperSettings,
+  _setRegisterSettingsCommand,
   DEFAULT_CONFIG,
 } from "../src/config/schema.js";
 import memkeeperExtension from "../src/index.js";
@@ -82,6 +42,7 @@ import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from 
 import { makeBuilderRun, makeObserverRun, makeSelectorRun } from "../src/runtime/stages.js";
 import { resetForNewSession } from "../src/store/graph-store.js";
 import { onTurnEnd, setStageRuns } from "../src/triggers.js";
+import { useStubs } from "./setup.js";
 
 /** A fake pi that records `on` registrations by event name. */
 function makeFakePi(): ExtensionAPI {
@@ -112,10 +73,28 @@ describe("memkeeperExtension (activate wiring)", () => {
     vi.clearAllMocks();
     resetForNewSession();
     _resetGetMemkeeperSettings();
+    // Opt into ALL shared-module stubs for this file (activate-wiring tests
+    // assert call wiring, never real graph/LLM behavior).
+    useStubs({
+      lifecycle: true,
+      triggers: true,
+      compactionHook: true,
+      widget: true,
+      stages: true,
+      todoWiring: true,
+    });
     // Pin the settings read to DEFAULT_CONFIG (override takes precedence over the
     // real handle, so the default-path tests get enabled=true without depending on
     // the real settings-ui storage read against the fake pi).
     _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG }));
+    // Inject a fake registerSettingsCommand via the schema.ts seam (NOT vi.mock of
+    // avtc-pi-settings-ui — see the file header) so initMemkeeperSettings returns
+    // a handle without the real settings-ui registering /mk:settings or a reload
+    // handler against the fake pi.
+    _setRegisterSettingsCommand((() => ({
+      getSettings: () => ({ ...DEFAULT_CONFIG, enabled: true }),
+      updateSetting: () => {},
+    })) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand);
     memkeeperExtension(makeFakePi());
   });
   afterEach(() => _resetGetMemkeeperSettings());

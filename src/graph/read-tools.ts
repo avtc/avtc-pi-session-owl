@@ -56,7 +56,7 @@ export const TAKE_ALL = 0;
 export const FIND_QUERY_MAX = 500;
 
 const ROOT_DEPTH = 0;
-const NO_AFTER_ID: string | null = null;
+export const NO_AFTER_ID: string | null = null;
 /** Default value for an `includeSuperseded` flag (hide obsolete unless asked). */
 const INCLUDE_DEFAULT = false;
 
@@ -192,6 +192,21 @@ export function nonObsoleteRoots(graph: MemkeeperGraph): Node[] {
   return rootNodes(graph)
     .filter((n) => !isObsolete(n))
     .sort(compareNodeOrder);
+}
+
+/** Non-obsolete roots drawn from an arbitrary node collection (the persisted
+ *  selected tree's nodes, a working copy, or `graph.nodes.values()`) — the
+ *  shared filter behind `nonObsoleteRoots(graph)`, the compaction summary, the
+ *  Selector working-tree render, and the status command. Filters roots
+ *  (`parentNode === ROOT_PARENT`) and drops obsolete. UNSORTED: callers apply
+ *  their own ordering (`compareNodeOrder` for the Builder view,
+ *  `orderActiveSetRoots` for the active-set/summary render). */
+export function nonObsoleteRootsOf<T extends RenderableNode>(nodes: Iterable<T>): T[] {
+  const out: T[] = [];
+  for (const n of nodes) {
+    if (n.parentNode === ROOT_PARENT && !isObsoleteState(n.state)) out.push(n);
+  }
+  return out;
 }
 
 /** Direct child nodes + direct observations of a parent node, ordered

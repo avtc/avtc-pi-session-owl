@@ -207,6 +207,11 @@ function materializeBase(details: MemkeeperDetails): MemkeeperGraph {
 
 /** Reconcile observation→node links; drop obs whose parent node is gone. */
 function reconcileLinks(graph: MemkeeperGraph): void {
+  // Collect the parents whose observation set grew (a newly-linked post-snapshot
+  // obs extends its time range) and recompute each parent's range ONCE — not
+  // once per newly-linked obs (recomputeRange re-scans the parent's evidence, so
+  // K new obs under one parent would otherwise trigger K identical subtree walks).
+  const touchedParents = new Set<string>();
   for (const [obsId, obs] of graph.observations) {
     const parent = graph.nodes.get(obs.parentNode);
     if (parent === undefined) {
@@ -218,9 +223,12 @@ function reconcileLinks(graph: MemkeeperGraph): void {
     }
     if (!parent.observationIds.includes(obsId)) {
       parent.observationIds.push(obsId);
-      // a newly-linked post-snapshot obs extends the node's time range
-      recomputeRange(graph, parent);
+      touchedParents.add(parent.id);
     }
+  }
+  for (const parentId of touchedParents) {
+    const parent = graph.nodes.get(parentId as NodeId);
+    if (parent !== undefined) recomputeRange(graph, parent);
   }
 }
 

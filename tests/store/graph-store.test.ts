@@ -350,6 +350,67 @@ describe("load reconstruction", () => {
     expect(store.graph.observations.has("o2")).toBe(true);
   });
 
+  it("recomputes a parent's time range once when multiple new obs link to it", async () => {
+    // One parent n1 gains THREE new observations at load. reconcileLinks must
+    // recompute n1's range once (covering all three), not once per obs — and the
+    // final range must span the earliest-to-latest obs timestamps.
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      delta: {
+        type: "create_node",
+        id: "n1",
+        summary: "",
+        importance: "high",
+        parentNode: null,
+        state: "new",
+      },
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("e2", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e2",
+      records: [
+        {
+          id: "o1",
+          content: "a",
+          importance: "high",
+          sourceEntryIds: ["1"],
+          timestamp: "2026-07-28T09:00:00.000Z",
+          parentNode: "n1",
+        },
+        {
+          id: "o2",
+          content: "b",
+          importance: "high",
+          sourceEntryIds: ["2"],
+          timestamp: "2026-07-28T10:00:00.000Z",
+          parentNode: "n1",
+        },
+        {
+          id: "o3",
+          content: "c",
+          importance: "high",
+          sourceEntryIds: ["3"],
+          timestamp: "2026-07-28T11:00:00.000Z",
+          parentNode: "n1",
+        },
+      ],
+      tokenCount: 3,
+    } satisfies ObservationEntry);
+    fake.leafId = "e2";
+
+    await load(fake);
+    const node = getGraphStore().graph.nodes.get("n1" as NodeId);
+    expect(node).toBeDefined();
+    expect(node?.observationIds).toEqual(["o1", "o2", "o3"]);
+    // range spans the earliest (09:00) to latest (11:00) obs — proving the single
+    // recompute ran after all three were linked (a per-obs recompute that stopped
+    // early would leave the range stale at 10:00).
+    expect(node?.timestamps.rangeStart).toBe("2026-07-28T09:00:00.000Z");
+    expect(node?.timestamps.rangeEnd).toBe("2026-07-28T11:00:00.000Z");
+  });
+
   it("falls back to deltas-only and does not throw on a corrupt details snapshot", async () => {
     freshStore();
     const fake = new FakeStore();

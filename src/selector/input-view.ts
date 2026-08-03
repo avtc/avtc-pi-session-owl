@@ -10,11 +10,11 @@ import {
 } from "../compaction/touched-files.js";
 import { formatNodeLine, RENDER_LEGEND } from "../format/render.js";
 import { cloneNode, cloneObservation } from "../graph/clone.js";
-import { orderActiveSetRoots } from "../graph/read-tools.js";
+import { nonObsoleteRootsOf, orderActiveSetRoots } from "../graph/read-tools.js";
 import { isUnstuckAutoContinue } from "../lifecycle.js";
 import { buildChunks, type ChunkOptions, renderAssistantTextBlock } from "../observer/chunk.js";
 import type { Node, NodeId, Observation, ObsId } from "../types.js";
-import { MemkeeperGraph, makeNode, N_IRRELEVANT, nowStoredTimestamp, ROOT_PARENT } from "../types.js";
+import { MemkeeperGraph, makeNode, N_IRRELEVANT, nowStoredTimestamp } from "../types.js";
 
 /**
  * The Selector's working copy: a deep-copied, in-memory graph the Selector
@@ -260,7 +260,6 @@ export interface SelectorInputViewArgs {
 
 /** Result of assembling the Selector input view. */
 export interface SelectorInputView {
-  view: string;
   /** The stable context (everything EXCEPT the working-tree section): the
    *  current-task context (tail + todo + touched files) + legends. Re-rendered
    *  fresh each pass so the per-pass message reflects the live working copy
@@ -279,8 +278,6 @@ export interface SelectorInputView {
  */
 export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInputView {
   const workingCopy = buildWorkingCopy(args.sourceGraph);
-
-  const workingTree = renderWorkingRoots(workingCopy);
 
   const contextSections: string[] = [];
 
@@ -306,9 +303,8 @@ export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInp
   contextSections.push(TAIL_LEGEND_NO_E);
 
   const contextView = contextSections.join("\n\n");
-  const view = [`Working tree\n\n${workingTree}`, contextView].join("\n\n");
 
-  return { view, contextView, workingCopy };
+  return { contextView, workingCopy };
 }
 
 /** Render the working copy's non-obsolete roots: nGoal first, then the rest by
@@ -316,9 +312,6 @@ export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInp
  *  run re-renders the working tree each pass (it mutates across passes). */
 export function renderWorkingRoots(workingCopy: SelectorWorkingCopy): string {
   const graph = workingCopy.graph;
-  const roots = [...graph.nodes.values()].filter(
-    (node) => node.parentNode === ROOT_PARENT && node.state !== "obsolete",
-  );
-  const ordered = orderActiveSetRoots(roots);
+  const ordered = orderActiveSetRoots(nonObsoleteRootsOf(graph.nodes.values()));
   return ordered.map((node) => formatNodeLine(node, { viewer: "nonBuilder" })).join("\n");
 }

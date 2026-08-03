@@ -440,7 +440,7 @@ describe("runBuilder", () => {
         return Promise.resolve({
           messages: [],
           usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
-          streamingOutputTokens: 0,
+          outputTokens: 0,
           aborted: false,
         });
       },

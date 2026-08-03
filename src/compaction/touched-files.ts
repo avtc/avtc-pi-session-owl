@@ -8,7 +8,7 @@
 // to the Selector input AND the rendered compaction summary.
 
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import { singleLine, toStoredTimestamp } from "../format/render.js";
+import { formatDayTime, singleLine, toStoredTimestamp } from "../format/render.js";
 
 /** Narrow port over the session manager for touched-files (the active branch +
  *  the current leaf). Injected so tests pass a fake; production passes the
@@ -118,21 +118,13 @@ const NO_PATH_LENGTH = 0;
 
 /** Render touched files as `<DD> <HH:MM> ✎|👁 <path>` lines (one per file). */
 export function renderTouchedFiles(files: readonly TouchedFile[]): string[] {
-  return files.map(
-    (f) => `${formatDayTime(f.timestamp)} ${f.op === "write" ? WRITE_GLYPH : READ_GLYPH} ${singleLine(f.path)}`,
-  );
+  return files.map(renderTouchedFile);
 }
 
 const WRITE_GLYPH = "✎";
 const READ_GLYPH = "👁";
 
-/** Render a stored UTC ISO instant as a LOCAL "<DD> <HH:MM>" (2-digit day +
- *  24h time) — same UTC→local conversion as the node/observation datetime
- *  render, never locale-dependent. */
-function formatDayTime(stored: string): string {
-  const d = new Date(stored);
-  const day = d.getDate().toString().padStart(2, "0");
-  const hh = d.getHours().toString().padStart(2, "0");
-  const mm = d.getMinutes().toString().padStart(2, "0");
-  return `${day} ${hh}:${mm}`;
+/** Render a touched-file line as "<DD> <HH:MM> <glyph> <path>". */
+function renderTouchedFile(f: TouchedFile): string {
+  return `${formatDayTime(f.timestamp)} ${f.op === "write" ? WRITE_GLYPH : READ_GLYPH} ${singleLine(f.path)}`;
 }

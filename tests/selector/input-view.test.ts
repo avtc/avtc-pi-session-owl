@@ -433,20 +433,6 @@ describe("buildTail", () => {
     expect(out).toContain("tail start");
   });
 
-  it("renders verbatim when the last user message is within the tail (no pairing needed)", () => {
-    const branch: SessionEntry[] = [
-      assistantEntry("a1", "earlier reply"),
-      userEntry("u1", "the real ask"),
-      assistantEntry("a2", "tail start"),
-      userEntry("u2", "tail msg"),
-    ];
-    const out = buildTail(ctxFor(branch), { firstKeptEntryId: "a2" }, CHUNK_OPTS);
-    // The last REAL user message is u2 (within tail at a2). But if we force the
-    // last user message outside the cut, the pairing kicks in. Here u2 is in the
-    // tail, so this asserts the verbatim path; pairing is covered next.
-    expect(out).toContain("tail msg");
-  });
-
   it("renders one <A> block per text part in the preceding agent (byte-consistent with the tail)", () => {
     // A multi-text-part assistant: the prelude must emit one <A> per text part,
     // matching what the tail would render for the same entry (not one joined block).
@@ -605,7 +591,7 @@ describe("buildTodo", () => {
 
 // --- buildSelectorInputView tests -------------------------------------------
 
-import { buildSelectorInputView } from "../../src/selector/input-view.js";
+import { buildSelectorInputView, renderWorkingRoots } from "../../src/selector/input-view.js";
 
 function sourceGraphForAssembly(): MemkeeperGraph {
   const nodes = new Map<NodeId, Node>();
@@ -645,18 +631,27 @@ function sourceGraphForAssembly(): MemkeeperGraph {
 
 const ASSEMBLY_OPTS = { tokenThreshold: 1000, toolBlockCapTokens: null, includeThinking: false };
 
+// Reconstruct the full per-pass message body the Selector sends (working tree +
+// context), mirroring run.ts passMessages without the preamble.
+const assemble = (r: {
+  workingCopy: import("../../src/selector/input-view.js").SelectorWorkingCopy;
+  contextView: string;
+}): string => `Working tree\n\n${renderWorkingRoots(r.workingCopy)}\n\n${r.contextView}`;
+
 describe("buildSelectorInputView", () => {
   it("assembles the three parts in order (working tree, current-task context, legends)", () => {
     const branch: SessionEntry[] = [userEntry("u0", "the ask"), assistantEntry("a2", "tail begins")];
-    const { view } = buildSelectorInputView({
-      sourceGraph: sourceGraphForAssembly(),
-      tail: { getLeafId: () => "leaf", getBranch: () => branch },
-      tailBoundary: { firstKeptEntryId: "a2" },
-      todo: { getInProgress: () => null, getPending: () => [] },
-      touchedFiles: { getLeafId: () => "leaf", getBranch: () => branch },
-      sinceEntryId: "a2",
-      chunkOptions: ASSEMBLY_OPTS,
-    });
+    const view = assemble(
+      buildSelectorInputView({
+        sourceGraph: sourceGraphForAssembly(),
+        tail: { getLeafId: () => "leaf", getBranch: () => branch },
+        tailBoundary: { firstKeptEntryId: "a2" },
+        todo: { getInProgress: () => null, getPending: () => [] },
+        touchedFiles: { getLeafId: () => "leaf", getBranch: () => branch },
+        sinceEntryId: "a2",
+        chunkOptions: ASSEMBLY_OPTS,
+      }),
+    );
     // Working tree roots appear before the tail content.
     expect(view.indexOf("the goal")).toBeLessThan(view.indexOf("the ask"));
     // Tail appears before the legends.
@@ -664,15 +659,17 @@ describe("buildSelectorInputView", () => {
   });
 
   it("includes the tree legend (RENDER_LEGEND) and the tail legend WITHOUT E=", () => {
-    const { view } = buildSelectorInputView({
-      sourceGraph: sourceGraphForAssembly(),
-      tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
-      tailBoundary: { firstKeptEntryId: "a2" },
-      todo: { getInProgress: () => null, getPending: () => [] },
-      touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
-      sinceEntryId: "a2",
-      chunkOptions: ASSEMBLY_OPTS,
-    });
+    const view = assemble(
+      buildSelectorInputView({
+        sourceGraph: sourceGraphForAssembly(),
+        tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
+        tailBoundary: { firstKeptEntryId: "a2" },
+        todo: { getInProgress: () => null, getPending: () => [] },
+        touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
+        sinceEntryId: "a2",
+        chunkOptions: ASSEMBLY_OPTS,
+      }),
+    );
     expect(view).toContain("📁 node"); // tree legend present
     expect(view).toContain("U user"); // tail legend present
     // The tail legend line has no E= attribute (redundant for the Selector).
@@ -682,15 +679,17 @@ describe("buildSelectorInputView", () => {
   });
 
   it("omits the todo section entirely when the bridge is absent (null)", () => {
-    const { view } = buildSelectorInputView({
-      sourceGraph: sourceGraphForAssembly(),
-      tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
-      tailBoundary: { firstKeptEntryId: "a2" },
-      todo: null,
-      touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
-      sinceEntryId: "a2",
-      chunkOptions: ASSEMBLY_OPTS,
-    });
+    const view = assemble(
+      buildSelectorInputView({
+        sourceGraph: sourceGraphForAssembly(),
+        tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
+        tailBoundary: { firstKeptEntryId: "a2" },
+        todo: null,
+        touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
+        sinceEntryId: "a2",
+        chunkOptions: ASSEMBLY_OPTS,
+      }),
+    );
     expect(view).not.toContain("Todo");
   });
 
@@ -756,15 +755,17 @@ describe("buildSelectorInputView", () => {
     const nGoal = nodes.get(N_GOAL);
     if (nGoal) nGoal.observationIds = [O_INITIAL_PROMPT];
     const source = new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 5 });
-    const { view } = buildSelectorInputView({
-      sourceGraph: source,
-      tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
-      tailBoundary: { firstKeptEntryId: "a2" },
-      todo: null,
-      touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
-      sinceEntryId: "a2",
-      chunkOptions: ASSEMBLY_OPTS,
-    });
+    const view = assemble(
+      buildSelectorInputView({
+        sourceGraph: source,
+        tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
+        tailBoundary: { firstKeptEntryId: "a2" },
+        todo: null,
+        touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
+        sinceEntryId: "a2",
+        chunkOptions: ASSEMBLY_OPTS,
+      }),
+    );
     const treeSection = view.split("Current task")[0] ?? "";
     expect(treeSection.indexOf("goal summary")).toBeLessThan(treeSection.indexOf("alpha high newer"));
     expect(treeSection.indexOf("alpha high newer")).toBeLessThan(treeSection.indexOf("bravo high older")); // newer before older on importance tie
@@ -777,15 +778,17 @@ describe("buildSelectorInputView", () => {
     const branch: SessionEntry[] = [assistantEntry("a2", "tail")];
     // buildSelectorInputView uses extractTouchedFiles(touchedFiles, sinceEntryId);
     // we feed a context whose getBranch returns toolCall entries below.
-    const { view } = buildSelectorInputView({
-      sourceGraph: sourceGraphForAssembly(),
-      tail: { getLeafId: () => "leaf", getBranch: () => branch },
-      tailBoundary: { firstKeptEntryId: "a2" },
-      todo: null,
-      touchedFiles: toolCallBranch(),
-      sinceEntryId: null,
-      chunkOptions: ASSEMBLY_OPTS,
-    });
+    const view = assemble(
+      buildSelectorInputView({
+        sourceGraph: sourceGraphForAssembly(),
+        tail: { getLeafId: () => "leaf", getBranch: () => branch },
+        tailBoundary: { firstKeptEntryId: "a2" },
+        todo: null,
+        touchedFiles: toolCallBranch(),
+        sinceEntryId: null,
+        chunkOptions: ASSEMBLY_OPTS,
+      }),
+    );
     expect(view).toContain("src/a.ts");
     expect(view).toContain("✎");
   });

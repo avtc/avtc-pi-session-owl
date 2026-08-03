@@ -247,7 +247,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(result.streamingOutputTokens).toBe(77);
+    expect(result.outputTokens).toBe(77);
   });
 
   it("falls back to chars/4 estimate over deltas when usage is not streamed", async () => {
@@ -260,7 +260,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(result.streamingOutputTokens).toBe(5);
+    expect(result.outputTokens).toBe(5);
   });
 
   it("prefers primary over a larger fallback (primary wins, not max)", async () => {
@@ -273,7 +273,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(result.streamingOutputTokens).toBe(5);
+    expect(result.outputTokens).toBe(5);
   });
 
   it("fallback tier equals the canonical chars/4 estimator (no drift)", async () => {
@@ -284,7 +284,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(result.streamingOutputTokens).toBe(estimateContentTokens(text));
+    expect(result.outputTokens).toBe(estimateContentTokens(text));
   });
 
   it("sums provider output across multiple turns (not a global max of per-message peaks)", async () => {
@@ -301,7 +301,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(result.streamingOutputTokens).toBe(80);
+    expect(result.outputTokens).toBe(80);
   });
 });
 

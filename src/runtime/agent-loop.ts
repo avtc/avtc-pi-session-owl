@@ -43,8 +43,8 @@ export interface StageUsage {
 export interface StageRunResult {
   messages: AgentMessage[];
   usage: StageUsage;
-  /** Live two-tier streaming-output-token counter (primary usage, fallback chars/4). */
-  streamingOutputTokens: number;
+  /** Final two-tier output-token count (primary usage.output, fallback chars/4). */
+  outputTokens: number;
   /** True when `input.signal` was aborted during the run. */
   aborted: boolean;
 }
@@ -168,8 +168,8 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     // multi-turn runs since partial.usage.output resets each message). The chars/4
     // fallback only applies when the provider reports no output at all. (A live
     // widget counter is built separately from the raw onEvent stream.)
-    const streamingOutputTokens = usage.output > 0 ? usage.output : fallbackTokens;
-    return { messages, usage, streamingOutputTokens, aborted: input.signal.aborted };
+    const outputTokens = usage.output > 0 ? usage.output : fallbackTokens;
+    return { messages, usage, outputTokens, aborted: input.signal.aborted };
   } catch (cause) {
     throw new StageRunError(cause, usage, input.signal.aborted);
   } finally {
