@@ -550,7 +550,8 @@ export function applySetMeta(
   }
   if (args.archived === false && node.state === "archived") node.state = "active";
   if (args.obsolete === false && node.state === "obsolete") {
-    // resurrect — clearing supersededBy is obsolete:false's sole job (#6)
+    // resurrect — only obsolete:false clears a supersededBy link (restores the
+    // node to active). archived/other fields never touch it.
     node.state = "active";
     node.supersededBy = null;
   }

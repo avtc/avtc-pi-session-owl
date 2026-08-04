@@ -70,7 +70,7 @@ const TOKEN_RES = [
   // plan-task shorthand refs (T15, T22) the `Task N.N` pattern above misses;
   // and prose-form user-decision citations (`decision #20`, `decision #2`).
   /\bT\d{1,2}\b/g,
-  /\bdecision\s+#\d+\b/gi,
+  /\bdecision[\s*]+#\d+\b/gi,
   /\biter-\d+\b/gi,
   /\bPhase [AB]\b/g,
 ];

@@ -284,14 +284,12 @@ function canReuseCachedTree(
   return coveredIndex >= lastCompactedIndex;
 }
 
-/** Materialize a cached snapshot's nodes into a throwaway graph so the shared
- *  `renderRootView` measures it exactly as try_finish would. Bounded by the
+/** Materialize the cached tree into a throwaway graph so the shared
+ *  `renderRootView` measures it exactly as `try_finish` would — bounded by the
  *  cached tree size (≤ selectorRootViewThreshold); cheap for a fast-path that
- *  skips an LLM run. */
-/** Materialize the cached tree into a throwaway graph for token measurement.
- *  Resolves observation content from the source store so a bare-`new` root
- *  (which falls back to its first observation's first line at render) is measured
- *  exactly as `try_finish` measures the working copy — no under-count. */
+ *  skips an LLM run. Resolves observation content from the source store so a
+ *  bare-`new` root (which falls back to its first observation's first line at
+ *  render) is measured with no under-count. */
 function materializeSnapshot(cached: SerializedSelection, sourceObservations: Map<ObsId, Observation>): Graph {
   const nodes = new Map<NodeId, Node>();
   for (const sn of cached.nodes) {

@@ -498,8 +498,9 @@ export interface CatUnit {
 
 /** Count the observations a single id resolves to: 1 if the id is an
  *  observation, the node's connected-observation count if the id is a node, 0
- *  otherwise (used to detect a single-observation uncapped target — decision
- *  #49). Shared by the agent find/cat path and mk_recall. */
+ *  otherwise. Shared by the agent find/cat path and mk_recall to detect a
+ *  single-observation uncapped target (one connected observation → returned
+ *  whole in any mode). */
 export function countConnectedObservations(
   nodes: Map<string, { observationIds: readonly string[] }>,
   observations: Map<string, unknown>,
