@@ -333,3 +333,12 @@ export function renderAssistantTextBlock(entry: SessionEntry): string {
     .map((text) => aBlock(entry.id, text).text)
     .join("");
 }
+
+/** Cheap presence predicate: true when the entry is an assistant message with
+ *  at least one non-empty cleaned text part. Avoids the full render+join of
+ *  `renderAssistantTextBlock` when only presence is needed (e.g. a scan). */
+export function hasAssistantText(entry: SessionEntry): boolean {
+  if (entry.type !== "message") return false;
+  if (entry.message.role !== "assistant") return false;
+  return assistantTextParts(entry.message).length > 0;
+}

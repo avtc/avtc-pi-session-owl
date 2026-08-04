@@ -774,6 +774,33 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       }
     });
 
+    it("single observation + contentPattern is uncapped (any mode)", async () => {
+      seedSource();
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      try {
+        const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "JWT" }));
+        // the grep excerpt is present despite the 1-token budget (single-obs grep uncapped).
+        expect(out).toContain("Chose JWT for stateless auth");
+        expect(out).not.toContain("budget reached");
+      } finally {
+        _setGetMemkeeperSettings(null);
+      }
+    });
+
+    it("a node with exactly one observation + lines is uncapped (any mode)", async () => {
+      // n7 has exactly one direct observation (o5); the single-obs exception
+      // applies even when the target is a node and the mode is lines.
+      seedSource();
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      try {
+        const out = text(await recall(tool(), { ids: ["n7"], lines: "1-1" }));
+        expect(out).toContain("1: Chose JWT for stateless auth");
+        expect(out).not.toContain("budget reached");
+      } finally {
+        _setGetMemkeeperSettings(null);
+      }
+    });
+
     it("contentPattern extracts grep excerpts with line numbers", async () => {
       seedSource();
       const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "JWT" }));
@@ -797,6 +824,38 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       seedSource();
       const out = text(await recall(tool(), { ids: ["o5"], lines: "1-1" }));
       expect(out).toContain("1: Chose JWT for stateless auth");
+    });
+
+    it("contentPattern grep timeout surfaces a partial-excerpts note (not silent)", async () => {
+      // a catastrophic contentPattern over a large observation must surface the
+      // timeout note — not silently return partial excerpts with no signal.
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
+      seedSource();
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(g, {
+        id: "n1",
+        summary: "slow grep target",
+        importance: "medium",
+        parentNode: null,
+        state: "active",
+      });
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "o1",
+          content: "a".repeat(4000).concat("!"),
+          importance: "medium",
+          sourceEntryIds: [],
+          timestamp: T0,
+          parentNode: "n1",
+        }),
+      });
+      const store = getGraphStore();
+      store.graph = g;
+      const out = text(await recall(tool(), { ids: ["o1"], contentPattern: "(.+a)(.+a)b" }));
+      expect(out.toLowerCase()).toContain("grep timed out");
+      _setGetMemkeeperSettings(null);
     });
 
     it("search results bounded by toolResultTokenBudget", async () => {

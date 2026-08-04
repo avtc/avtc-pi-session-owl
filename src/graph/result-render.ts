@@ -62,8 +62,8 @@ export interface RenderItem {
 }
 
 export interface BudgetedOptions {
-  /** Token budget (chars/4). null = uncapped (single-observation full read —
-   *  the single-observation-uncapped design). */
+  /** Token budget (chars/4). null = unbudgeted (a single-observation target
+   *  in any mode — the cap lifts, the mode still applies). */
   budget: number | null;
   /** How to render `content`. `terse` uses only the header. */
   mode: ContentMode;
@@ -100,12 +100,12 @@ export async function renderBudgeted(items: RenderItem[], opts: BudgetedOptions)
   }
 }
 
-// --- uncapped (single-observation full read) -------------------------------
+// --- uncapped (single-observation target, any mode) -----------------------
 
 async function renderUncapped(items: RenderItem[], opts: BudgetedOptions): Promise<BudgetedResult> {
-  // The uncapped path serves the single-observation full read (budget=null).
-  // Grep (if it ever reached here uncapped) reuses the grep renderer with an
-  // infinite budget; full / lines / terse expand via expandItems.
+  // The uncapped path serves a single-observation target (budget=null) in any
+  // mode. Grep reuses the grep renderer with an infinite budget (all matches
+  // shown); full / lines / terse expand via expandItems.
   if (opts.mode.kind === "grep") return renderGrepBudgeted(items, opts);
   const expanded = expandItems(items, opts.mode);
   const parts: string[] = [];

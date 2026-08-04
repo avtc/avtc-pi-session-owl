@@ -75,7 +75,7 @@ The defaults are the token-cheapest profile and are provisional — tune the thr
 
 | Tool | Description |
 |---|---|
-| `mk_recall` | Recall from memory — fetch by id, filter by time range, or regex search. Targets the rendered tree (selected-root or observations-root). Use `fullDetails` for whole content, or `contentPattern` (grep-style excerpts) / `lines` (a range) for targeted reads. Every result is bounded by `toolResultTokenBudget`. |
+| `mk_recall` | Recall from memory — fetch by id, filter by time range, or regex search. Targets the rendered tree (selected-root or observations-root). |
 
 ## Commands
 

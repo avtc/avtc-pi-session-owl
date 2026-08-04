@@ -17,7 +17,7 @@ import type {
   SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { buildChunks, type ChunkOptions, renderBlocks } from "../../src/observer/chunk.js";
+import { buildChunks, type ChunkOptions, hasAssistantText, renderBlocks } from "../../src/observer/chunk.js";
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -563,5 +563,25 @@ describe("renderBlocks: defensive branches", () => {
       .map((b) => b.text)
       .join("");
     expect(text).toBe("");
+  });
+});
+
+describe("hasAssistantText", () => {
+  it("true for an assistant message with a non-empty text part", () => {
+    expect(hasAssistantText(assistantEntry("a1", [{ type: "text", text: "hello" }]))).toBe(true);
+  });
+
+  it("false for a tool-call-only assistant message (no text)", () => {
+    expect(hasAssistantText(assistantEntry("a2", [{ type: "toolCall", id: "tc1", name: "t", arguments: {} }]))).toBe(
+      false,
+    );
+  });
+
+  it("false for a non-assistant entry (user message)", () => {
+    expect(hasAssistantText(userEntry("u1", "hi"))).toBe(false);
+  });
+
+  it("false for an assistant message whose text strips to empty (ANSI-only)", () => {
+    expect(hasAssistantText(assistantEntry("a3", [{ type: "text", text: "\u001b[31m\u001b[0m" }]))).toBe(false);
   });
 });

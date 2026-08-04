@@ -44,7 +44,7 @@ export interface MemkeeperConfig {
   findTimeoutMs: number;
   /** Max estimated tokens (chars/4) in any one cat/find/ls/mk_recall result
    *  text. Overflow pages with afterId (terse list) or stops expansion
-   *  (fullDetails/grep); a single-observation full read is uncapped.*/
+   *  (fullDetails/grep); a single-observation target is unbudgeted in any mode.*/
   toolResultTokenBudget: number;
   // Observer
   observerModel: string | null;

@@ -12,7 +12,7 @@ import { formatNodeLine, RENDER_LEGEND } from "../format/render.js";
 import { cloneNode, cloneObservation } from "../graph/clone.js";
 import { nodeLineOptions, nonObsoleteRootsOf, orderActiveSetRoots } from "../graph/read-tools.js";
 import { isUnstuckAutoContinue } from "../lifecycle.js";
-import { buildChunks, type ChunkOptions, renderAssistantTextBlock } from "../observer/chunk.js";
+import { buildChunks, type ChunkOptions, hasAssistantText, renderAssistantTextBlock } from "../observer/chunk.js";
 import type { Node, NodeId, Observation, ObsId } from "../types.js";
 import { MemkeeperGraph, makeNode, N_IRRELEVANT, nowStoredTimestamp } from "../types.js";
 
@@ -181,7 +181,7 @@ function findPrecedingAssistantText(branch: readonly SessionEntry[], from: numbe
     const entry = branch[i];
     if (!isMessageEntry(entry)) continue;
     if (entry.message.role !== "assistant") continue;
-    if (renderAssistantTextBlock(entry).length > 0) return i; // has text
+    if (hasAssistantText(entry)) return i; // has text
   }
   return NOT_FOUND;
 }

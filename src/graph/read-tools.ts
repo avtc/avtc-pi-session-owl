@@ -75,8 +75,6 @@ const DEFAULT_CONTEXT_LINES = 2;
 /** Named booleans for `resolveToolMode`'s default-full flag (no bare literals). */
 const MODE_DEFAULT_FULL = true;
 const MODE_DEFAULT_TERSE = false;
-/** Named undefined for an observation block's showParent (no bare literals). */
-const NO_PARENT: string | undefined = undefined;
 
 // --- extraction param schemas (contentPattern / contextLines / lines) -------
 // Shared by `cat`, `find` (and mirrored in mk_recall). `ls` is structure-only,
@@ -102,8 +100,9 @@ const LinesSchema = Type.Optional(
 );
 
 /** Resolve a contentPattern (compile via the shared guard) into a GrepSpec, or
- *  null when contentPattern is absent. Returns an error string on a bad regex. */
-function resolveGrepSpec(
+ *  null when contentPattern is absent. Returns an error string on a bad regex.
+ *  Shared by cat/find (read-tools) and mk_recall (recall). */
+export function resolveGrepSpec(
   contentPattern: string | undefined,
   contextLines: number | undefined,
 ): { grep: GrepSpec | null } | { error: string } {
@@ -446,16 +445,17 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
       }
       // resolve content mode + budget (precedence lines > contentPattern > full
       // > terse). cat is a full read, so the default mode is `full`; grep/lines
-      // override it. A single-observation full read is uncapped.
+      // override it. A single-observation target is unbudgeted in any mode.
       const modeRes = resolveToolMode(MODE_DEFAULT_FULL, params.contentPattern, params.contextLines, params.lines);
       if ("error" in modeRes) {
         return { content: [{ type: "text", text: modeRes.error }], details: { error: true } };
       }
       const items = window.map(catUnitToItem);
       // A single-observation target is unbudgeted in ANY mode (full / lines /
-      // grep): the cap lifts, but the mode still applies (full returns whole
-      // content; lines the range; grep the matching lines).
-      const singleObs = window.filter((u) => u.content !== undefined).length === 1;
+      // grep): the cap lifts, but the mode still applies. Counts the TARGET's
+      // connected observations (not the paginated window), so a small `take`
+      // on a multi-observation node is not wrongly uncapped.
+      const singleObs = singleObsTargetCount(graph, params.ids) === 1;
       const budget = singleObs ? null : resultTokenBudget();
       const rendered = await renderBudgeted(items, {
         budget,
@@ -494,6 +494,22 @@ export interface CatUnit {
   preamble?: string;
   header: string;
   content?: string;
+}
+
+/** Count the observations a list of ids resolves to: 1 per observation id,
+ *  the node's connected-observation count per node id, 0 per unknown. A
+ *  single-observation target (total === 1) is unbudgeted in any mode. */
+function singleObsTargetCount(graph: MemkeeperGraph, ids: string[]): number {
+  let total = 0;
+  for (const id of ids) {
+    const node = graph.nodes.get(id as NodeId);
+    if (node !== undefined) {
+      total += node.observationIds.length;
+      continue;
+    }
+    if (graph.observations.has(id as ObsId)) total += 1;
+  }
+  return total;
 }
 
 /** Build the cat units for a list of requested ids: each node expands to its

@@ -544,6 +544,27 @@ describe("result token budget + extraction", () => {
     expect(out).not.toContain("budget reached");
   });
 
+  it("cat multi-observation node with a small take is NOT uncapped (counts target, not window)", async () => {
+    // a node with TWO observations, requested with take:1 so the window holds a
+    // single content-bearing unit. The single-obs exception must count the
+    // TARGET's connected observations (2), not the paginated window (1), so the
+    // budget cap still applies.
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+    const g = buildGraph();
+    applyRecordObservation(g, {
+      obs: makeObservation({
+        id: "o200",
+        content: "second observation under n7",
+        importance: "medium",
+        sourceEntryIds: [],
+        timestamp: NOW,
+        parentNode: "n7",
+      }),
+    });
+    const out = textOf(await callTool(makeBuilderReadTools(g), "cat", { ids: ["n7"], page: { take: 1 } }));
+    expect(out).toContain("budget reached");
+  });
+
   it("cat single observation + lines is uncapped (any mode)", async () => {
     // a single-observation target is uncapped regardless of mode — even lines.
     _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
@@ -572,6 +593,27 @@ describe("result token budget + extraction", () => {
     expect(out).toContain("4: token refresh logic");
     // the obs header (content-free) leads the block.
     expect(out).toContain("📄 o5");
+  });
+
+  it("cat contentPattern timeout surfaces the partial-excerpts note", async () => {
+    // a catastrophic contentPattern over a large observation must surface the
+    // grep-timeout note (renderGrepBudgeted), not a silent partial result.
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
+    const g = buildGraph();
+    applyRecordObservation(g, {
+      obs: makeObservation({
+        id: "o100",
+        content: "a".repeat(4000).concat("!"),
+        importance: "medium",
+        sourceEntryIds: [],
+        timestamp: NOW,
+        parentNode: "n7",
+      }),
+    });
+    const localTools = makeBuilderReadTools(g);
+    const out = textOf(await callTool(localTools, "cat", { ids: ["o100"], contentPattern: "(.+a)(.+a)b" }));
+    expect(out.toLowerCase()).toContain("grep timed out");
+    _resetGetMemkeeperSettings();
   });
 
   it("cat lines returns the requested 1-indexed range, clamped", async () => {

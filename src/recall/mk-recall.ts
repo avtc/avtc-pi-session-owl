@@ -27,19 +27,14 @@ import {
   orderActiveSetRoots,
   paginate,
   type ResolvedPage,
+  resolveGrepSpec,
   resolvePage,
   staleCursorMessage,
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
 import { runRegexTests } from "../graph/regex-runner.js";
 import { budgetReachedFooter, budgetWindow, runGrepExcerpts } from "../graph/result-budget.js";
-import {
-  type ContentMode,
-  contentBlock,
-  type GrepSpec,
-  grepBlock,
-  resolveContentMode,
-} from "../graph/result-render.js";
+import { type ContentMode, contentBlock, grepBlock, resolveContentMode } from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, type ObsId } from "../types.js";
@@ -58,7 +53,6 @@ function targetObservationContent(target: RecallTarget): (obsId: string) => stri
 const TERSE_CONTENT_MAX = 120;
 const TRUNCATION_ELLIPSIS = "…";
 const CHILD_DEPTH = 1;
-const DEFAULT_CONTEXT_LINES = 2;
 /** Named undefined for an observation block's showParent (no bare literals). */
 const NO_PARENT: string | undefined = undefined;
 /** Named undefined for the pre-computed grep excerpts arg (no bare literals). */
@@ -679,13 +673,9 @@ function err(text: string): RecallResult {
 /** Compile `contentPattern` (if present) and resolve the content mode.
  *  Precedence: lines > contentPattern > fullDetails > terse. */
 function resolveRecallMode(fullDetails: boolean, params: MkRecallParams): { mode: ContentMode } | { error: string } {
-  let grep: GrepSpec | null = null;
-  if (params.contentPattern !== undefined && params.contentPattern !== "") {
-    const compiled = tryCompileFindRegex(params.contentPattern);
-    if ("error" in compiled) return compiled;
-    grep = { pattern: compiled.regex, context: params.contextLines ?? DEFAULT_CONTEXT_LINES };
-  }
-  const mode = resolveContentMode(fullDetails, grep, params.lines);
+  const grepRes = resolveGrepSpec(params.contentPattern, params.contextLines);
+  if ("error" in grepRes) return grepRes;
+  const mode = resolveContentMode(fullDetails, grepRes.grep, params.lines);
   if ("error" in mode) return mode;
   return { mode };
 }
@@ -698,11 +688,16 @@ async function computeGrepExcerpts(
   observations: RenderableObservation[],
   pattern: RegExp,
   context: number,
-): Promise<{ excerpts: ReadonlyMap<string, string[]> } | { error: string }> {
+): Promise<{ excerpts: ReadonlyMap<string, string[]>; note: string | null } | { error: string }> {
   const items = observations.map((o) => ({ id: o.id, content: o.content }));
   const result = await runGrepExcerpts(items, pattern, context, getMemkeeperSettings().findTimeoutMs);
   if ("error" in result) return result;
-  return { excerpts: result.excerpts };
+  if (result.timedOutMs !== null) {
+    const seconds = result.timedOutMs / 1000;
+    const note = `Grep timed out after ${seconds}s — partial excerpts only; refine or narrow the pattern.`;
+    return { excerpts: result.excerpts, note };
+  }
+  return { excerpts: result.excerpts, note: null };
 }
 
 /** Pure recall logic (extracted for testability + so the tool shell stays thin). */
@@ -763,6 +758,7 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
     const result = await computeGrepExcerpts(obsWindow, mode.pattern, mode.context);
     if ("error" in result) return err(result.error);
     excerpts = result.excerpts;
+    if (result.note !== null) note = result.note;
   }
 
   // render each candidate per the mode, then bound by the result token budget
@@ -850,9 +846,11 @@ async function executeIds(
   // grep mode: pre-compute excerpts for the observations in the window, then
   // re-render the referencing units so their obs blocks carry the excerpts.
   let renderedUnits = window;
+  let grepNote: string | null = null;
   if (mode.kind === "grep") {
     const result = await computeGrepExcerpts([...obsById.values()], mode.pattern, mode.context);
     if ("error" in result) return err(result.error);
+    grepNote = result.note;
     renderedUnits = window.map((u) => {
       const obs = obsById.get(u.id);
       if (obs === undefined) return u;
@@ -876,6 +874,7 @@ async function executeIds(
   const { text, footer } = budgetUnits(renderedUnits, budget, more, units.length, window[window.length - 1].id);
   const parts = [text];
   if (footer !== null) parts.push(footer);
+  if (grepNote !== null) parts.push(grepNote);
   // ids lookups never flag error: a missing id is conveyed by its not-found text
   // (matching the sibling `cat` tool), not a whole-result error flag.
   return ok(parts.join("\n"));
