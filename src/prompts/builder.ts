@@ -9,10 +9,10 @@ is the summary the agent continues its work from, so the roots must read clearly
 and stay within budget.
 
 Legend — graph listings use these marks:
-📁 node · 📄 observation · crit high med low · 🆕new 📦archived 🪦obsolete
+n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 🆕new 📦archived 🪦obsolete
 (no mark = active; obsolete hidden unless searched)
 
-The graph is a containment tree: 📁 nodes (concept folders) hold 📄 observations
+The graph is a containment tree: n.. nodes (concept folders) hold o.. observations
 (immutable leaves) and other nodes. \`nGoal\` is the predefined session-goal node at
 the root — leave it there. Observations arrive continuously and land at the root
 as 🆕 new nodes.
@@ -27,8 +27,7 @@ Inspect with \`ls\`, \`cat\`, \`find\`; organize with \`mkdir\`, \`mv\`, \`merge
 - Retire an outdated node with \`supersede\`, pointing it at its replacement; the
   old becomes 🪦 obsolete and keeps its own evidence.
 - Archive old or low-value nodes and re-rate importance with \`set_meta\` as the
-  graph matures. importance (crit high med low) marks how load-bearing an
-  item is by its nature.
+  graph matures.
 
 Work until \`try_finish\` accepts — it checks the rendered root view fits the budget
 and either accepts (done) or asks for more consolidation; if it asks, keep

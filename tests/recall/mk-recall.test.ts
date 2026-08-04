@@ -231,14 +231,14 @@ describe("mk_recall", () => {
       const out = text(await recall(tool(), { ids: ["n7"] }));
       const lines = out.split("\n");
       // header at depth 0
-      expect(lines[0]).toContain("📁 n7");
+      expect(lines[0]).toContain("n7");
       expect(lines[0]).toContain("Auth migration to JWT");
       // children indented
       expect(out).toContain("n8");
       expect(out).toContain("o5");
       // child n8 + o5 are indented (2-space) under the header
-      expect(lines.some((l) => l.startsWith("  📁 n8"))).toBe(true);
-      expect(lines.some((l) => l.startsWith("  📄 o5"))).toBe(true);
+      expect(lines.some((l) => l.startsWith("  n8"))).toBe(true);
+      expect(lines.some((l) => l.startsWith("  o5"))).toBe(true);
     });
 
     it("returns an observation's full content", async () => {
@@ -248,7 +248,7 @@ describe("mk_recall", () => {
       expect(out).toContain("Chose JWT for stateless auth");
       // observation line uses the shared ·-delimited format (no stale space between
       // id and importance); the default terse path carries content + timestamp.
-      expect(out).toContain("📄 o5 · high · Chose JWT for stateless auth · Jul 17 14:30");
+      expect(out).toContain("o5 · high · Chose JWT for stateless auth · 1line 7tokens · Jul 17 14:30");
     });
 
     it("bypasses includeSuperseded — a superseded node still returns with its replacement", async () => {
@@ -390,7 +390,7 @@ describe("mk_recall", () => {
       expect(out).toContain("oInitialPrompt");
       // nodes are not time-filtered but only surface via query, so a from/to-only
       // search returns observations only
-      expect(out).not.toMatch(/^\s*📁 n7\b/m);
+      expect(out).not.toMatch(/^\s*n7\b/m);
     });
 
     it("to is exclusive: an observation at the exact to bound is dropped", async () => {
@@ -805,7 +805,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       seedSource();
       const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "JWT" }));
       expect(out).toContain("JWT");
-      expect(out).toContain("📄 o5");
+      expect(out).toContain("o5");
     });
 
     it("rejects a malformed contentPattern with the compiler error", async () => {
@@ -824,7 +824,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       seedSource();
       const out = text(await recall(tool(), { ids: ["n7"], contentPattern: "JWT" }));
       // the node header is present.
-      expect(out).toContain("📁 n7");
+      expect(out).toContain("n7");
       // the child observation o5 shows its grep excerpt line under the node.
       expect(out).toContain("1: Chose JWT for stateless auth");
     });

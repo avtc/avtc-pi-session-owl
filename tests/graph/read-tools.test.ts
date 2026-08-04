@@ -146,7 +146,7 @@ describe("Builder read tools", () => {
       expect(out).toContain("n20");
       expect(out).toContain("📦"); // archived glyph on n20
       expect(out).not.toContain("n99");
-      // no 📄 at root level in a roots listing
+      // no o.. at root level in a roots listing (observations are always under a node)
       expect(lines.some((l) => l.includes("n12"))).toBe(true);
     });
 
@@ -189,9 +189,11 @@ describe("Builder read tools", () => {
       const out = textOf(await callTool(tools(), "cat", { ids: ["o5"] }));
       expect(out).toContain("Chose JWT for stateless auth");
       expect(out).toContain("o5");
-      // header is exactly `📄 id · importance · timestamp` (· separators, matching
-      // the shared one-line render format); no sourceEntryIds provenance rendered.
-      expect(out).toContain("📄 o5 · high · Jul 29 09:00");
+      // header is exactly `id · importance · size · timestamp` (· separators,
+      // matching the shared one-line render format); no sourceEntryIds provenance
+      // rendered. The size (1line 7tokens) is the full content's line + token
+      // count; cat omits the content snippet in the header (content follows).
+      expect(out).toContain("o5 · high · 1line 7tokens · Jul 29 09:00");
       expect(out).not.toContain("sourceEntryIds");
       // content appears EXACTLY ONCE — the header is content-free (id·importance·timestamp).
       const occurrences = out.split("Chose JWT for stateless auth").length - 1;
@@ -335,16 +337,16 @@ describe("Builder read tools", () => {
       const page2 = textOf(await callTool(tools(), "ls", { page: { take: 2, afterId } }));
       // page2 returns real next content (at least one root line, not the stale-cursor message)
       expect(page2).not.toContain("Cursor");
-      const page2RootLines = page2.split("\n").filter((l) => l.startsWith("📁 "));
+      const page2RootLines = page2.split("\n").filter((l) => /^n\S+/.test(l));
       expect(page2RootLines.length).toBeGreaterThan(0);
       // page1 roots must NOT reappear on page2 (no duplicate re-delivery)
       const page1Ids = page1
         .split("\n")
-        .map((l) => l.match(/^📁 (n\S+)/))
+        .map((l) => l.match(/^(n\S+)/))
         .filter((m): m is RegExpMatchArray => m !== null)
         .map((m) => m[1]);
       for (const id of page1Ids) {
-        const asLine = page2.split("\n").some((l) => l.includes(`📁 ${id} `));
+        const asLine = page2.split("\n").some((l) => l.startsWith(`${id} `));
         expect(asLine).toBe(false);
       }
     });
@@ -375,11 +377,11 @@ describe("Builder read tools", () => {
       // the first page's roots must NOT reappear (cursor shifted past them)
       const page1Ids = page1
         .split("\n")
-        .map((l) => l.match(/^📁 (n\S+)/))
+        .map((l) => l.match(/^(n\S+)/))
         .filter((m): m is RegExpMatchArray => m !== null)
         .map((m) => m[1]);
       for (const id of page1Ids) {
-        expect(all.split("\n").some((l) => l.includes(`📁 ${id} `))).toBe(false);
+        expect(all.split("\n").some((l) => l.startsWith(`${id} `))).toBe(false);
       }
     });
 
@@ -592,7 +594,7 @@ describe("result token budget + extraction", () => {
     expect(out).toContain("2: the token is secret");
     expect(out).toContain("4: token refresh logic");
     // the obs header (content-free) leads the block.
-    expect(out).toContain("📄 o5");
+    expect(out).toContain("o5");
   });
 
   it("cat contentPattern timeout surfaces the partial-excerpts note", async () => {

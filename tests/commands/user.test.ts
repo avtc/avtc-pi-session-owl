@@ -190,7 +190,7 @@ describe("/mk:* user commands", () => {
       expect(text).toContain("n8");
       expect(text).toContain("o5");
       // n8/o5 indented under the parent (leading spaces)
-      expect(text).toMatch(/^\s*📁 n8/m);
+      expect(text).toMatch(/^\s*n8/m);
     });
 
     it("unknown nodeId → error notify naming the id", async () => {
@@ -262,10 +262,10 @@ describe("/mk:* user commands", () => {
       expect(type).toBe("info");
       const text = message ?? "";
       // node header present
-      expect(text).toContain("📁 n8");
+      expect(text).toContain("n8");
       // no observation expanded (header-only unit — single line, no obs content)
       expect(text).not.toContain("\n");
-      expect(text).not.toMatch(/📄 o\d/);
+      expect(text).not.toMatch(/\bo\d/);
     });
 
     it("missing arg → usage error", async () => {
@@ -286,7 +286,7 @@ describe("/mk:* user commands", () => {
       expect(type).toBe("info");
       const text = message ?? "";
       // n7 node line genuinely matches its summary (not just via `in n7`)
-      expect(text).toContain("📁 n7");
+      expect(text).toContain("n7");
       // o5 content matches → shows `in n7`
       expect(text).toContain("o5");
       expect(text).toContain("in n7");

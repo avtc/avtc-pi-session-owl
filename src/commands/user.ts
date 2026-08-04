@@ -7,7 +7,7 @@
 // multi-line popups — zero agent-context cost (user-facing only, never injected).
 //
 // They mirror the Builder's filesystem navigation (one mental model across
-// Builder + user), reuse the shared render format (📁/📄 + importance words) and
+// Builder + user), reuse the shared render format (id-prefix n/o + importance words) and
 // the agent tools' collection logic (buildCatUnits / collectFindMatches), and
 // cap output at `commandResultCap` lines (a transient popup can't paginate — so
 // a render cap + drill footer, NOT cursor pagination).

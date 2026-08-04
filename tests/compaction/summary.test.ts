@@ -179,13 +179,13 @@ describe("renderSummary — observations-root", () => {
       touchedFiles: [],
     });
     const activeSet = out.split("## Active set")[1];
-    expect(activeSet).toContain("📁 nGoal");
-    expect(activeSet).toContain("📁 n7");
-    expect(activeSet).toContain("📁 n3");
+    expect(activeSet).toContain("nGoal");
+    expect(activeSet).toContain("n7");
+    expect(activeSet).toContain("n3");
     // obsolete excluded by default
-    expect(activeSet).not.toContain("📁 n9");
+    expect(activeSet).not.toContain("n9");
     // nGoal appears before the other roots
-    expect(activeSet.indexOf("📁 nGoal")).toBeLessThan(activeSet.indexOf("📁 n3"));
+    expect(activeSet.indexOf("nGoal")).toBeLessThan(activeSet.indexOf("n3"));
   });
 
   it("renders archived roots with 📦 and new nodes as active (no 🆕)", () => {
@@ -225,14 +225,14 @@ describe("renderSummary — selected-root", () => {
       touchedFiles: [],
     });
     const activeSet = out.split("## Active set")[1];
-    expect(activeSet).toContain("📁 nGoal");
-    expect(activeSet).toContain("📁 n7");
-    expect(activeSet).toContain("📁 n3");
-    expect(activeSet).toContain(`📁 ${N_IRRELEVANT}`);
+    expect(activeSet).toContain("nGoal");
+    expect(activeSet).toContain("n7");
+    expect(activeSet).toContain("n3");
+    expect(activeSet).toContain(`${N_IRRELEVANT}`);
     // nGoal first, nIrrelevant last
-    const goalIdx = activeSet.indexOf("📁 nGoal");
-    const n7Idx = activeSet.indexOf("📁 n7");
-    const irrIdx = activeSet.indexOf(`📁 ${N_IRRELEVANT}`);
+    const goalIdx = activeSet.indexOf("nGoal");
+    const n7Idx = activeSet.indexOf("n7");
+    const irrIdx = activeSet.indexOf(`${N_IRRELEVANT}`);
     expect(goalIdx).toBeLessThan(n7Idx);
     expect(n7Idx).toBeLessThan(irrIdx);
   });
@@ -249,7 +249,7 @@ describe("renderSummary — selected-root", () => {
       touchedFiles: [],
     });
     const activeSet = out.split("## Active set")[1];
-    expect(activeSet).toContain("📁 nGoal");
-    expect(activeSet).toContain("📁 n5");
+    expect(activeSet).toContain("nGoal");
+    expect(activeSet).toContain("n5");
   });
 });

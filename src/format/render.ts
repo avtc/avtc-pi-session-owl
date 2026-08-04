@@ -5,14 +5,15 @@
 // Builder ls/find, the Selector, mk_recall, the user /mk:* commands, and the
 // compaction summary.
 
-import { IMPORTANCE_ABBR, type Node, type Observation } from "../types.js";
+import { estimateContentTokens, IMPORTANCE_ABBR, type Node, type Observation } from "../types.js";
 
 export type RenderViewer = "builder" | "nonBuilder";
 
 /** The canonical one-line legend for the shared render format (non-Builder
  *  consumers — compaction summary, commands; the Builder's own prompt carries
  *  its own legend including the Builder-only 🆕new glyph). */
-export const RENDER_LEGEND = "📁 node · 📄 observation · crit high med low · 📦archived 🪦obsolete";
+export const RENDER_LEGEND =
+  "n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete";
 
 const MONTH_ABBREVIATIONS = [
   "Jan",
@@ -154,12 +155,26 @@ function stateGlyph(node: RenderableNode, viewer: RenderViewer): string {
   return "";
 }
 
-/** The direct-child counts fragment for a node (empty when none at all). */
+/** `count` + `singular`/`plural` noun, grammar-correct (1 node, 2 nodes). */
+function pluralize(count: number, singular: string, plural: string): string {
+  return `${count}${count === 1 ? singular : plural}`;
+}
+
+/** The direct-child counts fragment for a node. The node count is shown only
+ *  when non-zero (a `0nodes` prefix is noise); the obs count always shows. */
 function childCounts(node: RenderableNode): string {
-  const folders = node.childNodeIds.length;
-  const files = node.observationIds.length;
-  if (folders > 0) return `${folders}📁 ${files}📄`;
-  return `${files}📄`;
+  const nodes = node.childNodeIds.length;
+  const obs = pluralize(node.observationIds.length, "obs", "obs");
+  return nodes > 0 ? `${pluralize(nodes, "node", "nodes")} ${obs}` : obs;
+}
+
+/** The size fragment for an observation: line count + estimated token count of
+ *  its full content (chars/4). Always shown — lets the agent gauge the cost of
+ *  expanding (fullDetails) before drilling, and pick a `lines` window. */
+function observationSize(content: string): string {
+  const lineCount = content.split("\n").length;
+  const tokenCount = estimateContentTokens(content);
+  return `${pluralize(lineCount, "line", "lines")} ${pluralize(tokenCount, "token", "tokens")}`;
 }
 
 interface LineOptions {
@@ -199,7 +214,7 @@ export interface RenderableObservation {
 
 /** Render one node as a line (no indent — callers apply depth indentation). */
 export function formatNodeLine(node: RenderableNode, options: LineOptions): string {
-  const parts: string[] = [`📁 ${node.id} · ${stateGlyph(node, options.viewer)}${importanceAbbr(node.importance)}`];
+  const parts: string[] = [`${node.id} · ${stateGlyph(node, options.viewer)}${importanceAbbr(node.importance)}`];
   const summary = singleLine(node.summary);
   if (summary !== "") {
     parts.push(summary);
@@ -221,11 +236,12 @@ export function formatNodeLine(node: RenderableNode, options: LineOptions): stri
 
 /** Render one observation as a line (no indent — callers apply depth indentation). */
 export function formatObservationLine(obs: RenderableObservation, options: LineOptions): string {
-  const parts: string[] = [`📄 ${obs.id} · ${importanceAbbr(obs.importance)}`];
+  const parts: string[] = [`${obs.id} · ${importanceAbbr(obs.importance)}`];
   const formatContent = options.formatContent ?? singleLine;
   const content = formatContent(obs.content);
   if (content !== "") parts.push(content);
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
+  parts.push(observationSize(obs.content));
   parts.push(formatTimestamp(obs.timestamp));
   return parts.join(" · ");
 }

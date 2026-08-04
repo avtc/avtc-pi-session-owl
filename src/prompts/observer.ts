@@ -20,7 +20,7 @@ as E=id:
 - <C E=id tool=name> a tool call, immediately followed by its own result
   <R E=id> ... </R>, or <R E=id error> when the call failed
 
-Each observation carries an importance — how load-bearing it is by nature:
+Each observation carries an importance — how much it matters if lost, by nature:
 - critical — a hard, persistent constraint or correction; losing it would cause
   real harm
 - high — a decision, choice, or unresolved blocker

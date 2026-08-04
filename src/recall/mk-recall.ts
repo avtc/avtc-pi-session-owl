@@ -404,7 +404,7 @@ function terseObservationLine(obs: RenderableObservation, showParent: string | u
 }
 
 /** An observation header carrying no content: the shared format with content
- *  omitted (`📄 id · importance · [in parent] · timestamp`). */
+ *  omitted (`id · importance · size · [in parent] · timestamp`). */
 function observationHeader(obs: RenderableObservation, showParent: string | undefined): string {
   return formatObservationLine(obs, { viewer: VIEWER, showParent, formatContent: () => "" });
 }
@@ -616,7 +616,7 @@ const MK_RECALL_PARAMS = Type.Object({
 });
 
 const MK_RECALL_DESCRIPTION =
-  "Recall your preserved session memory — the durable context kept across compactions. Fetch the detail behind any id in the memory summary (n.. = node, o.. = observation), search all captured memory by regex, or filter by time. Each node in the result lists its children by id; call again with a child id to descend. Results are a compact indented tree (📁 node, 📄 observation) with importance (crit/high/med/low) and timestamps. Read-only.";
+  "Recall your preserved session memory — the durable context kept across compactions. Fetch the detail behind any id in the memory summary (n.. = node, o.. = observation), search all captured memory by regex, or filter by time. Each node in the result lists its children by id; call again with a child id to descend. Results are a compact indented tree (n.. node, o.. observation) with importance (crit/high/med/low — how much it matters if lost) and timestamps. Read-only.";
 
 // --- execute ---------------------------------------------------------------
 

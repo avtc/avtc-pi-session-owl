@@ -656,7 +656,7 @@ describe("buildSelectorInputView", () => {
     // Working tree roots appear before the tail content.
     expect(view.indexOf("the goal")).toBeLessThan(view.indexOf("the ask"));
     // Tail appears before the legends.
-    expect(view.indexOf("the ask")).toBeLessThan(view.indexOf("📁 node"));
+    expect(view.indexOf("the ask")).toBeLessThan(view.indexOf("n.. node"));
   });
 
   it("includes the tree legend (RENDER_LEGEND) and the tail legend WITHOUT E=", () => {
@@ -671,7 +671,7 @@ describe("buildSelectorInputView", () => {
         chunkOptions: ASSEMBLY_OPTS,
       }),
     );
-    expect(view).toContain("📁 node"); // tree legend present
+    expect(view).toContain("n.. node"); // tree legend present
     expect(view).toContain("U user"); // tail legend present
     // The tail legend line has no E= attribute (redundant for the Selector).
     const legendLine = view.split("\n").find((line) => line.includes("U user"));

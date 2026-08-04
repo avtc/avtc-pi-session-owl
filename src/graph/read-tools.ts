@@ -477,7 +477,7 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
   };
 }
 
-/** A content-free header for a cat observation block: `📄 id · importance · timestamp`
+/** A content-free header for a cat observation block: `id · importance · size · timestamp`
  *  (NO content — that's the body; NO sourceEntryIds — provenance is internal).
  *  Delegates to the shared formatObservationLine with content omitted, so the
  *  header stays byte-identical to every other observation line prefix. */

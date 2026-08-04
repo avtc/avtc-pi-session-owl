@@ -98,18 +98,40 @@ describe("formatNodeLine", () => {
       rangeEnd: "2026-07-29T09:15:00.000Z",
     });
     expect(formatNodeLine(node, { viewer: "builder" })).toBe(
-      "📁 n7 · high · Auth migration to JWT · 3📁 12📄 · Jul 28 14:30 — Jul 29 09:15",
+      "n7 · high · Auth migration to JWT · 3nodes 12obs · Jul 28 14:30 — Jul 29 09:15",
     );
+  });
+
+  it("uses grammar-correct singular/plural for child counts (1node Xobs)", () => {
+    const node = makeNode({
+      id: "n7",
+      summary: "Auth migration",
+      importance: "high",
+      observationIds: repeatObs(1),
+      childNodeIds: ["n8"],
+    });
+    expect(formatNodeLine(node, { viewer: "builder" })).toContain("1node 1obs");
+  });
+
+  it("uses grammar-correct singular for a multi-line obs size", () => {
+    const obs = makeObservation({
+      id: "o9",
+      content: "line one\nline two\nline three",
+      importance: "high",
+      timestamp: "2026-07-28T14:30:00.000Z",
+    });
+    // 3 lines (3line, plural) + ceil(28/4)=7 tokens (7tokens, plural)
+    expect(formatObservationLine(obs, { viewer: "builder" })).toContain("3lines 7tokens");
   });
 
   it("omits the child count when the node has only observations", () => {
     const node = makeNode({ id: "nGoal", summary: "the goal", importance: "critical", observationIds: repeatObs(2) });
-    expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe("📁 nGoal · crit · the goal · 2📄 · Jul 29 09:00");
+    expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe("nGoal · crit · the goal · 2obs · Jul 29 09:00");
   });
 
   it("renders an archived node with the 📦 glyph", () => {
     const node = makeNode({ id: "n3", summary: "old branch", importance: "low", state: "archived" });
-    expect(formatNodeLine(node, { viewer: "builder" })).toBe("📁 n3 · 📦low · old branch · 0📄 · Jul 29 09:00");
+    expect(formatNodeLine(node, { viewer: "builder" })).toBe("n3 · 📦low · old branch · 0obs · Jul 29 09:00");
   });
 
   it("renders an obsolete node with the 🪦 glyph and the → supersededBy link", () => {
@@ -120,7 +142,7 @@ describe("formatNodeLine", () => {
       state: "obsolete",
       supersededBy: "n7",
     });
-    expect(formatNodeLine(node, { viewer: "builder" })).toBe("📁 n2 · 🪦med · YAML config · → n7 · 0📄 · Jul 29 09:00");
+    expect(formatNodeLine(node, { viewer: "builder" })).toBe("n2 · 🪦med · YAML config · → n7 · 0obs · Jul 29 09:00");
   });
 
   it("emits the 🆕 glyph for a new node only when the viewer is the Builder", () => {
@@ -132,7 +154,7 @@ describe("formatNodeLine", () => {
       observationIds: repeatObs(1),
     });
     expect(formatNodeLine(node, { viewer: "builder" })).toBe(
-      "📁 n12 · 🆕med · Build failed: TS2322 · 1📄 · Jul 29 09:00",
+      "n12 · 🆕med · Build failed: TS2322 · 1obs · Jul 29 09:00",
     );
   });
 
@@ -145,7 +167,7 @@ describe("formatNodeLine", () => {
       observationIds: repeatObs(1),
     });
     expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe(
-      "📁 n12 · med · Build failed: TS2322 · 1📄 · Jul 29 09:00",
+      "n12 · med · Build failed: TS2322 · 1obs · Jul 29 09:00",
     );
   });
 
@@ -163,7 +185,7 @@ describe("formatNodeLine", () => {
     const resolveObs = (obsId: string): string | undefined =>
       obsId === node.observationIds[0] ? "User hit a TS2322 in auth module\nmore detail here" : undefined;
     expect(formatNodeLine(node, { viewer: "builder", observationContent: resolveObs })).toBe(
-      "📁 n15 · 🆕med · User hit a TS2322 in auth module · 1📄 · Jul 29 09:00",
+      "n15 · 🆕med · User hit a TS2322 in auth module · 1obs · Jul 29 09:00",
     );
   });
 
@@ -176,13 +198,13 @@ describe("formatNodeLine", () => {
       state: "new",
       observationIds: repeatObs(1),
     });
-    expect(formatNodeLine(node, { viewer: "builder" })).toBe("📁 n15 · 🆕med · 1📄 · Jul 29 09:00");
+    expect(formatNodeLine(node, { viewer: "builder" })).toBe("n15 · 🆕med · 1obs · Jul 29 09:00");
   });
 
   it("appends 'in <parent>' when showParent is set", () => {
     const node = makeNode({ id: "n20", summary: "leaf branch", importance: "high", observationIds: repeatObs(1) });
     expect(formatNodeLine(node, { viewer: "builder", showParent: "n7" })).toBe(
-      "📁 n20 · high · leaf branch · in n7 · 1📄 · Jul 29 09:00",
+      "n20 · high · leaf branch · in n7 · 1obs · Jul 29 09:00",
     );
   });
 });
@@ -196,7 +218,7 @@ describe("formatObservationLine", () => {
       timestamp: "2026-07-28T14:30:00.000Z",
     });
     expect(formatObservationLine(obs, { viewer: "builder" })).toBe(
-      "📄 o5 · high · Chose JWT for stateless auth · Jul 28 14:30",
+      "o5 · high · Chose JWT for stateless auth · 1line 7tokens · Jul 28 14:30",
     );
   });
 
@@ -208,7 +230,7 @@ describe("formatObservationLine", () => {
       timestamp: "2026-07-28T14:30:00.000Z",
     });
     expect(formatObservationLine(obs, { viewer: "nonBuilder", showParent: "n7" })).toBe(
-      "📄 o5 · low · a fact · in n7 · Jul 28 14:30",
+      "o5 · low · a fact · in n7 · 1line 2tokens · Jul 28 14:30",
     );
   });
 
@@ -221,7 +243,7 @@ describe("formatObservationLine", () => {
     });
     const upper = (c: string) => c.toUpperCase();
     expect(formatObservationLine(obs, { viewer: "nonBuilder", formatContent: upper })).toBe(
-      "📄 o5 · low · A FACT · Jul 28 14:30",
+      "o5 · low · A FACT · 1line 2tokens · Jul 28 14:30",
     );
   });
 
@@ -234,14 +256,16 @@ describe("formatObservationLine", () => {
     });
     const none = () => "";
     expect(formatObservationLine(obs, { viewer: "nonBuilder", showParent: "n7", formatContent: none })).toBe(
-      "📄 o5 · low · in n7 · Jul 28 14:30",
+      "o5 · low · in n7 · 1line 2tokens · Jul 28 14:30",
     );
   });
 });
 
 describe("RENDER_LEGEND", () => {
   it("is the canonical one-line shared legend (non-Builder; no Builder-only glyph)", () => {
-    expect(RENDER_LEGEND).toBe("📁 node · 📄 observation · crit high med low · 📦archived 🪦obsolete");
+    expect(RENDER_LEGEND).toBe(
+      "n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete",
+    );
   });
 });
 
@@ -273,7 +297,7 @@ describe("singleLine rendering", () => {
     const node = makeNode({ id: "n1", summary: "", importance: "medium", observationIds: repeatObs(1) });
     const line = formatNodeLine(node, { viewer: "nonBuilder" });
     expect(line).not.toContain("·  ·");
-    expect(line).toBe("📁 n1 · med · 1📄 · Jul 29 09:00");
+    expect(line).toBe("n1 · med · 1obs · Jul 29 09:00");
   });
 });
 

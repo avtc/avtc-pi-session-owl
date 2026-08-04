@@ -45,7 +45,7 @@ export type NodeId = GeneratedNodeId | typeof N_GOAL | typeof N_IRRELEVANT;
 
 export type Importance = "critical" | "high" | "medium" | "low";
 
-/** Ranking value for each importance (higher = more load-bearing). */
+/** Ranking value for each importance (higher = more consequential if lost). */
 export const IMPORTANCE_RANK: Record<Importance, number> = {
   critical: 4,
   high: 3,

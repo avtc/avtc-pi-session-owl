@@ -12,7 +12,7 @@ import { IMPORTANCE_VALUES, NODE_STATE_VALUES } from "./types.js";
 /** The four importance levels, derived from the canonical IMPORTANCE_VALUES so
  *  the schema enum cannot drift from the Importance union. */
 export const ImportanceSchema: TSchema = StringEnum([...IMPORTANCE_VALUES], {
-  description: "How load-bearing this item is by nature — critical, high, medium, or low.",
+  description: "How much it matters if lost, by nature — critical, high, medium, or low.",
 });
 
 /** The four node states, derived from the canonical NODE_STATE_VALUES so the

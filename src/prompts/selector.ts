@@ -9,7 +9,7 @@ after a compaction. The active-set top level becomes the summary, so it must rea
 clearly and fit the budget.
 
 Legend — the working tree uses these marks:
-📁 node · 📄 observation · crit high med low · 📦archived
+n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived
 (no mark = active)
 The recent tail is tagged blocks: U user, A assistant, C tool-call, R tool-result,
 T thinking.
@@ -18,7 +18,7 @@ You're given the working tree (the memory graph at its roots), the recent tail, 
 todo (in-progress + pending), and the files touched since the last compaction. Read
 them to grasp the current task; read the project files (\`fs_read\`/\`fs_grep\`/\`fs_find\`/\`fs_ls\`) to see the actionable tasks planned beyond the current one — the agent may reach several of them before the next compaction, so the active-set should ready it for those too.
 
-The tree is 📁 nodes (concept folders) holding 📄 observations and sub-nodes. \`nGoal\`
+The tree is n.. nodes (concept folders) holding o.. observations and sub-nodes. \`nGoal\`
 is the session goal — leave it at the top. \`nIrrelevant\` (already present) is the bin
 for what doesn't bear on the task — set things aside there, kept visible and terse.
 Archived nodes are included; promote one if it bears on the task again.

@@ -1,13 +1,13 @@
 # avtc-pi-memkeeper
 
-A working-memory extension for [pi](https://github.com/avtc/pi) — maintains a knowledge graph across context compactions and renders a task-relative summary into each compaction, so long sessions keep their goal, decisions, and load-bearing context without re-explaining themselves.
+A working-memory extension for [pi](https://github.com/avtc/pi) — maintains a knowledge graph across context compactions and renders a task-relative summary into each compaction, so long sessions keep their goal, decisions, and important context without re-explaining themselves.
 
 ![memkeeper](assets/images/<placeholder>.png)
 
 ## Features
 
 - **Persistent memory** — observations (immutable, source-backed) are captured continuously and organized into a semantic node graph that lasts across every compaction.
-- **Compaction summary** — at compaction, the graph's root level is refined toward a token budget and rendered into the summary pi injects. No full-history re-summary; nothing load-bearing is lost.
+- **Compaction summary** — at compaction, the graph's root level is refined toward a token budget and rendered into the summary pi injects. No full-history re-summary; nothing important is lost.
 - **Task-relative** — a Selector picks the nodes that matter to the current work and the planned next tasks; superseded and stale context drops out.
 - **Browse session memory** — `/mk:ls`, `/mk:cat`, `/mk:find` let you list, inspect, and search your memory graph; the `mk_recall` tool lets the agent recall on demand.
 - **Live status widget** — a footer line shows the active maintenance stage, its progress, and its token cost.
@@ -33,16 +33,16 @@ At compaction, the active set is rendered into the compaction summary that pi in
 The graph is a containment tree of **nodes** (folders) holding **observations** (leaves). It renders the same way everywhere — the agent's `mk_recall`, the Builder and Selector tools, and the `/mk:ls`/`/mk:cat`/`/mk:find` commands:
 
 ```
-📁 nGoal · crit · The session goal · 3📁 1📄 · Jul 28 14:30
-  📁 n12 · high · Auth flow redesign · 2📁 4📄 · Jul 28 14:30 — Jul 29 09:15
-    📄 o31 · med · JWT validation moved to middleware · Jul 28 14:30
-  📁 n8 · high · Decisions · 5📄 · Jul 28 14:30 — Jul 29 09:15
-  📁 n6 · 📦low · Old login form · 2📄 · Jul 27 09:00 — Jul 27 18:00
-  📁 n3 · 🪦med · YAML config · → n8 · 1📄 · Jul 27 09:00
-📁 n5 · med · Scratch · 2📄 · Jul 28 14:30 — Jul 29 09:15
+nGoal · crit · The session goal · 4nodes 1obs · Jul 28 14:30
+  n12 · high · Auth flow redesign · 1obs · Jul 28 14:30 — Jul 29 09:15
+    o31 · med · JWT validation moved to middleware · 2lines 15tokens · Jul 28 14:30
+  n8 · high · Decisions · 5obs · Jul 28 14:30 — Jul 29 09:15
+  n6 · 📦low · Old login form · 2obs · Jul 27 09:00 — Jul 27 18:00
+  n3 · 🪦med · YAML config · → n8 · 1obs · Jul 27 09:00
+n5 · med · Scratch · 2obs · Jul 28 14:30 — Jul 29 09:15
 ```
 
-(*📁* node · *📄* observation; importance *crit*/*high*/*med*/*low*; state glyphs *📦* archived · *🪦* obsolete · *🆕* new, Builder view only.)
+(*n..* node · *o..* observation; importance *crit*/*high*/*med*/*low* (how much it matters if lost); state glyphs *📦* archived · *🪦* obsolete · *🆕* new, Builder view only.)
 
 **How the agent operates it.** The Builder and Selector navigate and edit the graph with filesystem-style tools — `ls`, `cat`, `find` to read; `mkdir`, `mv`, `merge`, `supersede`, `set_meta` (Builder) / `set_summary` (Selector) to reorganize; `try_finish` to converge the root view on its budget. The Builder maintains the source graph; the Selector builds a curated copy (the active set) for the summary. The agent itself uses the read-only `mk_recall` to fetch and search on demand.
 
