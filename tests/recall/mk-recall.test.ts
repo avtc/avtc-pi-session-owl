@@ -484,35 +484,6 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       expect(full).not.toContain("e2");
       expect(full).not.toContain("sourceEntryIds");
     });
-
-    it("caps take:0+fullDetails to a bounded page (no unbounded verbatim dump)", async () => {
-      // defense-in-depth: take:0 (all) + fullDetails must not dump the whole
-      // observation set into the agent context verbatim; it is capped and the
-      // caller pages with afterId for more.
-      resetForNewSession();
-      setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
-      // more roots than the cap, each with a one-line body
-      for (let i = 1; i <= 60; i += 1) {
-        applyCreateNode(g, {
-          id: `nc${i}` as Node["id"],
-          summary: `capped node ${i}`,
-          importance: "medium",
-          parentNode: null,
-          state: "active",
-        });
-      }
-      setClock(null);
-      getGraphStore().graph = g;
-
-      // take:0 + fullDetails over a no-filter browse → capped, not all 60
-      const out = text(await recall(tool(), { take: 0, fullDetails: true }));
-      const rootsShown = out.split("\n").filter((l) => l.includes("capped node")).length;
-      expect(rootsShown).toBeLessThan(60);
-      expect(rootsShown).toBeGreaterThan(0);
-      // a pagination footer is present so the agent knows to page for more
-      expect(out).toContain("afterId=");
-    });
   });
 
   describe("pagination", () => {
@@ -753,6 +724,52 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       expect(full).toContain("gamma third.");
       // both carry the parent (flat search)
       expect(terse).toContain("in n1");
+    });
+  });
+
+  // --- AD18: result token budget + targeted extraction (contentPattern / lines) --
+
+  describe("result token budget + extraction", () => {
+    it("fullDetails single observation is returned whole (uncapped)", async () => {
+      seedSource();
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      try {
+        const out = text(await recall(tool(), { ids: ["o5"], fullDetails: true }));
+        expect(out).toContain("Chose JWT for stateless auth");
+        expect(out).not.toContain("budget reached");
+      } finally {
+        _setGetMemkeeperSettings(null);
+      }
+    });
+
+    it("contentPattern extracts grep excerpts with line numbers", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "JWT" }));
+      expect(out).toContain("JWT");
+      expect(out).toContain("📄 o5");
+    });
+
+    it("lines returns a 1-indexed range", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["o5"], lines: "1-1" }));
+      expect(out).toContain("1: Chose JWT for stateless auth");
+    });
+
+    it("search results bounded by toolResultTokenBudget", async () => {
+      seedSource();
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 2 }));
+      try {
+        const out = text(await recall(tool(), { query: "." }));
+        expect(out).toContain("budget reached");
+      } finally {
+        _setGetMemkeeperSettings(null);
+      }
+    });
+
+    it("rejects a malformed lines range with an error string", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["o5"], lines: "bad" }));
+      expect(out).toContain("Invalid line range");
     });
   });
 });

@@ -46,6 +46,7 @@ const EXPECTED_IDS = [
   "selectorMode",
   "commandResultCap",
   "findTimeoutMs",
+  "toolResultTokenBudget",
   // Observer
   "observerModel",
   "observerThresholdTokens",
@@ -139,6 +140,7 @@ describe("MEMKEEPER_SCHEMA", () => {
       selectorMode: "string",
       commandResultCap: "number",
       findTimeoutMs: "duration",
+      toolResultTokenBudget: "number",
       observerModel: "model",
       observerThresholdTokens: "number",
       observerIncludeThinking: "boolean",

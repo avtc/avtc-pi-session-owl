@@ -29,10 +29,17 @@ import {
   type ResolvedPage,
   resolvePage,
   staleCursorMessage,
-  TAKE_ALL,
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
 import { runRegexTests } from "../graph/regex-runner.js";
+import { budgetWindow, buildGrepExcerpt, sliceLineRange } from "../graph/result-budget.js";
+import {
+  type ContentMode,
+  type GrepSpec,
+  type RenderItem,
+  renderBudgeted,
+  resolveContentMode,
+} from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, type ObsId } from "../types.js";
@@ -51,6 +58,11 @@ function targetObservationContent(target: RecallTarget): (obsId: string) => stri
 const TERSE_CONTENT_MAX = 120;
 const TRUNCATION_ELLIPSIS = "…";
 const CHILD_DEPTH = 1;
+const DEFAULT_CONTEXT_LINES = 2;
+/** Named undefined for an observation block's showParent (no bare literals). */
+const NO_PARENT: string | undefined = undefined;
+/** Named undefined for the pre-computed grep excerpts arg (no bare literals). */
+const NO_EXCERPTS: readonly string[] | undefined = undefined;
 
 // --- normalized recall target ----------------------------------------------
 
@@ -283,7 +295,11 @@ interface RankKey {
 interface SearchCandidate {
   readonly id: string;
   readonly key: RankKey;
+  /** The one-line header (terse). Observation candidates also carry `obs` so the
+   *  content can be expanded/extracted by the budget layer under the active
+   *  content mode.*/
   readonly line: string;
+  readonly obs?: RecallObservation;
 }
 
 /** Importance desc, then recency desc (lexicographic on the UTC ISO instant). */
@@ -334,8 +350,14 @@ function missingIdMessage(id: string): string {
 }
 
 /** Render a node as a drill-down payload: header at depth 0, direct children
- *  indented at depth 1 (child nodes one-lined, child observations terse or full). */
-function renderNodePayload(node: RenderableNode, target: RecallTarget, fullDetails: boolean): string {
+ *  indented at depth 1 (child nodes one-lined, child observations per the
+ *  active content mode). */
+function renderNodePayload(
+  node: RenderableNode,
+  target: RecallTarget,
+  mode: ContentMode,
+  excerpts: ReadonlyMap<string, string[]>,
+): string {
   const observationContent = targetObservationContent(target);
   const lines: string[] = [formatNodeLine(node, { viewer: VIEWER, observationContent })];
   const childNodes = node.childNodeIds
@@ -348,23 +370,31 @@ function renderNodePayload(node: RenderableNode, target: RecallTarget, fullDetai
     lines.push(indent(formatNodeLine(child, { viewer: VIEWER, observationContent }), CHILD_DEPTH));
   }
   for (const obs of childObs) {
-    lines.push(indent(renderObservationBlock(obs, { showParent: undefined, fullDetails }), CHILD_DEPTH));
+    lines.push(indent(renderObservationBlock(obs, mode, NO_PARENT, excerpts.get(obs.id)), CHILD_DEPTH));
   }
   return lines.join("\n");
 }
 
-/** Render an observation as either a terse one-line (single-lined, length-capped)
- *  or a full content block (header + raw multi-line content). */
+/** Render an observation per the active content mode: terse one-line, full
+ *  content block, a line range, or grep excerpts. */
 function renderObservationBlock(
   obs: RenderableObservation,
-  options: { showParent: string | undefined; fullDetails: boolean },
+  mode: ContentMode,
+  showParent: string | undefined,
+  excerpts: readonly string[] | undefined,
 ): string {
-  if (options.fullDetails) {
-    // header (no content) + raw multi-line content below
-    const header = observationHeader(obs, options.showParent);
-    return `${header}\n${obs.content}`;
+  if (mode.kind === "terse") return terseObservationLine(obs, showParent);
+  const header = observationHeader(obs, showParent);
+  if (mode.kind === "full") return `${header}\n${obs.content}`;
+  if (mode.kind === "lines") {
+    const range = sliceLineRange(obs.content, `${mode.start}-${mode.end}`);
+    if ("error" in range || range.lines.length === 0) return header;
+    const numbered = range.lines.map((l, idx) => `  ${range.start + idx}: ${l}`);
+    return `${header}\n${numbered.join("\n")}`;
   }
-  return terseObservationLine(obs, options.showParent);
+  // grep — pre-computed excerpts (header + excerpt lines).
+  if (excerpts === undefined || excerpts.length === 0) return header;
+  return `${header}\n${excerpts.join("\n")}`;
 }
 
 /** A terse observation line: delegates to the shared formatObservationLine with
@@ -414,7 +444,6 @@ async function buildSearchCandidates(
   regex: RegExp | null,
   bounds: ResolvedBounds,
   includeSuperseded: boolean,
-  fullDetails: boolean,
 ): Promise<{ candidates: SearchCandidate[]; note?: string } | { error: string }> {
   // gather node + observation jobs (and the text each is tested against), then
   // batch-test every text in ONE worker round-trip.
@@ -470,7 +499,8 @@ async function buildSearchCandidates(
     candidates.push({
       id: obs.id,
       key: { importanceRank: observationImportanceRank(obs, parent), recency: obs.timestamp },
-      line: renderObservationBlock(obs, { showParent: obs.parentNode ?? undefined, fullDetails }),
+      line: terseObservationLine(obs, obs.parentNode ?? undefined),
+      obs,
     });
   }
 
@@ -520,20 +550,10 @@ function searchFooter(total: number, lastId: string, more: boolean): string {
 
 // --- pagination (top-level take/afterId → ResolvedPage) --------------------
 
-/** A cap on how many full-detail items one mk_recall result may contain —
- *  defense-in-depth against a take=0+fullDetails request dumping the whole
- *  verbatim observation set into the agent's context (the agent can still page
- *  with afterId). */
-const FULLDETAILS_TAKE_CAP = 50;
-
-/** Normalize top-level take/afterId into the shared ResolvedPage. A negative or
- *  omitted take defaults to DEFAULT_TAKE; 0 means "all" UNLESS fullDetails is
- *  requested, in which case it is capped to keep one result's verbatim content
- *  bounded (page with afterId for more). */
-function pageOf(take: number | undefined, afterId: string | undefined, fullDetails: boolean): ResolvedPage {
-  const resolved = resolvePage({ take: take ?? DEFAULT_TAKE, afterId: afterId ?? NO_AFTER_ID });
-  if (fullDetails && resolved.take === TAKE_ALL) return { ...resolved, take: FULLDETAILS_TAKE_CAP };
-  return resolved;
+/** Normalize top-level take/afterId into the shared ResolvedPage (negative
+ *  take clamps to TAKE_ALL = "all"). */
+function pageOf(take: number | undefined, afterId: string | undefined): ResolvedPage {
+  return resolvePage({ take: take ?? DEFAULT_TAKE, afterId: afterId ?? NO_AFTER_ID });
 }
 
 // --- tool parameters + description -----------------------------------------
@@ -573,6 +593,24 @@ const MK_RECALL_PARAMS = Type.Object({
         "false (default): terse one-line results; long observation text is truncated. true: full untruncated observation content — use it to read one item in full rather than surveying many.",
     }),
   ),
+  contentPattern: Type.Optional(
+    Type.String({
+      description:
+        "Regex matched against each result observation's content lines; returns the matching lines plus `contextLines` around each (grep-style, with line numbers), not whole content. Use to pull just the relevant excerpt from a large observation.",
+    }),
+  ),
+  contextLines: Type.Optional(
+    Type.Integer({
+      minimum: 0,
+      description: "Lines of context shown before and after each `contentPattern` match (default 2).",
+    }),
+  ),
+  lines: Type.Optional(
+    Type.String({
+      description:
+        "Show only the given line range of each result observation's content, e.g. '40-60'. Use to read a window around a `contentPattern` match's line number.",
+    }),
+  ),
   take: Type.Optional(Type.Integer({ minimum: 0, description: "Page size (default 50; 0 returns all)." })),
   afterId: Type.Optional(
     Type.String({ description: "Pagination cursor — the last id from the previous page. Omit on the first page." }),
@@ -591,6 +629,9 @@ interface MkRecallParams {
   to?: string;
   includeSuperseded?: boolean;
   fullDetails?: boolean;
+  contentPattern?: string;
+  contextLines?: number;
+  lines?: string;
   take?: number;
   afterId?: string;
 }
@@ -630,10 +671,65 @@ function err(text: string): RecallResult {
   return { text, error: true };
 }
 
+/** Compile `contentPattern` (if present) and resolve the content mode.
+ *  Precedence: lines > contentPattern > fullDetails > terse. */
+function resolveRecallMode(fullDetails: boolean, params: MkRecallParams): { mode: ContentMode } | { error: string } {
+  let grep: GrepSpec | null = null;
+  if (params.contentPattern !== undefined && params.contentPattern !== "") {
+    const compiled = tryCompileFindRegex(params.contentPattern);
+    if ("error" in compiled) return compiled;
+    grep = { pattern: compiled.regex, context: params.contextLines ?? DEFAULT_CONTEXT_LINES };
+  }
+  const mode = resolveContentMode(fullDetails, grep, params.lines);
+  if ("error" in mode) return mode;
+  return { mode };
+}
+
+/** Compute grep excerpts for a set of observations: batch-test contentPattern
+ *  over their content lines in one worker round-trip, then build ±context
+ *  excerpts (merged ranges) per observation. Returns the excerpts map, or an
+ *  error string for a compile/worker failure. */
+async function computeGrepExcerpts(
+  observations: RenderableObservation[],
+  pattern: RegExp,
+  context: number,
+): Promise<{ excerpts: ReadonlyMap<string, string[]> } | { error: string }> {
+  const perObs: { id: string; lines: string[] }[] = [];
+  const globalLines: string[] = [];
+  const owner: { obsIdx: number; localIdx: number }[] = [];
+  for (let oi = 0; oi < observations.length; oi += 1) {
+    const lines = observations[oi].content.split("\n");
+    perObs.push({ id: observations[oi].id, lines });
+    for (let li = 0; li < lines.length; li += 1) {
+      globalLines.push(lines[li]);
+      owner.push({ obsIdx: oi, localIdx: li });
+    }
+  }
+  const outcome = await runRegexTests(pattern, globalLines, getMemkeeperSettings().findTimeoutMs);
+  if ("error" in outcome) return { error: outcome.error };
+  const matchesPerObs: number[][] = observations.map(() => []);
+  for (let gi = 0; gi < globalLines.length; gi += 1) {
+    if (outcome.results[gi]) {
+      const o = owner[gi];
+      matchesPerObs[o.obsIdx].push(o.localIdx);
+    }
+  }
+  const excerpts = new Map<string, string[]>();
+  for (let oi = 0; oi < observations.length; oi += 1) {
+    if (matchesPerObs[oi].length > 0) {
+      excerpts.set(perObs[oi].id, buildGrepExcerpt(perObs[oi].lines, matchesPerObs[oi], context));
+    }
+  }
+  return { excerpts };
+}
+
 /** Pure recall logic (extracted for testability + so the tool shell stays thin). */
 async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   const fullDetails = params.fullDetails ?? false;
   const includeSuperseded = params.includeSuperseded ?? false;
+  const modeRes = resolveRecallMode(fullDetails, params);
+  if ("error" in modeRes) return err(modeRes.error);
+  const mode = modeRes.mode;
 
   // --- ids path: exact lookup, bypasses ranking + includeSuperseded ---
   // builds a FOCUSED target (only the requested ids + their children), not the
@@ -641,7 +737,7 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   // observation.
   if (params.ids !== undefined && params.ids.length > 0) {
     const target = resolveTargetForIds(params.ids);
-    return executeIds(target, params.ids, params.take, params.afterId, fullDetails);
+    return executeIds(target, params.ids, params.take, params.afterId, mode);
   }
 
   const target = resolveTarget();
@@ -664,13 +760,13 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   if (noFilters) {
     list = rootBrowseCandidates(target, includeSuperseded);
   } else {
-    const result = await buildSearchCandidates(target, regex, bounds, includeSuperseded, fullDetails);
+    const result = await buildSearchCandidates(target, regex, bounds, includeSuperseded);
     if ("error" in result) return err(result.error);
     list = result.candidates;
     note = result.note;
   }
 
-  const page = pageOf(params.take, params.afterId, params.fullDetails ?? false);
+  const page = pageOf(params.take, params.afterId);
   const { window, more, stale } = paginate(list, page);
   if (stale) return err(staleCursorMessage(page.afterId));
 
@@ -678,45 +774,122 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
     return ok(note ?? (noFilters ? "No memory yet." : "No matches."));
   }
 
-  const lines = window.map((c) => c.line);
-  lines.push(searchFooter(list.length, window[window.length - 1].id, more));
-  if (note !== undefined) lines.push(note);
-  return ok(lines.join("\n"));
+  // grep mode: pre-compute excerpts for the observation candidates in the window.
+  let excerpts: ReadonlyMap<string, string[]> = EMPTY_EXCERPTS;
+  if (mode.kind === "grep") {
+    const obsWindow = window.map((c) => c.obs).filter((o): o is RecallObservation => o !== undefined);
+    const result = await computeGrepExcerpts(obsWindow, mode.pattern, mode.context);
+    if ("error" in result) return err(result.error);
+    excerpts = result.excerpts;
+  }
+
+  // render each candidate per the mode, then bound by the result token budget
+  // (per-item atomic — a single-observation full read is uncapped).
+  const singleObsFull = mode.kind === "full" && window.length === 1 && window[0].obs !== undefined;
+  const budget = singleObsFull ? null : getMemkeeperSettings().toolResultTokenBudget;
+  const units = window.map((c) => ({
+    id: c.id,
+    text:
+      c.obs !== undefined
+        ? renderObservationBlock(c.obs, mode, c.obs.parentNode ?? undefined, excerpts.get(c.obs.id))
+        : c.line,
+  }));
+  const { text, footer } = budgetUnits(units, budget, more, list.length, window[window.length - 1].id);
+  const parts = [text];
+  if (footer !== null) parts.push(footer);
+  if (note !== undefined) parts.push(note);
+  return ok(parts.join("\n"));
+}
+
+const EMPTY_EXCERPTS: ReadonlyMap<string, string[]> = new Map();
+
+/** Apply the result token budget to rendered units (per-item atomic): emit whole
+ *  units while the budget holds, then a footer. A null budget is uncapped (only
+ *  the paginate `more` footer applies). The search footer (total count) is always
+ *  shown unless the budget truncated (the budget footer replaces it). */
+function budgetUnits(
+  units: { id: string; text: string }[],
+  budget: number | null,
+  paginateMore: boolean,
+  total: number,
+  lastWindowId: string,
+): { text: string; footer: string | null } {
+  if (budget === null) {
+    return { text: units.map((u) => u.text).join("\n"), footer: searchFooter(total, lastWindowId, paginateMore) };
+  }
+  const budgeted = budgetWindow(units, budget);
+  const lines = budgeted.kept.map((u) => u.text);
+  if (budgeted.remaining > 0) {
+    lines.push(`budget reached · +${budgeted.remaining} more · afterId=${budgeted.lastKeptId}`);
+    return { text: lines.join("\n"), footer: null };
+  }
+  return { text: lines.join("\n"), footer: searchFooter(total, lastWindowId, paginateMore) };
 }
 
 /** ids path: render each requested id (node payload or observation); paginate
- *  the aggregated children across all requested nodes/observations. */
-function executeIds(
+ *  over the requested ids. Async because grep mode batches contentPattern over
+ *  the observation content lines via the worker. */
+async function executeIds(
   target: RecallTarget,
   ids: string[],
   take: number | undefined,
   afterId: string | undefined,
-  fullDetails: boolean,
-): RecallResult {
+  mode: ContentMode,
+): Promise<RecallResult> {
   // Build a flat list of payload blocks (one per requested id), then paginate
   // over the requested ids (each id is one paginatable unit).
   const units: { id: string; text: string }[] = [];
+  // track the observations referenced (for grep excerpt pre-computation).
+  const obsById = new Map<string, RenderableObservation>();
   for (const id of ids) {
     const node = target.nodes.get(id);
     if (node !== undefined) {
-      units.push({ id, text: renderNodePayload(node, target, fullDetails) });
+      for (const oid of node.observationIds) {
+        const o = target.observations.get(oid);
+        if (o !== undefined) obsById.set(oid, o);
+      }
+      units.push({ id, text: renderNodePayload(node, target, mode, EMPTY_EXCERPTS) });
       continue;
     }
     const obs = target.observations.get(id);
     if (obs !== undefined) {
-      units.push({ id, text: renderObservationBlock(obs, { showParent: undefined, fullDetails }) });
+      obsById.set(id, obs);
+      units.push({ id, text: renderObservationBlock(obs, mode, NO_PARENT, NO_EXCERPTS) });
       continue;
     }
     units.push({ id, text: missingIdMessage(id) });
   }
 
-  const page = pageOf(take, afterId, fullDetails);
+  const page = pageOf(take, afterId);
   const { window, more, stale } = paginate(units, page);
   if (stale) return err(staleCursorMessage(page.afterId));
 
-  const lines = window.map((u) => u.text);
-  if (more && window.length > 0) lines.push(`· afterId=${window[window.length - 1].id}`);
+  // grep mode: pre-compute excerpts for the observations in the window, then
+  // re-render the referencing units so their obs blocks carry the excerpts.
+  let renderedUnits = window;
+  if (mode.kind === "grep") {
+    const result = await computeGrepExcerpts([...obsById.values()], mode.pattern, mode.context);
+    if ("error" in result) return err(result.error);
+    renderedUnits = window.map((u) => {
+      const obs = obsById.get(u.id);
+      if (obs === undefined) return u;
+      return { id: u.id, text: renderObservationBlock(obs, mode, NO_PARENT, result.excerpts.get(obs.id)) };
+    });
+    // also refresh node-payload units whose child obs now have excerpts.
+    renderedUnits = renderedUnits.map((u) => {
+      const node = target.nodes.get(u.id as NodeId);
+      if (node !== undefined) return { id: u.id, text: renderNodePayload(node, target, mode, result.excerpts) };
+      return u;
+    });
+  }
+
+  // single-observation full read is uncapped the result-token-budget design; otherwise per-item atomic.
+  const singleObsFull = mode.kind === "full" && ids.length === 1 && target.observations.get(ids[0]) !== undefined;
+  const budget = singleObsFull ? null : getMemkeeperSettings().toolResultTokenBudget;
+  const { text, footer } = budgetUnits(renderedUnits, budget, more, units.length, window[window.length - 1].id);
+  const parts = [text];
+  if (footer !== null) parts.push(footer);
   // ids lookups never flag error: a missing id is conveyed by its not-found text
   // (matching the sibling `cat` tool), not a whole-result error flag.
-  return ok(lines.join("\n"));
+  return ok(parts.join("\n"));
 }

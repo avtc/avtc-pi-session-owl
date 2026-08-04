@@ -71,6 +71,7 @@ describe("makeObserverRun (Observer stage wiring)", () => {
         renderMode: "selected-root",
         commandResultCap: 50,
         findTimeoutMs: 5000,
+        toolResultTokenBudget: 6000,
       },
     });
 

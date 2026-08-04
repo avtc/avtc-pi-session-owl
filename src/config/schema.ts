@@ -42,6 +42,10 @@ export interface MemkeeperConfig {
   /** Find/mk_recall search execution timeout. Runs in a worker thread; a
    *  pattern still running past this is stopped. */
   findTimeoutMs: number;
+  /** Max estimated tokens (chars/4) in any one cat/find/ls/mk_recall result
+   *  text. Overflow pages with afterId (terse list) or stops expansion
+   *  (fullDetails/grep); a single-observation full read is uncapped.*/
+  toolResultTokenBudget: number;
   // Observer
   observerModel: string | null;
   observerThresholdTokens: number;
@@ -73,6 +77,8 @@ const DEFAULT_SELECTOR_MODE = "on-compaction";
 const NO_MODEL: string | null = null;
 const NO_LIMIT: number | null = null;
 const DEFAULT_FIND_TIMEOUT_MS = 30_000;
+const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
+const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
 
 export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   // General
@@ -84,6 +90,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   selectorMode: DEFAULT_SELECTOR_MODE,
   commandResultCap: 50,
   findTimeoutMs: DEFAULT_FIND_TIMEOUT_MS,
+  toolResultTokenBudget: DEFAULT_TOOL_RESULT_TOKEN_BUDGET,
   // Observer
   observerModel: NO_MODEL,
   observerThresholdTokens: 4000,
@@ -132,6 +139,7 @@ const FIND_TIMEOUT_PRESETS: readonly PresetElement[] = [
   ["2m", 120_000],
   ["5m", 300_000],
 ];
+const TOOL_RESULT_TOKEN_BUDGET_PRESETS: readonly PresetElement[] = [2000, 4000, 6000, 8000, 12000];
 const OBSERVER_THRESHOLD_PRESETS: readonly PresetElement[] = [
   ["1K", 1000],
   ["2K", 2000],
@@ -227,6 +235,15 @@ const SETTINGS: readonly SettingSchema[] = [
     defaultValue: DEFAULT_CONFIG.findTimeoutMs,
     min: 1000,
     presets: FIND_TIMEOUT_PRESETS,
+  }),
+  setting("toolResultTokenBudget", {
+    label: "Tool result token budget",
+    description:
+      "Max estimated tokens in any cat/find/ls/mk_recall result; overflow pages with afterId or stops expansion (a single-observation read is uncapped).",
+    type: "number",
+    defaultValue: DEFAULT_CONFIG.toolResultTokenBudget,
+    min: MIN_TOOL_RESULT_TOKEN_BUDGET,
+    presets: TOOL_RESULT_TOKEN_BUDGET_PRESETS,
   }),
 
   // ── Observer ───────────────────────────────────────────────────────────────
@@ -346,6 +363,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "selectorMode",
       "commandResultCap",
       "findTimeoutMs",
+      "toolResultTokenBudget",
     ],
   },
   {

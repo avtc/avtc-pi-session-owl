@@ -35,6 +35,14 @@ import {
   ROOT_PARENT,
 } from "../types.js";
 import { runRegexTests } from "./regex-runner.js";
+import { budgetWindow } from "./result-budget.js";
+import {
+  type ContentMode,
+  type GrepSpec,
+  type RenderItem,
+  renderBudgeted,
+  resolveContentMode,
+} from "./result-render.js";
 import { isSafeRegex } from "./safe-regex.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
@@ -61,6 +69,67 @@ const ROOT_DEPTH = 0;
 export const NO_AFTER_ID: string | null = null;
 /** Default value for an `includeSuperseded` flag (hide obsolete unless asked). */
 const INCLUDE_DEFAULT = false;
+
+/** Default context lines around a grep (contentPattern) match. */
+const DEFAULT_CONTEXT_LINES = 2;
+/** Named booleans for `resolveToolMode`'s default-full flag (no bare literals). */
+const MODE_DEFAULT_FULL = true;
+const MODE_DEFAULT_TERSE = false;
+/** Named undefined for an observation block's showParent (no bare literals). */
+const NO_PARENT: string | undefined = undefined;
+
+// --- extraction param schemas (contentPattern / contextLines / lines) -------
+// Shared by `cat`, `find` (and mirrored in mk_recall). `ls` is structure-only,
+// so it does NOT take these params.
+
+const ContentPatternSchema = Type.Optional(
+  Type.String({
+    description:
+      "Regex matched against each result observation's content lines; returns the matching lines plus `contextLines` around each (grep-style, with line numbers), not whole content. Use to pull just the relevant excerpt from a large observation.",
+  }),
+);
+const ContextLinesSchema = Type.Optional(
+  Type.Integer({
+    minimum: 0,
+    description: "Lines of context shown before and after each `contentPattern` match (default 2).",
+  }),
+);
+const LinesSchema = Type.Optional(
+  Type.String({
+    description:
+      "Show only the given line range of each result observation's content, e.g. '40-60'. Use to read a window around a `contentPattern` match's line number.",
+  }),
+);
+
+/** Resolve a contentPattern (compile via the shared guard) into a GrepSpec, or
+ *  null when contentPattern is absent. Returns an error string on a bad regex. */
+function resolveGrepSpec(
+  contentPattern: string | undefined,
+  contextLines: number | undefined,
+): { grep: GrepSpec | null } | { error: string } {
+  if (contentPattern === undefined || contentPattern === "") return { grep: null };
+  const compiled = tryCompileFindRegex(contentPattern);
+  if ("error" in compiled) return compiled;
+  return { grep: { pattern: compiled.regex, context: contextLines ?? DEFAULT_CONTEXT_LINES } };
+}
+
+/** The result of resolving a tool's extraction params to a content mode — either
+ *  the mode, or an error string to surface verbatim. Shared by cat + find. */
+type ResolvedToolMode = ContentMode | { error: string };
+
+/** Resolve the extraction params (contentPattern / contextLines / lines) plus
+ *  the tool's default full flag to a content mode (cat defaults to full; find
+ *  defaults to terse). */
+function resolveToolMode(
+  defaultFull: boolean,
+  contentPattern: string | undefined,
+  contextLines: number | undefined,
+  lines: string | undefined,
+): ResolvedToolMode {
+  const grepRes = resolveGrepSpec(contentPattern, contextLines);
+  if ("error" in grepRes) return grepRes;
+  return resolveContentMode(defaultFull, grepRes.grep, lines);
+}
 
 /** The boolean that gates obsolete-item visibility in find/ls-style reads. */
 export type IncludeSuperseded = boolean;
@@ -230,6 +299,37 @@ function renderLines(lines: string[]): string {
   return lines.join("\n");
 }
 
+/** The per-call result token budget (chars/4) from config. */
+function resultTokenBudget(): number {
+  return getMemkeeperSettings().toolResultTokenBudget;
+}
+
+/** Apply the token budget to a paginated window of already-rendered one-line
+ *  items, returning the kept lines + a footer that reflects whichever axis
+ *  bound first (budget or item-count). When the budget truncates, the paginate
+ *  cursor is advanced to the last *kept* item (the budget is the tighter axis). */
+function renderTerseWindow(
+  window: { id: string; render: string }[],
+  budget: number,
+  paginateMore: boolean,
+  paginateRemaining: number,
+): { text: string; count: number; more: boolean } {
+  const budgeted = budgetWindow(
+    window.map((i) => ({ id: i.id, text: i.render })),
+    budget,
+  );
+  const lines = budgeted.kept.map((k) => k.text);
+  const budgetDropped = budgeted.remaining;
+  if (budgetDropped > 0) {
+    lines.push(`… +${budgetDropped} more · afterId=${budgeted.lastKeptId} · budget reached`);
+    return { text: renderLines(lines), count: budgeted.kept.length, more: true };
+  }
+  if (paginateMore && window.length > 0) {
+    lines.push(footer(window[window.length - 1].id, paginateRemaining));
+  }
+  return { text: renderLines(lines), count: window.length, more: paginateMore };
+}
+
 /** Build the node-line render options for a graph-backed viewer, wiring the
  *  observation-content resolver so a bare `new` node renders its first obs's
  *  first line. */
@@ -266,7 +366,7 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
     parameters: LS_PARAMS,
     async execute(_toolCallId, params) {
       const page = resolvePage(params.page);
-      const lines: string[] = [];
+      const budget = resultTokenBudget();
 
       if (params.nodeId === undefined || params.nodeId === null) {
         // roots: non-obsolete only (obsolete hidden by default — findable via find).
@@ -275,9 +375,12 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
         if (stale) {
           return staleResult(page);
         }
-        for (const node of window) lines.push(formatNodeLine(node, nodeLineOptions(graph, viewer)));
-        if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
-        return { content: [{ type: "text", text: renderLines(lines) }], details: { count: window.length, more } };
+        const rendered = window.map((node) => ({
+          id: node.id,
+          render: formatNodeLine(node, nodeLineOptions(graph, viewer)),
+        }));
+        const out = renderTerseWindow(rendered, budget, more, remaining);
+        return { content: [{ type: "text", text: out.text }], details: { count: out.count, more: out.more } };
       }
 
       const parent = graph.nodes.get(params.nodeId as NodeId);
@@ -285,7 +388,7 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
         return { content: [{ type: "text", text: `No node with id ${params.nodeId}.` }], details: { error: true } };
       }
       // header is the parent itself at depth 0; children indented at depth 1.
-      lines.push(indent(formatNodeLine(parent, nodeLineOptions(graph, viewer)), ROOT_DEPTH));
+      const headerLine = indent(formatNodeLine(parent, nodeLineOptions(graph, viewer)), ROOT_DEPTH);
       const { nodes, observations } = directChildren(graph, parent);
       const combined = [
         ...nodes.map((n) => ({ id: n.id, depth: 1, render: formatNodeLine(n, nodeLineOptions(graph, viewer)) })),
@@ -295,9 +398,14 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
       if (stale) {
         return staleResult(page);
       }
-      for (const item of window) lines.push(indent(item.render, item.depth));
-      if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
-      return { content: [{ type: "text", text: renderLines(lines) }], details: { count: window.length, more } };
+      // the parent header rides outside the budgeted window (always shown); the
+      // children window is budgeted by token count independently of `take`.
+      const rendered = window.map((item) => ({ id: item.id, render: indent(item.render, item.depth) }));
+      const out = renderTerseWindow(rendered, budget, more, remaining);
+      return {
+        content: [{ type: "text", text: renderLines([headerLine, out.text]) }],
+        details: { count: out.count, more: out.more },
+      };
     },
   };
 }
@@ -309,6 +417,9 @@ const CAT_PARAMS = Type.Object({
     minItems: 1,
     description: "Ids to read in full — observations and/or nodes. At least one.",
   }),
+  contentPattern: ContentPatternSchema,
+  contextLines: ContextLinesSchema,
+  lines: LinesSchema,
   page: Type.Optional(PageSchema),
 });
 
@@ -319,7 +430,7 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
   return {
     name: CAT_TOOL,
     description:
-      "Read full text — an observation's content, or a node's header plus the full text of its direct observations. Sub-nodes are not expanded here (use `ls` for them). `ls` shows one-line structure; `cat` shows full content.",
+      "Read full text — an observation's content, or a node's header plus the full text of its direct observations. Sub-nodes are not expanded here (use `ls` for them). `ls` shows one-line structure; `cat` shows full content. Use `contentPattern` for grep-style excerpts or `lines` for a line range instead of the whole content.",
     label: "Read full text",
     parameters: CAT_PARAMS,
     async execute(_toolCallId, params) {
@@ -333,10 +444,32 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
       if (stale) {
         return staleResult(page);
       }
-      const lines = window.map(renderCatUnit);
-      if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
-      const text = lines.length === 0 ? "(empty)" : lines.join("\n\n");
-      return { content: [{ type: "text", text }], details: { count: window.length, more } };
+      // resolve content mode + budget (precedence lines > contentPattern > full
+      // > terse). cat is a full read, so the default mode is `full`; grep/lines
+      // override it. A single-observation full read is uncapped.
+      const modeRes = resolveToolMode(MODE_DEFAULT_FULL, params.contentPattern, params.contextLines, params.lines);
+      if ("error" in modeRes) {
+        return { content: [{ type: "text", text: modeRes.error }], details: { error: true } };
+      }
+      const items = window.map(catUnitToItem);
+      const singleObsFull = modeRes.kind === "full" && window.filter((u) => u.content !== undefined).length === 1;
+      const budget = singleObsFull ? null : resultTokenBudget();
+      const rendered = await renderBudgeted(items, {
+        budget,
+        mode: modeRes,
+        findTimeoutMs: getMemkeeperSettings().findTimeoutMs,
+      });
+      const lines: string[] = [rendered.text];
+      if (rendered.note !== null) {
+        lines.push(rendered.note);
+      } else if (more && window.length > 0) {
+        lines.push(footer(window[window.length - 1].id, remaining));
+      }
+      const text = lines.filter((l) => l !== "").join("\n");
+      return {
+        content: [{ type: "text", text }],
+        details: { count: window.length, more: more || rendered.note !== null },
+      };
     },
   };
 }
@@ -398,6 +531,14 @@ export function buildCatUnits(graph: MemkeeperGraph, ids: string[], viewer: Rend
   return units;
 }
 
+/** Map a cat unit to a budgeted render item: the preamble (node header, shown
+ *  once on the first observation of a node) is folded into the item header so
+ *  the budget treats it as part of that observation's block. */
+function catUnitToItem(unit: CatUnit): RenderItem {
+  const header = unit.preamble !== undefined ? `${unit.preamble}\n${unit.header}` : unit.header;
+  return { id: unit.id, header, content: unit.content };
+}
+
 /** Render one cat unit (preamble + header + content). */
 export function renderCatUnit(unit: CatUnit): string {
   const parts: string[] = [];
@@ -414,6 +555,9 @@ const FIND_PARAMS = Type.Object({
   includeSuperseded: Type.Optional(
     Type.Boolean({ description: "Include superseded and obsolete items (default false — current memory only)." }),
   ),
+  contentPattern: ContentPatternSchema,
+  contextLines: ContextLinesSchema,
+  lines: LinesSchema,
   page: Type.Optional(PageSchema),
 });
 
@@ -553,11 +697,45 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
       if (stale) {
         return staleResult(page);
       }
-      const lines = window.map((m) => m.render);
-      if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
+      if (window.length === 0) {
+        const empty = collected.note ?? "No matches.";
+        return { content: [{ type: "text", text: empty }], details: { count: 0, more: false } };
+      }
+
+      // resolve content mode (find has no fullDetails param → terse/grep/lines).
+      const modeRes = resolveToolMode(MODE_DEFAULT_TERSE, params.contentPattern, params.contextLines, params.lines);
+      if ("error" in modeRes) {
+        return { content: [{ type: "text", text: modeRes.error }], details: { error: true } };
+      }
+
+      const budget = resultTokenBudget();
+      if (modeRes.kind === "terse") {
+        // terse: one-line matches, budgeted independently of `take`.
+        const rendered = window.map((m) => ({ id: m.id, render: m.render }));
+        const out = renderTerseWindow(rendered, budget, more, remaining);
+        const text = collected.note !== undefined ? `${out.text}\n${collected.note}` : out.text;
+        return { content: [{ type: "text", text }], details: { count: out.count, more: out.more } };
+      }
+
+      // grep / lines: expand the matched OBSERVATIONS' content; node matches stay
+      // header-only (they have no observation content).
+      const items: RenderItem[] = window.map((m) => {
+        const match = m as FindMatch & { obs?: Observation };
+        return { id: m.id, header: m.render, content: match.obs?.content };
+      });
+      const rendered = await renderBudgeted(items, {
+        budget,
+        mode: modeRes,
+        findTimeoutMs: getMemkeeperSettings().findTimeoutMs,
+      });
+      const lines = [rendered.text];
+      if (rendered.note !== null) lines.push(rendered.note);
+      else if (more) lines.push(footer(window[window.length - 1].id, remaining));
       if (collected.note !== undefined) lines.push(collected.note);
-      const text = lines.length === 0 ? "No matches." : lines.join("\n");
-      return { content: [{ type: "text", text }], details: { count: window.length, more } };
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { count: window.length, more: more || rendered.note !== null },
+      };
     },
   };
 }

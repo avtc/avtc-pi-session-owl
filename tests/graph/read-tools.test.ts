@@ -13,7 +13,7 @@ import {
   setClock,
 } from "../../src/graph/mutations.js";
 import { makeReadTools, nonObsoleteRootsOf, orderActiveSetRoots } from "../../src/graph/read-tools.js";
-import { MemkeeperGraph, makeObservation, N_GOAL, N_IRRELEVANT } from "../../src/types.js";
+import { MemkeeperGraph, makeObservation, N_GOAL, N_IRRELEVANT, type NodeId, type ObsId } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 
@@ -475,5 +475,107 @@ describe("orderActiveSetRoots — canonical active-set ordering", () => {
   it("works with neither special node present (plain importance/recency)", () => {
     const ordered = orderActiveSetRoots([MED, HIGH_OLDER, HIGH_RECENT]);
     expect(ordered.map((n) => n.id)).toEqual(["n7", "n8", "n12"]);
+  });
+});
+
+// --- AD18: result token budget + targeted extraction (contentPattern / lines) --
+
+describe("result token budget + extraction", () => {
+  /** Build a graph whose o5 observation has multi-line grep-able content. */
+  function grepGraph(): MemkeeperGraph {
+    setClock(() => NOW);
+    const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+    applyCreateNode(g, { id: N_GOAL, summary: "Goal", importance: "critical", parentNode: null, state: "active" });
+    applyCreateNode(g, {
+      id: "n7" as NodeId,
+      summary: "Auth migration to JWT",
+      importance: "high",
+      parentNode: null,
+      state: "active",
+    });
+    applyRecordObservation(g, {
+      obs: makeObservation({
+        id: "o5" as ObsId,
+        content: "line one\nthe token is secret\nline three\ntoken refresh logic\nline five",
+        importance: "high",
+        timestamp: NOW,
+        sourceEntryIds: ["e5"],
+        parentNode: "n7" as NodeId,
+      }),
+    });
+    setClock(null);
+    return g;
+  }
+
+  afterEach(() => _resetGetMemkeeperSettings());
+
+  it("cat budget truncates multi-observation output with a footer", async () => {
+    // two nodes, each with a big-content observation; tight budget keeps headers
+    // + stops expanding.
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 10 }));
+    const g = grepGraph();
+    applyCreateNode(g, {
+      id: "n8" as NodeId,
+      summary: "other",
+      importance: "medium",
+      parentNode: null,
+      state: "active",
+    });
+    applyRecordObservation(g, {
+      obs: makeObservation({
+        id: "o9" as ObsId,
+        content: "x".repeat(200),
+        importance: "medium",
+        timestamp: NOW,
+        sourceEntryIds: ["e9"],
+        parentNode: "n8" as NodeId,
+      }),
+    });
+    const out = textOf(await callTool(makeBuilderReadTools(g), "cat", { ids: ["n7", "n8"] }));
+    expect(out).toContain("budget reached");
+  });
+
+  it("cat single observation is returned whole (uncapped)", async () => {
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+    const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"] }));
+    // the full multi-line content is present despite the 1-token budget.
+    expect(out).toContain("the token is secret");
+    expect(out).toContain("line five");
+    expect(out).not.toContain("budget reached");
+  });
+
+  it("cat contentPattern returns grep excerpts with line numbers", async () => {
+    const out = textOf(
+      await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], contentPattern: "token" }),
+    );
+    expect(out).toContain("2: the token is secret");
+    expect(out).toContain("4: token refresh logic");
+    // the obs header (content-free) leads the block.
+    expect(out).toContain("📄 o5");
+  });
+
+  it("cat lines returns the requested 1-indexed range, clamped", async () => {
+    const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], lines: "2-3" }));
+    expect(out).toContain("2: the token is secret");
+    expect(out).toContain("3: line three");
+    expect(out).not.toContain("line five");
+  });
+
+  it("find contentPattern extracts excerpts from matched observations", async () => {
+    const out = textOf(
+      await callTool(makeBuilderReadTools(grepGraph()), "find", { query: "token", contentPattern: "secret" }),
+    );
+    expect(out).toContain("2: the token is secret");
+  });
+
+  it("ls budget truncates the root list with a footer", async () => {
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 2 }));
+    const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "ls", {}));
+    expect(out).toContain("budget reached");
+  });
+
+  it("rejects a malformed lines range with an error string", async () => {
+    const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], lines: "bad" }));
+    expect(out).toContain("Invalid line range");
   });
 });

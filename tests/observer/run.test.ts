@@ -141,6 +141,7 @@ function makeArgs(opts: {
       renderMode: "selected-root",
       commandResultCap: 50,
       findTimeoutMs: 5000,
+      toolResultTokenBudget: 6000,
     },
     unobserved: opts.unobserved,
     signal: new AbortController().signal,

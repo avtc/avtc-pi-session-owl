@@ -39,6 +39,7 @@ function settings(over: Partial<MemkeeperConfig>): MemkeeperConfig {
     renderMode: "selected-root",
     commandResultCap: 50,
     findTimeoutMs: 5000,
+    toolResultTokenBudget: 6000,
     ...over,
   };
 }
