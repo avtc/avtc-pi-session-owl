@@ -15,7 +15,8 @@ import { Worker } from "node:worker_threads";
 
 /** Worker body (raw JS — `eval: true`, no module resolution so it needs no
  *  bundler/loader). Receives a regex source+flags + the strings to test,
- *  posts back either the boolean results or a compile error. */
+ *  posts back either the boolean results or a compile error. It handles one
+ *  message per request and stays alive across requests (the Worker is reused). */
 const WORKER_SOURCE = `
 const { parentPort } = require("worker_threads");
 parentPort.on("message", (req) => {
@@ -29,9 +30,57 @@ parentPort.on("message", (req) => {
 });
 `;
 
-/** Monotonic request id correlating the worker's reply to the call (the worker
- *  handles one request per call then is terminated, so the id is defensive). */
+/** A pending request awaiting the worker's reply (or its timeout). */
+interface Pending {
+  resolve: (outcome: RegexTestOutcome) => void;
+  timer: NodeJS.Timeout | null;
+}
+
+/** The lazily-created, reused worker. Null until first use, and reset to null
+ *  after a timeout or worker error (the next call respawns). One worker serves
+ *  all calls so the per-call spawn cost (OS thread + V8 isolate init) is paid
+ *  once, not once per find/mk_recall query. */
+let worker: Worker | null = null;
+/** Pending requests keyed by id, so the shared worker's replies route to the
+ *  right caller (the id also disambiguates if calls ever overlap). */
+const pending = new Map<number, Pending>();
+/** Monotonic request id correlating the worker's reply to the call. */
 let nextRequestId = 0;
+
+/** Ensure the shared worker exists, wiring its message/error listeners once. */
+function getWorker(): Worker {
+  if (worker !== null) return worker;
+  const w = new Worker(WORKER_SOURCE, { eval: true });
+  // a persistent listener routes every reply to its pending caller.
+  w.on("message", (msg: { id: number; results?: boolean[]; error?: string }) => {
+    const p = pending.get(msg.id);
+    if (p === undefined) return;
+    if (p.timer !== null) clearTimeout(p.timer);
+    pending.delete(msg.id);
+    if (msg.error !== undefined) p.resolve({ error: compileErrorMessage(msg.error) });
+    else p.resolve({ results: msg.results ?? [] });
+  });
+  // a worker-level error (crash) fails every still-pending request, then the
+  // worker is discarded so the next call respawns.
+  w.on("error", (err: Error) => {
+    failAll({ error: compileErrorMessage(err.message) });
+  });
+  worker = w;
+  return w;
+}
+
+/** Resolve all pending requests with `outcome`, terminate + discard the worker. */
+function failAll(outcome: RegexTestOutcome): void {
+  for (const p of pending.values()) {
+    if (p.timer !== null) clearTimeout(p.timer);
+    p.resolve(outcome);
+  }
+  pending.clear();
+  if (worker !== null) {
+    void worker.terminate();
+    worker = null;
+  }
+}
 
 /** Outcome of a batched regex test: either a boolean per input string or an
  *  error string the caller surfaces verbatim (timeout / compile failure). */
@@ -59,35 +108,23 @@ export async function runRegexTests(regex: RegExp, strings: string[], timeoutMs:
 async function runInWorker(regex: RegExp, strings: string[], timeoutMs: number): Promise<RegexTestOutcome> {
   const id = nextRequestId;
   nextRequestId += 1;
-  const worker = new Worker(WORKER_SOURCE, { eval: true });
+  const w = getWorker();
   return new Promise<RegexTestOutcome>((resolve) => {
-    let settled = false;
-    const finish = (outcome: RegexTestOutcome): void => {
-      if (settled) return;
-      settled = true;
-      if (timer !== null) clearTimeout(timer);
-      // release the worker regardless of outcome (terminate is a no-op if dead)
-      void worker.terminate();
-      resolve(outcome);
-    };
-
-    const onMessage = (msg: { id: number; results?: boolean[]; error?: string }): void => {
-      if (msg.id !== id) return;
-      if (msg.error !== undefined) finish({ error: compileErrorMessage(msg.error) });
-      else if (msg.results !== undefined) finish({ results: msg.results });
-    };
-
-    worker.once("message", onMessage);
-    worker.once("error", (err: Error) => finish({ error: compileErrorMessage(err.message) }));
-
-    let timer: NodeJS.Timeout | null = null;
-    if (timeoutMs > 0) {
-      timer = setTimeout(() => {
-        finish({ error: timeoutErrorMessage(timeoutMs) });
-      }, timeoutMs);
-    }
-
-    worker.postMessage({ id, source: regex.source, flags: regex.flags, strings });
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            // a timeout kills the stuck worker (the pattern is still running in
+            // it) and fails this request; the next call respawns a fresh worker.
+            pending.delete(id);
+            if (worker !== null) {
+              void worker.terminate();
+              worker = null;
+            }
+            resolve({ error: timeoutErrorMessage(timeoutMs) });
+          }, timeoutMs)
+        : null;
+    pending.set(id, { resolve, timer });
+    w.postMessage({ id, source: regex.source, flags: regex.flags, strings });
   });
 }
 

@@ -20,6 +20,7 @@ import {
   collectFindMatches,
   directChildren,
   type IncludeSuperseded,
+  nodeLineOptions,
   nonObsoleteRoots,
   orderActiveSetRoots,
   renderCatUnit,
@@ -100,7 +101,7 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
   if (idArg === null) {
     // roots: non-obsolete only (obsolete hidden by default — use /mk:find-all).
     for (const node of orderActiveSetRoots(nonObsoleteRoots(graph))) {
-      lines.push(formatNodeLine(node, { viewer: VIEWER }));
+      lines.push(formatNodeLine(node, nodeLineOptions(graph, VIEWER)));
     }
     const { text } = formatList(lines, resolveCap());
     await notifyInfo(ctx, text === "" ? "No memory yet." : text);
@@ -113,10 +114,10 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
     return;
   }
   // parent header at depth 0; children indented at depth 1.
-  lines.push(formatNodeLine(parent, { viewer: VIEWER }));
+  lines.push(formatNodeLine(parent, nodeLineOptions(graph, VIEWER)));
   const { nodes, observations } = directChildren(graph, parent);
   for (const node of nodes) {
-    lines.push(indent(formatNodeLine(node, { viewer: VIEWER }), CHILD_DEPTH));
+    lines.push(indent(formatNodeLine(node, nodeLineOptions(graph, VIEWER)), CHILD_DEPTH));
   }
   for (const obs of observations) {
     lines.push(indent(formatObservationLine(obs, { viewer: VIEWER }), CHILD_DEPTH));

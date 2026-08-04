@@ -160,6 +160,7 @@ interface WrappedPair {
  * or when no valid records are captured (notify instead).
  */
 export async function runObserver(input: ObserverRunInput): Promise<void> {
+  if (input.signal.aborted) return;
   if (input.unobserved.length === EMPTY_GAP) return;
 
   // model resolution (observerModel -> defaultModel -> session).

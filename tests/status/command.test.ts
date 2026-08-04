@@ -198,10 +198,10 @@ describe("buildStatusReport", () => {
 
   it("Usage since session start + since last compaction sections (per-phase in/out/cache/$)", () => {
     const usage = ledger({
-      observe: { input: 45000, output: 4000, cacheRead: 30000, cost: 0.082, turns: 10, passes: 3 },
+      observe: { input: 45000, output: 4000, cacheRead: 30000, cost: 0.082, turns: 10, runs: 3 },
     });
     const baseline = ledger({
-      observe: { input: 30000, output: 2500, cacheRead: 22000, cost: 0.06, turns: 6, passes: 2 },
+      observe: { input: 30000, output: 2500, cacheRead: 22000, cost: 0.06, turns: 6, runs: 2 },
     });
     const report = buildStatusReport(input({ usageLedger: usage, lastCompactionLedger: baseline }));
     expect(report).toContain("Usage since session start");
@@ -222,7 +222,7 @@ describe("buildStatusReport", () => {
 
   it("since last compaction mirrors since session start when lastCompactionLedger is null (no compaction yet)", () => {
     const usage = ledger({
-      observe: { input: 45000, output: 4000, cacheRead: 30000, cost: 0.082, turns: 10, passes: 3 },
+      observe: { input: 45000, output: 4000, cacheRead: 30000, cost: 0.082, turns: 10, runs: 3 },
     });
     const report = buildStatusReport(input({ usageLedger: usage, lastCompactionLedger: null }));
     const sinceCompactionBlock = report.slice(report.indexOf("Usage since last compaction"));
@@ -231,9 +231,9 @@ describe("buildStatusReport", () => {
 
   it("formats all three phases (observe/build/select) in each usage section", () => {
     const usage = ledger({
-      observe: { input: 1000, output: 100, cacheRead: 0, cost: 0, turns: 1, passes: 1 },
-      build: { input: 2000, output: 200, cacheRead: 0, cost: 0, turns: 1, passes: 1 },
-      select: { input: 3000, output: 300, cacheRead: 0, cost: 0, turns: 1, passes: 1 },
+      observe: { input: 1000, output: 100, cacheRead: 0, cost: 0, turns: 1, runs: 1 },
+      build: { input: 2000, output: 200, cacheRead: 0, cost: 0, turns: 1, runs: 1 },
+      select: { input: 3000, output: 300, cacheRead: 0, cost: 0, turns: 1, runs: 1 },
     });
     const report = buildStatusReport(input({ usageLedger: usage, lastCompactionLedger: null }));
     const block = report.slice(report.indexOf("Usage since session start"));
@@ -262,7 +262,7 @@ describe("gatherStatusInput", () => {
       },
     } as unknown as Observation);
     getGraphStore().usageLedger = ledger({
-      observe: { input: 500, output: 0, cacheRead: 0, cost: 0, turns: 1, passes: 1 },
+      observe: { input: 500, output: 0, cacheRead: 0, cost: 0, turns: 1, runs: 1 },
     });
 
     const gathered = gatherStatusInput(settings({}), { sessionStartMs: 1000, compactionCount: 2 });

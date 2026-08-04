@@ -18,7 +18,12 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
-import { measureRootViewTokens, nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
+import {
+  measureRootViewTokens,
+  nodeLineOptions,
+  nonObsoleteRoots,
+  renderRootViewFromRoots,
+} from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
@@ -347,6 +352,8 @@ function persistResult(store: StoreContext, graphStore: GraphStore, workingGraph
  *  `rootViewCounts`). */
 function pushSelectedCounts(widget: WidgetController, workingGraph: Graph): void {
   const roots = nonObsoleteRoots(workingGraph);
-  const rootViewTokens = estimateContentTokens(renderRootViewFromRoots(roots, NON_BUILDER));
+  const rootViewTokens = estimateContentTokens(
+    renderRootViewFromRoots(roots, NON_BUILDER, nodeLineOptions(workingGraph, NON_BUILDER).observationContent),
+  );
   widget.setSelectedCounts(roots.length, rootViewTokens);
 }

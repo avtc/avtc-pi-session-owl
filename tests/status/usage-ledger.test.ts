@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { StageUsage } from "../../src/runtime/agent-loop.js";
 import {
   addPhaseUsage,
+  bumpRun,
   sinceLastCompaction,
   sinceSessionStart,
   snapshotAtCompaction,
@@ -20,17 +21,17 @@ function phase(
   cacheRead: number,
   cost: number,
   turns: number,
-  passes: number,
+  runs: number,
 ): PhaseUsage {
-  return { input, output, cacheRead, cost, turns, passes };
+  return { input, output, cacheRead, cost, turns, runs };
 }
 
 describe("usage-ledger", () => {
   describe("addPhaseUsage", () => {
-    it("accumulates a stage's usage into the named phase + increments passes", () => {
+    it("accumulates a stage's usage into the named phase (counter untouched)", () => {
       const ledger: UsageLedger = cloneLedger(EMPTY_LEDGER);
       addPhaseUsage(ledger, "observe", STAGE_USAGE_A);
-      expect(ledger.observe).toEqual(phase(1000, 500, 300, 0.05, 3, 1));
+      expect(ledger.observe).toEqual(phase(1000, 500, 300, 0.05, 3, 0));
       expect(ledger.build).toEqual(phase(0, 0, 0, 0, 0, 0));
       expect(ledger.select).toEqual(phase(0, 0, 0, 0, 0, 0));
     });
@@ -39,7 +40,7 @@ describe("usage-ledger", () => {
       const ledger: UsageLedger = cloneLedger(EMPTY_LEDGER);
       addPhaseUsage(ledger, "build", STAGE_USAGE_A);
       addPhaseUsage(ledger, "build", STAGE_USAGE_B);
-      expect(ledger.build).toEqual(phase(3000, 2000, 1000, 0.16, 8, 2));
+      expect(ledger.build).toEqual(phase(3000, 2000, 1000, 0.16, 8, 0));
     });
 
     it("accumulates into independent phases", () => {
@@ -47,12 +48,22 @@ describe("usage-ledger", () => {
       addPhaseUsage(ledger, "observe", STAGE_USAGE_A);
       addPhaseUsage(ledger, "build", STAGE_USAGE_B);
       addPhaseUsage(ledger, "select", STAGE_USAGE_A);
-      expect(ledger.observe.passes).toBe(1);
-      expect(ledger.build.passes).toBe(1);
-      expect(ledger.select.passes).toBe(1);
+      expect(ledger.observe.runs).toBe(0);
+      expect(ledger.build.runs).toBe(0);
+      expect(ledger.select.runs).toBe(0);
       expect(ledger.build.input).toBe(2000);
       expect(ledger.observe.input).toBe(1000);
       expect(ledger.select.input).toBe(1000);
+    });
+
+    it("bumpRun counts one run per phase (independent of usage folds)", () => {
+      const ledger: UsageLedger = cloneLedger(EMPTY_LEDGER);
+      addPhaseUsage(ledger, "observe", STAGE_USAGE_A);
+      addPhaseUsage(ledger, "observe", STAGE_USAGE_B);
+      bumpRun(ledger, "observe");
+      expect(ledger.observe.runs).toBe(1);
+      // two folds folded, but only one run counted
+      expect(ledger.observe.input).toBe(3000);
     });
 
     it("mutates + returns the same ledger object (in-place accumulation)", () => {
@@ -74,7 +85,7 @@ describe("usage-ledger", () => {
   });
 
   describe("sinceLastCompaction", () => {
-    it("subtracts the snapshot phase-by-phase, field by field (passes included)", () => {
+    it("subtracts the snapshot phase-by-phase, field by field (runs included)", () => {
       const ledger: UsageLedger = {
         observe: phase(3000, 2000, 1000, 0.16, 8, 3),
         build: phase(2000, 1500, 700, 0.11, 5, 1),
@@ -132,8 +143,9 @@ describe("usage-ledger", () => {
       };
       // baseline captured at the last compaction (from details.lastCompactionLedger)
       const baseline = snapshotAtCompaction(ledger).lastCompactionLedger;
-      // simulate post-snapshot activity
+      // simulate post-snapshot activity: one observe run folds usage + bumps runs.
       addPhaseUsage(ledger, "observe", STAGE_USAGE_A);
+      bumpRun(ledger, "observe");
       // since-last-compaction reflects only the post-snapshot stage (cost uses
       // FP-tolerant comparison — floating-point addition drifts in the cents).
       const diff = sinceLastCompaction(ledger, baseline);
@@ -142,7 +154,7 @@ describe("usage-ledger", () => {
       expect(diff.observe.cacheRead).toBe(300);
       expect(diff.observe.cost).toBeCloseTo(0.05, 10);
       expect(diff.observe.turns).toBe(3);
-      expect(diff.observe.passes).toBe(1);
+      expect(diff.observe.runs).toBe(1);
       expect(diff.build).toEqual(phase(0, 0, 0, 0, 0, 0));
     });
   });

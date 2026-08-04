@@ -12,11 +12,11 @@ import { cloneLedger, type PhaseUsage, type UsageLedger } from "../store/codecs.
 export type Phase = "observe" | "build" | "select";
 
 /**
- * Add a stage's accumulated usage to its phase total, in place, and bump the
- * pass counter. `StageUsage` carries input/output/cacheRead/cost/turns (no
- * passes); the phase adds those five fields and counts the call as one pass (a
- * Builder/Selector convergence pass, or one Observer chunk). Returns the same
- * ledger object (convenience for `appendUsage(store, addPhaseUsage(...))`).
+ * Add a stage's accumulated usage to its phase total, in place (token/cost/turn
+ * fields only). `StageUsage` carries input/output/cacheRead/cost/turns (no run
+ * counter); the run counter is bumped once per stage RUN by the ledger hook
+ * (makeLedgerHook), not per convergence pass. Returns the same ledger object
+ * (convenience for `appendUsage(store, addPhaseUsage(...))`).
  */
 export function addPhaseUsage(ledger: UsageLedger, phase: Phase, usage: StageUsage): UsageLedger {
   const p = ledger[phase];
@@ -25,8 +25,13 @@ export function addPhaseUsage(ledger: UsageLedger, phase: Phase, usage: StageUsa
   p.cacheRead += usage.cacheRead;
   p.cost += usage.cost;
   p.turns += usage.turns;
-  p.passes += 1;
   return ledger;
+}
+
+/** Count one completed stage RUN for `phase` (a Builder/Selector convergence
+ *  run, or one Observer run — regardless of how many passes/chunks it had). */
+export function bumpRun(ledger: UsageLedger, phase: Phase): void {
+  ledger[phase].runs += 1;
 }
 
 /**
@@ -62,6 +67,6 @@ function subtractPhase(a: PhaseUsage, b: PhaseUsage): PhaseUsage {
     cacheRead: a.cacheRead - b.cacheRead,
     cost: a.cost - b.cost,
     turns: a.turns - b.turns,
-    passes: a.passes - b.passes,
+    runs: a.runs - b.runs,
   };
 }

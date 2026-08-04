@@ -8,25 +8,32 @@
 // (mirroring the Observer's fold-per-unit, persist-once pattern). `hasUsage`
 // tells the run whether anything was folded so it can skip a redundant persist.
 
-import { addPhaseUsage, type Phase } from "../status/usage-ledger.js";
+import { addPhaseUsage, bumpRun, type Phase } from "../status/usage-ledger.js";
 import { appendUsage, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import type { StageUsage } from "./agent-loop.js";
 
 /**
  * Build the `onStageEnd` fold hook for one phase of one run. The hook folds the
- * stage usage into the named phase (input/output/cacheRead/cost/turns + a run
- * count) of the store's live cumulative ledger, in-memory only — the RUN calls
- * `persistLedger` once at run end. `hasUsage()` reports whether any fold fired.
- * Closing over `phase` keeps each run's hook scoped to its own stage.
+ * stage usage into the named phase (input/output/cacheRead/cost/turns) of the
+ * store's live cumulative ledger, in-memory only — the RUN calls `persistLedger`
+ * once at run end. The run counter is bumped once, on the FIRST fold of the run
+ * (marking that this stage run contributed), not per pass. `hasUsage()` reports
+ * whether any fold fired. Closing over `phase` keeps each run's hook scoped to
+ * its own stage.
  */
 export function makeLedgerHook(phase: Phase): {
   onStageEnd: (usage: StageUsage) => void;
   hasUsage: () => boolean;
 } {
+  let counted = false;
   let accumulated = false;
   return {
     onStageEnd: (usage: StageUsage): void => {
       addPhaseUsage(getGraphStore().usageLedger, phase, usage);
+      if (!counted) {
+        bumpRun(getGraphStore().usageLedger, phase);
+        counted = true;
+      }
       accumulated = true;
     },
     hasUsage: () => accumulated,

@@ -4,7 +4,7 @@
 // Tests for the worker-thread regex runner. The runner executes regex tests in
 // a worker so a catastrophic pattern can be terminated instead of freezing pi.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runRegexTests } from "../../src/graph/regex-runner.js";
 
 describe("runRegexTests", () => {
@@ -57,5 +57,33 @@ describe("runRegexTests", () => {
     // reasonable bound; timeout 0 must NOT short-circuit to an error.
     const res = await runRegexTests(/foo/, ["foobar"], 0);
     if ("results" in res) expect(res.results).toEqual([true]);
+  });
+});
+
+describe("runRegexTests synchronous fallback", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.doUnmock("node:worker_threads");
+    vi.resetModules();
+  });
+
+  it("degrades to synchronous regex.test when the worker cannot spawn", async () => {
+    // restricted runtimes where worker_threads is unavailable hit the catch in
+    // runRegexTests and fall back to a synchronous test. Mock the Worker
+    // constructor to throw so runInWorker rejects, exercising the fallback.
+    vi.doMock("node:worker_threads", () => ({
+      Worker: class {
+        constructor() {
+          throw new Error("worker_threads unavailable in this runtime");
+        }
+      },
+    }));
+    vi.resetModules();
+    const { runRegexTests: fallbackRun } = await import("../../src/graph/regex-runner.js");
+
+    const res = await fallbackRun(/foo/, ["foobar", "no match", "foo"], 5000);
+    // the fallback returns correct synchronous results (not a worker error)
+    expect("results" in res).toBe(true);
+    if ("results" in res) expect(res.results).toEqual([true, false, true]);
   });
 });

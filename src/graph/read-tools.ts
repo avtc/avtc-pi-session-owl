@@ -229,6 +229,22 @@ function renderLines(lines: string[]): string {
   return lines.join("\n");
 }
 
+/** Build the node-line render options for a graph-backed viewer, wiring the
+ *  observation-content resolver so a bare `new` node renders its first obs's
+ *  first line. */
+export function nodeLineOptions(
+  graph: MemkeeperGraph,
+  viewer: RenderViewer,
+): {
+  viewer: RenderViewer;
+  observationContent: (obsId: string) => string | undefined;
+} {
+  return {
+    viewer,
+    observationContent: (obsId: string): string | undefined => graph.observations.get(obsId as ObsId)?.content,
+  };
+}
+
 // --- ls --------------------------------------------------------------------
 
 const LS_PARAMS = Type.Object({
@@ -258,7 +274,7 @@ export function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTo
         if (stale) {
           return staleResult(page);
         }
-        for (const node of window) lines.push(formatNodeLine(node, { viewer }));
+        for (const node of window) lines.push(formatNodeLine(node, nodeLineOptions(graph, viewer)));
         if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
         return { content: [{ type: "text", text: renderLines(lines) }], details: { count: window.length, more } };
       }
@@ -268,10 +284,10 @@ export function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTo
         return { content: [{ type: "text", text: `No node with id ${params.nodeId}.` }], details: { error: true } };
       }
       // header is the parent itself at depth 0; children indented at depth 1.
-      lines.push(indent(formatNodeLine(parent, { viewer }), ROOT_DEPTH));
+      lines.push(indent(formatNodeLine(parent, nodeLineOptions(graph, viewer)), ROOT_DEPTH));
       const { nodes, observations } = directChildren(graph, parent);
       const combined = [
-        ...nodes.map((n) => ({ id: n.id, depth: 1, render: formatNodeLine(n, { viewer }) })),
+        ...nodes.map((n) => ({ id: n.id, depth: 1, render: formatNodeLine(n, nodeLineOptions(graph, viewer)) })),
         ...observations.map((o) => ({ id: o.id, depth: 1, render: formatObservationLine(o, { viewer }) })),
       ];
       const { window, more, remaining, stale } = paginate(combined, page);
@@ -351,7 +367,7 @@ export function buildCatUnits(graph: MemkeeperGraph, ids: string[], viewer: Rend
   for (const id of ids) {
     const node = graph.nodes.get(id as NodeId);
     if (node !== undefined) {
-      const nodeHeader = formatNodeLine(node, { viewer });
+      const nodeHeader = formatNodeLine(node, nodeLineOptions(graph, viewer));
       const obs = node.observationIds
         .map((oid) => graph.observations.get(oid))
         .filter((o): o is Observation => o !== undefined)
@@ -470,7 +486,7 @@ export async function collectFindMatches(
       nodeMatches.push({
         id: node.id,
         node,
-        render: formatNodeLine(node, { viewer, showParent: node.parentNode ?? undefined }),
+        render: formatNodeLine(node, { ...nodeLineOptions(graph, viewer), showParent: node.parentNode ?? undefined }),
       });
     }
   }
@@ -540,15 +556,21 @@ export function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): Agent
  *  `viewer`. Shared by try_finish (budget gate), the run's fast-path, and the
  *  per-pass user-message state snapshot. */
 export function renderRootView(graph: MemkeeperGraph, viewer: RenderViewer): string {
-  return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer);
+  return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer, nodeLineOptions(graph, viewer).observationContent);
 }
 
 /** Render an already-collected set of non-obsolete roots for `viewer`. Lets a
  *  caller that already needs the roots list (e.g. the widget, which reads both
- *  the count and the view tokens) avoid recomputing `nonObsoleteRoots`. */
-export function renderRootViewFromRoots(roots: Node[], viewer: RenderViewer): string {
+ *  the count and the view tokens) avoid recomputing `nonObsoleteRoots`. The
+ *  optional resolver wires the bare-`new`-node first-obs-line fallback so token
+ *  measurement matches the displayed render. */
+export function renderRootViewFromRoots(
+  roots: Node[],
+  viewer: RenderViewer,
+  observationContent?: (obsId: string) => string | undefined,
+): string {
   if (roots.length === 0) return "";
-  return roots.map((n) => formatNodeLine(n, { viewer })).join("\n");
+  return roots.map((n) => formatNodeLine(n, { viewer, observationContent })).join("\n");
 }
 
 /** Token-estimate of the non-obsolete root view (chars/4), rendered for

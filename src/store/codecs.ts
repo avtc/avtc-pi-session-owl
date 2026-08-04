@@ -44,7 +44,7 @@ export interface PhaseUsage {
   cacheRead: number;
   cost: number;
   turns: number;
-  passes: number;
+  runs: number;
 }
 
 export interface UsageLedger {
@@ -59,7 +59,7 @@ export const EMPTY_PHASE_USAGE: PhaseUsage = {
   cacheRead: 0,
   cost: 0,
   turns: 0,
-  passes: 0,
+  runs: 0,
 };
 
 export const EMPTY_LEDGER: UsageLedger = {
@@ -330,14 +330,17 @@ export function decodeSelection(raw: unknown): SerializedSelection | null {
 
 function isPhaseUsage(v: unknown): v is PhaseUsage {
   if (!isObject(v)) return false;
-  const { input, output, cacheRead, cost, turns, passes } = v;
+  // `runs` is the current field; `passes` is the legacy name (older persisted
+  // ledgers) — accept either (tolerant reader, additive rename).
+  const runs = v.runs ?? v.passes;
+  const { input, output, cacheRead, cost, turns } = v;
   return (
     typeof input === "number" &&
     typeof output === "number" &&
     typeof cacheRead === "number" &&
     typeof cost === "number" &&
     typeof turns === "number" &&
-    typeof passes === "number"
+    typeof runs === "number"
   );
 }
 
@@ -346,7 +349,17 @@ export function decodeUsage(raw: unknown): UsageLedger | null {
   if (!isObject(raw)) return null;
   const { observe, build, select } = raw;
   if (!isPhaseUsage(observe) || !isPhaseUsage(build) || !isPhaseUsage(select)) return null;
-  return { observe, build, select };
+  // normalize: emit `runs` from either the current field or the legacy `passes`
+  // name (older persisted ledgers), constructing fresh PhaseUsage objects.
+  return { observe: normalizePhase(observe), build: normalizePhase(build), select: normalizePhase(select) };
+}
+
+/** Build a fresh PhaseUsage from a decoded phase, normalizing the run counter
+ *  field name (current `runs`, legacy `passes`). */
+function normalizePhase(p: PhaseUsage): PhaseUsage {
+  const NO_RUNS = 0;
+  const runs = (p as { runs?: number; passes?: number }).runs ?? (p as { passes?: number }).passes ?? NO_RUNS;
+  return { input: p.input, output: p.output, cacheRead: p.cacheRead, cost: p.cost, turns: p.turns, runs };
 }
 
 /** Known MemkeeperDetails schema versions (tolerant reader rejects others). */

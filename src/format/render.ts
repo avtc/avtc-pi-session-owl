@@ -40,6 +40,18 @@ export function singleLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/** The first line of a (possibly multi-line) text, collapsed to one line. Used
+ *  to render a bare `new` node from its observation's content. */
+function firstLine(text: string): string {
+  const newlineAt = text.indexOf("\n");
+  return singleLine(newlineAt === NOT_FOUND ? text : text.slice(START_INDEX, newlineAt));
+}
+
+/** Zero-length list sentinel (no-bare-literals). */
+const EMPTY_OBS_LIST = 0;
+const NOT_FOUND = -1;
+const START_INDEX = 0;
+
 /** The render abbreviation for an importance (crit/high/med/low). */
 export function importanceAbbr(imp: Node["importance"]): string {
   return IMPORTANCE_ABBR[imp];
@@ -156,6 +168,10 @@ interface LineOptions {
   /** Transform (or omit) the observation content line. Default: `singleLine`.
    *  Return "" to render a content-free header. Node lines ignore this. */
   formatContent?: (content: string) => string;
+  /** Resolve an observation's content by id — used to render a bare `new` node
+   *  (empty summary) as its first observation's first line. Callers without
+   *  observation-content access omit it (the summary segment is then omitted). */
+  observationContent?: (obsId: string) => string | undefined;
 }
 
 /** Structural node shape the line helpers read (satisfied by both the in-memory
@@ -185,7 +201,17 @@ export interface RenderableObservation {
 export function formatNodeLine(node: RenderableNode, options: LineOptions): string {
   const parts: string[] = [`📁 ${node.id} · ${stateGlyph(node, options.viewer)}${importanceAbbr(node.importance)}`];
   const summary = singleLine(node.summary);
-  if (summary !== "") parts.push(summary);
+  if (summary !== "") {
+    parts.push(summary);
+  } else if (node.observationIds.length > EMPTY_OBS_LIST && options.observationContent !== undefined) {
+    // a bare `new` node (empty summary until the Builder first writes one) renders
+    // its first observation's first line so the Builder sees what it is about.
+    const resolved = options.observationContent(node.observationIds[0]);
+    if (resolved !== undefined) {
+      const first = firstLine(resolved);
+      if (first !== "") parts.push(first);
+    }
+  }
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
   if (node.state === "obsolete" && node.supersededBy !== null) parts.push(`→ ${node.supersededBy}`);
   parts.push(childCounts(node));

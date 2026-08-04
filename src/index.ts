@@ -13,7 +13,7 @@ import { compactionHook } from "./compaction/hook.js";
 import { getMemkeeperSettings, initMemkeeperSettings } from "./config/schema.js";
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "./lifecycle.js";
 import { log } from "./log.js";
-import { createMkRecallTool } from "./recall/mk-recall.js";
+import { makeMkRecallTool } from "./recall/mk-recall.js";
 import {
   makeBuilderRun,
   makeObserverRun,
@@ -37,7 +37,7 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   // The agent's read-only memory drill-down tool. Registered unconditionally
   // (it is read-only and harmless even when memkeeper is disabled — it just
   // reads whatever graph state exists).
-  pi.registerTool(createMkRecallTool());
+  pi.registerTool(makeMkRecallTool());
 
   // The user's `/mk:*` browse commands (roots / cat / find / find-all). They
   // render via ui.notify (zero agent-context cost) and read the source graph

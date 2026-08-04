@@ -623,15 +623,16 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn, thresholdTokens: 10 }));
 
-    // observe phase accumulated BOTH chunks' usage + counted two passes.
+    // observe phase accumulated BOTH chunks' usage but counts the run once
+    // (two chunks, one Observer run).
     const obs = getGraphStore().usageLedger.observe;
     expect(obs.input).toBe(3000);
     expect(obs.output).toBe(2000);
     expect(obs.cacheRead).toBe(1000);
-    expect(obs.passes).toBe(2);
+    expect(obs.runs).toBe(1);
     // build/select untouched.
-    expect(getGraphStore().usageLedger.build.passes).toBe(0);
-    expect(getGraphStore().usageLedger.select.passes).toBe(0);
+    expect(getGraphStore().usageLedger.build.runs).toBe(0);
+    expect(getGraphStore().usageLedger.select.runs).toBe(0);
     // the ledger is persisted ONCE at run end, not once per chunk (two chunks
     // here but one durable memkeeper.usage entry).
     expect(appended.filter((e) => e.type === "memkeeper.usage")).toHaveLength(1);

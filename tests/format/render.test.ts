@@ -149,6 +149,36 @@ describe("formatNodeLine", () => {
     );
   });
 
+  it("renders a bare new node (empty summary) as its first observation's first line", () => {
+    // a freshly-captured wrapper node has an empty summary until the Builder
+    // writes one; the render surfaces the first observation's first line so the
+    // Builder can judge what the arrival is about.
+    const node = makeNode({
+      id: "n15",
+      summary: "",
+      importance: "medium",
+      state: "new",
+      observationIds: repeatObs(1),
+    });
+    const resolveObs = (obsId: string): string | undefined =>
+      obsId === node.observationIds[0] ? "User hit a TS2322 in auth module\nmore detail here" : undefined;
+    expect(formatNodeLine(node, { viewer: "builder", observationContent: resolveObs })).toBe(
+      "📁 n15 · 🆕med · User hit a TS2322 in auth module · 1📄 · Jul 29 09:00",
+    );
+  });
+
+  it("renders a bare node with no resolver as before (no summary segment)", () => {
+    // without observation-content access the summary segment is omitted.
+    const node = makeNode({
+      id: "n15",
+      summary: "",
+      importance: "medium",
+      state: "new",
+      observationIds: repeatObs(1),
+    });
+    expect(formatNodeLine(node, { viewer: "builder" })).toBe("📁 n15 · 🆕med · 1📄 · Jul 29 09:00");
+  });
+
   it("appends 'in <parent>' when showParent is set", () => {
     const node = makeNode({ id: "n20", summary: "leaf branch", importance: "high", observationIds: repeatObs(1) });
     expect(formatNodeLine(node, { viewer: "builder", showParent: "n7" })).toBe(

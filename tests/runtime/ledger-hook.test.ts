@@ -54,11 +54,11 @@ describe("makeLedgerHook", () => {
     const { onStageEnd } = makeLedgerHook("build");
     expect(usageDeltaCount()).toBe(0);
     onStageEnd(USAGE_A);
-    expect(getGraphStore().usageLedger.build).toEqual({ ...USAGE_A, passes: 1 });
+    expect(getGraphStore().usageLedger.build).toEqual({ ...USAGE_A, runs: 1 });
     expect(usageDeltaCount()).toBe(0); // fold only — no persist yet
   });
 
-  it("accumulates across multiple folds (one hook = the same phase each call)", () => {
+  it("accumulates usage across multiple folds but counts the run once (one hook = one run)", () => {
     const { onStageEnd } = makeLedgerHook("observe");
     onStageEnd(USAGE_A);
     onStageEnd(USAGE_A);
@@ -68,16 +68,16 @@ describe("makeLedgerHook", () => {
       cacheRead: 600,
       cost: 0.1,
       turns: 6,
-      passes: 2,
+      runs: 1,
     });
   });
 
   it("each phase's hook is independent (observe hook doesn't touch build)", () => {
     makeLedgerHook("observe").onStageEnd(USAGE_A);
     makeLedgerHook("select").onStageEnd(USAGE_A);
-    expect(getGraphStore().usageLedger.observe.passes).toBe(1);
-    expect(getGraphStore().usageLedger.select.passes).toBe(1);
-    expect(getGraphStore().usageLedger.build.passes).toBe(0);
+    expect(getGraphStore().usageLedger.observe.runs).toBe(1);
+    expect(getGraphStore().usageLedger.select.runs).toBe(1);
+    expect(getGraphStore().usageLedger.build.runs).toBe(0);
   });
 
   it("hasUsage() reports false before any fold, true after", () => {
@@ -106,6 +106,6 @@ describe("makeLedgerHook", () => {
     expect(usageDeltaCount()).toBe(0);
     if (ledger.hasUsage()) persistLedger(ctx);
     expect(usageDeltaCount()).toBe(1);
-    expect(getGraphStore().usageLedger.build.passes).toBe(3);
+    expect(getGraphStore().usageLedger.build.runs).toBe(1);
   });
 });

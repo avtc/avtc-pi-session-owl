@@ -562,7 +562,7 @@ interface MkRecallParams {
 
 /** Build the mk_recall ToolDefinition. Reads the graph store + renderMode live
  *  (closures; needs no ExtensionContext). Read-only — never mutates. */
-export function createMkRecallTool(): ToolDefinition<typeof MK_RECALL_PARAMS> {
+export function makeMkRecallTool(): ToolDefinition<typeof MK_RECALL_PARAMS> {
   return {
     name: MK_RECALL_TOOL,
     label: "Browse memory",

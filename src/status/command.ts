@@ -8,7 +8,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
-import { nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
+import { nodeLineOptions, nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { notify } from "../notify.js";
 import { cloneLedger, decodeNode, EMPTY_LEDGER, type SerializedNode, type UsageLedger } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -154,7 +154,9 @@ export function gatherStatusInput(
   const nodes = [...graph.nodes.values()];
   const observations = [...graph.observations.values()];
   const nonObsoleteRoots = nonObsoleteRootsOf(nodes);
-  const rootsViewTokens = estimateContentTokens(renderRootViewFromRoots(nonObsoleteRoots, "builder"));
+  const rootsViewTokens = estimateContentTokens(
+    renderRootViewFromRoots(nonObsoleteRoots, "builder", nodeLineOptions(graph, "builder").observationContent),
+  );
   const selectedViewTokens = measureSelectedViewTokens(config.renderMode, store.selectedTree?.nodes ?? null);
   return {
     enabled: config.enabled,

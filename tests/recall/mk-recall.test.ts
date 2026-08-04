@@ -12,7 +12,7 @@ import {
   MUTATE_SOURCE,
   setClock,
 } from "../../src/graph/mutations.js";
-import { createMkRecallTool } from "../../src/recall/mk-recall.js";
+import { makeMkRecallTool } from "../../src/recall/mk-recall.js";
 import { encodeSelection } from "../../src/store/codecs.js";
 import { getGraphStore, persistSelectedTree, resetForNewSession } from "../../src/store/graph-store.js";
 import { MemkeeperGraph, makeObservation, N_GOAL, type Node, type ObsId } from "../../src/types.js";
@@ -218,7 +218,7 @@ function text(result: ToolResult): string {
 }
 
 describe("mk_recall", () => {
-  const tool = () => createMkRecallTool();
+  const tool = () => makeMkRecallTool();
 
   describe("ids — exact lookup", () => {
     it("returns a node and its children (ls-style, indented)", async () => {
