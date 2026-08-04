@@ -21,7 +21,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `builderMode` | string | `on-compaction` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
 | `selectorMode` | string | `on-compaction` | When the Selector runs (only if `renderMode=selected-root`): `on-compaction` or `on-session-context-threshold`. |
 | `commandResultCap` | number | `50` | Max lines a `/mk:*` command renders before a `... +N more` footer. `null` = no limit. (User commands only; the agent's `mk_recall` paginates separately.) |
-| `regexTimeoutMs` | number | `5000` | Max ms a `find`/`mk_recall` regex may run before it is killed. Tests run in a worker thread, so pi stays responsive while a catastrophic pattern is terminated. `0` disables the timeout (not advised — a bad pattern can freeze pi). |
+| `findTimeoutMs` | duration | `30000` | Max duration a `find`/`mk_recall` search may run before it is stopped. |
 
 ## Observer
 

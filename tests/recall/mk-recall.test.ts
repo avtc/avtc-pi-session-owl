@@ -293,7 +293,7 @@ describe("mk_recall", () => {
     });
 
     it("kills a slow regex past the timeout and surfaces a timeout error (worker-thread backstop)", async () => {
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, regexTimeoutMs: 300 }));
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       seedSource();
       // a guard-slipping polynomial shape over a large observation content
       resetForNewSession();
@@ -483,6 +483,35 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       expect(terse).not.toContain("sourceEntryIds");
       expect(full).not.toContain("e2");
       expect(full).not.toContain("sourceEntryIds");
+    });
+
+    it("caps take:0+fullDetails to a bounded page (no unbounded verbatim dump)", async () => {
+      // defense-in-depth: take:0 (all) + fullDetails must not dump the whole
+      // observation set into the agent context verbatim; it is capped and the
+      // caller pages with afterId for more.
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      // more roots than the cap, each with a one-line body
+      for (let i = 1; i <= 60; i += 1) {
+        applyCreateNode(g, {
+          id: `nc${i}` as Node["id"],
+          summary: `capped node ${i}`,
+          importance: "medium",
+          parentNode: null,
+          state: "active",
+        });
+      }
+      setClock(null);
+      getGraphStore().graph = g;
+
+      // take:0 + fullDetails over a no-filter browse → capped, not all 60
+      const out = text(await recall(tool(), { take: 0, fullDetails: true }));
+      const rootsShown = out.split("\n").filter((l) => l.includes("capped node")).length;
+      expect(rootsShown).toBeLessThan(60);
+      expect(rootsShown).toBeGreaterThan(0);
+      // a pagination footer is present so the agent knows to page for more
+      expect(out).toContain("afterId=");
     });
   });
 

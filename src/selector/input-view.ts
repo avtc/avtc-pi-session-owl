@@ -10,7 +10,7 @@ import {
 } from "../compaction/touched-files.js";
 import { formatNodeLine, RENDER_LEGEND } from "../format/render.js";
 import { cloneNode, cloneObservation } from "../graph/clone.js";
-import { nonObsoleteRootsOf, orderActiveSetRoots } from "../graph/read-tools.js";
+import { nodeLineOptions, nonObsoleteRootsOf, orderActiveSetRoots } from "../graph/read-tools.js";
 import { isUnstuckAutoContinue } from "../lifecycle.js";
 import { buildChunks, type ChunkOptions, renderAssistantTextBlock } from "../observer/chunk.js";
 import type { Node, NodeId, Observation, ObsId } from "../types.js";
@@ -313,5 +313,5 @@ export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInp
 export function renderWorkingRoots(workingCopy: SelectorWorkingCopy): string {
   const graph = workingCopy.graph;
   const ordered = orderActiveSetRoots(nonObsoleteRootsOf(graph.nodes.values()));
-  return ordered.map((node) => formatNodeLine(node, { viewer: "nonBuilder" })).join("\n");
+  return ordered.map((node) => formatNodeLine(node, nodeLineOptions(graph, "nonBuilder"))).join("\n");
 }

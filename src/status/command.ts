@@ -157,7 +157,11 @@ export function gatherStatusInput(
   const rootsViewTokens = estimateContentTokens(
     renderRootViewFromRoots(nonObsoleteRoots, "builder", nodeLineOptions(graph, "builder").observationContent),
   );
-  const selectedViewTokens = measureSelectedViewTokens(config.renderMode, store.selectedTree?.nodes ?? null);
+  const selectedViewTokens = measureSelectedViewTokens(
+    config.renderMode,
+    store.selectedTree?.nodes ?? null,
+    nodeLineOptions(graph, "nonBuilder").observationContent,
+  );
   return {
     enabled: config.enabled,
     settings: {
@@ -177,15 +181,18 @@ export function gatherStatusInput(
 }
 
 /** Decode a persisted selected tree's roots + measure the rendered view tokens.
- *  Returns null when there is no tree or renderMode is observations-root. */
+ *  Returns null when there is no tree or renderMode is observations-root. The
+ *  observation-content resolver (from the source store) wires the bare-`new`-node
+ *  first-obs-line fallback so the measurement matches the displayed render. */
 function measureSelectedViewTokens(
   renderMode: "selected-root" | "observations-root",
   serializedNodes: SerializedNode[] | null,
+  observationContent: (obsId: string) => string | undefined,
 ): number | null {
   if (renderMode !== "selected-root" || serializedNodes === null) return null;
   const decoded = nonObsoleteRootsOf(serializedNodes.map(decodeNode).filter((n): n is Node => n !== null));
   if (decoded.length === 0) return null;
-  return estimateContentTokens(renderRootViewFromRoots(decoded, "nonBuilder"));
+  return estimateContentTokens(renderRootViewFromRoots(decoded, "nonBuilder", observationContent));
 }
 
 // --- registration ----------------------------------------------------------

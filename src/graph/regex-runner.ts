@@ -10,20 +10,29 @@
 // authoritative backstop for any catastrophic pattern that slips the static
 // `isSafeRegex` fast-reject — it closes the residual polynomial/exponential
 // shapes without freezing the process.
+//
+// The worker posts each result back as it completes (not one batch at the end),
+// so a timeout returns the PARTIAL matches found so far instead of discarding
+// everything: the caller reports those partials plus a "search was stopped"
+// note.
 
 import { Worker } from "node:worker_threads";
 
 /** Worker body (raw JS — `eval: true`, no module resolution so it needs no
- *  bundler/loader). Receives a regex source+flags + the strings to test,
- *  posts back either the boolean results or a compile error. It handles one
- *  message per request and stays alive across requests (the Worker is reused). */
+ *  bundler/loader). Receives a regex source+flags + the strings to test, posts
+ *  each boolean result back immediately (indexed), then a done marker — so the
+ *  main thread accumulates partial results and can return them on timeout. It
+ *  handles one message per request and stays alive across requests (the Worker
+ *  is reused). */
 const WORKER_SOURCE = `
 const { parentPort } = require("worker_threads");
 parentPort.on("message", (req) => {
   try {
     const re = new RegExp(req.source, req.flags);
-    const results = req.strings.map((s) => re.test(s));
-    parentPort.postMessage({ id: req.id, results });
+    for (let i = 0; i < req.strings.length; i++) {
+      parentPort.postMessage({ id: req.id, index: i, result: re.test(req.strings[i]) });
+    }
+    parentPort.postMessage({ id: req.id, done: true });
   } catch (err) {
     parentPort.postMessage({ id: req.id, error: (err && err.message) ? err.message : String(err) });
   }
@@ -34,8 +43,11 @@ parentPort.on("message", (req) => {
 interface Pending {
   resolve: (outcome: RegexTestOutcome) => void;
   timer: NodeJS.Timeout | null;
+  /** Results accumulated so far (length === total; untested slots stay false). */
+  results: boolean[];
+  /** How many results have been posted back by the worker so far. */
+  testedCount: number;
 }
-
 /** The lazily-created, reused worker. Null until first use, and reset to null
  *  after a timeout or worker error (the next call respawns). One worker serves
  *  all calls so the per-call spawn cost (OS thread + V8 isolate init) is paid
@@ -52,13 +64,25 @@ function getWorker(): Worker {
   if (worker !== null) return worker;
   const w = new Worker(WORKER_SOURCE, { eval: true });
   // a persistent listener routes every reply to its pending caller.
-  w.on("message", (msg: { id: number; results?: boolean[]; error?: string }) => {
+  w.on("message", (msg: { id: number; index?: number; result?: boolean; done?: boolean; error?: string }) => {
     const p = pending.get(msg.id);
     if (p === undefined) return;
-    if (p.timer !== null) clearTimeout(p.timer);
-    pending.delete(msg.id);
-    if (msg.error !== undefined) p.resolve({ error: compileErrorMessage(msg.error) });
-    else p.resolve({ results: msg.results ?? [] });
+    if (msg.error !== undefined) {
+      if (p.timer !== null) clearTimeout(p.timer);
+      pending.delete(msg.id);
+      p.resolve({ error: compileErrorMessage(msg.error) });
+      return;
+    }
+    if (msg.done === true) {
+      if (p.timer !== null) clearTimeout(p.timer);
+      pending.delete(msg.id);
+      p.resolve({ results: p.results });
+      return;
+    }
+    if (msg.index !== undefined && msg.result !== undefined) {
+      p.results[msg.index] = msg.result;
+      p.testedCount += 1;
+    }
   });
   // a worker-level error (crash) fails every still-pending request, then the
   // worker is discarded so the next call respawns.
@@ -82,55 +106,65 @@ function failAll(outcome: RegexTestOutcome): void {
   }
 }
 
-/** Outcome of a batched regex test: either a boolean per input string or an
- *  error string the caller surfaces verbatim (timeout / compile failure). */
-export type RegexTestOutcome = { results: boolean[] } | { error: string };
+/** Outcome of a batched regex test: the boolean per input string (complete), a
+ *  PARTIAL result set when the timeout fired (the matches found before the kill,
+ *  untested slots false), or an error string the caller surfaces verbatim. */
+export type RegexTestOutcome =
+  | { results: boolean[] }
+  | { results: boolean[]; testedCount: number; timedOutMs: number }
+  | { error: string };
+
+/** A floor on the configured timeout: even when a legacy/persisted config
+ *  carries 0 (the removed "Off" preset), the worker kill timer is armed at
+ *  least this long so a catastrophic pattern cannot freeze the reused worker
+ *  and brick every later search. */
+const MIN_TIMEOUT_MS = 1000;
 
 /** Test `regex` against each string in `strings`, returning a boolean[] in the
- *  same order. Runs in a worker thread; if a single test has not finished by
- *  `timeoutMs` the worker is terminated and an error is returned. `timeoutMs`
- *  of 0 disables the timeout (the worker runs to completion). On any failure
- *  to spawn a worker (e.g. a restricted runtime), falls back to synchronous
- *  testing — the static `isSafeRegex` guard in `tryCompileFindRegex` still
- *  rejects known-catastrophic patterns before this point, so the fallback is
- *  safe in practice. */
+ *  same order. Runs in a worker thread; the worker posts each result back as it
+ *  completes. If the batch has not finished by the configured timeout (floored
+ *  to a minimum), the worker is terminated and the PARTIAL results found so far
+ *  are returned alongside a timed-out marker — callers report those partials
+ *  plus a "search was stopped" note. If the worker cannot be spawned (a
+ *  restricted runtime), the batch is REFUSED with an error — running
+ *  unprotected on the main thread (where a backtracking pattern cannot be
+ *  interrupted) would risk freezing the host process. */
 export async function runRegexTests(regex: RegExp, strings: string[], timeoutMs: number): Promise<RegexTestOutcome> {
   if (strings.length === 0) return { results: [] };
   try {
     return await runInWorker(regex, strings, timeoutMs);
   } catch {
-    // worker_threads unavailable or the worker failed to spawn — degrade to a
-    // synchronous test. Patterns reaching here already passed the static guard.
-    return { results: strings.map((s) => regex.test(s)) };
+    // worker_threads unavailable or the worker failed to spawn — refuse rather
+    // than run an interruptible pattern unprotected on the main thread.
+    return { error: UNAVAILABLE_MESSAGE };
   }
 }
+
+const UNAVAILABLE_MESSAGE =
+  "Regex search is unavailable in this runtime (worker threads could not start). Try a simpler pattern or browse with ls.";
 
 async function runInWorker(regex: RegExp, strings: string[], timeoutMs: number): Promise<RegexTestOutcome> {
   const id = nextRequestId;
   nextRequestId += 1;
   const w = getWorker();
+  const effectiveTimeout = Math.max(timeoutMs, MIN_TIMEOUT_MS);
+  const results: boolean[] = new Array(strings.length).fill(false);
   return new Promise<RegexTestOutcome>((resolve) => {
-    const timer =
-      timeoutMs > 0
-        ? setTimeout(() => {
-            // a timeout kills the stuck worker (the pattern is still running in
-            // it) and fails this request; the next call respawns a fresh worker.
-            pending.delete(id);
-            if (worker !== null) {
-              void worker.terminate();
-              worker = null;
-            }
-            resolve({ error: timeoutErrorMessage(timeoutMs) });
-          }, timeoutMs)
-        : null;
-    pending.set(id, { resolve, timer });
+    // entry is mutated by the worker's per-result messages (results + testedCount);
+    // the timer reads testedCount at timeout. Build entry first, then arm the timer.
+    const entry: Pending = { resolve, timer: null, results, testedCount: 0 };
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      if (worker !== null) {
+        void worker.terminate();
+        worker = null;
+      }
+      resolve({ results, testedCount: entry.testedCount, timedOutMs: effectiveTimeout });
+    }, effectiveTimeout);
+    entry.timer = timer;
+    pending.set(id, entry);
     w.postMessage({ id, source: regex.source, flags: regex.flags, strings });
   });
-}
-
-function timeoutErrorMessage(timeoutMs: number): string {
-  const seconds = timeoutMs / 1000;
-  return `Regex timed out after ${seconds}s — the pattern backtracks too heavily or the input is too large. Simplify the regex.`;
 }
 
 function compileErrorMessage(detail: string): string {

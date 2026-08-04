@@ -70,7 +70,7 @@ describe("makeObserverRun (Observer stage wiring)", () => {
         maxSelectorPasses: 5,
         renderMode: "selected-root",
         commandResultCap: 50,
-        regexTimeoutMs: 5000,
+        findTimeoutMs: 5000,
       },
     });
 

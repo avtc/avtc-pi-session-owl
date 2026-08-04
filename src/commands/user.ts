@@ -182,10 +182,11 @@ async function runFind(
     return;
   }
   if (collected.matches.length === 0) {
-    await notifyInfo(ctx, "No matches.");
+    await notifyInfo(ctx, collected.note ?? "No matches.");
     return;
   }
   const lines = collected.matches.map((m) => m.render);
+  if (collected.note !== undefined) lines.push(collected.note);
   const { text } = formatList(lines, resolveCap());
   await notifyInfo(ctx, text);
 }

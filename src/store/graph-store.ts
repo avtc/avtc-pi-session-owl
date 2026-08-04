@@ -211,6 +211,12 @@ function reconcileLinks(graph: MemkeeperGraph): void {
   // obs extends its time range) and recompute each parent's range ONCE — not
   // once per newly-linked obs (recomputeRange re-scans the parent's evidence, so
   // K new obs under one parent would otherwise trigger K identical subtree walks).
+  // Build a per-parent existing-obs Set once so the membership check is O(1)
+  // (a `.includes` per obs would be O(K) → O(K²) over a parent's evidence).
+  const existing = new Map<string, Set<string>>();
+  for (const node of graph.nodes.values()) {
+    if (node.observationIds.length > 0) existing.set(node.id, new Set(node.observationIds));
+  }
   const touchedParents = new Set<string>();
   for (const [obsId, obs] of graph.observations) {
     const parent = graph.nodes.get(obs.parentNode);
@@ -221,8 +227,10 @@ function reconcileLinks(graph: MemkeeperGraph): void {
       graph.observations.delete(obsId);
       continue;
     }
-    if (!parent.observationIds.includes(obsId)) {
+    const have = existing.get(parent.id);
+    if (have === undefined || !have.has(obsId)) {
       parent.observationIds.push(obsId);
+      have?.add(obsId);
       touchedParents.add(parent.id);
     }
   }

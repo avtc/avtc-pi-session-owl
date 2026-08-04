@@ -352,17 +352,15 @@ function persistObservationBatch(
   contiguousCoversUpToId: string | null,
 ): void {
   const graph = getGraphStore().graph;
+  let tokenCount = 0;
   const serializedRecords = pairs.map((pair) => {
     const obs = graph.observations.get(pair.obsId);
     if (obs === undefined) {
       throw new Error("observer wrap: observation missing");
     }
+    tokenCount += obs.contentTokens;
     return encodeObservation(obs);
   });
-  const tokenCount = pairs.reduce((sum, pair) => {
-    const obs = graph.observations.get(pair.obsId);
-    return sum + (obs?.contentTokens ?? 0);
-  }, 0);
   const coversFromId = unobserved[FIRST]?.id ?? null;
   const coversUpToId = contiguousCoversUpToId ?? unobserved[FIRST]?.id ?? null;
   const entry: ObservationEntry = { coversFromId, coversUpToId, records: serializedRecords, tokenCount };

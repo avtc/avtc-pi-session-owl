@@ -26,17 +26,29 @@ describe("runRegexTests", () => {
     if ("results" in res) expect(res.results).toEqual([]);
   });
 
-  it("terminates a catastrophic backtracking pattern on timeout and reports an error", async () => {
+  it("terminates a catastrophic backtracking pattern on timeout, returning partial results", async () => {
     // (a+)+$ on a long non-matching string backtracks catastrophically on the
-    // main thread; in the worker it is killed at the timeout.
+    // main thread; in the worker it is killed at the timeout. The outcome now
+    // carries the PARTIAL results found so far + a timed-out marker (not a bare
+    // error) so callers can surface what was matched.
     const evil = /(a+)+$/;
+    const fast = "plain text";
     const input = "a".repeat(2000).concat("!");
     const t0 = Date.now();
-    const res = await runRegexTests(evil, [input], 500);
+    // the fast string completes before the catastrophic one hangs; both are in
+    // the batch so partial results = [true] (fast matched... actually false) and
+    // the catastrophic slot is untested (false).
+    const res = await runRegexTests(evil, [fast, input], 500);
     const elapsed = Date.now() - t0;
-    expect("error" in res).toBe(true);
-    // killed promptly, not after the pattern's natural (multi-second+) runtime
-    expect(elapsed).toBeLessThan(2000);
+    expect("testedCount" in res).toBe(true);
+    expect("results" in res).toBe(true);
+    if ("testedCount" in res) {
+      // killed promptly, not after the pattern's natural (multi-second+) runtime
+      expect(elapsed).toBeLessThan(2000);
+      // the fast string was tested (testedCount >= 1); the catastrophic one hung
+      expect(res.testedCount).toBeGreaterThanOrEqual(1);
+      expect(res.timedOutMs).toBeGreaterThanOrEqual(500);
+    }
   });
 
   it("keeps the main thread responsive while the worker is stuck on a slow pattern", async () => {
@@ -52,9 +64,10 @@ describe("runRegexTests", () => {
     expect(ticks).toBeGreaterThanOrEqual(1);
   });
 
-  it("timeout 0 means no timeout (a slow pattern runs to completion, not killed)", async () => {
-    // a polynomial-but-not-catastrophic pattern that completes well within any
-    // reasonable bound; timeout 0 must NOT short-circuit to an error.
+  it("timeout 0 is clamped to the minimum floor (a fast pattern still completes)", async () => {
+    // a configured/legacy 0 (the removed "Off" preset) is floored to the
+    // minimum so a catastrophic pattern cannot freeze the reused worker; a
+    // fast pattern completes well within the floor and returns normally.
     const res = await runRegexTests(/foo/, ["foobar"], 0);
     if ("results" in res) expect(res.results).toEqual([true]);
   });
@@ -67,10 +80,11 @@ describe("runRegexTests synchronous fallback", () => {
     vi.resetModules();
   });
 
-  it("degrades to synchronous regex.test when the worker cannot spawn", async () => {
+  it("refuses the batch (returns an error) when the worker cannot spawn", async () => {
     // restricted runtimes where worker_threads is unavailable hit the catch in
-    // runRegexTests and fall back to a synchronous test. Mock the Worker
-    // constructor to throw so runInWorker rejects, exercising the fallback.
+    // runRegexTests. Running an interruptible pattern unprotected on the main
+    // thread (the static guard has known gaps) would risk freezing the host, so
+    // the batch is refused instead. Mock the Worker constructor to throw.
     vi.doMock("node:worker_threads", () => ({
       Worker: class {
         constructor() {
@@ -82,8 +96,8 @@ describe("runRegexTests synchronous fallback", () => {
     const { runRegexTests: fallbackRun } = await import("../../src/graph/regex-runner.js");
 
     const res = await fallbackRun(/foo/, ["foobar", "no match", "foo"], 5000);
-    // the fallback returns correct synchronous results (not a worker error)
-    expect("results" in res).toBe(true);
-    if ("results" in res) expect(res.results).toEqual([true, false, true]);
+    // the fallback refuses rather than running unprotected on the main thread
+    expect("error" in res).toBe(true);
+    if ("error" in res) expect(res.error).toMatch(/unavailable/i);
   });
 });

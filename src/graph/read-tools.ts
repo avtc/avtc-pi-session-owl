@@ -55,7 +55,7 @@ export const TAKE_ALL = 0;
  *  find now accepts USER input (/mk:find), but observations are condensed
  *  (short) and the graph is session-bounded, so the realistic blast radius is
  *  a brief synchronous hang, not a crash. */
-export const FIND_QUERY_MAX = 500;
+const FIND_QUERY_MAX = 500;
 
 const ROOT_DEPTH = 0;
 export const NO_AFTER_ID: string | null = null;
@@ -95,13 +95,14 @@ export function paginate<T extends { id: string }>(
   items: T[],
   page: ResolvedPage,
 ): { window: T[]; more: boolean; remaining: number; stale: boolean } {
-  if (page.take === TAKE_ALL) return { window: items, more: false, remaining: 0, stale: false };
   let startIdx = 0;
   if (page.afterId !== NO_AFTER_ID) {
     const i = items.findIndex((item) => item.id === page.afterId);
     if (i < 0) return { window: [], more: false, remaining: 0, stale: true };
     startIdx = i + 1;
   }
+  // take === 0 means "all" — return the whole (cursor-shifted) list at once.
+  if (page.take === TAKE_ALL) return { window: items.slice(startIdx), more: false, remaining: 0, stale: false };
   const window = items.slice(startIdx, startIdx + page.take);
   const remaining = Math.max(0, items.length - (startIdx + page.take));
   return { window, more: remaining > 0, remaining, stale: false };
@@ -122,7 +123,7 @@ export function staleCursorMessage(afterId: string | null): string {
 
 /** The full tool result for a stale cursor: the message + zero-count/stale
  *  details. Shared by ls/cat/find so the 4 stale paths stay identical. */
-export function staleResult(page: ResolvedPage): AgentToolResult<unknown> {
+function staleResult(page: ResolvedPage): AgentToolResult<unknown> {
   return {
     content: [{ type: "text", text: staleCursorMessage(page.afterId ?? "") }],
     details: { count: 0, stale: true },
@@ -139,7 +140,7 @@ export interface OrderableNode {
 }
 
 /** Importance desc (critical→low), then rangeEnd recency desc (newer first). */
-export function compareNodeOrder<T extends OrderableNode>(a: T, b: T): number {
+function compareNodeOrder<T extends OrderableNode>(a: T, b: T): number {
   const byImportance = IMPORTANCE_RANK[b.importance] - IMPORTANCE_RANK[a.importance];
   if (byImportance !== 0) return byImportance;
   return b.timestamps.rangeEnd.localeCompare(a.timestamps.rangeEnd);
@@ -158,18 +159,18 @@ export function orderActiveSetRoots<T extends RenderableNode>(roots: readonly T[
 }
 
 /** Recency desc by timestamp (newer first). */
-export function compareObservationOrder(a: Observation, b: Observation): number {
+function compareObservationOrder(a: Observation, b: Observation): number {
   return b.timestamp.localeCompare(a.timestamp);
 }
 
 /** A node is obsolete when its state is "obsolete". */
-export function isObsolete(node: Node): boolean {
+function isObsolete(node: Node): boolean {
   return isObsoleteState(node.state);
 }
 
 /** A raw state is obsolete when it is "obsolete" (the visible-by-default gate;
  *  the operand form of `isObsolete` for sites that hold a `NodeState`, not a node). */
-export function isObsoleteState(state: Node["state"]): boolean {
+function isObsoleteState(state: Node["state"]): boolean {
   return state === "obsolete";
 }
 
@@ -183,7 +184,7 @@ export function isVisible(state: Node["state"], includeSuperseded: boolean): boo
 // --- root view + children --------------------------------------------------
 
 /** The roots of the graph: nodes whose parentNode is null. */
-export function rootNodes(graph: MemkeeperGraph): Node[] {
+function rootNodes(graph: MemkeeperGraph): Node[] {
   return [...graph.nodes.values()].filter((n) => n.parentNode === ROOT_PARENT);
 }
 
@@ -256,7 +257,7 @@ const LS_PARAMS = Type.Object({
 
 /** Build the `ls` tool bound to `graph`, rendered for `viewer` (the `new`-state
  *  glyph is Builder-only; non-Builder viewers render `new` as `active`). */
-export function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof LS_PARAMS> {
+function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof LS_PARAMS> {
   return {
     name: LS_TOOL,
     description:
@@ -314,7 +315,7 @@ const CAT_PARAMS = Type.Object({
 /** Build the `cat` tool: read full text — observations verbatim, or a node's
  *  header plus its direct observations verbatim (child nodes NOT expanded).
  *  `viewer` controls the node-header glyph rendering (Builder-only `new`). */
-export function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof CAT_PARAMS> {
+function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof CAT_PARAMS> {
   return {
     name: CAT_TOOL,
     description:
@@ -344,7 +345,7 @@ export function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentT
  *  (NO content — that's the body; NO sourceEntryIds — provenance is internal).
  *  Delegates to the shared formatObservationLine with content omitted, so the
  *  header stays byte-identical to every other observation line prefix. */
-export function catObsHeader(obs: Observation): string {
+function catObsHeader(obs: Observation): string {
   return formatObservationLine(obs, { viewer: "nonBuilder", formatContent: () => "" });
 }
 
@@ -449,14 +450,14 @@ export function tryCompileFindRegex(query: string): { regex: RegExp } | { error:
  *  `/mk:find` commands.
  *
  *  Async because the regex tests run in a worker thread bounded by
- *  `regexTimeoutMs` (a catastrophic pattern is killed instead of freezing pi).
+ *  `findTimeoutMs` (a catastrophic pattern is killed instead of freezing pi).
  *  Returns the matches, or an error string the caller surfaces verbatim. */
 export async function collectFindMatches(
   graph: MemkeeperGraph,
   regex: RegExp,
   includeSuperseded: IncludeSuperseded,
   viewer: RenderViewer,
-): Promise<{ matches: FindMatch[] } | { error: string }> {
+): Promise<{ matches: FindMatch[]; note?: string } | { error: string }> {
   // gather candidates first (preserving node-then-obs grouping), then batch-test
   // every text in ONE worker round-trip rather than per entity.
   const nodeJobs: { node: Node; text: string }[] = [];
@@ -473,7 +474,7 @@ export async function collectFindMatches(
     }
   }
   const texts: string[] = [...nodeJobs.map((j) => j.text), ...obsJobs.map((j) => j.obs.content)];
-  const outcome = await runRegexTests(regex, texts, getMemkeeperSettings().regexTimeoutMs);
+  const outcome = await runRegexTests(regex, texts, getMemkeeperSettings().findTimeoutMs);
   if ("error" in outcome) return { error: outcome.error };
 
   const nodeHits = outcome.results.slice(0, nodeJobs.length);
@@ -504,7 +505,17 @@ export async function collectFindMatches(
   // consistent with `ls`.
   nodeMatches.sort((a, b) => compareNodeOrder(a.node, b.node));
   obsMatches.sort((a, b) => compareObservationOrder(a.obs, b.obs));
-  return { matches: [...nodeMatches, ...obsMatches] };
+  const matches = [...nodeMatches, ...obsMatches];
+  // a timeout returns the PARTIAL matches found so far + a note surfacing that
+  // the search was stopped (so the caller can tell the agent/user).
+  if ("testedCount" in outcome) {
+    const seconds = outcome.timedOutMs / 1000;
+    return {
+      matches,
+      note: `Search timed out after ${seconds}s — tested ${outcome.testedCount} of ${texts.length} items before the kill. These are partial results; refine or narrow the query.`,
+    };
+  }
+  return { matches };
 }
 
 /** A sortable wrapper carrying the entity for ordering. */
@@ -518,7 +529,7 @@ interface ObsMatch extends FindMatch {
 /** Build the `find` tool: whole-graph regex search over node summaries +
  *  observation content, flat results each carrying `in <parent>`. `viewer`
  *  controls the match glyph rendering (Builder-only `new`). */
-export function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof FIND_PARAMS> {
+function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof FIND_PARAMS> {
   return {
     name: FIND_TOOL,
     description:
@@ -544,6 +555,7 @@ export function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): Agent
       }
       const lines = window.map((m) => m.render);
       if (more && window.length > 0) lines.push(footer(window[window.length - 1].id, remaining));
+      if (collected.note !== undefined) lines.push(collected.note);
       const text = lines.length === 0 ? "No matches." : lines.join("\n");
       return { content: [{ type: "text", text }], details: { count: window.length, more } };
     },
@@ -559,15 +571,20 @@ export function renderRootView(graph: MemkeeperGraph, viewer: RenderViewer): str
   return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer, nodeLineOptions(graph, viewer).observationContent);
 }
 
+/** Resolver that yields no observation content (for callers without
+ *  observation-content access — e.g. measuring a detached selected tree). */
+export const NO_OBSERVATION_CONTENT = (_obsId: string): undefined => undefined;
+
 /** Render an already-collected set of non-obsolete roots for `viewer`. Lets a
  *  caller that already needs the roots list (e.g. the widget, which reads both
  *  the count and the view tokens) avoid recomputing `nonObsoleteRoots`. The
- *  optional resolver wires the bare-`new`-node first-obs-line fallback so token
- *  measurement matches the displayed render. */
+ *  observation-content resolver wires the bare-`new`-node first-obs-line
+ *  fallback so token measurement matches the displayed render; pass
+ *  NO_OBSERVATION_CONTENT when the caller has no observation access. */
 export function renderRootViewFromRoots(
   roots: Node[],
   viewer: RenderViewer,
-  observationContent?: (obsId: string) => string | undefined,
+  observationContent: (obsId: string) => string | undefined,
 ): string {
   if (roots.length === 0) return "";
   return roots.map((n) => formatNodeLine(n, { viewer, observationContent })).join("\n");

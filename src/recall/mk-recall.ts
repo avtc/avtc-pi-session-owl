@@ -29,6 +29,7 @@ import {
   type ResolvedPage,
   resolvePage,
   staleCursorMessage,
+  TAKE_ALL,
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
 import { runRegexTests } from "../graph/regex-runner.js";
@@ -40,6 +41,12 @@ import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, typ
 
 export const MK_RECALL_TOOL = "mk_recall";
 const VIEWER: RenderViewer = "nonBuilder";
+/** Resolve a bare `new` node's first-observation line from a recall target's
+ *  observations (mirrors the graph-backed render so mk_recall matches the
+ *  displayed tree). */
+function targetObservationContent(target: RecallTarget): (obsId: string) => string | undefined {
+  return (obsId: string): string | undefined => target.observations.get(obsId)?.content;
+}
 /** Single-line content cap for terse results (full content shows in fullDetails). */
 const TERSE_CONTENT_MAX = 120;
 const TRUNCATION_ELLIPSIS = "…";
@@ -97,13 +104,16 @@ function resolveTreeObs(
   return withTreeParent(source, treeObsParent);
 }
 
-/** Build a recall target over the live source graph. */
+/** Build a recall target over the live source graph. The source graph's own
+ *  node/observation maps are referenced directly (no eager copy) — the live
+ *  graph is read-only during a recall call, and `Observation`/`Node` already
+ *  satisfy the renderable view types. */
 function targetFromSourceGraph(graph: MemkeeperGraph): RecallTarget {
-  const nodes = new Map<string, RenderableNode>();
-  for (const n of graph.nodes.values()) nodes.set(n.id, n);
-  const observations = new Map<string, RecallObservation>();
-  for (const o of graph.observations.values()) observations.set(o.id, o);
-  return { renderMode: "observations-root", nodes, observations };
+  return {
+    renderMode: "observations-root",
+    nodes: graph.nodes as Map<string, RenderableNode>,
+    observations: graph.observations as Map<string, RecallObservation>,
+  };
 }
 
 /** Build a recall target over the persisted selected tree. Nodes are the tree's
@@ -195,7 +205,7 @@ function targetFromSelectionForIds(
 
 /** Override an observation's parentNode with its curated tree parent when the
  *  tree places it under a different node than the source graph. */
-function withTreeParent<T extends RecallObservation>(obs: T, treeObsParent: Map<string, string>): RecallObservation {
+function withTreeParent(obs: RecallObservation, treeObsParent: Map<string, string>): RecallObservation {
   const treeParent = treeObsParent.get(obs.id);
   if (treeParent === undefined) return obs;
   return { ...obs, parentNode: treeParent };
@@ -326,7 +336,8 @@ function missingIdMessage(id: string): string {
 /** Render a node as a drill-down payload: header at depth 0, direct children
  *  indented at depth 1 (child nodes one-lined, child observations terse or full). */
 function renderNodePayload(node: RenderableNode, target: RecallTarget, fullDetails: boolean): string {
-  const lines: string[] = [formatNodeLine(node, { viewer: VIEWER })];
+  const observationContent = targetObservationContent(target);
+  const lines: string[] = [formatNodeLine(node, { viewer: VIEWER, observationContent })];
   const childNodes = node.childNodeIds
     .map((id) => target.nodes.get(id))
     .filter((n): n is RenderableNode => n !== undefined);
@@ -334,7 +345,7 @@ function renderNodePayload(node: RenderableNode, target: RecallTarget, fullDetai
     .map((id) => target.observations.get(id))
     .filter((o): o is RecallObservation => o !== undefined);
   for (const child of childNodes) {
-    lines.push(indent(formatNodeLine(child, { viewer: VIEWER }), CHILD_DEPTH));
+    lines.push(indent(formatNodeLine(child, { viewer: VIEWER, observationContent }), CHILD_DEPTH));
   }
   for (const obs of childObs) {
     lines.push(indent(renderObservationBlock(obs, { showParent: undefined, fullDetails }), CHILD_DEPTH));
@@ -396,7 +407,7 @@ function resolveBounds(from: string | undefined, to: string | undefined): Resolv
 }
 
 /** Build the ranked candidate list for the search/list path. Async because the
- *  regex tests run in a worker thread bounded by `regexTimeoutMs`. Returns the
+ *  regex tests run in a worker thread bounded by `findTimeoutMs`. Returns the
  *  candidates, or an error string the caller surfaces verbatim. */
 async function buildSearchCandidates(
   target: RecallTarget,
@@ -404,9 +415,10 @@ async function buildSearchCandidates(
   bounds: ResolvedBounds,
   includeSuperseded: boolean,
   fullDetails: boolean,
-): Promise<{ candidates: SearchCandidate[] } | { error: string }> {
+): Promise<{ candidates: SearchCandidate[]; note?: string } | { error: string }> {
   // gather node + observation jobs (and the text each is tested against), then
   // batch-test every text in ONE worker round-trip.
+  const observationContent = targetObservationContent(target);
   const nodeJobs: { node: RenderableNode }[] = [];
   const obsJobs: { obs: RecallObservation; parent: RenderableNode | null }[] = [];
   for (const node of target.nodes.values()) {
@@ -423,15 +435,19 @@ async function buildSearchCandidates(
 
   let nodeHits: boolean[];
   let obsHits: boolean[];
+  let testedCount: number | null = null;
+  let timedOutMs: number | null = null;
   if (regex === null) {
     nodeHits = [];
     obsHits = obsJobs.map(() => true); // no query → every obs is a text match
   } else {
     const texts = [...nodeJobs.map((j) => j.node.summary), ...obsJobs.map((j) => j.obs.content)];
-    const outcome = await runRegexTests(regex, texts, getMemkeeperSettings().regexTimeoutMs);
+    const outcome = await runRegexTests(regex, texts, getMemkeeperSettings().findTimeoutMs);
     if ("error" in outcome) return { error: outcome.error };
     nodeHits = outcome.results.slice(0, nodeJobs.length);
     obsHits = outcome.results.slice(nodeJobs.length);
+    testedCount = "testedCount" in outcome ? outcome.testedCount : texts.length;
+    timedOutMs = "testedCount" in outcome ? outcome.timedOutMs : null;
   }
 
   const candidates: SearchCandidate[] = [];
@@ -441,7 +457,7 @@ async function buildSearchCandidates(
       candidates.push({
         id: node.id,
         key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
-        line: formatNodeLine(node, { viewer: VIEWER, showParent: node.parentNode ?? undefined }),
+        line: formatNodeLine(node, { viewer: VIEWER, observationContent, showParent: node.parentNode ?? undefined }),
       });
     }
   }
@@ -459,6 +475,14 @@ async function buildSearchCandidates(
   }
 
   candidates.sort(compareCandidates);
+  if (timedOutMs !== null && testedCount !== null) {
+    const seconds = timedOutMs / 1000;
+    const total = nodeJobs.length + obsJobs.length;
+    return {
+      candidates,
+      note: `Search timed out after ${seconds}s — tested ${testedCount} of ${total} items before the kill. These are partial results; refine or narrow the query.`,
+    };
+  }
   return { candidates };
 }
 
@@ -466,6 +490,7 @@ async function buildSearchCandidates(
  *  `includeSuperseded` is true, obsolete roots are included too (shown with 🪦
  *  + → supersededBy) so the modifier is never silently dropped. */
 function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean): SearchCandidate[] {
+  const observationContent = targetObservationContent(target);
   const roots: RenderableNode[] = [];
   for (const node of target.nodes.values()) {
     if (node.parentNode !== null) continue;
@@ -479,7 +504,7 @@ function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean):
   return ordered.map((node) => ({
     id: node.id,
     key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
-    line: formatNodeLine(node, { viewer: VIEWER }),
+    line: formatNodeLine(node, { viewer: VIEWER, observationContent }),
   }));
 }
 
@@ -495,10 +520,20 @@ function searchFooter(total: number, lastId: string, more: boolean): string {
 
 // --- pagination (top-level take/afterId → ResolvedPage) --------------------
 
-/** Normalize top-level take/afterId into the shared ResolvedPage (negative take
- *  clamps to TAKE_ALL = "all"). */
-function pageOf(take: number | undefined, afterId: string | undefined): ResolvedPage {
-  return resolvePage({ take: take ?? DEFAULT_TAKE, afterId: afterId ?? NO_AFTER_ID });
+/** A cap on how many full-detail items one mk_recall result may contain —
+ *  defense-in-depth against a take=0+fullDetails request dumping the whole
+ *  verbatim observation set into the agent's context (the agent can still page
+ *  with afterId). */
+const FULLDETAILS_TAKE_CAP = 50;
+
+/** Normalize top-level take/afterId into the shared ResolvedPage. A negative or
+ *  omitted take defaults to DEFAULT_TAKE; 0 means "all" UNLESS fullDetails is
+ *  requested, in which case it is capped to keep one result's verbatim content
+ *  bounded (page with afterId for more). */
+function pageOf(take: number | undefined, afterId: string | undefined, fullDetails: boolean): ResolvedPage {
+  const resolved = resolvePage({ take: take ?? DEFAULT_TAKE, afterId: afterId ?? NO_AFTER_ID });
+  if (fullDetails && resolved.take === TAKE_ALL) return { ...resolved, take: FULLDETAILS_TAKE_CAP };
+  return resolved;
 }
 
 // --- tool parameters + description -----------------------------------------
@@ -513,7 +548,7 @@ const MK_RECALL_PARAMS = Type.Object({
   query: Type.Optional(
     Type.String({
       description:
-        "Regex (JS) over node summaries and observation content. Match several terms in one call with alternation, e.g. auth|jwt|login. An invalid pattern returns an error string; fix it and retry.",
+        "Regex (JS) over node summaries and observation content. Match several terms in one call with alternation, e.g. auth|jwt|login. An invalid pattern returns an error string; fix it and retry. A pattern that runs too long is stopped — partial matches come back with a note to narrow the query.",
     }),
   ),
   from: Type.Optional(
@@ -625,24 +660,27 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
 
   const noFilters = regex === null && bounds.from === null && bounds.to === null;
   let list: SearchCandidate[];
+  let note: string | undefined;
   if (noFilters) {
     list = rootBrowseCandidates(target, includeSuperseded);
   } else {
     const result = await buildSearchCandidates(target, regex, bounds, includeSuperseded, fullDetails);
     if ("error" in result) return err(result.error);
     list = result.candidates;
+    note = result.note;
   }
 
-  const page = pageOf(params.take, params.afterId);
+  const page = pageOf(params.take, params.afterId, params.fullDetails ?? false);
   const { window, more, stale } = paginate(list, page);
   if (stale) return err(staleCursorMessage(page.afterId));
 
   if (window.length === 0) {
-    return ok(noFilters ? "No memory yet." : "No matches.");
+    return ok(note ?? (noFilters ? "No memory yet." : "No matches."));
   }
 
   const lines = window.map((c) => c.line);
   lines.push(searchFooter(list.length, window[window.length - 1].id, more));
+  if (note !== undefined) lines.push(note);
   return ok(lines.join("\n"));
 }
 
@@ -672,7 +710,7 @@ function executeIds(
     units.push({ id, text: missingIdMessage(id) });
   }
 
-  const page = pageOf(take, afterId);
+  const page = pageOf(take, afterId, fullDetails);
   const { window, more, stale } = paginate(units, page);
   if (stale) return err(staleCursorMessage(page.afterId));
 

@@ -12,7 +12,7 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ContextUsage, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
-import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
+import { nodeLineOptions, nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import type { StageUsage } from "../runtime/agent-loop.js";
 import { deltaTextOf, deltaTokens, messageEndUsage, streamedOutputUsage } from "../runtime/streaming-tokens.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -260,7 +260,9 @@ const WIDGET_ROOTS_VIEWER = "builder" as const;
  *  share one roots computation, not two). */
 function rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number } {
   const roots = nonObsoleteRoots(graph);
-  const viewTokens = estimateContentTokens(renderRootViewFromRoots(roots, WIDGET_ROOTS_VIEWER));
+  const viewTokens = estimateContentTokens(
+    renderRootViewFromRoots(roots, WIDGET_ROOTS_VIEWER, nodeLineOptions(graph, WIDGET_ROOTS_VIEWER).observationContent),
+  );
   return { count: roots.length, viewTokens };
 }
 

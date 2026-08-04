@@ -305,7 +305,7 @@ describe("Builder read tools", () => {
       // A guard-slipping polynomial shape (each .+ greedily splits on a long
       // run of 'a's) over a large observation content — slow enough to exceed a
       // short timeout. This exercises the worker-thread kill path end-to-end.
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, regexTimeoutMs: 300 }));
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       const g = buildGraph();
       applyRecordObservation(g, {
         obs: makeObservation({
@@ -362,6 +362,30 @@ describe("Builder read tools", () => {
       const out = textOf(await callTool(tools(), "ls", { page: { take: 2, afterId: "nX-not-present" } }));
       expect(out.toLowerCase()).toContain("cursor");
       expect(out.toLowerCase()).toContain("afterid");
+    });
+
+    it("take:0 (all) with a valid afterId returns everything from the cursor onward", async () => {
+      // take:0 means 'no limit' but still respects the afterId cursor — returns
+      // the whole cursor-shifted tail, not the whole list from the start.
+      const page1 = textOf(await callTool(tools(), "ls", { page: { take: 2 } }));
+      const match = page1.match(/afterId=(\S+)/);
+      expect(match).not.toBeNull();
+      const afterId = match !== null ? match[1] : "";
+      const all = textOf(await callTool(tools(), "ls", { page: { take: 0, afterId } }));
+      // the first page's roots must NOT reappear (cursor shifted past them)
+      const page1Ids = page1
+        .split("\n")
+        .map((l) => l.match(/^📁 (n\S+)/))
+        .filter((m): m is RegExpMatchArray => m !== null)
+        .map((m) => m[1]);
+      for (const id of page1Ids) {
+        expect(all.split("\n").some((l) => l.includes(`📁 ${id} `))).toBe(false);
+      }
+    });
+
+    it("take:0 (all) with a stale afterId reports the stale cursor, not everything", async () => {
+      const out = textOf(await callTool(tools(), "ls", { page: { take: 0, afterId: "nX-not-present" } }));
+      expect(out.toLowerCase()).toContain("cursor");
     });
   });
 

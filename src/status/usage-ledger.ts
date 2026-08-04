@@ -50,7 +50,7 @@ export function sinceSessionStart(ledger: UsageLedger): UsageLedger {
   return ledger;
 }
 
-/** Per-phase field-wise subtraction (ledger − baseline), `passes` included. Pure:
+/** Per-phase field-wise subtraction (ledger − baseline), `runs` included. Pure:
  *  returns a fresh ledger, leaves both inputs untouched. */
 export function sinceLastCompaction(ledger: UsageLedger, baseline: UsageLedger): UsageLedger {
   return {
