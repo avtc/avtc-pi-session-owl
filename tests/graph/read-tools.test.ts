@@ -12,7 +12,12 @@ import {
   MUTATE_SOURCE,
   setClock,
 } from "../../src/graph/mutations.js";
-import { makeReadTools, nonObsoleteRootsOf, orderActiveSetRoots } from "../../src/graph/read-tools.js";
+import {
+  countConnectedObservations,
+  makeReadTools,
+  nonObsoleteRootsOf,
+  orderActiveSetRoots,
+} from "../../src/graph/read-tools.js";
 import { MemkeeperGraph, makeObservation, N_GOAL, N_IRRELEVANT, type NodeId, type ObsId } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
@@ -659,5 +664,34 @@ describe("result token budget + extraction", () => {
   it("rejects a malformed lines range with an error string", async () => {
     const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], lines: "bad" }));
     expect(out).toContain("Invalid line range");
+  });
+});
+
+describe("countConnectedObservations", () => {
+  const nodes = new Map<string, { observationIds: readonly string[] }>([
+    ["n1", { observationIds: ["o1", "o2"] }],
+    ["n2", { observationIds: [] }],
+  ]);
+  const observations = new Map<string, unknown>([
+    ["o1", {}],
+    ["o2", {}],
+    ["o9", {}],
+  ]);
+
+  it("returns the node's connected-observation count for a node id", () => {
+    expect(countConnectedObservations(nodes, observations, "n1")).toBe(2);
+  });
+
+  it("returns 0 for an empty-container node", () => {
+    expect(countConnectedObservations(nodes, observations, "n2")).toBe(0);
+  });
+
+  it("returns 1 for an observation id", () => {
+    expect(countConnectedObservations(nodes, observations, "o1")).toBe(1);
+    expect(countConnectedObservations(nodes, observations, "o9")).toBe(1);
+  });
+
+  it("returns 0 for an unknown id", () => {
+    expect(countConnectedObservations(nodes, observations, "nope")).toBe(0);
   });
 });

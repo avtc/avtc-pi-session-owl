@@ -11,27 +11,35 @@
 // `isSafeRegex` fast-reject — it closes the residual polynomial/exponential
 // shapes without freezing the process.
 //
-// The worker posts each result back as it completes (not one batch at the end),
-// so a timeout returns the PARTIAL matches found so far instead of discarding
-// everything: the caller reports those partials plus a "search was stopped"
-// note.
+// The worker posts results back in fixed-size chunks as they complete (not
+// one batch at the end), so a timeout returns the PARTIAL matches found so far
+// instead of discarding everything: the caller reports those partials plus a
+// "search was stopped" note.
 
 import { Worker } from "node:worker_threads";
 
 /** Worker body (raw JS — `eval: true`, no module resolution so it needs no
  *  bundler/loader). Receives a regex source+flags + the strings to test, posts
- *  each boolean result back immediately (indexed), then a done marker — so the
- *  main thread accumulates partial results and can return them on timeout. It
- *  handles one message per request and stays alive across requests (the Worker
- *  is reused). */
+ *  results back in fixed-size chunks (not one message per string — a grep over
+ *  thousands of content lines would otherwise flood the cross-thread queue
+ *  with per-line messages), then a done marker — so the main thread accumulates
+ *  partial results and can return them on timeout. It handles one message per
+ *  request and stays alive across requests (the Worker is reused). */
 const WORKER_SOURCE = `
 const { parentPort } = require("worker_threads");
+const CHUNK_SIZE = 64;
 parentPort.on("message", (req) => {
   try {
     const re = new RegExp(req.source, req.flags);
+    let batch = [];
     for (let i = 0; i < req.strings.length; i++) {
-      parentPort.postMessage({ id: req.id, index: i, result: re.test(req.strings[i]) });
+      batch.push([i, re.test(req.strings[i])]);
+      if (batch.length >= CHUNK_SIZE) {
+        parentPort.postMessage({ id: req.id, batch: batch });
+        batch = [];
+      }
     }
+    if (batch.length > 0) parentPort.postMessage({ id: req.id, batch: batch });
     parentPort.postMessage({ id: req.id, done: true });
   } catch (err) {
     parentPort.postMessage({ id: req.id, error: (err && err.message) ? err.message : String(err) });
@@ -64,7 +72,7 @@ function getWorker(): Worker {
   if (worker !== null) return worker;
   const w = new Worker(WORKER_SOURCE, { eval: true });
   // a persistent listener routes every reply to its pending caller.
-  w.on("message", (msg: { id: number; index?: number; result?: boolean; done?: boolean; error?: string }) => {
+  w.on("message", (msg: { id: number; batch?: [number, boolean][]; done?: boolean; error?: string }) => {
     const p = pending.get(msg.id);
     if (p === undefined) return;
     if (msg.error !== undefined) {
@@ -79,9 +87,11 @@ function getWorker(): Worker {
       p.resolve({ results: p.results });
       return;
     }
-    if (msg.index !== undefined && msg.result !== undefined) {
-      p.results[msg.index] = msg.result;
-      p.testedCount += 1;
+    if (msg.batch !== undefined) {
+      for (const [index, result] of msg.batch) {
+        p.results[index] = result;
+      }
+      p.testedCount += msg.batch.length;
     }
   });
   // a worker-level error (crash) fails every still-pending request, then the
@@ -130,12 +140,12 @@ export type RegexTestOutcome =
 const MIN_TIMEOUT_MS = 1000;
 
 /** Test `regex` against each string in `strings`, returning a boolean[] in the
- *  same order. Runs in a worker thread; the worker posts each result back as it
- *  completes. If the batch has not finished by the configured timeout (floored
- *  to a minimum), the worker is terminated and the PARTIAL results found so far
- *  are returned alongside a timed-out marker — callers report those partials
- *  plus a "search was stopped" note. If the worker cannot be spawned (a
- *  restricted runtime), the batch is REFUSED with an error — running
+ *  same order. Runs in a worker thread; the worker posts results back in chunks
+ *  as they complete. If the batch has not finished by the configured timeout
+ *  (floored to a minimum), the worker is terminated and the PARTIAL results
+ *  found so far are returned alongside a timed-out marker — callers report
+ *  those partials plus a "search was stopped" note. If the worker cannot be
+ *  spawned (a restricted runtime), the batch is REFUSED with an error — running
  *  unprotected on the main thread (where a backtracking pattern cannot be
  *  interrupted) would risk freezing the host process. */
 export async function runRegexTests(regex: RegExp, strings: string[], timeoutMs: number): Promise<RegexTestOutcome> {

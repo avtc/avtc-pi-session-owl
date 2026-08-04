@@ -546,6 +546,10 @@ export function applySetMeta(
   }
   if (args.importance !== null) node.importance = args.importance;
   if (args.archived === true) {
+    // archiving an obsolete node exits the obsolete state — clear the
+    // supersession link (supersededBy tracks obsolete only); an archived
+    // node never carries a dangling replacement ref.
+    if (node.state === "obsolete") node.supersededBy = null;
     node.state = "archived";
   }
   if (args.archived === false && node.state === "archived") node.state = "active";

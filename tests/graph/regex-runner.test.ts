@@ -32,20 +32,21 @@ describe("runRegexTests", () => {
     // carries the PARTIAL results found so far + a timed-out marker (not a bare
     // error) so callers can surface what was matched.
     const evil = /(a+)+$/;
-    const fast = "plain text";
+    // the worker posts results in fixed-size chunks, so partial results are
+    // captured at chunk boundaries: enough fast strings to fill at least one
+    // chunk complete before the catastrophic one hangs (testedCount >= 1),
+    // while the catastrophic slot stays untested (false).
+    const fast = Array.from({ length: 70 }, () => "plain text");
     const input = "a".repeat(2000).concat("!");
     const t0 = Date.now();
-    // the fast string completes before the catastrophic one hangs; both are in
-    // the batch so partial results = [true] (fast matched... actually false) and
-    // the catastrophic slot is untested (false).
-    const res = await runRegexTests(evil, [fast, input], 500);
+    const res = await runRegexTests(evil, [...fast, input], 500);
     const elapsed = Date.now() - t0;
     expect("testedCount" in res).toBe(true);
     expect("results" in res).toBe(true);
     if ("testedCount" in res) {
       // killed promptly, not after the pattern's natural (multi-second+) runtime
       expect(elapsed).toBeLessThan(2000);
-      // the fast string was tested (testedCount >= 1); the catastrophic one hung
+      // at least one chunk of fast strings was posted before the hang
       expect(res.testedCount).toBeGreaterThanOrEqual(1);
       expect(res.timedOutMs).toBeGreaterThanOrEqual(500);
     }

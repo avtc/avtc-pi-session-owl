@@ -59,10 +59,12 @@ export const TAKE_ALL = 0;
 /** Upper bound on a `find` regex pattern length — guards against accidental
  *  megabyte patterns. NOTE: this caps PATTERN LENGTH, not catastrophic
  *  backtracking (a short `(a+)+$` can still blow up on long input). True ReDoS
- *  hardening needs a worker-thread timeout — that remains a known limitation.
- *  find now accepts USER input (/mk:find), but observations are condensed
- *  (short) and the graph is session-bounded, so the realistic blast radius is
- *  a brief synchronous hang, not a crash. */
+ *  hardening is two-layer: a static `isSafeRegex` fast-reject (known-evil
+ *  shapes) plus a worker-thread runtime cap (`findTimeoutMs`, regex-runner.ts)
+ *  that kills any residual catastrophic pattern at the configured duration and
+ *  returns partial matches. `find` accepts USER input (/mk:find); observations
+ *  are condensed (short) and the graph is session-bounded, so the realistic
+ *  blast radius is small, and the worker timeout bounds the worst case. */
 const FIND_QUERY_MAX = 500;
 
 const ROOT_DEPTH = 0;

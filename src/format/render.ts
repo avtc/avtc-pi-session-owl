@@ -155,10 +155,11 @@ function stateGlyph(node: RenderableNode, viewer: RenderViewer): string {
   return "";
 }
 
-/** `count` + `singular`/`plural` noun, grammar-correct (1 node, 2 nodes).
- *  Shared by the render layer and the result-budget / status renderers so the
- *  codebase has one pluralization mechanism (handles invariant nouns like
- *  "obs" via equal singular+plural). */
+/** `count` + `singular`/`plural` noun, grammar-correct and SPACE-LESS
+ *  (1node, 2nodes) — the compact counts-slot render format. Prose that needs a
+ *  space between the count and noun (e.g. "5 compactions" in the status report)
+ *  keeps its inline suffix, since this helper's space-less output is for the
+ *  tree counts only. Handles invariant nouns like "obs" via equal singular+plural. */
 export function pluralize(count: number, singular: string, plural: string): string {
   return `${count}${count === 1 ? singular : plural}`;
 }

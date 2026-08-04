@@ -143,6 +143,25 @@ export function dissolvable(node: Node): boolean {
 }
 
 /**
+ * `supersededBy` tracks the obsolete state: a node carries a replacement id
+ * ONLY when it is obsolete, and null otherwise. Catches the obsolete→archived
+ * transition that would leave a dangling replacement ref (the supersession
+ * link must not survive a state change away from obsolete).
+ */
+export function supersededByCorrelatesState(graph: MemkeeperGraph): boolean {
+  for (const node of graph.nodes.values()) {
+    if (node.state === "obsolete") {
+      // an obsolete node must carry its replacement (supersede always sets it).
+      if (node.supersededBy === null) return false;
+    } else if (node.supersededBy !== null) {
+      // a non-obsolete node must not carry a replacement ref.
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Run all structural validators. Returns true for a well-formed graph; throws
  * `GraphInvariantError` on the first violation (used as the per-mutate gate).
  */
@@ -161,6 +180,9 @@ export function validateGraph(graph: MemkeeperGraph): boolean {
   }
   if (!nGoalInvariants(graph)) {
     throw new GraphInvariantError("the nGoal invariants do not hold");
+  }
+  if (!supersededByCorrelatesState(graph)) {
+    throw new GraphInvariantError("a supersededBy link does not correlate with the obsolete state");
   }
   return true;
 }

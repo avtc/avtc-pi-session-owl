@@ -11,6 +11,7 @@ import {
   isSpecial,
   nGoalInvariants,
   noCycles,
+  supersededByCorrelatesState,
   validateGraph,
 } from "../../src/graph/invariants.js";
 import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/types.js";
@@ -181,6 +182,34 @@ describe("validateGraph", () => {
   it("throws GraphInvariantError for an invalid graph", () => {
     const g = validGraph();
     g.observations.set("o9" as ObsId, obsWith({ id: "o9", parentNode: "n999" as NodeId }));
+    expect(() => validateGraph(g)).toThrow(GraphInvariantError);
+  });
+});
+
+describe("supersededByCorrelatesState", () => {
+  it("holds for a graph with no obsolete nodes", () => {
+    expect(supersededByCorrelatesState(validGraph())).toBe(true);
+  });
+
+  it("holds for an obsolete node carrying its replacement", () => {
+    const g = validGraph();
+    node(g, "n5").state = "obsolete";
+    node(g, "n5").supersededBy = "n6" as NodeId;
+    expect(supersededByCorrelatesState(g)).toBe(true);
+  });
+
+  it("fails when an obsolete node has a null supersededBy", () => {
+    const g = validGraph();
+    node(g, "n5").state = "obsolete";
+    // supersededBy stays null — obsolete without a replacement ref
+    expect(supersededByCorrelatesState(g)).toBe(false);
+  });
+
+  it("fails when a non-obsolete node carries a supersededBy link", () => {
+    const g = validGraph();
+    node(g, "n5").state = "archived";
+    node(g, "n5").supersededBy = "n6" as NodeId; // dangling ref on an archived node
+    expect(supersededByCorrelatesState(g)).toBe(false);
     expect(() => validateGraph(g)).toThrow(GraphInvariantError);
   });
 });

@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { makeBuilderTools } from "../../src/builder/tools.js";
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { MERGE_PARAMS, MKDIR_PARAMS } from "../../src/graph/mutate-tools.js";
 import {
   applyCreateNode,
   applyRecordObservation,
@@ -257,6 +258,26 @@ describe("Builder mutate tools", () => {
       expect(g.nodes.get("n7")?.summary).toBe("Auth migration to JWT (consolidated)");
     });
 
+    it("re-rates an existing dest's importance when importance is passed", async () => {
+      const g = buildGraph();
+      const { ctx, entries } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      // n7 starts at high (from buildGraph); the merge re-rates it to critical.
+      expect(g.nodes.get("n7")?.importance).toBe("high");
+      const r = await callTool(tools, "merge", {
+        sourceIds: ["n8"],
+        destId: "n7",
+        importance: "critical",
+      });
+      expect(isError(r)).toBe(false);
+      const deltas = graphDeltas(entries);
+      const delta = deltas[0] as { type: string; importance?: string };
+      expect(delta.type).toBe("merge");
+      expect(delta.importance).toBe("critical");
+      expect(g.nodes.get("n7")?.importance).toBe("critical");
+      expect(g.nodes.get("n7")?.state).toBe("active");
+    });
+
     it("creates a new root when destId is null + newSummary provided", async () => {
       const g = buildGraph();
       const { ctx } = makeFakeStore();
@@ -309,6 +330,8 @@ describe("Builder mutate tools", () => {
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
       const r = await callTool(tools, "merge", { sourceIds: [N_GOAL], destId: "n7", newSummary: "x" });
       expect(isError(r)).toBe(true);
+      expect(textOf(r)).toBe("merge: nGoal cannot be a merge source");
+      expect(textOf(r)).not.toContain("merge: merge:");
       expect(graphDeltas(entries)).toHaveLength(0);
     });
 
@@ -318,6 +341,8 @@ describe("Builder mutate tools", () => {
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
       const r = await callTool(tools, "merge", { sourceIds: ["n8"], destId: N_GOAL, newSummary: "x" });
       expect(isError(r)).toBe(true);
+      expect(textOf(r)).toBe("merge: nGoal cannot be a merge destination");
+      expect(textOf(r)).not.toContain("merge: merge:");
       expect(graphDeltas(entries)).toHaveLength(0);
     });
   });
@@ -343,6 +368,8 @@ describe("Builder mutate tools", () => {
       const before = g.nodes.get(N_GOAL)?.state;
       const r = await callTool(tools, "supersede", { nodeId: "n7", supersededNodeIds: [N_GOAL] });
       expect(isError(r)).toBe(true);
+      expect(textOf(r)).toBe("supersede: nGoal cannot be superseded");
+      expect(textOf(r)).not.toContain("supersede: supersede:");
       expect(g.nodes.get(N_GOAL)?.state).toBe(before);
       expect(graphDeltas(entries)).toHaveLength(0);
     });
@@ -355,6 +382,8 @@ describe("Builder mutate tools", () => {
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
       const r = await callTool(tools, "supersede", { nodeId: "n12", supersededNodeIds: ["n8"] });
       expect(isError(r)).toBe(true);
+      expect(textOf(r)).toBe("supersede: replacement n12 is itself obsolete");
+      expect(textOf(r)).not.toContain("supersede: supersede:");
       expect(graphDeltas(entries)).toHaveLength(0);
     });
   });
@@ -485,6 +514,30 @@ describe("Builder mutate tools", () => {
       expect(tools).toHaveLength(9);
       const names = tools.map((t) => t.name).sort();
       expect(names).toEqual(["cat", "find", "ls", "merge", "mkdir", "mv", "set_meta", "supersede", "try_finish"]);
+    });
+  });
+
+  describe("parameter schema (importance requirement)", () => {
+    // the callTool helper bypasses TypeBox schema validation, so the
+    // importance requirement is pinned directly against the schema via the
+    // TypeBox value checker (a future Type.Optional regression on mkdir
+    // importance would otherwise pass the suite).
+    it("mkdir rejects a params object missing importance", () => {
+      const { Check } = require("typebox/value") as { Check: (schema: unknown, value: unknown) => boolean };
+      // importance is required on mkdir — omitting it must fail validation.
+      expect(Check(MKDIR_PARAMS, { summary: "a node" })).toBe(false);
+      // providing it passes.
+      expect(Check(MKDIR_PARAMS, { summary: "a node", importance: "high" })).toBe(true);
+    });
+
+    it("merge treats importance as optional (schema-permit, runtime-required on destId:null)", () => {
+      const { Check } = require("typebox/value") as { Check: (schema: unknown, value: unknown) => boolean };
+      // importance is optional on the merge schema (required only at runtime
+      // when destId === null); an existing-dest merge without importance is valid.
+      expect(Check(MERGE_PARAMS, { sourceIds: ["n8"], destId: "n7", newSummary: "merged" })).toBe(true);
+      expect(
+        Check(MERGE_PARAMS, { sourceIds: ["n8"], destId: "n7", newSummary: "merged", importance: "critical" }),
+      ).toBe(true);
     });
   });
 });

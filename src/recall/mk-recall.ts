@@ -354,11 +354,6 @@ function missingIdMessage(id: string): string {
   return `No node or observation with id ${id}.`;
 }
 
-/** Resolve a single id against the target via the shared count helper. */
-function singleObsTargetCount(target: RecallTarget, id: string): number {
-  return countConnectedObservations(target.nodes, target.observations, id);
-}
-
 /** Render a node as a drill-down payload: header at depth 0, direct children
  *  indented at depth 1 (child nodes one-lined, child observations per the
  *  active content mode). */
@@ -872,7 +867,7 @@ async function executeIds(
   // the cap lifts, but the mode still applies. This covers both a direct
   // observation id and a node whose connected observations total exactly one.
   const budget =
-    ids.length === 1 && singleObsTargetCount(target, ids[0]) === 1
+    ids.length === 1 && countConnectedObservations(target.nodes, target.observations, ids[0]) === 1
       ? null
       : getMemkeeperSettings().toolResultTokenBudget;
   const { text, footer } = budgetUnits(renderedUnits, budget, more, units.length, window[window.length - 1].id);

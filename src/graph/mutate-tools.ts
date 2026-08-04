@@ -2,12 +2,11 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Shared graph MUTATE tool factories (mkdir/mv/merge + the Selector's set_meta)
-// parameterized
-// by a MutateContext that names BOTH the policy (source vs workingCopy) AND the
-// persistence strategy (append the delta to the store, or drop it). The Builder
-// (source graph, store-appending) and the Selector (working copy, no store
-// append — the final tree is persisted once at run completion) build their
-// mutate tools from these factories — no duplication.
+// parameterized by a MutateContext that names BOTH the policy (source vs
+// workingCopy) AND the persistence strategy (append the delta to the store, or
+// drop it). The Builder (source graph, store-appending) and the Selector
+// (working copy, no store append — the final tree is persisted once at run
+// completion) build their mutate tools from these factories — no duplication.
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";

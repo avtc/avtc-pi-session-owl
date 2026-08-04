@@ -136,6 +136,57 @@ describe("applyDelta replay dispatcher", () => {
     expect(g.nodes.has("n2")).toBe(false);
   });
 
+  it("replays a merge delta into an existing dest, carrying importance re-rate", () => {
+    const g = seedGraph();
+    applyCreateNode(g, {
+      id: "n2" as NodeId,
+      summary: "to absorb into n1",
+      importance: "low" as Importance,
+      parentNode: N_GOAL,
+      state: "active",
+    });
+    applyRecordObservation(g, {
+      obs: makeObservation({
+        id: "o9" as ObsId,
+        content: "in n2",
+        importance: "low" as Importance,
+        sourceEntryIds: ["8"],
+        timestamp: "2026-07-29T12:00:00.000Z",
+        parentNode: "n2" as NodeId,
+      }),
+    });
+    // n1 starts at medium; the merge re-rates it to critical.
+    expect(node(g, "n1").importance).toBe("medium");
+    const delta: MergeDelta = {
+      type: "merge",
+      sourceIds: ["n2" as NodeId],
+      destId: "n1" as NodeId,
+      importance: "critical" as Importance,
+    };
+    applyDelta(g, delta, MUTATE_SOURCE);
+    expect(node(g, "n1").importance).toBe("critical");
+    expect(g.nodes.has("n2")).toBe(false);
+  });
+
+  it("replays a merge delta that creates a new root via resolvedDestId (identity-stable)", () => {
+    const g = seedGraph();
+    // simulate a replay where the producer already assigned the new-root id;
+    // the replay must reuse it (not derive a fresh one from nextNodeId).
+    const delta: MergeDelta = {
+      type: "merge",
+      sourceIds: ["n1" as NodeId],
+      destId: null,
+      newSummary: "the merged root",
+      importance: "high" as Importance,
+      resolvedDestId: "n5" as NodeId,
+    };
+    applyDelta(g, delta, MUTATE_SOURCE);
+    expect(g.nodes.has("n5")).toBe(true);
+    expect(node(g, "n5").summary).toBe("the merged root");
+    expect(node(g, "n5").importance).toBe("high");
+    expect(node(g, "n5").parentNode).toBeNull();
+  });
+
   it("applies a supersede delta", () => {
     const g = seedGraph();
     applyCreateNode(g, {

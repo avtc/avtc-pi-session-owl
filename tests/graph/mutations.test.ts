@@ -465,13 +465,15 @@ describe("applySetMeta", () => {
     expect(nodeById(g, "n1").supersededBy).toBeNull();
   });
 
-  it("archiving an obsolete node keeps its supersededBy link (resurrect via obsolete:false)", () => {
+  it("archiving an obsolete node exits obsolete and clears its supersededBy link", () => {
     const g = graphWithTwoRoots();
     applySupersede(g, { nodeId: "n2", supersededNodeIds: ["n1"] }, MUTATE_SOURCE);
     applySetMeta(g, { nodeId: "n1", importance: null, archived: true, obsolete: null, summary: null }, MUTATE_SOURCE);
     expect(nodeById(g, "n1").state).toBe("archived");
-    // archived:true does NOT clear supersededBy — that is obsolete:false's sole job (#6)
-    expect(nodeById(g, "n1").supersededBy).toBe("n2");
+    // archived:true exits the obsolete state, so the supersession link is
+    // cleared — supersededBy tracks obsolete only (a dangling replacement
+    // ref on an archived node violates the state correlation).
+    expect(nodeById(g, "n1").supersededBy).toBeNull();
   });
 
   it("rewrites the summary and recomputes its token count", () => {

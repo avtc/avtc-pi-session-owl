@@ -11,7 +11,6 @@ import { TRY_FINISH_TOOL } from "../../src/graph/read-tools.js";
 import { SELECTOR_SYSTEM } from "../../src/prompts/selector.js";
 import type { StageRunInput, StageRunResult } from "../../src/runtime/agent-loop.js";
 import { makeSelectorPassTracker, runSelector } from "../../src/selector/run.js";
-import { SELECTOR_SET_META_TOOL as SELECTOR_SET_SUMMARY_TOOL } from "../../src/selector/tools.js";
 import { encodeSelection, SELECTION_TYPE, USAGE_TYPE } from "../../src/store/codecs.js";
 import {
   getGraphStore,
@@ -24,8 +23,6 @@ import type { WidgetController } from "../../src/widget/tracker.js";
 import { NO_OP_WIDGET, recordingWidget, scriptRunStage, scriptRunStageWithError } from "../builder/run-helpers.js";
 
 const NOW = "2026-07-30T12:00:00.000Z";
-const SET_SUMMARY = SELECTOR_SET_SUMMARY_TOOL;
-
 // --- pass tracker ----------------------------------------------------------
 
 // toolEndEvent two-arg form (isError false) and three-arg form.
@@ -191,7 +188,7 @@ describe("runSelector", () => {
           tools: [
             { name: MV_TOOL, ok: true }, // demote n4 into nIrrelevant
             { name: MERGE_TOOL, ok: true }, // consolidate
-            { name: SET_SUMMARY, ok: true }, // condense
+            { name: SELECTOR_SET_META_TOOL, ok: true }, // condense (set_meta)
             { name: TRY_FINISH_TOOL, ok: false }, // reject → pass 2
           ],
         },

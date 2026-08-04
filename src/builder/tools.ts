@@ -112,7 +112,10 @@ function makeSupersedeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool
 
 const SET_META_PARAMS = Type.Object({
   nodeId: Type.String({ description: "The node to update." }),
-  importance: Type.Optional(ImportanceSchema),
+  importance: Type.Optional({
+    ...ImportanceSchema,
+    description: "Re-rate the node — how much it matters if lost.",
+  }),
   archived: Type.Optional(Type.Boolean({ description: "True to archive, false to restore to active." })),
   summary: Type.Optional(Type.String({ minLength: 1, description: "A new summary for the node." })),
   obsolete: Type.Optional(
