@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { MEMKEEPER_SCHEMA } from "../../src/config/schema.js";
 
 const CONFIG_PATH = resolve(__dirname, "../../docs/CONFIGURATION.md");
+const README_PATH = resolve(__dirname, "../../README.md");
 
 /** Extract every documented knob id from CONFIGURATION.md. Knobs are rendered
  *  as table rows whose first cell is a backticked id: `` | `enabled` `` . */
@@ -29,5 +30,19 @@ describe("docs/CONFIGURATION.md parity with MEMKEEPER_SCHEMA", () => {
     const schemaIds = MEMKEEPER_SCHEMA.settings.map((s) => s.id).sort();
     const docIds = documentedKnobIds();
     expect(docIds).toEqual(schemaIds);
+  });
+});
+
+describe("README render-format example parity", () => {
+  it("uses the current text-based render format, not the stale emoji-icon format", () => {
+    const text = readFileSync(README_PATH, "utf8");
+    // current format: grammar-correct child/size counts in words
+    expect(text).toMatch(/\dnodes \d+obs/);
+    expect(text).toMatch(/\dlines? \d+tokens?/);
+    // importance rendered as text words, not the dropped colored-dot circles
+    expect(text).toMatch(/crit|high|med|low/);
+    // the dropped kind icons must not reappear in the render example
+    expect(text).not.toContain("📁 n");
+    expect(text).not.toContain("📄 o");
   });
 });

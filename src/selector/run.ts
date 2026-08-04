@@ -57,20 +57,13 @@ const NON_BUILDER = "nonBuilder" as const;
 const INDEX_NOT_FOUND = -1;
 const PREV_ENTRY = 1; // prev(firstKeptEntryId) = firstKeptEntryId position − 1
 
-/** A per-pass outcome: applied mutate count + whether try_finish converged. */
-export interface SelectorPassOutcome extends ConvergenceOutcome {}
-
-/**
- * Build a per-pass event tracker: an `onEvent` that forwards EVERY event to the
- * downstream sink (the widget) AND inspects `tool_execution_end` to count
- * applied Selector mutates (the four mutate tools with `details.ok === true`
- * and not `isError`) and detect try_finish convergence (`details.ok === true`).
- * Read tools and rejected mutates do not count.
- *
- * Delegates to the shared convergence tracker (the Builder and Selector share
- * the same tracking shape; only the mutate-name set differs). */
+/** Build a per-pass event tracker: forwards every event to the downstream
+ *  sink (widget) and inspects `tool_execution_end` to count applied Selector
+ *  mutates + detect try_finish convergence. Delegates to the shared
+ *  convergence tracker (Builder/Selector share the same shape; only the
+ *  mutate-name set differs). */
 export function makeSelectorPassTracker(downstream: (event: AgentEvent) => void): {
-  outcome: SelectorPassOutcome;
+  outcome: ConvergenceOutcome;
   onEvent: (event: AgentEvent) => void;
 } {
   return makeConvergenceTracker(downstream, SELECTOR_MUTATE_TOOL_NAMES);
@@ -225,7 +218,7 @@ async function runPass(
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>,
   pass: number,
   onStageEnd: (usage: StageUsage) => void,
-): Promise<{ outcome: SelectorPassOutcome }> {
+): Promise<{ outcome: ConvergenceOutcome }> {
   const { outcome, onEvent } = makeSelectorPassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(working, contextView, pass);
   await runConvergencePass({
@@ -267,7 +260,7 @@ function canReuseCachedTree(
 ): boolean {
   const cached = store.selectedTree;
   if (cached === null) return false; // nothing cached → build
-  const rootViewTokens = measureRootViewTokens(materializeSnapshot(cached), NON_BUILDER);
+  const rootViewTokens = measureRootViewTokens(materializeSnapshot(cached, store.graph.observations), NON_BUILDER);
   if (rootViewTokens >= threshold) return false; // over budget → rebuild
   // Staleness = the cached tree must COVER the compacted-away block.
   // Compaction path (firstKeptEntryId non-null): the compacted block is
@@ -295,15 +288,27 @@ function canReuseCachedTree(
  *  `renderRootView` measures it exactly as try_finish would. Bounded by the
  *  cached tree size (≤ selectorRootViewThreshold); cheap for a fast-path that
  *  skips an LLM run. */
-function materializeSnapshot(cached: SerializedSelection): Graph {
+/** Materialize the cached tree into a throwaway graph for token measurement.
+ *  Resolves observation content from the source store so a bare-`new` root
+ *  (which falls back to its first observation's first line at render) is measured
+ *  exactly as `try_finish` measures the working copy — no under-count. */
+function materializeSnapshot(cached: SerializedSelection, sourceObservations: Map<ObsId, Observation>): Graph {
   const nodes = new Map<NodeId, Node>();
   for (const sn of cached.nodes) {
     const node = decodeNode(sn);
     if (node !== null) nodes.set(node.id, node);
   }
+  // resolve the observation ids the cached nodes reference from the source store
+  const observations = new Map<ObsId, Observation>();
+  for (const node of nodes.values()) {
+    for (const obsId of node.observationIds) {
+      const obs = sourceObservations.get(obsId);
+      if (obs !== undefined) observations.set(obsId, obs);
+    }
+  }
   return new MemkeeperGraph({
     nodes,
-    observations: new Map<ObsId, Observation>(),
+    observations,
     nextObsId: cached.nextObsId,
     nextNodeId: cached.nextNodeId,
   });

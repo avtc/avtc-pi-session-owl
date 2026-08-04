@@ -170,13 +170,13 @@ describe("/mk:* user commands", () => {
       const text = message ?? "";
       // non-obsolete roots only: nGoal, n7, n12(new→active render), n20(archived)
       expect(text).toContain("nGoal");
-      expect(text).toContain("n7");
-      expect(text).toContain("n12");
-      expect(text).toContain("n20");
+      expect(text).toContain("n7 ·");
+      expect(text).toContain("n12 ·");
+      expect(text).toContain("n20 ·");
       // obsolete n99 EXCLUDED from default ls
-      expect(text).not.toContain("n99");
+      expect(text).not.toContain("n99 ·");
       // nGoal (critical) appears before n7 (high)
-      expect(text.indexOf("nGoal")).toBeLessThan(text.indexOf("n7"));
+      expect(text.indexOf("nGoal")).toBeLessThan(text.indexOf("n7 ·"));
     });
 
     it("nodeId arg → that node's children indented under the parent header", async () => {
@@ -185,7 +185,7 @@ describe("/mk:* user commands", () => {
       expect(type).toBe("info");
       const text = message ?? "";
       // parent header present (n7)
-      expect(text).toContain("n7");
+      expect(text).toContain("n7 ·");
       // child node n8 + observation o5 present
       expect(text).toContain("n8");
       expect(text).toContain("o5");
@@ -227,7 +227,7 @@ describe("/mk:* user commands", () => {
       expect(type).toBe("info");
       const text = message ?? "";
       // node header present
-      expect(text).toContain("n7");
+      expect(text).toContain("n7 ·");
       // direct observation o5 full multi-line content (NOT single-lined)
       expect(text).toContain("with RS256 signing");
       // child node n8 NOT expanded (no child-node header beyond the parent n7)
@@ -286,7 +286,7 @@ describe("/mk:* user commands", () => {
       expect(type).toBe("info");
       const text = message ?? "";
       // n7 node line genuinely matches its summary (not just via `in n7`)
-      expect(text).toContain("n7");
+      expect(text).toContain("n7 ·");
       // o5 content matches → shows `in n7`
       expect(text).toContain("o5");
       expect(text).toContain("in n7");

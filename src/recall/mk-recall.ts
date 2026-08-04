@@ -21,6 +21,7 @@ import {
   singleLine,
 } from "../format/render.js";
 import {
+  countConnectedObservations,
   DEFAULT_TAKE,
   isVisible,
   NO_AFTER_ID,
@@ -142,29 +143,55 @@ function targetFromSelection(selection: SerializedSelection, sourceGraph: Memkee
   return { renderMode: "selected-root", nodes, observations };
 }
 
+/** Materialize an `ids` drill into the accumulator maps. For each id: if it
+ *  resolves to a node, add the node + its direct child nodes + its connected
+ *  observations; otherwise add it as an observation. `resolveNode` serves both
+ *  the requested id and child ids (same backing lookup in both call sites),
+ *  and each observation is added at most once. Shared by the source-graph and
+ *  selected-tree focused-id builders. */
+function materializeFocusedIds(
+  ids: readonly string[],
+  nodes: Map<string, RenderableNode>,
+  observations: Map<string, RecallObservation>,
+  resolveNode: (id: string) => RenderableNode | undefined,
+  resolveObs: (id: string) => RecallObservation | undefined,
+): void {
+  for (const id of ids) {
+    const node = resolveNode(id);
+    if (node !== undefined) {
+      nodes.set(node.id, node);
+      for (const childId of node.childNodeIds) {
+        const child = resolveNode(childId);
+        if (child !== undefined) nodes.set(child.id, child);
+      }
+      for (const obsId of node.observationIds) {
+        if (!observations.has(obsId)) {
+          const obs = resolveObs(obsId);
+          if (obs !== undefined) observations.set(obsId, obs);
+        }
+      }
+      continue;
+    }
+    if (!observations.has(id)) {
+      const obs = resolveObs(id);
+      if (obs !== undefined) observations.set(id, obs);
+    }
+  }
+}
+
 /** Build a FOCUSED recall target over the source graph for an `ids` drill:
  *  materialize only the requested nodes + their direct children + requested
  *  observations, instead of iterating the whole graph. */
 function targetFromSourceGraphForIds(graph: MemkeeperGraph, ids: readonly string[]): RecallTarget {
   const nodes = new Map<string, RenderableNode>();
   const observations = new Map<string, RecallObservation>();
-  for (const id of ids) {
-    const node = graph.nodes.get(id as NodeId);
-    if (node !== undefined) {
-      nodes.set(node.id, node);
-      for (const childId of node.childNodeIds) {
-        const child = graph.nodes.get(childId);
-        if (child !== undefined) nodes.set(child.id, child);
-      }
-      for (const obsId of node.observationIds) {
-        const obs = graph.observations.get(obsId as ObsId);
-        if (obs !== undefined) observations.set(obs.id, obs);
-      }
-      continue;
-    }
-    const obs = graph.observations.get(id as ObsId);
-    if (obs !== undefined) observations.set(obs.id, obs);
-  }
+  materializeFocusedIds(
+    ids,
+    nodes,
+    observations,
+    (id) => graph.nodes.get(id as NodeId),
+    (id) => graph.observations.get(id as ObsId),
+  );
   return { renderMode: "observations-root", nodes, observations };
 }
 
@@ -180,32 +207,16 @@ function targetFromSelectionForIds(
 ): RecallTarget {
   const byId = new Map<string, SerializedNode>();
   for (const sn of selection.nodes) byId.set(sn.id, sn);
-
   const treeObsParent = buildTreeObsParent(selection);
+  const resolveNode = (id: string): RenderableNode | undefined => {
+    const sn = byId.get(id);
+    return sn === undefined ? undefined : serializedNodeToView(sn);
+  };
+  const resolveObs = (id: string): RecallObservation | undefined =>
+    resolveTreeObs(selection, sourceGraph, id, treeObsParent);
   const nodes = new Map<string, RenderableNode>();
   const observations = new Map<string, RecallObservation>();
-  const wantObs = (obsId: string): void => {
-    if (observations.has(obsId)) return;
-    const view = resolveTreeObs(selection, sourceGraph, obsId, treeObsParent);
-    if (view !== undefined) observations.set(obsId, view);
-  };
-
-  for (const id of ids) {
-    const sn = byId.get(id);
-    if (sn !== undefined) {
-      const view = serializedNodeToView(sn);
-      nodes.set(view.id, view);
-      for (const childId of sn.childNodeIds) {
-        const child = byId.get(childId);
-        if (child !== undefined) nodes.set(child.id, serializedNodeToView(child));
-      }
-      for (const obsId of sn.observationIds) wantObs(obsId);
-      continue;
-    }
-    // requested id is an observation (or missing → renderNodePayload/executeIds
-    // handles the not-found case; materializing it lets the lookup succeed)
-    wantObs(id);
-  }
+  materializeFocusedIds(ids, nodes, observations, resolveNode, resolveObs);
   return { renderMode: "selected-root", nodes, observations };
 }
 
@@ -343,15 +354,9 @@ function missingIdMessage(id: string): string {
   return `No node or observation with id ${id}.`;
 }
 
-/** Count the observations a single id resolves to: 1 if the id is an
- *  observation, the node's connected-observation count if the id is a node, 0
- *  otherwise (used to detect a single-observation uncapped target). */
+/** Resolve a single id against the target via the shared count helper. */
 function singleObsTargetCount(target: RecallTarget, id: string): number {
-  const obs = target.observations.get(id);
-  if (obs !== undefined) return 1;
-  const node = target.nodes.get(id as NodeId);
-  if (node !== undefined) return node.observationIds.length;
-  return 0;
+  return countConnectedObservations(target.nodes, target.observations, id);
 }
 
 /** Render a node as a drill-down payload: header at depth 0, direct children

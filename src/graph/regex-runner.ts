@@ -89,8 +89,17 @@ function getWorker(): Worker {
   w.on("error", (err: Error) => {
     failAll({ error: compileErrorMessage(err.message) });
   });
+  // unref so the worker never pins the event loop (pi can exit / reload even
+  // while a request is mid-flight); teardown is handled explicitly on shutdown.
+  w.unref();
   worker = w;
   return w;
+}
+
+/** Tear down the shared worker on session shutdown / extension reload so its
+ *  thread is reclaimed rather than leaked across in-process reloads. */
+export function terminateRegexWorker(): void {
+  failAll({ error: WORKER_SHUTDOWN_MESSAGE });
 }
 
 /** Resolve all pending requests with `outcome`, terminate + discard the worker. */
@@ -142,6 +151,8 @@ export async function runRegexTests(regex: RegExp, strings: string[], timeoutMs:
 
 const UNAVAILABLE_MESSAGE =
   "Regex search is unavailable in this runtime (worker threads could not start). Try a simpler pattern or browse with ls.";
+
+const WORKER_SHUTDOWN_MESSAGE = "Regex search was stopped (the session shut down). Re-run the query after reload.";
 
 async function runInWorker(regex: RegExp, strings: string[], timeoutMs: number): Promise<RegexTestOutcome> {
   const id = nextRequestId;

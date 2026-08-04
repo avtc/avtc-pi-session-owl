@@ -155,8 +155,11 @@ function stateGlyph(node: RenderableNode, viewer: RenderViewer): string {
   return "";
 }
 
-/** `count` + `singular`/`plural` noun, grammar-correct (1 node, 2 nodes). */
-function pluralize(count: number, singular: string, plural: string): string {
+/** `count` + `singular`/`plural` noun, grammar-correct (1 node, 2 nodes).
+ *  Shared by the render layer and the result-budget / status renderers so the
+ *  codebase has one pluralization mechanism (handles invariant nouns like
+ *  "obs" via equal singular+plural). */
+export function pluralize(count: number, singular: string, plural: string): string {
   return `${count}${count === 1 ? singular : plural}`;
 }
 
@@ -172,7 +175,9 @@ function childCounts(node: RenderableNode): string {
  *  its full content (chars/4). Always shown — lets the agent gauge the cost of
  *  expanding (fullDetails) before drilling, and pick a `lines` window. */
 function observationSize(content: string): string {
-  const lineCount = content.split("\n").length;
+  // Lines of content: a trailing newline is a terminator, not an extra line;
+  // empty content is 0 lines.
+  const lineCount = content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
   const tokenCount = estimateContentTokens(content);
   return `${pluralize(lineCount, "line", "lines")} ${pluralize(tokenCount, "token", "tokens")}`;
 }

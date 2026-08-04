@@ -5,6 +5,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
+import { runRegexTests } from "../src/graph/regex-runner.js";
 import {
   captureInitialPromptIfAbsent,
   extractMessageText,
@@ -312,5 +313,14 @@ describe("onSessionShutdown", () => {
     onSessionShutdown({ type: "session_shutdown", reason: "reload" }, noopWidget);
     expect(handle.abortController.signal.aborted).toBe(true);
     handle.release();
+  });
+
+  it("terminates the regex worker so it does not leak across reload", async () => {
+    // first call spawns the shared worker
+    await runRegexTests(/foo/, ["foobar"], 5000);
+    onSessionShutdown({ type: "session_shutdown", reason: "reload" }, noopWidget);
+    // the worker was discarded; a subsequent call must respawn cleanly
+    const res = await runRegexTests(/foo/, ["foobar"], 5000);
+    expect("results" in res).toBe(true);
   });
 });

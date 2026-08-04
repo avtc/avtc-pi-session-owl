@@ -547,10 +547,10 @@ export function applySetMeta(
   if (args.importance !== null) node.importance = args.importance;
   if (args.archived === true) {
     node.state = "archived";
-    if (node.supersededBy !== null) node.supersededBy = null;
   }
   if (args.archived === false && node.state === "archived") node.state = "active";
   if (args.obsolete === false && node.state === "obsolete") {
+    // resurrect — clearing supersededBy is obsolete:false's sole job (#6)
     node.state = "active";
     node.supersededBy = null;
   }

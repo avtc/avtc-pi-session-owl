@@ -9,7 +9,7 @@
 // They mirror the Builder's filesystem navigation (one mental model across
 // Builder + user), reuse the shared render format (id-prefix n/o + importance words) and
 // the agent tools' collection logic (buildCatUnits / collectFindMatches), and
-// cap output at `commandResultCap` lines (a transient popup can't paginate — so
+// cap output at `commandResultCap` result items (a transient popup can't paginate — so
 // a render cap + drill footer, NOT cursor pagination).
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";

@@ -20,6 +20,7 @@ import { getMemkeeperSettings } from "./config/schema.js";
 import { toStoredTimestamp } from "./format/render.js";
 import { stripAnsi } from "./format/sanitize.js";
 import { applyCreateNode, applyRecordObservation, applySetMeta, MUTATE_SOURCE } from "./graph/mutations.js";
+import { terminateRegexWorker } from "./graph/regex-runner.js";
 import { abortInFlight } from "./runtime/run-lock.js";
 import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
 import {
@@ -194,6 +195,7 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
  *  Fire-and-forget — the run releases in its own `finally`. */
 export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetController): void {
   abortInFlight();
+  terminateRegexWorker();
   widget.endStage();
   widget.clearCtx();
 }

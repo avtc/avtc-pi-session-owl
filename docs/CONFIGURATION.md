@@ -20,7 +20,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `observerMode` | string | `on-threshold` | `on-threshold` fires at `turn_end` when ≥1 unobserved event and tokens ≥ `observerThresholdTokens`. `on-compaction` catches up at compaction only. |
 | `builderMode` | string | `on-compaction` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
 | `selectorMode` | string | `on-compaction` | When the Selector runs (only if `renderMode=selected-root`): `on-compaction` or `on-session-context-threshold`. |
-| `commandResultCap` | number | `50` | Max lines a `/mk:*` command renders before a `... +N more` footer. `null` = no limit. (User commands only; the agent's `mk_recall` paginates separately.) |
+| `commandResultCap` | number | `50` | Max result items a `/mk:*` command renders before a `... +N more` footer. `null` = no limit. (User commands only; the agent's `mk_recall` paginates separately.) |
 | `findTimeoutMs` | duration | `30000` | Max duration a `find`/`mk_recall` search may run before it is stopped. |
 | `toolResultTokenBudget` | number | `6000` | Max estimated tokens in any `cat`/`find`/`ls`/`mk_recall` result; overflow pages with `afterId` or stops expansion. A single-observation read is uncapped. |
 

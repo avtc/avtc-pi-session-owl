@@ -8,6 +8,7 @@
 // `estimateContentTokens` (chars/4, types.ts) is the token estimate used for the
 // budget — the same heuristic Pi's own compaction applies.
 
+import { pluralize } from "../format/render.js";
 import { estimateContentTokens } from "../types.js";
 import { runRegexTests } from "./regex-runner.js";
 
@@ -121,7 +122,7 @@ export function budgetReachedFooter(
   lastKeptId: string | null,
   noun: "item" | "match" | "observation",
 ): string {
-  const unit = `${noun}${remaining === 1 ? "" : "s"}`;
+  const unit = pluralize(remaining, noun, `${noun}s`);
   const cursor = lastKeptId === null ? "" : ` · afterId=${lastKeptId}`;
   return `budget reached · +${remaining} more ${unit}${cursor}`;
 }

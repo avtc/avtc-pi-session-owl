@@ -496,18 +496,27 @@ export interface CatUnit {
   content?: string;
 }
 
-/** Count the observations a list of ids resolves to: 1 per observation id,
- *  the node's connected-observation count per node id, 0 per unknown. A
- *  single-observation target (total === 1) is unbudgeted in any mode. */
+/** Count the observations a single id resolves to: 1 if the id is an
+ *  observation, the node's connected-observation count if the id is a node, 0
+ *  otherwise (used to detect a single-observation uncapped target — decision
+ *  #49). Shared by the agent find/cat path and mk_recall. */
+export function countConnectedObservations(
+  nodes: Map<string, { observationIds: readonly string[] }>,
+  observations: Map<string, unknown>,
+  id: string,
+): number {
+  const node = nodes.get(id);
+  if (node !== undefined) return node.observationIds.length;
+  return observations.has(id) ? 1 : 0;
+}
+
+/** Sum `countConnectedObservations` over a list of ids against a graph — the
+ *  total a target resolves to. A single-observation target (total === 1) is
+ *  unbudgeted in any mode. */
 function singleObsTargetCount(graph: MemkeeperGraph, ids: string[]): number {
   let total = 0;
   for (const id of ids) {
-    const node = graph.nodes.get(id as NodeId);
-    if (node !== undefined) {
-      total += node.observationIds.length;
-      continue;
-    }
-    if (graph.observations.has(id as ObsId)) total += 1;
+    total += countConnectedObservations(graph.nodes, graph.observations, id);
   }
   return total;
 }

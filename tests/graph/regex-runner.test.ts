@@ -5,7 +5,7 @@
 // a worker so a catastrophic pattern can be terminated instead of freezing pi.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runRegexTests } from "../../src/graph/regex-runner.js";
+import { runRegexTests, terminateRegexWorker } from "../../src/graph/regex-runner.js";
 
 describe("runRegexTests", () => {
   it("returns boolean match results for each input string (batch, order-preserving)", async () => {
@@ -79,6 +79,20 @@ describe("runRegexTests", () => {
     const nan = Number.NaN;
     const res = await runRegexTests(/foo/, ["foobar"], nan);
     if ("results" in res) expect(res.results).toEqual([true]);
+  });
+});
+
+describe("terminateRegexWorker (shutdown teardown)", () => {
+  it("discards the worker so the next call respawns (no leak across reload)", async () => {
+    // first call creates a worker
+    await runRegexTests(/foo/, ["foobar"], 5000);
+    // shutdown discards it
+    terminateRegexWorker();
+    // a subsequent call must still work — a fresh worker is spawned
+    const res = await runRegexTests(/foo/, ["foobar"], 5000);
+    expect("results" in res).toBe(true);
+    if ("results" in res) expect(res.results).toEqual([true]);
+    terminateRegexWorker();
   });
 });
 

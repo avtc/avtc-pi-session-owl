@@ -225,6 +225,35 @@ function text(result: ToolResult): string {
 describe("mk_recall", () => {
   const tool = () => makeMkRecallTool();
 
+  /** Build a fresh store whose graph holds one node n1 with a single large
+   *  observation o1 (4000 `a`s + `!`) — a payload that makes a catastrophic
+   *  polynomial regex hang so the timeout path can be exercised. Returns the
+   *  live graph for assertion. */
+  function slowGrepTarget(): MemkeeperGraph {
+    resetForNewSession();
+    setClock(() => T0);
+    const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+    applyCreateNode(g, {
+      id: "n1",
+      summary: "slow target",
+      importance: "medium",
+      parentNode: null,
+      state: "active",
+    });
+    applyRecordObservation(g, {
+      obs: makeObservation({
+        id: "o1",
+        content: "a".repeat(4000).concat("!"),
+        importance: "medium",
+        sourceEntryIds: [],
+        timestamp: T0,
+        parentNode: "n1",
+      }),
+    });
+    getGraphStore().graph = g;
+    return g;
+  }
+
   describe("ids — exact lookup", () => {
     it("returns a node and its children (ls-style, indented)", async () => {
       seedSource();
@@ -302,28 +331,7 @@ describe("mk_recall", () => {
       _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       seedSource();
       // a guard-slipping polynomial shape over a large observation content
-      resetForNewSession();
-      setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
-      applyCreateNode(g, {
-        id: "n1",
-        summary: "slow target",
-        importance: "medium",
-        parentNode: null,
-        state: "active",
-      });
-      applyRecordObservation(g, {
-        obs: makeObservation({
-          id: "o1",
-          content: "a".repeat(4000).concat("!"),
-          importance: "medium",
-          sourceEntryIds: [],
-          timestamp: T0,
-          parentNode: "n1",
-        }),
-      });
-      const store = getGraphStore();
-      store.graph = g;
+      slowGrepTarget();
       const out = text(await recall(tool(), { query: "(.+a)(.+a)b" }));
       expect(out.toLowerCase()).toContain("timed out");
       _setGetMemkeeperSettings(null);
@@ -840,28 +848,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       // timeout note — not silently return partial excerpts with no signal.
       _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       seedSource();
-      resetForNewSession();
-      setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
-      applyCreateNode(g, {
-        id: "n1",
-        summary: "slow grep target",
-        importance: "medium",
-        parentNode: null,
-        state: "active",
-      });
-      applyRecordObservation(g, {
-        obs: makeObservation({
-          id: "o1",
-          content: "a".repeat(4000).concat("!"),
-          importance: "medium",
-          sourceEntryIds: [],
-          timestamp: T0,
-          parentNode: "n1",
-        }),
-      });
-      const store = getGraphStore();
-      store.graph = g;
+      slowGrepTarget();
       const out = text(await recall(tool(), { ids: ["o1"], contentPattern: "(.+a)(.+a)b" }));
       expect(out.toLowerCase()).toContain("grep timed out");
       _setGetMemkeeperSettings(null);
@@ -874,28 +861,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       // ids path (covered above).
       _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       seedSource();
-      resetForNewSession();
-      setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
-      applyCreateNode(g, {
-        id: "n1",
-        summary: "slow grep target",
-        importance: "medium",
-        parentNode: null,
-        state: "active",
-      });
-      applyRecordObservation(g, {
-        obs: makeObservation({
-          id: "o1",
-          content: "a".repeat(4000).concat("!"),
-          importance: "medium",
-          sourceEntryIds: [],
-          timestamp: T0,
-          parentNode: "n1",
-        }),
-      });
-      const store = getGraphStore();
-      store.graph = g;
+      slowGrepTarget();
       // A time bound (from) makes this the search path (noFilters=false) with
       // no query (regex===null → every observation is a candidate); the
       // contentPattern then runs the catastrophic grep over o1's content.

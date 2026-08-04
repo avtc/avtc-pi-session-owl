@@ -124,6 +124,28 @@ describe("formatNodeLine", () => {
     expect(formatObservationLine(obs, { viewer: "builder" })).toContain("3lines 7tokens");
   });
 
+  it("renders empty observation content as 0lines 0tokens", () => {
+    const obs = makeObservation({
+      id: "o1",
+      content: "",
+      importance: "low",
+      timestamp: "2026-07-28T14:30:00.000Z",
+    });
+    expect(formatObservationLine(obs, { viewer: "builder" })).toContain("0lines 0tokens");
+  });
+
+  it("counts a trailing newline as a terminator, not an extra line", () => {
+    const obs = makeObservation({
+      id: "o2",
+      content: "a single line with a trailing newline\n",
+      importance: "low",
+      timestamp: "2026-07-28T14:30:00.000Z",
+    });
+    // one line of content + a terminator newline → 1line, not 2lines
+    expect(formatObservationLine(obs, { viewer: "builder" })).toContain("1line ");
+    expect(formatObservationLine(obs, { viewer: "builder" })).not.toContain("2lines");
+  });
+
   it("omits the child count when the node has only observations", () => {
     const node = makeNode({ id: "nGoal", summary: "the goal", importance: "critical", observationIds: repeatObs(2) });
     expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe("nGoal · crit · the goal · 2obs · Jul 29 09:00");

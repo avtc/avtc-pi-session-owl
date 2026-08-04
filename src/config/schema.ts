@@ -221,7 +221,7 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("commandResultCap", {
     label: "Command result cap",
     description:
-      "Max lines the user /mk:* commands render before a footer. No limit = unbounded. " +
+      "Max result items the user /mk:* commands render before a footer. No limit = unbounded. " +
       "User commands only (the agent's tools use cursor pagination).",
     type: "number",
     defaultValue: DEFAULT_CONFIG.commandResultCap,

@@ -17,6 +17,7 @@
 // keeps its own opaque-unit budgeting (its units are heterogeneous node
 // payloads / observations / not-found blocks).
 
+import { pluralize } from "../format/render.js";
 import { estimateContentTokens } from "../types.js";
 import { budgetReachedFooter, budgetWindow, parseLineRange, runGrepExcerpts, sliceLineRange } from "./result-budget.js";
 
@@ -182,7 +183,7 @@ async function renderTwoStageBudgeted(items: RenderItem[], opts: BudgetedOptions
   }
   const note =
     unexpandedWithContent > 0
-      ? `budget reached · ${unexpandedWithContent} item${unexpandedWithContent === 1 ? "" : "s"} not expanded · use contentPattern for targeted extraction`
+      ? `budget reached · ${pluralize(unexpandedWithContent, "item", "items")} not expanded · use contentPattern for targeted extraction`
       : null;
   return { text: parts.join("\n"), note, lastId: items[items.length - 1].id };
 }
