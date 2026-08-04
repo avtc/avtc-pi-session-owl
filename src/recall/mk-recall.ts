@@ -766,8 +766,8 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   }
 
   // render each candidate per the mode, then bound by the result token budget
-  // (per-item atomic — a single-observation target is uncapped in any mode:
-  // full / lines / grep, a deliberate single drill returns whole).
+  // (per-item atomic — a single-observation target is unbudgeted in any mode:
+  // the cap lifts, but the mode still applies).
   const singleObs = window.length === 1 && window[0].obs !== undefined;
   const budget = singleObs ? null : getMemkeeperSettings().toolResultTokenBudget;
   const units = window.map((c) => ({
@@ -866,8 +866,8 @@ async function executeIds(
     });
   }
 
-  // A single-observation target is uncapped in any mode (full / lines / grep):
-  // a deliberate single drill returns whole. This covers both a direct
+  // A single-observation target is unbudgeted in any mode (full / lines / grep):
+  // the cap lifts, but the mode still applies. This covers both a direct
   // observation id and a node whose connected observations total exactly one.
   const budget =
     ids.length === 1 && singleObsTargetCount(target, ids[0]) === 1
