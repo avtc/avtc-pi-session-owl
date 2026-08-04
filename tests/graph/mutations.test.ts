@@ -304,11 +304,16 @@ describe("applyMerge", () => {
     applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
     applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T11:00:00.000Z", parentNode: "n2" }) });
     const before = g.nextNodeId;
-    applyMerge(g, { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root" }, MUTATE_SOURCE);
+    applyMerge(
+      g,
+      { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root", importance: "high" },
+      MUTATE_SOURCE,
+    );
     expect(g.nextNodeId).toBeGreaterThan(before);
     const found = [...g.nodes.values()].find((n) => n.summary === "fresh root");
     expect(found).toBeDefined();
     expect(found?.parentNode).toBeNull();
+    expect(found?.importance).toBe("high");
     expect(g.nodes.has("n1")).toBe(false);
     expect(g.nodes.has("n2")).toBe(false);
   });
@@ -317,16 +322,27 @@ describe("applyMerge", () => {
     const g = graphWithTwoRoots();
     applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n1" }) });
     applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T11:00:00.000Z", parentNode: "n2" }) });
-    const delta = applyMerge(g, { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root" }, MUTATE_SOURCE);
+    const delta = applyMerge(
+      g,
+      { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root", importance: "medium" },
+      MUTATE_SOURCE,
+    );
     expect(delta.destId).toBeNull();
     expect(delta.resolvedDestId).toBeDefined();
+    expect(delta.importance).toBe("medium");
     // replay on a graph whose nextNodeId counter is LOWER than at original apply
     // (simulating a skipped counter-advancing delta): the resolved id must win.
     const g2 = graphWithTwoRoots();
     g2.nextNodeId = 5; // lower than the original graph's counter
     applyMerge(
       g2,
-      { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root", resolvedDestId: delta.resolvedDestId },
+      {
+        sourceIds: ["n1", "n2"],
+        destId: null,
+        newSummary: "fresh root",
+        importance: "medium",
+        resolvedDestId: delta.resolvedDestId,
+      },
       MUTATE_SOURCE,
     );
     expect(g2.nodes.has(delta.resolvedDestId as NodeId)).toBe(true);
@@ -342,8 +358,18 @@ describe("applyMerge", () => {
 
   it("requires newSummary when creating a new root via merge (destId null)", () => {
     const g = graphWithTwoRoots();
-    expect(() => applyMerge(g, { sourceIds: ["n1", "n2"], destId: null }, MUTATE_SOURCE)).toThrow(GraphInvariantError);
+    expect(() => applyMerge(g, { sourceIds: ["n1", "n2"], destId: null, importance: "high" }, MUTATE_SOURCE)).toThrow(
+      GraphInvariantError,
+    );
     // rejected call leaves the graph unchanged — no stray new root
+    expect([...g.nodes.values()].filter((n) => n.parentNode === null).length).toBe(2);
+  });
+
+  it("requires importance when creating a new root via merge (destId null)", () => {
+    const g = graphWithTwoRoots();
+    expect(() =>
+      applyMerge(g, { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root" }, MUTATE_SOURCE),
+    ).toThrow(GraphInvariantError);
     expect([...g.nodes.values()].filter((n) => n.parentNode === null).length).toBe(2);
   });
 

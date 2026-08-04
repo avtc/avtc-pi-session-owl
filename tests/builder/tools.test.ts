@@ -124,7 +124,7 @@ describe("Builder mutate tools", () => {
       const g = buildGraph();
       const { ctx, entries } = makeFakeStore();
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
-      const r = await callTool(tools, "mkdir", { summary: "Database design" });
+      const r = await callTool(tools, "mkdir", { summary: "Database design", importance: "high" });
       expect(isError(r)).toBe(false);
       const deltas = graphDeltas(entries);
       expect(deltas).toHaveLength(1);
@@ -132,7 +132,7 @@ describe("Builder mutate tools", () => {
       expect(delta.type).toBe("create_node");
       expect(delta.state).toBe("active");
       expect(delta.summary).toBe("Database design");
-      expect(delta.importance).toBe("medium");
+      expect(delta.importance).toBe("high");
       // the node exists in the graph with zero observations (container OK)
       const created = g.nodes.get(delta.id as NodeId);
       expect(created).toBeDefined();
@@ -145,7 +145,7 @@ describe("Builder mutate tools", () => {
       const g = buildGraph();
       const { ctx } = makeFakeStore();
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
-      const r = await callTool(tools, "mkdir", { summary: "Token signing", parentId: "n7" });
+      const r = await callTool(tools, "mkdir", { summary: "Token signing", importance: "medium", parentId: "n7" });
       expect(isError(r)).toBe(false);
       const parent = g.nodes.get("n7");
       // the new node is a child of n7
@@ -261,12 +261,18 @@ describe("Builder mutate tools", () => {
       const g = buildGraph();
       const { ctx } = makeFakeStore();
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
-      const r = await callTool(tools, "merge", { sourceIds: ["n8"], destId: null, newSummary: "JWT bundle" });
+      const r = await callTool(tools, "merge", {
+        sourceIds: ["n8"],
+        destId: null,
+        newSummary: "JWT bundle",
+        importance: "high",
+      });
       expect(isError(r)).toBe(false);
       const bundle = [...g.nodes.values()].find((n) => n.summary === "JWT bundle");
       expect(bundle).toBeDefined();
       expect(bundle?.parentNode).toBeNull();
       expect(bundle?.state).toBe("active");
+      expect(bundle?.importance).toBe("high");
       // the NEW root id surfaces in the result text so the model can ls/cat it.
       expect(textOf(r)).toContain(bundle?.id ?? "(missing)");
     });
@@ -277,7 +283,22 @@ describe("Builder mutate tools", () => {
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
       const r = await callTool(tools, "merge", { sourceIds: ["n8"], destId: null });
       expect(isError(r)).toBe(true);
-      expect(textOf(r)).toContain("newSummary");
+      // The surfaced text carries exactly one op prefix (runMutate strips the
+      // mutation-layer duplicate) and keeps the hint about the new root.
+      expect(textOf(r)).toBe("merge: newSummary is required when destId is null (names the new root node)");
+      expect(textOf(r)).not.toContain("merge: merge:");
+      expect(graphDeltas(entries)).toHaveLength(0);
+      expect(g.nodes.has("n8")).toBe(true);
+    });
+
+    it("rejects destId=null without importance — error result, graph + delta unchanged", async () => {
+      const g = buildGraph();
+      const { ctx, entries } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      const r = await callTool(tools, "merge", { sourceIds: ["n8"], destId: null, newSummary: "JWT bundle" });
+      expect(isError(r)).toBe(true);
+      expect(textOf(r)).toBe("merge: importance is required when destId is null (rates the new root node)");
+      expect(textOf(r)).not.toContain("merge: merge:");
       expect(graphDeltas(entries)).toHaveLength(0);
       expect(g.nodes.has("n8")).toBe(true);
     });

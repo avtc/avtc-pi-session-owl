@@ -52,6 +52,7 @@ export function applyDelta(graph: MemkeeperGraph, delta: GraphDelta, policy: Mut
           sourceIds: delta.sourceIds,
           destId: delta.destId,
           newSummary: delta.newSummary,
+          importance: delta.importance,
           resolvedDestId: delta.resolvedDestId,
         },
         policy,

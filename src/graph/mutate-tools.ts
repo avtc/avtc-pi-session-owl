@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Shared graph MUTATE tool factories (mkdir/mv/merge/set_summary) parameterized
+// Shared graph MUTATE tool factories (mkdir/mv/merge + the Selector's set_meta)
+// parameterized
 // by a MutateContext that names BOTH the policy (source vs workingCopy) AND the
 // persistence strategy (append the delta to the store, or drop it). The Builder
 // (source graph, store-appending) and the Selector (working copy, no store
@@ -10,6 +11,7 @@
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
+import { ImportanceSchema } from "../schema.js";
 import type { Importance, MemkeeperGraph, NodeId, ObsId } from "../types.js";
 import { GraphInvariantError } from "./invariants.js";
 import {
@@ -26,9 +28,7 @@ import {
 export const MKDIR_TOOL = "mkdir";
 export const MV_TOOL = "mv";
 export const MERGE_TOOL = "merge";
-export const SET_SUMMARY_TOOL = "set_summary";
-
-const DEFAULT_NODE_IMPORTANCE: Importance = "medium";
+export const SELECTOR_SET_META_TOOL = "set_meta";
 
 // --- MutateContext (the source-vs-working-copy seam) -----------------------
 
@@ -55,6 +55,20 @@ function errorResult(message: string): AgentToolResult<unknown> {
   return { content: [{ type: "text", text: message }], details: { error: true } };
 }
 
+/** Mutator op names that prefix their own `GraphInvariantError` messages. The
+ *  tool-facing `runMutate` wrapper strips exactly one such leading prefix so the
+ *  surfaced message is not doubled (`"merge: merge: …"`) — the wrapper's own
+ *  `${what}:` already provides the op context. */
+const OP_ERROR_PREFIXES = ["create_node", "record_observation", "mv", "merge", "supersede", "set_meta"] as const;
+
+function stripOpPrefix(message: string): string {
+  for (const op of OP_ERROR_PREFIXES) {
+    const prefix = `${op}: `;
+    if (message.startsWith(prefix)) return message.slice(prefix.length);
+  }
+  return message;
+}
+
 /** Run a mutation, persist its delta via `ctx.persist`, and report success — or
  *  catch a structural rejection (GraphInvariantError) and surface it as an error
  *  result the model can retry from. A rejected mutate leaves the graph (and the
@@ -73,7 +87,7 @@ export function runMutate(
     delta = apply();
   } catch (cause) {
     if (cause instanceof GraphInvariantError) {
-      return errorResult(`${what}: ${cause.message}`);
+      return errorResult(`${what}: ${stripOpPrefix(cause.message)}`);
     }
     throw cause;
   }
@@ -85,6 +99,10 @@ export function runMutate(
 
 export const MKDIR_PARAMS = Type.Object({
   summary: Type.String({ minLength: 1, description: "The new node's summary." }),
+  importance: {
+    ...ImportanceSchema,
+    description: "How much the new node matters if lost — critical, high, medium, or low.",
+  },
   parentId: Type.Optional(Type.String({ description: "A parent node, or omit/null for the root." })),
 });
 
@@ -108,17 +126,28 @@ export const MERGE_PARAMS = Type.Object({
       description: "A synthesized summary for the destination (required when `destId` is null).",
     }),
   ),
+  importance: Type.Optional({
+    ...ImportanceSchema,
+    description:
+      "Set the destination's importance. Required when `destId` is null (names the new root's importance); optional otherwise (re-rates the destination).",
+  }),
 });
 
-export const SET_SUMMARY_PARAMS = Type.Object({
-  nodeId: Type.String({ description: "The node whose summary to rewrite." }),
-  summary: Type.String({ minLength: 1, description: "A new (typically condensed) summary for the node." }),
+export const SELECTOR_SET_META_PARAMS = Type.Object({
+  nodeId: Type.String({ description: "The node to edit." }),
+  summary: Type.Optional(
+    Type.String({ minLength: 1, description: "A new (typically condensed) summary for the node." }),
+  ),
+  importance: Type.Optional({
+    ...ImportanceSchema,
+    description: "Re-rate the node — how much it matters if lost.",
+  }),
 });
 
 // --- mkdir -----------------------------------------------------------------
 
 /** Build the `mkdir` tool: create a container node (zero observations OK) under
- *  an optional parent, state `active`, default importance medium. */
+ *  an optional parent, state `active`, with the given importance. */
 export function makeMkdirTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof MKDIR_PARAMS> {
   return {
     name: MKDIR_TOOL,
@@ -135,7 +164,7 @@ export function makeMkdirTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
           applyCreateNode(graph, {
             id,
             summary: params.summary,
-            importance: DEFAULT_NODE_IMPORTANCE,
+            importance: params.importance as Importance,
             parentNode: (params.parentId ?? null) as NodeId | null,
             state: "active",
           }),
@@ -209,6 +238,7 @@ export function makeMergeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
               sourceIds: params.sourceIds as NodeId[],
               destId,
               ...(params.newSummary !== undefined ? { newSummary: params.newSummary } : {}),
+              ...(params.importance !== undefined ? { importance: params.importance as Importance } : {}),
             },
             ctx.policy,
           ),
@@ -224,31 +254,40 @@ export function makeMergeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
   };
 }
 
-// --- set_summary (summary-only) --------------------------------------------
+// --- set_meta (Selector variant: importance + summary, no lifecycle) ------
 
-/** Build the `set_summary` tool: rewrite a node's summary (typically condensing
- *  or clarifying it to fit the budget). Summary-only — structurally forbids
- *  importance/archived params (those are source properties, Builder-only via
- *  set_meta). Implemented over the shared set_meta mutator passing summary only. */
-export function makeSetSummaryTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof SET_SUMMARY_PARAMS> {
+/** Build the Selector's `set_meta` tool: edit a node's summary and/or
+ *  importance. Structurally forbids `archived`/`obsolete` — those lifecycle
+ *  transitions are Builder-only (the Selector demotes via `nIrrelevant`, never
+ *  by archiving). Implemented over the shared set_meta mutator passing importance
+ *  + summary and forcing the lifecycle fields to null. */
+export function makeSelectorSetMetaTool(
+  graph: MemkeeperGraph,
+  ctx: MutateContext,
+): AgentTool<typeof SELECTOR_SET_META_PARAMS> {
   return {
-    name: SET_SUMMARY_TOOL,
-    description: "Rewrite a node's summary — condense or clarify it to fit the budget.",
-    label: "Edit summary",
-    parameters: SET_SUMMARY_PARAMS,
+    name: SELECTOR_SET_META_TOOL,
+    description: "Edit a node's summary and/or importance — condense its wording or re-rate how much it matters.",
+    label: "Edit node",
+    parameters: SELECTOR_SET_META_PARAMS,
     async execute(_toolCallId, params) {
+      const hasSummary = params.summary !== undefined;
+      const hasImportance = params.importance !== undefined;
+      if (!hasSummary && !hasImportance) {
+        return errorResult("set_meta: provide at least one of summary or importance.");
+      }
       return runMutate(
         ctx,
-        "set_summary",
+        "set_meta",
         () =>
           applySetMeta(
             graph,
             {
               nodeId: params.nodeId as NodeId,
-              importance: null,
+              importance: hasImportance ? (params.importance as Importance) : null,
               archived: null,
               obsolete: null,
-              summary: params.summary,
+              summary: hasSummary ? (params.summary as string) : null,
             },
             ctx.policy,
           ),

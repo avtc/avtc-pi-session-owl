@@ -6,11 +6,11 @@
 //     deep-copied working graph with viewer "nonBuilder" (new→active); mutations
 //     apply with MUTATE_WORKING_COPY (nGoal/oInitialPrompt freely rearrangeable,
 //     no source-graph protections); nothing reaches the source GraphStore.
-//   - set_summary (Selector-only, summary-only).
+//   - set_meta (Selector variant: importance + summary, no lifecycle).
 //   - try_finish (nonBuilder viewer, selectorRootViewThreshold).
 //   - fs_* read tools (alias pi built-ins).
 //   - todo_list (conditional on the todo bridge).
-//   - makeSelectorTools assembly (supersede/set_meta excluded).
+//   - makeSelectorTools assembly (supersede excluded; set_meta is the Selector variant).
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -27,7 +27,7 @@ import {
   makeSelectorGraphTools,
   makeSelectorTools,
   SELECTOR_MUTATE_TOOL_NAMES,
-  SET_SUMMARY_TOOL,
+  SELECTOR_SET_META_TOOL,
   TODO_LIST_TOOL,
 } from "../../src/selector/tools.js";
 import type { TodoBridge } from "../../src/todo/types.js";
@@ -173,7 +173,7 @@ describe("Selector working-copy graph tools (mkdir/mv/merge)", () => {
 
   it("mkdir creates a new node in the working copy", async () => {
     const tools = makeSelectorGraphTools(working, SETTINGS);
-    const res = await callTool(tools, "mkdir", { summary: "new task group" });
+    const res = await callTool(tools, "mkdir", { summary: "new task group", importance: "medium" });
     expect(textOf(res)).toMatch(/Created (n\d+)/);
     const m = textOf(res).match(/Created (n\d+)/);
     expect(m).not.toBeNull();
@@ -209,7 +209,7 @@ describe("Selector working-copy graph tools (mkdir/mv/merge)", () => {
   });
 });
 
-describe("Selector set_summary (Selector-only, summary-only)", () => {
+describe("Selector set_meta (importance + summary; no lifecycle)", () => {
   let source: MemkeeperGraph;
   let working: SelectorWorkingCopy;
 
@@ -220,7 +220,10 @@ describe("Selector set_summary (Selector-only, summary-only)", () => {
 
   it("rewrites a working-copy node's summary and recomputes summaryTokens", async () => {
     const tools = makeSelectorGraphTools(working, SETTINGS);
-    await callTool(tools, SET_SUMMARY_TOOL, { nodeId: "n7", summary: "a much longer condensed summary than before" });
+    await callTool(tools, SELECTOR_SET_META_TOOL, {
+      nodeId: "n7",
+      summary: "a much longer condensed summary than before",
+    });
     const node = working.graph.nodes.get("n7");
     expect(node).toBeDefined();
     expect(node?.summary).toBe("a much longer condensed summary than before");
@@ -228,19 +231,28 @@ describe("Selector set_summary (Selector-only, summary-only)", () => {
     expect(node?.summaryTokens).toBe(11);
   });
 
-  it("structurally forbids importance/archived params (schema has no such fields)", () => {
+  it("re-rates a working-copy node's importance", async () => {
     const tools = makeSelectorGraphTools(working, SETTINGS);
-    const tool = tools.find((t) => t.name === SET_SUMMARY_TOOL);
+    const before = working.graph.nodes.get("n7")?.importance;
+    await callTool(tools, SELECTOR_SET_META_TOOL, { nodeId: "n7", importance: "critical" });
+    const node = working.graph.nodes.get("n7");
+    expect(node?.importance).toBe("critical");
+    expect(node?.importance).not.toBe(before);
+  });
+
+  it("structurally forbids archived/obsolete params (schema has no such fields)", () => {
+    const tools = makeSelectorGraphTools(working, SETTINGS);
+    const tool = tools.find((t) => t.name === SELECTOR_SET_META_TOOL);
     expect(tool).toBeDefined();
     const schema = (tool as AgentTool).parameters as { properties?: Record<string, unknown> };
     const props = schema.properties ?? {};
-    expect(Object.keys(props).sort()).toEqual(["nodeId", "summary"]);
+    expect(Object.keys(props).sort()).toEqual(["importance", "nodeId", "summary"]);
   });
 
   it("rejects an unknown nodeId with an error result (no throw)", async () => {
     const tools = makeSelectorGraphTools(working, SETTINGS);
-    const res = await callTool(tools, SET_SUMMARY_TOOL, { nodeId: "nGhost", summary: "x" });
-    expect(textOf(res).toLowerCase()).toContain("set_summary");
+    const res = await callTool(tools, SELECTOR_SET_META_TOOL, { nodeId: "nGhost", summary: "x" });
+    expect(textOf(res).toLowerCase()).toContain("set_meta");
     expect(textOf(res).toLowerCase()).toContain("nghost");
   });
 });
@@ -373,7 +385,7 @@ describe("Selector todo_list (conditional)", () => {
   });
 });
 
-describe("Selector toolset composition (supersede/set_meta excluded)", () => {
+describe("Selector toolset composition (supersede excluded)", () => {
   let source: MemkeeperGraph;
   let working: SelectorWorkingCopy;
 
@@ -382,23 +394,23 @@ describe("Selector toolset composition (supersede/set_meta excluded)", () => {
     working = buildWorkingCopy(source);
   });
 
-  it("supersede and set_meta are NOT in the toolset (Builder-only)", () => {
+  it("supersede is NOT in the toolset (Builder-only); set_meta is (importance + summary only)", () => {
     const tools = makeSelectorTools({ workingCopy: working, settings: SETTINGS, ctx: ctxStub(), todoBridge: null });
     const names = new Set(tools.map((t) => t.name));
     expect(names.has("supersede")).toBe(false);
-    expect(names.has("set_meta")).toBe(false);
+    expect(names.has(SELECTOR_SET_META_TOOL)).toBe(true);
   });
 
   it("the 8 graph tools are all present", () => {
     const tools = makeSelectorTools({ workingCopy: working, settings: SETTINGS, ctx: ctxStub(), todoBridge: null });
     const names = new Set(tools.map((t) => t.name));
-    for (const n of ["ls", "cat", "find", "mkdir", "mv", "merge", SET_SUMMARY_TOOL, "try_finish"]) {
+    for (const n of ["ls", "cat", "find", "mkdir", "mv", "merge", SELECTOR_SET_META_TOOL, "try_finish"]) {
       expect(names.has(n)).toBe(true);
     }
   });
 
   it("SELECTOR_MUTATE_TOOL_NAMES lists the 4 Selector mutates (no-op detection set for the run)", () => {
-    expect([...SELECTOR_MUTATE_TOOL_NAMES].sort()).toEqual(["merge", "mkdir", "mv", SET_SUMMARY_TOOL]);
+    expect([...SELECTOR_MUTATE_TOOL_NAMES].sort()).toEqual(["merge", "mkdir", "mv", SELECTOR_SET_META_TOOL]);
     // read tools + try_finish excluded (parity with the Builder's set).
     expect(SELECTOR_MUTATE_TOOL_NAMES.has("ls")).toBe(false);
     expect(SELECTOR_MUTATE_TOOL_NAMES.has("try_finish")).toBe(false);
@@ -410,10 +422,10 @@ describe("Selector toolset composition (supersede/set_meta excluded)", () => {
       nodes: [...source.nodes.values()].map((n) => [n.id, n.parentNode, n.childNodeIds, n.observationIds]),
       obs: [...source.observations.values()].map((o) => [o.id, o.parentNode]),
     });
-    await callTool(tools, "mkdir", { summary: "new group" });
+    await callTool(tools, "mkdir", { summary: "new group", importance: "low" });
     await callTool(tools, "mv", { sourceIds: ["n8"], destId: null });
     await callTool(tools, "merge", { sourceIds: ["n12"], destId: "n7", newSummary: "x" });
-    await callTool(tools, SET_SUMMARY_TOOL, { nodeId: "n7", summary: "y" });
+    await callTool(tools, SELECTOR_SET_META_TOOL, { nodeId: "n7", summary: "y" });
     const after = JSON.stringify({
       nodes: [...source.nodes.values()].map((n) => [n.id, n.parentNode, n.childNodeIds, n.observationIds]),
       obs: [...source.observations.values()].map((o) => [o.id, o.parentNode]),

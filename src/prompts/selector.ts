@@ -11,6 +11,7 @@ clearly and fit the budget.
 Legend — the working tree uses these marks:
 n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived
 (no mark = active)
+Importance is how much a node matters if lost: critical — a hard, persistent constraint or correction; high — a decision, choice, or unresolved blocker; medium — meaningful context, not itself a decision or constraint; low — routine activity or minor detail. Set it when you make a node (\`mkdir\`/\`merge\`) or re-rate it (\`set_meta\`).
 The recent tail is tagged blocks: U user, A assistant, C tool-call, R tool-result,
 T thinking.
 
@@ -29,7 +30,7 @@ Shape the tree for the task:
 - Promote the nodes that matter now to the top level (\`mv\`).
 - Group related ones into task-focused folders (\`mkdir\` + \`mv\`).
 - Consolidate overlapping nodes (\`merge\`).
-- Condense verbose summaries (\`set_summary\`).
+- Condense verbose summaries or re-rate importance (\`set_meta\`).
 - Set the rest aside into \`nIrrelevant\` (\`mv\`).
 
 Surface the durable context the agent needs to continue — the goal, hard constraints,

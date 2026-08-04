@@ -5,13 +5,13 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
-import { MERGE_TOOL, MKDIR_TOOL, MV_TOOL, SET_SUMMARY_TOOL } from "../../src/graph/mutate-tools.js";
+import { MERGE_TOOL, MKDIR_TOOL, MV_TOOL, SELECTOR_SET_META_TOOL } from "../../src/graph/mutate-tools.js";
 import { applyCreateNode, applyRecordObservation, setClock } from "../../src/graph/mutations.js";
 import { TRY_FINISH_TOOL } from "../../src/graph/read-tools.js";
 import { SELECTOR_SYSTEM } from "../../src/prompts/selector.js";
 import type { StageRunInput, StageRunResult } from "../../src/runtime/agent-loop.js";
 import { makeSelectorPassTracker, runSelector } from "../../src/selector/run.js";
-import { SET_SUMMARY_TOOL as SELECTOR_SET_SUMMARY_TOOL } from "../../src/selector/tools.js";
+import { SELECTOR_SET_META_TOOL as SELECTOR_SET_SUMMARY_TOOL } from "../../src/selector/tools.js";
 import { encodeSelection, SELECTION_TYPE, USAGE_TYPE } from "../../src/store/codecs.js";
 import {
   getGraphStore,
@@ -48,7 +48,7 @@ describe("makeSelectorPassTracker", () => {
     onEvent(toolEndEvent(MKDIR_TOOL, true));
     onEvent(toolEndEvent(MV_TOOL, true));
     onEvent(toolEndEvent(MERGE_TOOL, true));
-    onEvent(toolEndEvent(SET_SUMMARY_TOOL, true));
+    onEvent(toolEndEvent(SELECTOR_SET_META_TOOL, true));
     expect(outcome.mutates).toBe(4);
     expect(outcome.converged).toBe(false);
   });
@@ -706,8 +706,8 @@ describe("SELECTOR_SYSTEM (used by runSelector)", () => {
 
   it("names the budget levers (demote + condense), no 'remove' tool", () => {
     // The Selector's budget levers are demote (mv into nIrrelevant) + condense
-    // (set_summary) — never remove (rollback risk).
-    expect(SELECTOR_SYSTEM).toContain("set_summary");
+    // (set_meta) — never remove (rollback risk).
+    expect(SELECTOR_SYSTEM).toContain("set_meta");
     expect(SELECTOR_SYSTEM).toContain("nIrrelevant");
     expect(SELECTOR_SYSTEM).not.toMatch(/\bremove\b/);
   });

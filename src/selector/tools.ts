@@ -5,7 +5,7 @@
 // source graph). Composition:
 //   - graph read tools (ls/cat/find) — reused from graph/read-tools with the
 //     "nonBuilder" viewer (new→active, no 🆕 glyph);
-//   - graph mutate tools (mkdir/mv/merge/set_summary) — the shared factories from
+//   - graph mutate tools (mkdir/mv/merge/set_meta) — the shared factories from
 //     graph/mutate-tools bound to a workingCopy MutateContext (policy `workingCopy`
 //     — skips the nGoal/oInitialPrompt rejections; the Selector freely rearranges
 //     them in its copy — and a NO-OP persist: the working copy is transient, the
@@ -13,7 +13,8 @@
 //   - try_finish (convergence gate on selectorRootViewThreshold, nonBuilder);
 //   - fs_* read tools (alias pi's read/grep/find/ls built-ins);
 //   - todo_list (conditional on the optional avtc-pi-todo bridge).
-// supersede and set_meta are EXCLUDED (Builder-only source-graph semantics).
+// supersede is EXCLUDED (Builder-only source-graph semantics). The Selector's
+// set_meta edits summary + importance only (no archived/obsolete lifecycle).
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -34,8 +35,8 @@ import {
   makeMergeTool,
   makeMkdirTool,
   makeMvTool,
-  makeSetSummaryTool,
-  SET_SUMMARY_TOOL,
+  makeSelectorSetMetaTool,
+  SELECTOR_SET_META_TOOL,
 } from "../graph/mutate-tools.js";
 
 import { MUTATE_WORKING_COPY } from "../graph/mutations.js";
@@ -43,8 +44,8 @@ import { makeReadTools, makeTryFinishTool } from "../graph/read-tools.js";
 import type { TodoBridge, TodoItem } from "../todo/types.js";
 import type { SelectorWorkingCopy } from "./input-view.js";
 
-/** Re-export the Selector-only summary tool name for callers/tests. */
-export { SET_SUMMARY_TOOL };
+/** Re-export the Selector's set_meta tool name for callers/tests. */
+export { SELECTOR_SET_META_TOOL };
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -63,7 +64,7 @@ export const SELECTOR_MUTATE_TOOL_NAMES: ReadonlySet<string> = new Set([
   MKDIR_TOOL,
   MV_TOOL,
   MERGE_TOOL,
-  SET_SUMMARY_TOOL,
+  SELECTOR_SET_META_TOOL,
 ]);
 
 /** A no-op persist: the working copy is transient and the resulting tree is
@@ -141,7 +142,7 @@ function makeTodoListTool(bridge: TodoBridge): AgentTool<typeof TODO_LIST_PARAMS
 
 // --- graph tools + full toolset -------------------------------------------
 
-/** Build the Selector graph tools (ls/cat/find/mkdir/mv/merge/set_summary/
+/** Build the Selector graph tools (ls/cat/find/mkdir/mv/merge/set_meta/
  *  try_finish) bound to the working copy. The read tools render with the
  *  "nonBuilder" viewer (new→active); the mutate tools apply with the
  *  `workingCopy` policy and append nothing to the store. */
@@ -152,7 +153,7 @@ export function makeSelectorGraphTools(working: SelectorWorkingCopy, settings: M
     makeMkdirTool(working.graph, ctx),
     makeMvTool(working.graph, ctx),
     makeMergeTool(working.graph, ctx),
-    makeSetSummaryTool(working.graph, ctx),
+    makeSelectorSetMetaTool(working.graph, ctx),
     makeTryFinishTool(working.graph, { rootViewThreshold: settings.selectorRootViewThreshold }, "nonBuilder"),
   ];
 }
@@ -168,9 +169,10 @@ export interface SelectorToolsArgs {
 }
 
 /** Build the full Selector toolset: 8 graph tools (ls/cat/find/mkdir/mv/merge/
- *  set_summary/try_finish) + 4 fs_* reads + todo_list (1, only when the bridge is
- *  present). supersede and set_meta are EXCLUDED (Builder-only source-graph
- *  semantics). Nothing writes back to the source graph. */
+ *  set_meta/try_finish) + 4 fs_* reads + todo_list (1, only when the bridge is
+ *  present). supersede is EXCLUDED (Builder-only); the Selector's `set_meta`
+ *  edits summary + importance only (no archived/obsolete — lifecycle stays
+ *  Builder-only). Nothing writes back to the source graph. */
 export function makeSelectorTools(args: SelectorToolsArgs): AgentTool[] {
   const tools: AgentTool[] = [
     ...makeSelectorGraphTools(args.workingCopy, args.settings),

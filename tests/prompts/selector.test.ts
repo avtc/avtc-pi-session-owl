@@ -14,13 +14,13 @@ describe("SELECTOR_SYSTEM prompt", () => {
     expect(SELECTOR_SYSTEM.startsWith("You build the active-set")).toBe(true);
   });
 
-  it("names the Selector tools (8 graph tools, no supersede/set_meta)", () => {
-    for (const tool of ["ls", "cat", "find", "mkdir", "mv", "merge", "set_summary", "try_finish"]) {
+  it("names the Selector tools (8 graph tools, no supersede)", () => {
+    for (const tool of ["ls", "cat", "find", "mkdir", "mv", "merge", "set_meta", "try_finish"]) {
       expect(SELECTOR_SYSTEM).toContain(tool);
     }
-    // supersede / set_meta are Builder-only (excluded from the Selector toolset).
+    // supersede is Builder-only (excluded from the Selector toolset). The
+    // Selector's set_meta edits importance + summary only (no archived/obsolete).
     expect(SELECTOR_SYSTEM).not.toContain("supersede");
-    expect(SELECTOR_SYSTEM).not.toContain("set_meta");
   });
 
   it("includes the fs_* file-read tool mention (the actionable-tasks sentence)", () => {
@@ -48,6 +48,7 @@ describe("SELECTOR_SYSTEM prompt", () => {
         "Legend — the working tree uses these marks:",
         "n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived",
         "(no mark = active)",
+        "Importance is how much a node matters if lost: critical — a hard, persistent constraint or correction; high — a decision, choice, or unresolved blocker; medium — meaningful context, not itself a decision or constraint; low — routine activity or minor detail. Set it when you make a node (`mkdir`/`merge`) or re-rate it (`set_meta`).",
         "The recent tail is tagged blocks: U user, A assistant, C tool-call, R tool-result,",
         "T thinking.",
         "",
@@ -66,7 +67,7 @@ describe("SELECTOR_SYSTEM prompt", () => {
         "- Promote the nodes that matter now to the top level (`mv`).",
         "- Group related ones into task-focused folders (`mkdir` + `mv`).",
         "- Consolidate overlapping nodes (`merge`).",
-        "- Condense verbose summaries (`set_summary`).",
+        "- Condense verbose summaries or re-rate importance (`set_meta`).",
         "- Set the rest aside into `nIrrelevant` (`mv`).",
         "",
         "Surface the durable context the agent needs to continue — the goal, hard constraints,",

@@ -3,7 +3,7 @@
 
 // The Builder MUTATE tools — supersede + set_meta (Builder-only source-graph
 // semantics) PLUS the assembly of the full 9-tool Builder toolset. The shared
-// mkdir/mv/merge/set_summary factories live in `../graph/mutate-tools.js`
+// mkdir/mv/merge + the Selector's set_meta factories live in `../graph/mutate-tools.js`
 // (parameterized by a MutateContext = policy + persistence strategy); the shared
 // read tools (ls/cat/find) + try_finish + the root-view render/measure helpers
 // live in `../graph/read-tools.js` (parameterized by viewer). The Builder wires
@@ -36,8 +36,6 @@ export {
   MKDIR_TOOL,
   MV_PARAMS,
   MV_TOOL,
-  SET_SUMMARY_PARAMS,
-  SET_SUMMARY_TOOL,
 } from "../graph/mutate-tools.js";
 // Re-export the shared names so existing import sites (compaction/hook, the run,
 // tests) keep resolving through this module while the canonical definitions live

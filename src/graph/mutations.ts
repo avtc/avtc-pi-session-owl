@@ -57,6 +57,10 @@ export interface MergeDelta {
   sourceIds: NodeId[];
   destId: NodeId | null;
   newSummary?: string;
+  /** Set when the merge re-rates the destination (always present for a new root
+   *  created with `destId === null`, where importance is required at creation;
+   *  present for an existing dest only when the caller re-rates it). */
+  importance?: Importance;
   /** When destId === null (a new root is created), the resolved id of that
    *  node — recorded so replay is identity-stable even if the store's tolerant
    *  reader skipped an earlier counter-advancing delta. Absent when destId is
@@ -372,11 +376,20 @@ export function applyMv(
 
 export function applyMerge(
   graph: MemkeeperGraph,
-  args: { sourceIds: NodeId[]; destId: NodeId | null; newSummary?: string; resolvedDestId?: NodeId },
+  args: {
+    sourceIds: NodeId[];
+    destId: NodeId | null;
+    newSummary?: string;
+    importance?: Importance;
+    resolvedDestId?: NodeId;
+  },
   policy: MutationPolicy,
 ): MergeDelta {
   if (args.destId === null && args.newSummary === undefined) {
-    throw new GraphInvariantError("merge: newSummary is required when destId is null");
+    throw new GraphInvariantError("merge: newSummary is required when destId is null (names the new root node)");
+  }
+  if (args.destId === null && args.importance === undefined) {
+    throw new GraphInvariantError("merge: importance is required when destId is null (rates the new root node)");
   }
   const sources = args.sourceIds.map((id) => requireNode(graph, id, "merge"));
   if (policy === MUTATE_SOURCE) {
@@ -410,7 +423,7 @@ export function applyMerge(
     applyCreateNode(graph, {
       id: newId,
       summary: args.newSummary ?? "",
-      importance: "medium",
+      importance: args.importance as Importance,
       parentNode: null,
       state: "active",
       skipStructural: true,
@@ -446,6 +459,11 @@ export function applyMerge(
     dest.summary = args.newSummary;
     dest.summaryTokens = estimateContentTokens(args.newSummary);
   }
+  // re-rate the destination when an importance was supplied (always, for a new
+  // root; optionally, for an existing dest the caller chose to re-rate)
+  if (args.importance !== undefined) {
+    dest.importance = args.importance;
+  }
   // dissolve the emptied sources + any emptied old parents
   const toDissolve = [...sources.filter((s) => s.id !== dest.id).map((s) => s.id), ...oldParents];
   const dissolveResult = dissolveEmptied(graph, toDissolve);
@@ -460,6 +478,7 @@ export function applyMerge(
     sourceIds: args.sourceIds,
     destId: args.destId,
     ...(args.newSummary !== undefined ? { newSummary: args.newSummary } : {}),
+    ...(args.importance !== undefined ? { importance: args.importance } : {}),
     ...(args.destId === null ? { resolvedDestId: dest.id } : {}),
   };
 }

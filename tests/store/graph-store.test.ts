@@ -659,6 +659,7 @@ describe("load reconstruction", () => {
         sourceIds: ["n1", "n2"],
         destId: null,
         newSummary: "merged root",
+        importance: "high",
       },
       MUTATE_SOURCE,
     );
@@ -675,6 +676,7 @@ describe("load reconstruction", () => {
     // the merged new-root id survives (identity-stable via resolvedDestId)
     expect(reconstructed.nodes.has(mergeDelta.resolvedDestId as NodeId)).toBe(true);
     expect(reconstructed.nodes.get(mergeDelta.resolvedDestId as NodeId)?.summary).toBe("merged root");
+    expect(reconstructed.nodes.get(mergeDelta.resolvedDestId as NodeId)?.importance).toBe("high");
     // the two source roots dissolved
     expect(reconstructed.nodes.has("n1" as NodeId)).toBe(false);
     expect(reconstructed.nodes.has("n2" as NodeId)).toBe(false);

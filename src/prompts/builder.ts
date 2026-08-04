@@ -11,6 +11,7 @@ and stay within budget.
 Legend — graph listings use these marks:
 n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 🆕new 📦archived 🪦obsolete
 (no mark = active; obsolete hidden unless searched)
+Importance is how much a node matters if lost: critical — a hard, persistent constraint or correction; high — a decision, choice, or unresolved blocker; medium — meaningful context, not itself a decision or constraint; low — routine activity or minor detail. Set it when you make a node (\`mkdir\`/\`merge\`) and re-rate it (\`set_meta\`) as the graph matures.
 
 The graph is a containment tree: n.. nodes (concept folders) hold o.. observations
 (immutable leaves) and other nodes. \`nGoal\` is the predefined session-goal node at
