@@ -349,6 +349,17 @@ function missingIdMessage(id: string): string {
   return `No node or observation with id ${id}.`;
 }
 
+/** Count the observations a single id resolves to: 1 if the id is an
+ *  observation, the node's connected-observation count if the id is a node, 0
+ *  otherwise (used to detect a single-observation uncapped target). */
+function singleObsTargetCount(target: RecallTarget, id: string): number {
+  const obs = target.observations.get(id);
+  if (obs !== undefined) return 1;
+  const node = target.nodes.get(id as NodeId);
+  if (node !== undefined) return node.observationIds.length;
+  return 0;
+}
+
 /** Render a node as a drill-down payload: header at depth 0, direct children
  *  indented at depth 1 (child nodes one-lined, child observations per the
  *  active content mode). */
@@ -755,9 +766,10 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   }
 
   // render each candidate per the mode, then bound by the result token budget
-  // (per-item atomic — a single-observation full read is uncapped).
-  const singleObsFull = mode.kind === "full" && window.length === 1 && window[0].obs !== undefined;
-  const budget = singleObsFull ? null : getMemkeeperSettings().toolResultTokenBudget;
+  // (per-item atomic — a single-observation target is uncapped in any mode:
+  // full / lines / grep, a deliberate single drill returns whole).
+  const singleObs = window.length === 1 && window[0].obs !== undefined;
+  const budget = singleObs ? null : getMemkeeperSettings().toolResultTokenBudget;
   const units = window.map((c) => ({
     id: c.id,
     text:
@@ -854,9 +866,13 @@ async function executeIds(
     });
   }
 
-  // single-observation full read is uncapped the result-token-budget design; otherwise per-item atomic.
-  const singleObsFull = mode.kind === "full" && ids.length === 1 && target.observations.get(ids[0]) !== undefined;
-  const budget = singleObsFull ? null : getMemkeeperSettings().toolResultTokenBudget;
+  // A single-observation target is uncapped in any mode (full / lines / grep):
+  // a deliberate single drill returns whole. This covers both a direct
+  // observation id and a node whose connected observations total exactly one.
+  const budget =
+    ids.length === 1 && singleObsTargetCount(target, ids[0]) === 1
+      ? null
+      : getMemkeeperSettings().toolResultTokenBudget;
   const { text, footer } = budgetUnits(renderedUnits, budget, more, units.length, window[window.length - 1].id);
   const parts = [text];
   if (footer !== null) parts.push(footer);

@@ -748,6 +748,32 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       }
     });
 
+    it("single observation + lines is uncapped (any mode)", async () => {
+      seedSource();
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      try {
+        const out = text(await recall(tool(), { ids: ["o5"], lines: "1-1" }));
+        expect(out).toContain("1: Chose JWT for stateless auth");
+        expect(out).not.toContain("budget reached");
+      } finally {
+        _setGetMemkeeperSettings(null);
+      }
+    });
+
+    it("a node with exactly one observation is uncapped (single-obs target)", async () => {
+      // n7 has exactly one direct observation (o5); ids:["n7"] is a
+      // single-observation target and must be uncapped regardless of mode.
+      seedSource();
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      try {
+        const out = text(await recall(tool(), { ids: ["n7"], fullDetails: true }));
+        expect(out).toContain("Chose JWT for stateless auth");
+        expect(out).not.toContain("budget reached");
+      } finally {
+        _setGetMemkeeperSettings(null);
+      }
+    });
+
     it("contentPattern extracts grep excerpts with line numbers", async () => {
       seedSource();
       const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "JWT" }));

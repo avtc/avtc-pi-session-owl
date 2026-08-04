@@ -452,8 +452,10 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
         return { content: [{ type: "text", text: modeRes.error }], details: { error: true } };
       }
       const items = window.map(catUnitToItem);
-      const singleObsFull = modeRes.kind === "full" && window.filter((u) => u.content !== undefined).length === 1;
-      const budget = singleObsFull ? null : resultTokenBudget();
+      // A single-observation target is uncapped in ANY mode (full / lines / grep) —
+      // a deliberate single drill returns whole, regardless of extraction params.
+      const singleObs = window.filter((u) => u.content !== undefined).length === 1;
+      const budget = singleObs ? null : resultTokenBudget();
       const rendered = await renderBudgeted(items, {
         budget,
         mode: modeRes,

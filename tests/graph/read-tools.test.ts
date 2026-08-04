@@ -544,6 +544,26 @@ describe("result token budget + extraction", () => {
     expect(out).not.toContain("budget reached");
   });
 
+  it("cat single observation + lines is uncapped (any mode)", async () => {
+    // a single-observation target is uncapped regardless of mode — even lines.
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+    const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], lines: "2-4" }));
+    expect(out).toContain("2: the token is secret");
+    expect(out).toContain("4: token refresh logic");
+    expect(out).not.toContain("budget reached");
+  });
+
+  it("cat single observation + contentPattern is uncapped (any mode)", async () => {
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+    const out = textOf(
+      await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], contentPattern: "token" }),
+    );
+    // both token matches are present despite the 1-token budget (single-obs grep uncapped).
+    expect(out).toContain("2: the token is secret");
+    expect(out).toContain("4: token refresh logic");
+    expect(out).not.toContain("budget reached");
+  });
+
   it("cat contentPattern returns grep excerpts with line numbers", async () => {
     const out = textOf(
       await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], contentPattern: "token" }),
