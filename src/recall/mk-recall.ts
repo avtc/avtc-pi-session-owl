@@ -32,12 +32,12 @@ import {
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
 import { runRegexTests } from "../graph/regex-runner.js";
-import { budgetWindow, buildGrepExcerpt, sliceLineRange } from "../graph/result-budget.js";
+import { budgetReachedFooter, budgetWindow, runGrepExcerpts } from "../graph/result-budget.js";
 import {
   type ContentMode,
+  contentBlock,
   type GrepSpec,
-  type RenderItem,
-  renderBudgeted,
+  grepBlock,
   resolveContentMode,
 } from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
@@ -376,7 +376,9 @@ function renderNodePayload(
 }
 
 /** Render an observation per the active content mode: terse one-line, full
- *  content block, a line range, or grep excerpts. */
+ *  content block, a line range, or grep excerpts. Delegates the full/lines body
+ *  to the shared contentBlock and the grep body to the shared grepBlock, so the
+ *  body shape stays byte-identical to the graph read tools. */
 function renderObservationBlock(
   obs: RenderableObservation,
   mode: ContentMode,
@@ -385,16 +387,8 @@ function renderObservationBlock(
 ): string {
   if (mode.kind === "terse") return terseObservationLine(obs, showParent);
   const header = observationHeader(obs, showParent);
-  if (mode.kind === "full") return `${header}\n${obs.content}`;
-  if (mode.kind === "lines") {
-    const range = sliceLineRange(obs.content, `${mode.start}-${mode.end}`);
-    if ("error" in range || range.lines.length === 0) return header;
-    const numbered = range.lines.map((l, idx) => `  ${range.start + idx}: ${l}`);
-    return `${header}\n${numbered.join("\n")}`;
-  }
-  // grep — pre-computed excerpts (header + excerpt lines).
-  if (excerpts === undefined || excerpts.length === 0) return header;
-  return `${header}\n${excerpts.join("\n")}`;
+  if (mode.kind === "grep") return grepBlock(header, excerpts);
+  return contentBlock(header, obs.content, mode);
 }
 
 /** A terse observation line: delegates to the shared formatObservationLine with
@@ -686,41 +680,18 @@ function resolveRecallMode(fullDetails: boolean, params: MkRecallParams): { mode
 }
 
 /** Compute grep excerpts for a set of observations: batch-test contentPattern
- *  over their content lines in one worker round-trip, then build ±context
- *  excerpts (merged ranges) per observation. Returns the excerpts map, or an
- *  error string for a compile/worker failure. */
+ *  over their content lines in one worker round-trip (shared runGrepExcerpts),
+ *  then return the per-observation excerpt map. Returns an error string for a
+ *  compile/worker failure. */
 async function computeGrepExcerpts(
   observations: RenderableObservation[],
   pattern: RegExp,
   context: number,
 ): Promise<{ excerpts: ReadonlyMap<string, string[]> } | { error: string }> {
-  const perObs: { id: string; lines: string[] }[] = [];
-  const globalLines: string[] = [];
-  const owner: { obsIdx: number; localIdx: number }[] = [];
-  for (let oi = 0; oi < observations.length; oi += 1) {
-    const lines = observations[oi].content.split("\n");
-    perObs.push({ id: observations[oi].id, lines });
-    for (let li = 0; li < lines.length; li += 1) {
-      globalLines.push(lines[li]);
-      owner.push({ obsIdx: oi, localIdx: li });
-    }
-  }
-  const outcome = await runRegexTests(pattern, globalLines, getMemkeeperSettings().findTimeoutMs);
-  if ("error" in outcome) return { error: outcome.error };
-  const matchesPerObs: number[][] = observations.map(() => []);
-  for (let gi = 0; gi < globalLines.length; gi += 1) {
-    if (outcome.results[gi]) {
-      const o = owner[gi];
-      matchesPerObs[o.obsIdx].push(o.localIdx);
-    }
-  }
-  const excerpts = new Map<string, string[]>();
-  for (let oi = 0; oi < observations.length; oi += 1) {
-    if (matchesPerObs[oi].length > 0) {
-      excerpts.set(perObs[oi].id, buildGrepExcerpt(perObs[oi].lines, matchesPerObs[oi], context));
-    }
-  }
-  return { excerpts };
+  const items = observations.map((o) => ({ id: o.id, content: o.content }));
+  const result = await runGrepExcerpts(items, pattern, context, getMemkeeperSettings().findTimeoutMs);
+  if ("error" in result) return result;
+  return { excerpts: result.excerpts };
 }
 
 /** Pure recall logic (extracted for testability + so the tool shell stays thin). */
@@ -820,7 +791,7 @@ function budgetUnits(
   const budgeted = budgetWindow(units, budget);
   const lines = budgeted.kept.map((u) => u.text);
   if (budgeted.remaining > 0) {
-    lines.push(`budget reached · +${budgeted.remaining} more · afterId=${budgeted.lastKeptId}`);
+    lines.push(budgetReachedFooter(budgeted.remaining, budgeted.lastKeptId, "item"));
     return { text: lines.join("\n"), footer: null };
   }
   return { text: lines.join("\n"), footer: searchFooter(total, lastWindowId, paginateMore) };

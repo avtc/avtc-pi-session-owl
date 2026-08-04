@@ -159,6 +159,21 @@ describe("renderBudgeted — grep", () => {
     const out = await renderBudgeted(items, { budget: 3, mode: makeGrep("hit", 0), findTimeoutMs: 5000 });
     expect(out.note).toContain("more matches in this observation");
   });
+  it("emits the first excerpt even when it alone exceeds the remaining budget", async () => {
+    // the `&& emittedExcerpt` guard ensures the FIRST excerpt of an observation
+    // is always pushed once its header was emitted, even if that excerpt alone
+    // overflows the remaining budget. A regression that flips && to || (or drops
+    // the guard) would drop the first excerpt and must be caught here.
+    // header ~1 tok; one long matching line (~10 tok); budget ~2 → after the
+    // header ~1 tok remains, so the first excerpt (~2 tok) exceeds it but is
+    // still pushed; a second excerpt is dropped (→ more-matches note).
+    const longMatch = "hit".repeat(10);
+    const items: RenderItem[] = [{ id: "a", header: "h-a", content: `${longMatch}\nmiss\n${longMatch}` }];
+    const out = await renderBudgeted(items, { budget: 2, mode: makeGrep(longMatch, 0), findTimeoutMs: 5000 });
+    // the first excerpt IS present despite exceeding the budget.
+    expect(out.text).toContain("1: ");
+    expect(out.note).toContain("more matches in this observation");
+  });
   it("skips observations with no matches", async () => {
     const items: RenderItem[] = [
       { id: "a", header: "h-a", content: "nomatch" },

@@ -2,8 +2,13 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
-import { _setGetMemkeeperSettings, DEFAULT_CONFIG, type MemkeeperConfig } from "../../src/config/schema.js";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  _resetGetMemkeeperSettings,
+  _setGetMemkeeperSettings,
+  DEFAULT_CONFIG,
+  type MemkeeperConfig,
+} from "../../src/config/schema.js";
 import {
   applyCreateNode,
   applyRecordObservation,
@@ -193,7 +198,7 @@ function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
 }
 
 function setRenderMode(renderMode: MemkeeperConfig["renderMode"]): void {
-  _setGetMemkeeperSettings(() => ({ ...({ renderMode } as Partial<MemkeeperConfig>) }) as MemkeeperConfig);
+  _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, renderMode }));
 }
 
 function clearRenderMode(): void {
@@ -275,6 +280,7 @@ describe("mk_recall", () => {
   });
 
   describe("query — regex search + ranking", () => {
+    afterEach(() => _resetGetMemkeeperSettings());
     it("ranks by importance-then-recency, non-obsolete only (parent-state rule), flat with in <parent>", async () => {
       seedSource();
       const out = text(await recall(tool(), { query: "[Jj]wt|auth" }));
@@ -747,6 +753,18 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "JWT" }));
       expect(out).toContain("JWT");
       expect(out).toContain("📄 o5");
+    });
+
+    it("contentPattern on a NODE id re-renders its child observations with excerpts", async () => {
+      // ids:[nodeId] + contentPattern → executeIds re-renders the node payload so
+      // its child observations carry the grep excerpts (the node-payload + grep
+      // branch that the obs-only test above does not cover).
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["n7"], contentPattern: "JWT" }));
+      // the node header is present.
+      expect(out).toContain("📁 n7");
+      // the child observation o5 shows its grep excerpt line under the node.
+      expect(out).toContain("1: Chose JWT for stateless auth");
     });
 
     it("lines returns a 1-indexed range", async () => {

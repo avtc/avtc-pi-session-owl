@@ -35,7 +35,7 @@ import {
   ROOT_PARENT,
 } from "../types.js";
 import { runRegexTests } from "./regex-runner.js";
-import { budgetWindow } from "./result-budget.js";
+import { budgetReachedFooter, budgetWindow } from "./result-budget.js";
 import {
   type ContentMode,
   type GrepSpec,
@@ -321,7 +321,7 @@ function renderTerseWindow(
   const lines = budgeted.kept.map((k) => k.text);
   const budgetDropped = budgeted.remaining;
   if (budgetDropped > 0) {
-    lines.push(`… +${budgetDropped} more · afterId=${budgeted.lastKeptId} · budget reached`);
+    lines.push(budgetReachedFooter(budgetDropped, budgeted.lastKeptId, "item"));
     return { text: renderLines(lines), count: budgeted.kept.length, more: true };
   }
   if (paginateMore && window.length > 0) {

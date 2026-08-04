@@ -71,6 +71,15 @@ describe("runRegexTests", () => {
     const res = await runRegexTests(/foo/, ["foobar"], 0);
     if ("results" in res) expect(res.results).toEqual([true]);
   });
+
+  it("a NaN/undefined timeout is floored to the minimum (no immediate-kill)", async () => {
+    // a partial settings object missing findTimeoutMs must not produce a NaN
+    // timeout that fires immediately (killing the worker at 0 tested) — it is
+    // floored to the minimum so a fast pattern still completes.
+    const nan = Number.NaN;
+    const res = await runRegexTests(/foo/, ["foobar"], nan);
+    if ("results" in res) expect(res.results).toEqual([true]);
+  });
 });
 
 describe("runRegexTests synchronous fallback", () => {

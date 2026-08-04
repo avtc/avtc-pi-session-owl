@@ -302,11 +302,22 @@ function splitTopLevelAlternatives(body: string): string[] {
  *  classes intersect (`(a|.)+`, `(\d|[0-9])+`) are a ReDoS shape. */
 type CharClass =
   | { kind: "universal" }
-  | { kind: "explicit"; chars: Set<string> }
-  | { kind: "complement"; exclude: Set<string> }
+  | { kind: "explicit"; chars: ReadonlySet<string> }
+  | { kind: "complement"; exclude: ReadonlySet<string> }
   | { kind: "unknown" }; // can't statically classify → conservative overlap
 
 const DIGIT_CHARS = "0123456789";
+const WORD_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+const SPACE_CHARS =
+  " \f\n\r\t\v\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+/** Frozen char Sets for the \d/\w/\s shorthand classes, built once and reused
+ *  across firstCharClass + polynomialQuantifierChain (read-only: classesIntersect
+ *  never mutates). Hoisting avoids rebuilding the same Set on every call in the
+ *  per-alternation / per-character hot paths. */
+const DIGIT_CHAR_SET: ReadonlySet<string> = new Set(DIGIT_CHARS);
+const WORD_CHAR_SET: ReadonlySet<string> = new Set(WORD_CHARS);
+const SPACE_CHAR_SET: ReadonlySet<string> = new Set(SPACE_CHARS);
+
 /** Reject a run of this many (or more) ADJACENT OVERLAPPING unbounded
  *  quantifiers in one path — k such quantifiers that partition a common span
  *  cost O(n^k) when a later part fails to match. k≥2 is the danger threshold:
@@ -314,9 +325,6 @@ const DIGIT_CHARS = "0123456789";
  *  1000. Conservative per the stated policy (false positives acceptable, false
  *  negatives not). */
 const IMPRECISE_CHAIN_MAX = 2;
-const WORD_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-const SPACE_CHARS =
-  " \f\n\r\t\v\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
 
 /** Expand a `[...]` class body (without the brackets) into an explicit char set,
  *  applying ranges (`a-z`) and the standard shorthand escapes. */
@@ -382,12 +390,12 @@ function firstCharClass(branch: string): CharClass {
     if (c === "\\") {
       const next = branch[k + 1];
       if (next === "b" || next === "B") continue; // word-boundary assertions (zero-width)
-      if (next === "d") return { kind: "explicit", chars: new Set(DIGIT_CHARS) };
-      if (next === "w") return { kind: "explicit", chars: new Set(WORD_CHARS) };
-      if (next === "s") return { kind: "explicit", chars: new Set(SPACE_CHARS) };
-      if (next === "D") return { kind: "complement", exclude: new Set(DIGIT_CHARS) };
-      if (next === "W") return { kind: "complement", exclude: new Set(WORD_CHARS) };
-      if (next === "S") return { kind: "complement", exclude: new Set(SPACE_CHARS) };
+      if (next === "d") return { kind: "explicit", chars: DIGIT_CHAR_SET };
+      if (next === "w") return { kind: "explicit", chars: WORD_CHAR_SET };
+      if (next === "s") return { kind: "explicit", chars: SPACE_CHAR_SET };
+      if (next === "D") return { kind: "complement", exclude: DIGIT_CHAR_SET };
+      if (next === "W") return { kind: "complement", exclude: WORD_CHAR_SET };
+      if (next === "S") return { kind: "complement", exclude: SPACE_CHAR_SET };
       if (next !== undefined) return { kind: "explicit", chars: new Set([next]) }; // any other escaped char
       return { kind: "unknown" };
     }
@@ -518,12 +526,12 @@ function polynomialQuantifierChain(pattern: string): number {
     const ch = pattern[i];
     if (ch === "\\") {
       const next = pattern[i + 1];
-      if (next === "d") pendingOperand = { kind: "explicit", chars: new Set(DIGIT_CHARS) };
-      else if (next === "w") pendingOperand = { kind: "explicit", chars: new Set(WORD_CHARS) };
-      else if (next === "s") pendingOperand = { kind: "explicit", chars: new Set(SPACE_CHARS) };
-      else if (next === "D") pendingOperand = { kind: "complement", exclude: new Set(DIGIT_CHARS) };
-      else if (next === "W") pendingOperand = { kind: "complement", exclude: new Set(WORD_CHARS) };
-      else if (next === "S") pendingOperand = { kind: "complement", exclude: new Set(SPACE_CHARS) };
+      if (next === "d") pendingOperand = { kind: "explicit", chars: DIGIT_CHAR_SET };
+      else if (next === "w") pendingOperand = { kind: "explicit", chars: WORD_CHAR_SET };
+      else if (next === "s") pendingOperand = { kind: "explicit", chars: SPACE_CHAR_SET };
+      else if (next === "D") pendingOperand = { kind: "complement", exclude: DIGIT_CHAR_SET };
+      else if (next === "W") pendingOperand = { kind: "complement", exclude: WORD_CHAR_SET };
+      else if (next === "S") pendingOperand = { kind: "complement", exclude: SPACE_CHAR_SET };
       else if (next !== undefined) pendingOperand = { kind: "explicit", chars: new Set([next]) };
       else pendingOperand = null;
       if (lastQuant) lastQuant.atomsSince += 1;

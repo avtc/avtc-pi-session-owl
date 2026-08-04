@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Higher-level budgeted content rendering shared by the graph read tools
-// (cat/find/ls) and the agent mk_recall. Builds on the pure helpers in
-// result-budget.ts (budgetWindow, buildGrepExcerpt, sliceLineRange,
-// parseLineRange) and adds:
+// Higher-level budgeted content rendering for the graph read tools
+// (cat/find/ls). Builds on the pure helpers in result-budget.ts (budgetWindow,
+// runGrepExcerpts, sliceLineRange, parseLineRange) and adds:
 //  - content-mode resolution (terse / full / grep / lines),
 //  - the two-stage result token budget (terse structure first, then expand top-down
 //    one whole item at a time),
@@ -13,11 +12,13 @@
 //
 // The tools stay thin: they fetch + select the items (as RenderItems), compile
 // contentPattern (via tryCompileFindRegex, handling the error), resolve the
-// mode + budget, and hand both to `renderBudgeted`.
+// mode + budget, and hand both to `renderBudgeted`. The agent mk_recall shares
+// the lower-level primitives (contentBlock, grepBlock, runGrepExcerpts) but
+// keeps its own opaque-unit budgeting (its units are heterogeneous node
+// payloads / observations / not-found blocks).
 
 import { estimateContentTokens } from "../types.js";
-import { runRegexTests } from "./regex-runner.js";
-import { budgetWindow, buildGrepExcerpt, parseLineRange, sliceLineRange } from "./result-budget.js";
+import { budgetReachedFooter, budgetWindow, parseLineRange, runGrepExcerpts, sliceLineRange } from "./result-budget.js";
 
 /** How to render an observation's content within a result. */
 export type ContentMode =
@@ -102,9 +103,11 @@ export async function renderBudgeted(items: RenderItem[], opts: BudgetedOptions)
 // --- uncapped (single-observation full read) -------------------------------
 
 async function renderUncapped(items: RenderItem[], opts: BudgetedOptions): Promise<BudgetedResult> {
-  // full / lines / grep expand content; terse uses headers only.
-  const expanded = await expandItems(items, opts.mode, opts.findTimeoutMs);
-  if ("error" in expanded) return { text: expanded.error, note: NO_ITEMS_NOTE, lastId: null };
+  // The uncapped path serves the single-observation full read (budget=null).
+  // Grep (if it ever reached here uncapped) reuses the grep renderer with an
+  // infinite budget; full / lines / terse expand via expandItems.
+  if (opts.mode.kind === "grep") return renderGrepBudgeted(items, opts);
+  const expanded = expandItems(items, opts.mode);
   const parts: string[] = [];
   for (const e of expanded) parts.push(e.render);
   return { text: parts.join("\n"), note: NO_ITEMS_NOTE, lastId: items[items.length - 1].id };
@@ -117,7 +120,7 @@ function renderTerseBudgeted(items: RenderItem[], budget: number): BudgetedResul
   const { kept, remaining, lastKeptId } = budgetWindow(budgeted, budget);
   return {
     text: kept.map((k) => k.text).join("\n"),
-    note: remaining > 0 ? `budget reached · ${remaining} more item${remaining === 1 ? "" : "s"}` : null,
+    note: remaining > 0 ? budgetReachedFooter(remaining, lastKeptId, "item") : null,
     lastId: lastKeptId,
   };
 }
@@ -140,18 +143,19 @@ async function renderTwoStageBudgeted(items: RenderItem[], opts: BudgetedOptions
       // headers overflow → partial list of headers up to i.
       const kept = items.slice(0, i);
       const remaining = items.length - i;
+      const lastKeptId = kept.length > 0 ? kept[kept.length - 1].id : null;
       return {
         text: kept.map((k) => k.header).join("\n"),
-        note: `budget reached · ${remaining} more item${remaining === 1 ? "" : "s"}`,
-        lastId: kept.length > 0 ? kept[kept.length - 1].id : null,
+        note: budgetReachedFooter(remaining, lastKeptId, "item"),
+        lastId: lastKeptId,
       };
     }
     headerTotal = next;
   }
 
   // stage 2: all headers fit. Expand content top-down, one whole item at a time.
-  const expanded = await expandItems(items, opts.mode, opts.findTimeoutMs);
-  if ("error" in expanded) return { text: expanded.error, note: null, lastId: null };
+  // (opts.mode is full|lines here — terse + grep route to their own renderers.)
+  const expanded = expandItems(items, opts.mode as ExpandMode);
 
   let remaining = budget - headerTotal;
   const parts: string[] = [];
@@ -189,34 +193,16 @@ async function renderGrepBudgeted(items: RenderItem[], opts: BudgetedOptions): P
   }
   const grep = opts.mode;
 
-  // batch all content lines through one worker round-trip.
-  const perObsLines: { id: string; lines: string[] }[] = [];
-  const globalLines: string[] = [];
-  const lineOwner: { itemIdx: number; localIdx: number }[] = [];
-  for (let i = 0; i < items.length; i += 1) {
-    const content = items[i].content ?? "";
-    const lines = content.length === 0 ? [] : content.split("\n");
-    perObsLines.push({ id: items[i].id, lines });
-    for (let li = 0; li < lines.length; li += 1) {
-      globalLines.push(lines[li]);
-      lineOwner.push({ itemIdx: i, localIdx: li });
-    }
-  }
-  const outcome = await runRegexTests(grep.pattern, globalLines, opts.findTimeoutMs);
-  if ("error" in outcome) return { text: outcome.error, note: null, lastId: null };
-
-  // map hits → per-item matched local line indices.
-  const matchesPerItem: number[][] = items.map(() => []);
-  for (let gi = 0; gi < globalLines.length; gi += 1) {
-    if (outcome.results[gi]) {
-      const owner = lineOwner[gi];
-      matchesPerItem[owner.itemIdx].push(owner.localIdx);
-    }
-  }
+  // batch all content lines through one worker round-trip (shared helper).
+  const grepable = items.map((i) => ({ id: i.id, content: i.content ?? "" }));
+  const result = await runGrepExcerpts(grepable, grep.pattern, grep.context, opts.findTimeoutMs);
+  if ("error" in result) return { text: result.error, note: null, lastId: null };
+  const matchesPerItem = result.matchesPerItem;
+  const perObsExcerpts = result.excerpts;
 
   const timedOutNote =
-    "testedCount" in outcome
-      ? `grep timed out after ${(outcome.timedOutMs / 1000).toFixed(0)}s · partial excerpts`
+    result.timedOutMs !== null
+      ? `grep timed out after ${(result.timedOutMs / 1000).toFixed(0)}s · partial excerpts`
       : null;
 
   let total = 0;
@@ -229,7 +215,7 @@ async function renderGrepBudgeted(items: RenderItem[], opts: BudgetedOptions): P
     if (matches.length === 0) continue; // no matches in this obs → skip entirely
     const header = items[i].header;
     const headerTokens = estimateContentTokens(header);
-    const excerpts = buildGrepExcerpt(perObsLines[i].lines, matches, grep.context);
+    const excerpts = perObsExcerpts.get(items[i].id) ?? [];
     // emit header (atomic with its first excerpt? emit header, then excerpts).
     if (total + headerTokens > budget && parts.length > 0) {
       // header won't fit → stop before this observation.
@@ -270,42 +256,45 @@ function countRemainingObs(matchesPerItem: number[][], fromIdx: number): number 
   return n;
 }
 
-// --- per-item expansion (full / lines / grep) ------------------------------
+// --- per-item expansion (full / lines) --------------------------------------
 
 interface ExpandedItem {
   render: string;
 }
 
-/** Expand each item under the mode (full = header + whole content; lines =
- *  header + line range). Returns the per-item rendered block. Grep is handled
- *  separately by renderGrepBudgeted (worker batching), so this only covers
- *  full / lines / terse. */
-async function expandItems(
-  items: RenderItem[],
-  mode: ContentMode,
-  _findTimeoutMs: number,
-): Promise<ExpandedItem[] | { error: string }> {
-  if (mode.kind === "grep") {
-    // grep uses its own renderer; expandItems is not called for grep in the
-    // uncapped path except via renderUncapped — handle there by falling back.
-    return items.map((i) => ({ render: contentBlock(i, mode) }));
-  }
-  return items.map((i) => ({ render: contentBlock(i, mode) }));
+/** The content modes that expand each item's body here (full / lines). Grep
+ *  has its own renderer (renderGrepBudgeted — worker-batched excerpts) and is
+ *  never routed through expandItems/contentBlock. */
+type ExpandMode = Exclude<ContentMode, { kind: "grep" }>;
+
+/** Expand each item under a full/lines mode (full = header + whole content;
+ *  lines = header + a numbered line range). Returns the per-item rendered
+ *  block. Grep is handled separately by renderGrepBudgeted (worker batching),
+ *  so this only covers full / lines / terse. */
+function expandItems(items: RenderItem[], mode: ExpandMode): ExpandedItem[] {
+  return items.map((i) => ({ render: contentBlock(i.header, i.content, mode) }));
 }
 
-/** One item's body under full/lines/terse: header, then the content block
- *  (full content, a line range, or nothing for terse / content-less items). */
-function contentBlock(item: RenderItem, mode: ContentMode): string {
-  if (item.content === undefined) return item.header;
-  if (mode.kind === "terse") return item.header;
-  if (mode.kind === "full") return `${item.header}\n${item.content}`;
-  if (mode.kind === "lines") {
-    const range = sliceLineRange(item.content, `${mode.start}-${mode.end}`);
-    if ("error" in range) return item.header;
-    if (range.lines.length === 0) return item.header;
-    const numbered = range.lines.map((l, idx) => `  ${range.start + idx}: ${l}`);
-    return `${item.header}\n${numbered.join("\n")}`;
-  }
-  // grep (fallback only — renderGrepBudgeted is the real path)
-  return item.header;
+/** Render one item's body under full/lines/terse: header, then the content
+ *  block (full content, a numbered line range, or nothing for terse /
+ *  content-less items). Shared with the agent mk_recall, which passes a
+ *  pre-computed header + content (and, for grep, pre-computed excerpts). */
+export function contentBlock(header: string, content: string | undefined, mode: ExpandMode): string {
+  if (content === undefined) return header;
+  if (mode.kind === "terse") return header;
+  if (mode.kind === "full") return `${header}\n${content}`;
+  // lines
+  const range = sliceLineRange(content, `${mode.start}-${mode.end}`);
+  if ("error" in range) return header;
+  if (range.lines.length === 0) return header;
+  const numbered = range.lines.map((l, idx) => `  ${range.start + idx}: ${l}`);
+  return `${header}\n${numbered.join("\n")}`;
+}
+
+/** Render one item's body when grep excerpts were pre-computed (header + the
+ *  excerpt lines, or header-only when there are no excerpts). Used by the agent
+ *  mk_recall, which pre-computes excerpts for the observations in its window. */
+export function grepBlock(header: string, excerpts: readonly string[] | undefined): string {
+  if (excerpts === undefined || excerpts.length === 0) return header;
+  return `${header}\n${excerpts.join("\n")}`;
 }

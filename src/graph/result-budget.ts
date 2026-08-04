@@ -9,6 +9,7 @@
 // budget — the same heuristic Pi's own compaction applies.
 
 import { estimateContentTokens } from "../types.js";
+import { runRegexTests } from "./regex-runner.js";
 
 /** A rendered item with an id (for the continuation cursor) and its text. */
 export interface BudgetItem {
@@ -102,4 +103,82 @@ export function sliceLineRange(content: string, range: string): { lines: string[
   const end = Math.min(lines.length, parsed.end);
   if (start > lines.length) return { lines: [], start };
   return { lines: lines.slice(start - 1, end), start };
+}
+
+/** An item whose content is grep-able. */
+export interface GrepableItem {
+  id: string;
+  content: string;
+}
+
+/** Build the uniform budget-reached footer shown when a result list is
+ *  truncated by the token budget. Always carries the continuation cursor
+ *  (`afterId`) so the agent/user can page — truncation always has a cursor.
+ *  `noun` ("item" | "match" | "observation") labels what "more" counts, for the
+ *  rare caller where the unit is ambiguous; it pluralizes itself. */
+export function budgetReachedFooter(
+  remaining: number,
+  lastKeptId: string | null,
+  noun: "item" | "match" | "observation",
+): string {
+  const unit = `${noun}${remaining === 1 ? "" : "s"}`;
+  const cursor = lastKeptId === null ? "" : ` · afterId=${lastKeptId}`;
+  return `budget reached · +${remaining} more ${unit}${cursor}`;
+}
+
+/** Outcome of batching a contentPattern over many items' content lines in one
+ *  worker round-trip (see runGrepExcerpts). */
+export interface GrepExcerptsOutcome {
+  /** For each input item (in order), the 0-indexed local line indices that
+   *  matched. */
+  matchesPerItem: number[][];
+  /** Built excerpts keyed by item id (only items with >=1 match). */
+  excerpts: ReadonlyMap<string, string[]>;
+  /** Non-null when the worker timed out (partial results). */
+  timedOutMs: number | null;
+}
+
+/** Batch-test a contentPattern over many items' content lines in ONE worker
+ *  round-trip (via runRegexTests), map the hits back to per-item local line
+ *  indices, and build ±context excerpts (merged ranges) per item. Shared by the
+ *  budgeted grep renderer and the agent mk_recall's pre-compute path. Returns an
+ *  error string on a compile/worker failure (surfaced verbatim to the caller). */
+export async function runGrepExcerpts(
+  items: readonly GrepableItem[],
+  pattern: RegExp,
+  context: number,
+  timeoutMs: number,
+): Promise<GrepExcerptsOutcome | { error: string }> {
+  const perItemLines: string[][] = [];
+  const globalLines: string[] = [];
+  const owner: { itemIdx: number; localIdx: number }[] = [];
+  for (let ii = 0; ii < items.length; ii += 1) {
+    const content = items[ii].content ?? "";
+    const lines = content.length === 0 ? [] : content.split("\n");
+    perItemLines.push(lines);
+    for (let li = 0; li < lines.length; li += 1) {
+      globalLines.push(lines[li]);
+      owner.push({ itemIdx: ii, localIdx: li });
+    }
+  }
+  const outcome = await runRegexTests(pattern, globalLines, timeoutMs);
+  if ("error" in outcome) return outcome;
+  const matchesPerItem: number[][] = items.map(() => []);
+  for (let gi = 0; gi < globalLines.length; gi += 1) {
+    if (outcome.results[gi]) {
+      const o = owner[gi];
+      matchesPerItem[o.itemIdx].push(o.localIdx);
+    }
+  }
+  const excerpts = new Map<string, string[]>();
+  for (let ii = 0; ii < items.length; ii += 1) {
+    if (matchesPerItem[ii].length > 0) {
+      excerpts.set(items[ii].id, buildGrepExcerpt(perItemLines[ii], matchesPerItem[ii], context));
+    }
+  }
+  return {
+    matchesPerItem,
+    excerpts,
+    timedOutMs: "testedCount" in outcome ? outcome.timedOutMs : null,
+  };
 }

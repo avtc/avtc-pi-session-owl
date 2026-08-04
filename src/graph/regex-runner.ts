@@ -147,7 +147,7 @@ async function runInWorker(regex: RegExp, strings: string[], timeoutMs: number):
   const id = nextRequestId;
   nextRequestId += 1;
   const w = getWorker();
-  const effectiveTimeout = Math.max(timeoutMs, MIN_TIMEOUT_MS);
+  const effectiveTimeout = Math.max(Number(timeoutMs) || MIN_TIMEOUT_MS, MIN_TIMEOUT_MS);
   const results: boolean[] = new Array(strings.length).fill(false);
   return new Promise<RegexTestOutcome>((resolve) => {
     // entry is mutated by the worker's per-result messages (results + testedCount);
