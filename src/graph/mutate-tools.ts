@@ -199,9 +199,6 @@ export function makeMergeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
     parameters: MERGE_PARAMS,
     async execute(_toolCallId, params) {
       const destId = (params.destId ?? null) as NodeId | null;
-      if (destId === null && (params.newSummary === undefined || params.newSummary.length === 0)) {
-        return errorResult("merge: newSummary is required when destId is null (names the new root node).");
-      }
       return runMutate(
         ctx,
         "merge",

@@ -40,7 +40,8 @@ import {
 
 import { MUTATE_WORKING_COPY } from "../graph/mutations.js";
 import { makeReadTools, makeTryFinishTool } from "../graph/read-tools.js";
-import type { SelectorWorkingCopy, TodoItem } from "./input-view.js";
+import type { TodoBridge, TodoItem } from "../todo/types.js";
+import type { SelectorWorkingCopy } from "./input-view.js";
 
 /** Re-export the Selector-only summary tool name for callers/tests. */
 export { SET_SUMMARY_TOOL };
@@ -107,9 +108,6 @@ export function makeFileReadTools(cwd: string): AgentTool[] {
  *  not installed → no `todo_list` tool (graceful degrade; not an error). This is
  *  the contract the todo bridge satisfies; the tool here only reads it.
  *  The item shape is the shared `TodoItem` (same as the input-view render). */
-export interface TodoBridge {
-  getItems(filter?: { status?: TodoItem["status"] }): TodoItem[];
-}
 
 const TODO_LIST_PARAMS = Type.Object({
   status: Type.Optional(

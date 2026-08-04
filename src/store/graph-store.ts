@@ -270,19 +270,30 @@ export async function load(ctx: StoreContext): Promise<void> {
     });
   }
 
-  // 2. populate the observation content index from EVERY observation entry
-  //    (observations are immutable + never pruned, so all entries contribute).
+  // 2. single pass over the branch: populate the observation content index
+  //    (from EVERY observation entry — they are immutable + never pruned, so
+  //    all contribute), replay nothing here, and pick up the latest-wins
+  //    selected tree + usage ledger. Folding the selection/usage latest-wins
+  //    into the observation pass avoids a second full-branch scan.
   for (const e of entries) {
-    if (!isCustomEntry(e) || e.customType !== OBSERVATION_TYPE) continue;
-    const payload = e.data as ObservationEntry | undefined;
-    if (payload === undefined) continue;
-    if (typeof payload.coversUpToId === "string") {
-      storeState.observerFrontier = payload.coversUpToId;
-    }
-    if (!Array.isArray(payload.records)) continue;
-    for (const rec of payload.records) {
-      const obs = decodeObservation(rec);
-      if (obs !== null) graph.observations.set(obs.id, obs);
+    if (!isCustomEntry(e)) continue;
+    if (e.customType === OBSERVATION_TYPE) {
+      const payload = e.data as ObservationEntry | undefined;
+      if (payload === undefined) continue;
+      if (typeof payload.coversUpToId === "string") {
+        storeState.observerFrontier = payload.coversUpToId;
+      }
+      if (!Array.isArray(payload.records)) continue;
+      for (const rec of payload.records) {
+        const obs = decodeObservation(rec);
+        if (obs !== null) graph.observations.set(obs.id, obs);
+      }
+    } else if (e.customType === SELECTION_TYPE) {
+      const tree = decodeSelection(e.data);
+      if (tree !== null) storeState.selectedTree = tree;
+    } else if (e.customType === USAGE_TYPE) {
+      const usage = decodeUsage((e.data as { ledger?: unknown } | undefined)?.ledger);
+      if (usage !== null) storeState.usageLedger = usage;
     }
   }
 
@@ -306,18 +317,6 @@ export async function load(ctx: StoreContext): Promise<void> {
 
   // 4. reconcile observation links (post-snapshot obs → their wrapper nodes).
   reconcileLinks(graph);
-
-  // 5. latest selected tree + usage ledger win over the snapshot baseline.
-  for (const e of entries) {
-    if (!isCustomEntry(e)) continue;
-    if (e.customType === SELECTION_TYPE) {
-      const tree = decodeSelection(e.data);
-      if (tree !== null) storeState.selectedTree = tree;
-    } else if (e.customType === USAGE_TYPE) {
-      const usage = decodeUsage((e.data as { ledger?: unknown } | undefined)?.ledger);
-      if (usage !== null) storeState.usageLedger = usage;
-    }
-  }
 
   storeState.graph = graph;
 }

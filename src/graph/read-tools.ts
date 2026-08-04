@@ -35,7 +35,7 @@ import {
   ROOT_PARENT,
 } from "../types.js";
 import { runRegexTests } from "./regex-runner.js";
-import { budgetReachedFooter, budgetWindow } from "./result-budget.js";
+import { budgetReachedFooter, budgetWindow, searchTimeoutNote } from "./result-budget.js";
 import {
   type ContentMode,
   type GrepSpec,
@@ -672,10 +672,9 @@ export async function collectFindMatches(
   // a timeout returns the PARTIAL matches found so far + a note surfacing that
   // the search was stopped (so the caller can tell the agent/user).
   if ("testedCount" in outcome) {
-    const seconds = outcome.timedOutMs / 1000;
     return {
       matches,
-      note: `Search timed out after ${seconds}s — tested ${outcome.testedCount} of ${texts.length} items before the kill. These are partial results; refine or narrow the query.`,
+      note: searchTimeoutNote(outcome.timedOutMs, outcome.testedCount, texts.length),
     };
   }
   return { matches };

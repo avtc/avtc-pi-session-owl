@@ -14,9 +14,9 @@
 
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "./config/schema.js";
+import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./format/chunk.js";
 import { measureRootViewTokens } from "./graph/read-tools.js";
 import { log } from "./log.js";
-import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./observer/chunk.js";
 import { acquireOrSkip, inFlight, type StageName } from "./runtime/run-lock.js";
 import { getGraphStore } from "./store/graph-store.js";
 import { estimateContentTokens } from "./types.js";

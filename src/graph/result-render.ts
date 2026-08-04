@@ -153,24 +153,31 @@ async function renderTwoStageBudgeted(items: RenderItem[], opts: BudgetedOptions
     headerTotal = next;
   }
 
-  // stage 2: all headers fit. Expand content top-down, one whole item at a time.
+  // stage 2: all headers fit. Expand content top-down, one whole item at a
+  // time. The expansion is computed LAZILY per item (contentBlock only for
+  // items with content that may fit), so items past the budget cutoff are never
+  // rendered — only their (already-computed) header is reused.
   // (opts.mode is full|lines here — terse + grep route to their own renderers.)
-  const expanded = expandItems(items, opts.mode as ExpandMode);
+  const mode = opts.mode as ExpandMode;
 
   let remaining = budget - headerTotal;
   const parts: string[] = [];
   let unexpandedWithContent = 0;
   for (let i = 0; i < items.length; i += 1) {
     const item = items[i];
-    const exp = expanded[i];
-    const expansionTokens = estimateContentTokens(exp.render) - headerTokens[i];
-    if (item.content !== undefined && expansionTokens <= remaining) {
-      parts.push(exp.render);
-      remaining -= expansionTokens;
-    } else {
-      // header-only (expansion doesn't fit → stop expanding).
+    if (item.content !== undefined) {
+      const render = contentBlock(item.header, item.content, mode);
+      const expansionTokens = estimateContentTokens(render) - headerTokens[i];
+      if (expansionTokens <= remaining) {
+        parts.push(render);
+        remaining -= expansionTokens;
+        continue;
+      }
+      // expansion doesn't fit → header-only.
       parts.push(item.header);
-      if (item.content !== undefined) unexpandedWithContent += 1;
+      unexpandedWithContent += 1;
+    } else {
+      parts.push(item.header);
     }
   }
   const note =

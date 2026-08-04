@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import type { TodoContext, TodoItem } from "../selector/input-view.js";
-import type { TodoBridge } from "../selector/tools.js";
 import type { TodoItemsStatus, TodoReadyItem } from "../snippets/vendored/subscribe-to-todo.js";
+import type { TodoBridge, TodoContext, TodoItem } from "./types.js";
 
 /** The subset of the vendored `subscribeToTodo` proxy the adapter consumes —
  *  just `getItems` (the read-only full-list getter). The proxy's other methods

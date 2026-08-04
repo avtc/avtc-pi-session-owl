@@ -34,6 +34,7 @@ import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify } from "../runtime/model.js";
 import { decodeNode, encodeSelection, type SerializedSelection } from "../store/codecs.js";
 import { type GraphStore, getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
+import type { TodoBridge, TodoContext } from "../todo/types.js";
 import {
   estimateContentTokens,
   type MemkeeperGraph as Graph,
@@ -45,14 +46,8 @@ import {
   type ObsId,
 } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
-import {
-  buildSelectorInputView,
-  renderWorkingRoots,
-  type SelectorInputView,
-  type TailBoundary,
-  type TodoContext,
-} from "./input-view.js";
-import { makeSelectorTools, SELECTOR_MUTATE_TOOL_NAMES, type TodoBridge } from "./tools.js";
+import { buildSelectorInputView, renderWorkingRoots, type SelectorInputView, type TailBoundary } from "./input-view.js";
+import { makeSelectorTools, SELECTOR_MUTATE_TOOL_NAMES } from "./tools.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 

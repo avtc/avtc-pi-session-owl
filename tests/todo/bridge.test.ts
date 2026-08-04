@@ -2,9 +2,8 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import type { TodoContext, TodoItem } from "../../src/selector/input-view.js";
-import type { TodoBridge } from "../../src/selector/tools.js";
 import { makeTodoAdapter, type TodoProxy } from "../../src/todo/bridge.js";
+import type { TodoBridge, TodoContext, TodoItem } from "../../src/todo/types.js";
 
 /** Build a minimal fake proxy for testing (only the methods the adapter uses). */
 function fakeProxy(items: RawItem[]): TodoProxy {

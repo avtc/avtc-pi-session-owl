@@ -616,6 +616,14 @@ describe("result token budget + extraction", () => {
     _resetGetMemkeeperSettings();
   });
 
+  it("cat rejects a malformed contentPattern with the compiler error", async () => {
+    // resolveGrepSpec → tryCompileFindRegex error branch (unclosed paren) must
+    // surface to the caller, not be swallowed.
+    const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], contentPattern: "a(" }));
+    expect(out.toLowerCase()).toContain("invalid regex");
+    expect(out).toContain("a(");
+  });
+
   it("cat lines returns the requested 1-indexed range, clamped", async () => {
     const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], lines: "2-3" }));
     expect(out).toContain("2: the token is secret");
@@ -628,6 +636,16 @@ describe("result token budget + extraction", () => {
       await callTool(makeBuilderReadTools(grepGraph()), "find", { query: "token", contentPattern: "secret" }),
     );
     expect(out).toContain("2: the token is secret");
+  });
+
+  it("find rejects a malformed contentPattern with the compiler error", async () => {
+    // resolveGrepSpec → tryCompileFindRegex error branch (unclosed paren) must
+    // surface to the find caller too.
+    const out = textOf(
+      await callTool(makeBuilderReadTools(grepGraph()), "find", { query: "token", contentPattern: "a(" }),
+    );
+    expect(out.toLowerCase()).toContain("invalid regex");
+    expect(out).toContain("a(");
   });
 
   it("ls budget truncates the root list with a footer", async () => {

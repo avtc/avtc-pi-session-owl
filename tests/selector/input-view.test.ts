@@ -552,7 +552,8 @@ describe("buildTail", () => {
 
 // --- buildTodo tests --------------------------------------------------------
 
-import { buildTodo, type TodoContext, type TodoItem } from "../../src/selector/input-view.js";
+import { buildTodo } from "../../src/selector/input-view.js";
+import type { TodoContext, TodoItem } from "../../src/todo/types.js";
 
 function item(id: string, name: string, status: TodoItem["status"], details: string | null): TodoItem {
   return details === null ? { id, name, status } : { id, name, status, details };

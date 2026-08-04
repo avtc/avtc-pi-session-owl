@@ -808,6 +808,15 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       expect(out).toContain("📄 o5");
     });
 
+    it("rejects a malformed contentPattern with the compiler error", async () => {
+      // resolveGrepSpec → tryCompileFindRegex error branch (unclosed paren) must
+      // surface to the mk_recall caller (resolveRecallMode consumer).
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "a(" }));
+      expect(out.toLowerCase()).toContain("invalid regex");
+      expect(out).toContain("a(");
+    });
+
     it("contentPattern on a NODE id re-renders its child observations with excerpts", async () => {
       // ids:[nodeId] + contentPattern → executeIds re-renders the node payload so
       // its child observations carry the grep excerpts (the node-payload + grep
@@ -854,6 +863,43 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       const store = getGraphStore();
       store.graph = g;
       const out = text(await recall(tool(), { ids: ["o1"], contentPattern: "(.+a)(.+a)b" }));
+      expect(out.toLowerCase()).toContain("grep timed out");
+      _setGetMemkeeperSettings(null);
+    });
+
+    it("search-path contentPattern timeout surfaces the grep-timeout note", async () => {
+      // The search path (query, not ids) has its OWN note plumbing
+      // (mk-recall.ts:761). A contentPattern grep timeout over a large
+      // observation found via search must surface the note too — not just the
+      // ids path (covered above).
+      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
+      seedSource();
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(g, {
+        id: "n1",
+        summary: "slow grep target",
+        importance: "medium",
+        parentNode: null,
+        state: "active",
+      });
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "o1",
+          content: "a".repeat(4000).concat("!"),
+          importance: "medium",
+          sourceEntryIds: [],
+          timestamp: T0,
+          parentNode: "n1",
+        }),
+      });
+      const store = getGraphStore();
+      store.graph = g;
+      // A time bound (from) makes this the search path (noFilters=false) with
+      // no query (regex===null → every observation is a candidate); the
+      // contentPattern then runs the catastrophic grep over o1's content.
+      const out = text(await recall(tool(), { from: "2020-01-01 00:00", contentPattern: "(.+a)(.+a)b" }));
       expect(out.toLowerCase()).toContain("grep timed out");
       _setGetMemkeeperSettings(null);
     });

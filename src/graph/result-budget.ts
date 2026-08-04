@@ -126,6 +126,14 @@ export function budgetReachedFooter(
   return `budget reached · +${remaining} more ${unit}${cursor}`;
 }
 
+/** The note surfaced when a find/search times out: how long it ran, how many of
+ *  the candidate items were tested before the worker was killed, and the hint
+ *  to narrow the query. Shared by find (read-tools) and mk_recall search. */
+export function searchTimeoutNote(timedOutMs: number, testedCount: number, total: number): string {
+  const seconds = Math.floor(timedOutMs / 1000);
+  return `Search timed out after ${seconds}s — tested ${testedCount} of ${total} items before the kill. These are partial results; refine or narrow the query.`;
+}
+
 /** Outcome of batching a contentPattern over many items' content lines in one
  *  worker round-trip (see runGrepExcerpts). */
 export interface GrepExcerptsOutcome {

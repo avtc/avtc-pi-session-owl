@@ -2,7 +2,13 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import { budgetWindow, buildGrepExcerpt, parseLineRange, sliceLineRange } from "../../src/graph/result-budget.js";
+import {
+  budgetWindow,
+  buildGrepExcerpt,
+  parseLineRange,
+  searchTimeoutNote,
+  sliceLineRange,
+} from "../../src/graph/result-budget.js";
 
 describe("budgetWindow", () => {
   it("keeps all items when under budget", () => {
@@ -111,5 +117,22 @@ describe("sliceLineRange", () => {
   it("surfaces a parse error", () => {
     const out = sliceLineRange(content, "bad");
     expect("error" in out).toBe(true);
+  });
+});
+
+describe("searchTimeoutNote", () => {
+  it("formats seconds, tested of total, with the partial-results hint", () => {
+    const note = searchTimeoutNote(30_000, 4, 10);
+    expect(note).toBe(
+      "Search timed out after 30s — tested 4 of 10 items before the kill. These are partial results; refine or narrow the query.",
+    );
+  });
+
+  it("floors fractional seconds to a whole number", () => {
+    // a 300ms timeout renders as 0s (Math.floor), not 0.3s — timeout notes
+    // read better as whole seconds.
+    const note = searchTimeoutNote(300, 0, 5);
+    expect(note).toContain("after 0s —");
+    expect(note).toContain("tested 0 of 5 items");
   });
 });

@@ -8,8 +8,8 @@ import type {
   SessionEntry,
   SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
-import { stripAnsi } from "../format/sanitize.js";
 import { CHARS_PER_TOKEN_ESTIMATE } from "../types.js";
+import { stripAnsi } from "./sanitize.js";
 
 /**
  * One rendered tag-block in the Observer's XML-tagged chunk format. A block is

@@ -17,7 +17,7 @@ import type {
   SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { buildChunks, type ChunkOptions, hasAssistantText, renderBlocks } from "../../src/observer/chunk.js";
+import { buildChunks, type ChunkOptions, hasAssistantText, renderBlocks } from "../../src/format/chunk.js";
 
 // --- fixtures ---------------------------------------------------------------
 

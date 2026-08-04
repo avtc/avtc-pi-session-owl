@@ -29,8 +29,8 @@ import {
   SELECTOR_MUTATE_TOOL_NAMES,
   SET_SUMMARY_TOOL,
   TODO_LIST_TOOL,
-  type TodoBridge,
 } from "../../src/selector/tools.js";
+import type { TodoBridge } from "../../src/todo/types.js";
 import {
   MemkeeperGraph,
   makeObservation,

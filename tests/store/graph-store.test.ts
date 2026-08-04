@@ -6,6 +6,7 @@ import type { GraphDelta } from "../../src/graph/mutations.js";
 import { applyCreateNode, applyMerge, MUTATE_SOURCE } from "../../src/graph/mutations.js";
 import { log } from "../../src/log.js";
 import {
+  cloneLedger,
   EMPTY_LEDGER,
   encodeDetails,
   encodeSelection,
@@ -15,7 +16,9 @@ import {
   OBSERVATION_TYPE,
   type ObservationEntry,
   SELECTION_TYPE,
+  type SelectionEntry,
   USAGE_TYPE,
+  type UsageEntry,
 } from "../../src/store/codecs.js";
 import type { StoreContext, StoreEntry } from "../../src/store/graph-store.js";
 import {
@@ -28,7 +31,7 @@ import {
   resetForNewSession,
 } from "../../src/store/graph-store.js";
 import type { Importance, NodeId } from "../../src/types.js";
-import { makeNode, N_GOAL } from "../../src/types.js";
+import { MemkeeperGraph, makeNode, N_GOAL } from "../../src/types.js";
 
 // --- fake StoreContext -----------------------------------------------------
 
@@ -303,6 +306,61 @@ describe("load reconstruction", () => {
     expect(store.graph.nodes.has("n1" as NodeId)).toBe(true);
     expect(store.graph.observations.has("o1")).toBe(true);
     expect(store.observerFrontier).toBe("e2");
+  });
+
+  it("reconstructs observations + selection + usage from one mixed branch (single scan)", async () => {
+    // Guards the folded single-pass reconstruction: observation content, the
+    // latest selected tree, and the latest usage ledger must all load from a
+    // branch that interleaves all three custom-entry types.
+    freshStore();
+    const fake = new FakeStore();
+    // n1 must exist before observations reference it (reconcileLinks drops
+    // orphans whose parent node was never created).
+    fake.addCustomAt("e0", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      delta: {
+        type: "create_node",
+        id: "n1",
+        summary: "wrap",
+        importance: "medium",
+        parentNode: null,
+        state: "active",
+      },
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [
+        { id: "o1", content: "first", importance: "high", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    const tree = encodeSelection(
+      new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 }),
+      null,
+      null,
+    );
+    fake.addCustomAt("e2", SELECTION_TYPE, tree satisfies SelectionEntry);
+    fake.addCustomAt("e3", USAGE_TYPE, { ledger: cloneLedger(EMPTY_LEDGER) } satisfies UsageEntry);
+    // a LATER observation advances the frontier past the selection/usage —
+    // order independence must hold (latest-wins for selection/usage).
+    fake.addCustomAt("e4", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e4",
+      records: [
+        { id: "o2", content: "second", importance: "medium", sourceEntryIds: ["3"], timestamp: "t2", parentNode: "n1" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.leafId = "e4";
+
+    await load(fake);
+    const store = getGraphStore();
+    expect(store.graph.observations.has("o1")).toBe(true);
+    expect(store.graph.observations.has("o2")).toBe(true);
+    expect(store.observerFrontier).toBe("e4");
+    expect(store.selectedTree).toEqual(tree);
+    expect(store.usageLedger).toEqual(EMPTY_LEDGER);
   });
 
   it("reconstructs from a batched graph_delta entry (deltas array, e.g. an Observer run)", async () => {

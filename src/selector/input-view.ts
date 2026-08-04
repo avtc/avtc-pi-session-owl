@@ -8,11 +8,12 @@ import {
   renderTouchedFiles,
   type TouchedFilesContext,
 } from "../compaction/touched-files.js";
+import { buildChunks, type ChunkOptions, hasAssistantText, renderAssistantTextBlock } from "../format/chunk.js";
 import { formatNodeLine, RENDER_LEGEND } from "../format/render.js";
 import { cloneNode, cloneObservation } from "../graph/clone.js";
 import { nodeLineOptions, nonObsoleteRootsOf, orderActiveSetRoots } from "../graph/read-tools.js";
 import { isUnstuckAutoContinue } from "../lifecycle.js";
-import { buildChunks, type ChunkOptions, hasAssistantText, renderAssistantTextBlock } from "../observer/chunk.js";
+import type { TodoContext } from "../todo/types.js";
 import type { Node, NodeId, Observation, ObsId } from "../types.js";
 import { MemkeeperGraph, makeNode, N_IRRELEVANT, nowStoredTimestamp } from "../types.js";
 
@@ -195,21 +196,6 @@ function entryAt(branch: readonly SessionEntry[], index: number): SessionEntry {
 }
 
 // --- todo context -----------------------------------------------------------
-
-/** One todo item (read-only view sourced from the avtc-pi-todo bridge). */
-export interface TodoItem {
-  id: string;
-  name: string;
-  status: "in_progress" | "pending" | "completed";
-  details?: string;
-}
-
-/** Port over the (optional) avtc-pi-todo bridge. `null`/undefined bridge → no
- *  todo context (graceful degrade; not an error). */
-export interface TodoContext {
-  getInProgress: () => TodoItem | null;
-  getPending: () => TodoItem[];
-}
 
 const TODO_HEADING = "Todo";
 const NO_IN_PROGRESS = "(nothing in progress)";

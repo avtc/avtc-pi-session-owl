@@ -37,7 +37,7 @@ const NO_NEW_NODES = 0;
 const EMPTY_ROOT_VIEW = "";
 
 /** A per-pass outcome: applied mutate count + whether try_finish converged. */
-export interface PassOutcome extends ConvergenceOutcome {}
+export interface BuilderPassOutcome extends ConvergenceOutcome {}
 
 /**
  * Build a per-pass event tracker: an `onEvent` that forwards EVERY event to the
@@ -49,7 +49,7 @@ export interface PassOutcome extends ConvergenceOutcome {}
  * Delegates to the shared convergence tracker (the Builder and Selector share
  * the same tracking shape; only the mutate-name set differs). */
 export function makeBuilderPassTracker(downstream: (event: AgentEvent) => void): {
-  outcome: PassOutcome;
+  outcome: BuilderPassOutcome;
   onEvent: (event: AgentEvent) => void;
 } {
   return makeConvergenceTracker(downstream, MUTATE_TOOL_NAMES);
@@ -176,7 +176,7 @@ async function runPass(
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>,
   pass: number,
   onStageEnd: (usage: StageUsage) => void,
-): Promise<{ outcome: PassOutcome }> {
+): Promise<{ outcome: BuilderPassOutcome }> {
   const { outcome, onEvent } = makeBuilderPassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(graph, pass);
   await runConvergencePass({

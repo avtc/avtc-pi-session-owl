@@ -33,7 +33,7 @@ import {
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
 import { runRegexTests } from "../graph/regex-runner.js";
-import { budgetReachedFooter, budgetWindow, runGrepExcerpts } from "../graph/result-budget.js";
+import { budgetReachedFooter, budgetWindow, runGrepExcerpts, searchTimeoutNote } from "../graph/result-budget.js";
 import { type ContentMode, contentBlock, grepBlock, resolveContentMode } from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -505,11 +505,10 @@ async function buildSearchCandidates(
 
   candidates.sort(compareCandidates);
   if (timedOutMs !== null && testedCount !== null) {
-    const seconds = timedOutMs / 1000;
     const total = nodeJobs.length + obsJobs.length;
     return {
       candidates,
-      note: `Search timed out after ${seconds}s — tested ${testedCount} of ${total} items before the kill. These are partial results; refine or narrow the query.`,
+      note: searchTimeoutNote(timedOutMs, testedCount, total),
     };
   }
   return { candidates };

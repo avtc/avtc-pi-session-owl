@@ -2,10 +2,9 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { TodoContext } from "../selector/input-view.js";
-import type { TodoBridge } from "../selector/tools.js";
 import { subscribeToTodo } from "../snippets/vendored/subscribe-to-todo.js";
 import { makeTodoAdapter } from "./bridge.js";
+import type { TodoBridge, TodoContext } from "./types.js";
 
 /** `disableBuiltInFollowUp = false` — memkeeper does not manage todo's followUp
  *  message (named constant for the no-bare-literals rule). */
