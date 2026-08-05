@@ -82,6 +82,7 @@ function estimateUnobservedTokens(unobserved: SessionEntry[], settings: Memkeepe
     tokenThreshold: Number.POSITIVE_INFINITY,
     toolBlockCapTokens: settings.observerToolBlockCapTokens,
     includeThinking: settings.observerIncludeThinking,
+    includeEntryId: true,
   };
   const blocks = renderBlocks(unobserved, options);
   return blocks.reduce((sum, block) => sum + estimateContentTokens(block.text), 0);

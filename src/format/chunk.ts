@@ -13,7 +13,7 @@ import { stripAnsi } from "./sanitize.js";
 
 /**
  * One rendered tag-block in the Observer's XML-tagged chunk format. A block is
- * the atomic citation unit (carries E=entryId). Within an entry's group, a
+ * the atomic citation unit (carries entry=entryId). Within an entry's group, a
  * tool-call block (tag "C") is always immediately followed by its result block
  * (tag "R") so the pair reads as one adjacency unit.
  */
@@ -39,6 +39,9 @@ export interface ChunkOptions {
   readonly toolBlockCapTokens: number | null;
   /** Include non-redacted thinking blocks (redacted always skipped). */
   readonly includeThinking: boolean;
+  /** Emit the `entry=id` attribute on each tag (the Observer cites source ids;
+   *  recall consumers — Builder/Selector/agent — have no use for raw entry ids). */
+  readonly includeEntryId: boolean;
 }
 
 export interface RenderedChunk {
@@ -95,39 +98,44 @@ function cleanText(content: string | readonly (TextContent | { readonly type: st
 
 // --- block constructors (final inner text already cleaned/capped) -----------
 
-function uBlock(id: string, inner: string): RenderBlock {
-  return { tag: "U", entryId: id, text: `<U E=${id}>${inner}</U>` };
+function uBlock(id: string, inner: string, includeEntryId: boolean): RenderBlock {
+  const attr = includeEntryId ? ` entry=${id}` : "";
+  return { tag: "U", entryId: id, text: `<USER${attr}>${inner}</USER>` };
 }
 
-function aBlock(id: string, inner: string): RenderBlock {
-  return { tag: "A", entryId: id, text: `<A E=${id}>${inner}</A>` };
+function aBlock(id: string, inner: string, includeEntryId: boolean): RenderBlock {
+  const attr = includeEntryId ? ` entry=${id}` : "";
+  return { tag: "A", entryId: id, text: `<ASSISTANT${attr}>${inner}</ASSISTANT>` };
 }
 
-function tBlock(id: string, inner: string): RenderBlock {
-  return { tag: "T", entryId: id, text: `<T E=${id}>${inner}</T>` };
+function tBlock(id: string, inner: string, includeEntryId: boolean): RenderBlock {
+  const attr = includeEntryId ? ` entry=${id}` : "";
+  return { tag: "T", entryId: id, text: `<THINKING${attr}>${inner}</THINKING>` };
 }
 
-function cBlock(id: string, toolName: string, inner: string): RenderBlock {
-  return { tag: "C", entryId: id, text: `<C E=${id} tool=${toolName}>${inner}</C>` };
+function cBlock(id: string, toolName: string, inner: string, includeEntryId: boolean): RenderBlock {
+  const attr = includeEntryId ? ` entry=${id}` : "";
+  return { tag: "C", entryId: id, text: `<TOOLCALL:${toolName}${attr}>${inner}</TOOLCALL>` };
 }
 
-function rBlock(id: string, inner: string, isError: boolean): RenderBlock {
-  const attr = isError ? ` ${ATTR_ERROR}` : "";
-  return { tag: "R", entryId: id, text: `<R E=${id}${attr}>${inner}</R>` };
+function rBlock(id: string, inner: string, isError: boolean, includeEntryId: boolean): RenderBlock {
+  const entryAttr = includeEntryId ? ` entry=${id}` : "";
+  const attr = isError ? `${entryAttr} ${ATTR_ERROR}` : entryAttr;
+  return { tag: "R", entryId: id, text: `<TOOLRESULT${attr}>${inner}</TOOLRESULT>` };
 }
 
 // --- per-entry group rendering ----------------------------------------------
 
-function renderCustomMessageGroup(entry: CustomMessageEntry): RenderGroup | null {
+function renderCustomMessageGroup(entry: CustomMessageEntry, includeEntryId: boolean): RenderGroup | null {
   const text = cleanText(entry.content);
   if (text.length === 0) return null;
-  return { blocks: [uBlock(entry.id, text)] };
+  return { blocks: [uBlock(entry.id, text, includeEntryId)] };
 }
 
-function renderBranchSummaryGroup(entry: BranchSummaryEntry): RenderGroup | null {
+function renderBranchSummaryGroup(entry: BranchSummaryEntry, includeEntryId: boolean): RenderGroup | null {
   const text = stripAnsi(entry.summary);
   if (text.length === 0) return null;
-  return { blocks: [uBlock(entry.id, text)] };
+  return { blocks: [uBlock(entry.id, text, includeEntryId)] };
 }
 
 /**
@@ -138,6 +146,7 @@ function renderBranchSummaryGroup(entry: BranchSummaryEntry): RenderGroup | null
  */
 export function renderGroups(entries: readonly SessionEntry[], options: ChunkOptions): RenderGroup[] {
   const cap = options.toolBlockCapTokens;
+  const includeEntryId = options.includeEntryId;
   const resultByCallId = buildResultIndex(entries);
   const consumedResultIds = new Set<string>();
   const groups: RenderGroup[] = [];
@@ -150,12 +159,12 @@ export function renderGroups(entries: readonly SessionEntry[], options: ChunkOpt
         break;
       }
       case "custom_message": {
-        const group = renderCustomMessageGroup(entry);
+        const group = renderCustomMessageGroup(entry, includeEntryId);
         if (group !== null) groups.push(group);
         break;
       }
       case "branch_summary": {
-        const group = renderBranchSummaryGroup(entry);
+        const group = renderBranchSummaryGroup(entry, includeEntryId);
         if (group !== null) groups.push(group);
         break;
       }
@@ -190,16 +199,17 @@ function renderMessageBlocks(
   const message = entry.message;
   if (typeof message !== "object" || message === null) return [];
   const id = entry.id;
+  const includeEntryId = options.includeEntryId;
 
   if (message.role === "user") {
     const text = cleanText(message.content);
-    return text.length > 0 ? [uBlock(id, text)] : [];
+    return text.length > 0 ? [uBlock(id, text, includeEntryId)] : [];
   }
 
   if (message.role === "toolResult") {
     if (consumedResultIds.has(id)) return []; // already absorbed into its call's group
     const text = capBlock(cleanText(message.content), cap);
-    return [rBlock(id, text, message.isError)];
+    return [rBlock(id, text, message.isError, includeEntryId)];
   }
 
   if (message.role === "assistant") {
@@ -230,23 +240,24 @@ function renderAssistantBlocks(
   resultByCallId: Map<string, SessionMessageEntry>,
   consumedResultIds: Set<string>,
 ): RenderBlock[] {
+  const includeEntryId = options.includeEntryId;
   const blocks: RenderBlock[] = [];
   for (const part of message.content) {
     switch (part.type) {
       case "text": {
         const text = cleanText([part]);
-        if (text.length > 0) blocks.push(aBlock(id, text));
+        if (text.length > 0) blocks.push(aBlock(id, text, includeEntryId));
         break;
       }
       case "thinking": {
         if (!options.includeThinking) break;
         if (part.redacted === true) break; // redacted always skipped
         const cleaned = sanitizeThinking(part.thinking);
-        if (cleaned.length > 0) blocks.push(tBlock(id, cleaned));
+        if (cleaned.length > 0) blocks.push(tBlock(id, cleaned, includeEntryId));
         break;
       }
       case "toolCall": {
-        emitToolCallPair(part, id, cap, resultByCallId, consumedResultIds, blocks);
+        emitToolCallPair(part, id, cap, includeEntryId, resultByCallId, consumedResultIds, blocks);
         break;
       }
       default:
@@ -260,20 +271,21 @@ function emitToolCallPair(
   call: ToolCall,
   callEntryId: string,
   cap: number | null,
+  includeEntryId: boolean,
   resultByCallId: Map<string, SessionMessageEntry>,
   consumedResultIds: Set<string>,
   blocks: RenderBlock[],
 ): void {
   // args are structured JSON (not free text) — capped but not ANSI-stripped
   const argsText = capBlock(JSON.stringify(call.arguments), cap);
-  blocks.push(cBlock(callEntryId, call.name, argsText));
+  blocks.push(cBlock(callEntryId, call.name, argsText, includeEntryId));
 
   const resultEntry = resultByCallId.get(call.id);
   if (resultEntry === undefined) return; // orphan call (result absent mid-stream)
   const result = resultEntry.message;
   if (typeof result !== "object" || result === null || result.role !== "toolResult") return;
   const resultText = capBlock(cleanText(result.content), cap);
-  blocks.push(rBlock(resultEntry.id, resultText, result.isError));
+  blocks.push(rBlock(resultEntry.id, resultText, result.isError, includeEntryId));
   consumedResultIds.add(resultEntry.id);
 }
 
@@ -287,7 +299,7 @@ export function renderBlocks(entries: readonly SessionEntry[], options: ChunkOpt
 
 /**
  * Split entries into entry-bounded, token-gated chunks. A whole entry (its
- * group) is never split across chunks. Each chunk reports `allowedIds`: the E=
+ * group) is never split across chunks. Each chunk reports `allowedIds`: the entry=
  * ids cited in its blocks (the allowed source-id set the Observer's
  * `record_observations` must draw from).
  */
@@ -320,17 +332,17 @@ export function buildChunks(entries: readonly SessionEntry[], options: ChunkOpti
 }
 
 /**
- * Render an assistant message's TEXT as `<A E=id>text</A>` blocks (text-only —
- * thinking/tool calls dropped), one block per text part (matching the chunk
- * pipeline), with the same ANSI sanitization. Returns "" when the message
- * carries no text. Used by the Selector tail pairing (text-only preceding-agent
- * prelude).
+ * Render an assistant message's TEXT as `<ASSISTANT>text</ASSISTANT>` blocks
+ * (text-only — thinking/tool calls dropped), one block per text part (matching
+ * the chunk pipeline), with the same ANSI sanitization. Returns "" when the
+ * message carries no text. Used by the Selector tail pairing (text-only
+ * preceding-agent prelude) — a recall consumer, so it omits `entry=id`.
  */
-export function renderAssistantTextBlock(entry: SessionEntry): string {
+export function renderAssistantTextBlock(entry: SessionEntry, includeEntryId: boolean): string {
   if (entry.type !== "message") return "";
   if (entry.message.role !== "assistant") return "";
   return assistantTextParts(entry.message)
-    .map((text) => aBlock(entry.id, text).text)
+    .map((text) => aBlock(entry.id, text, includeEntryId).text)
     .join("");
 }
 

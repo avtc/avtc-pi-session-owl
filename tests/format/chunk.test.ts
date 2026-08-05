@@ -99,22 +99,23 @@ const NO_CAP: ChunkOptions = {
   tokenThreshold: Number.POSITIVE_INFINITY,
   toolBlockCapTokens: null,
   includeThinking: true,
+  includeEntryId: true,
 };
 
-// --- tag & E=id shape -------------------------------------------------------
+// --- tag & entry=id shape -------------------------------------------------------
 
-describe("renderBlocks: tags and E=id attribute", () => {
-  it("renders a user message as <U E=id>text</U>", () => {
+describe("renderBlocks: tags and entry=id attribute", () => {
+  it("renders a user message as <USER entry=id>text</USER>", () => {
     const blocks = renderBlocks([userEntry("e1", "hello")], NO_CAP);
-    expect(blocks.map((b) => b.text).join("")).toBe("<U E=e1>hello</U>");
+    expect(blocks.map((b) => b.text).join("")).toBe("<USER entry=e1>hello</USER>");
   });
 
-  it("renders assistant text as <A E=id>text</A>", () => {
+  it("renders assistant text as <ASSISTANT entry=id>text</ASSISTANT>", () => {
     const blocks = renderBlocks([assistantEntry("e2", [{ type: "text", text: "hi there" }])], NO_CAP);
-    expect(blocks.map((b) => b.text).join("")).toBe("<A E=e2>hi there</A>");
+    expect(blocks.map((b) => b.text).join("")).toBe("<ASSISTANT entry=e2>hi there</ASSISTANT>");
   });
 
-  it("renders a tool call as <C E=id tool=name>args</C> immediately followed by its result <R E=rid>", () => {
+  it("renders a tool call as <TOOLCALL:name entry=id>args</TOOLCALL> immediately followed by its result <TOOLRESULT entry=rid>", () => {
     const entries: SessionEntry[] = [
       assistantEntry("e2", [{ type: "toolCall", id: "call1", name: "read", arguments: { path: "/x" } }]),
       toolResultEntry("e3", "call1", "read", "ok", false),
@@ -122,10 +123,10 @@ describe("renderBlocks: tags and E=id attribute", () => {
     const text = renderBlocks(entries, NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe('<C E=e2 tool=read>{"path":"/x"}</C><R E=e3>ok</R>');
+    expect(text).toBe('<TOOLCALL:read entry=e2>{"path":"/x"}</TOOLCALL><TOOLRESULT entry=e3>ok</TOOLRESULT>');
   });
 
-  it("adds the error attribute on <R> when the tool result failed (isError)", () => {
+  it("adds the error attribute on <TOOLRESULT> when the tool result failed (isError)", () => {
     const entries: SessionEntry[] = [
       assistantEntry("e2", [{ type: "toolCall", id: "call1", name: "read", arguments: {} }]),
       toolResultEntry("e3", "call1", "read", "EISDIR: illegal operation", true),
@@ -133,10 +134,12 @@ describe("renderBlocks: tags and E=id attribute", () => {
     const text = renderBlocks(entries, NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<C E=e2 tool=read>{}</C><R E=e3 error>EISDIR: illegal operation</R>");
+    expect(text).toBe(
+      "<TOOLCALL:read entry=e2>{}</TOOLCALL><TOOLRESULT entry=e3 error>EISDIR: illegal operation</TOOLRESULT>",
+    );
   });
 
-  it("carries E=id as an attribute on EACH block, never a separate <E> wrapper", () => {
+  it("carries entry=id as an attribute on EACH block, never a separate wrapper", () => {
     const entries: SessionEntry[] = [
       userEntry("u1", "hi"),
       assistantEntry("a1", [
@@ -148,8 +151,8 @@ describe("renderBlocks: tags and E=id attribute", () => {
       .map((b) => b.text)
       .join("");
     expect(text).not.toContain("<E>");
-    expect(text).toContain("E=u1");
-    expect(text).toContain("E=a1");
+    expect(text).toContain("entry=u1");
+    expect(text).toContain("entry=a1");
   });
 
   it("does not emit c=callId on tool calls/results (rely on adjacency)", () => {
@@ -183,14 +186,14 @@ describe("renderBlocks: thinking", () => {
     const text = renderBlocks([assistantEntry("a1", [thinking, { type: "text", text: "answer" }])], opts)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<A E=a1>answer</A>");
+    expect(text).toBe("<ASSISTANT entry=a1>answer</ASSISTANT>");
   });
 
-  it("includes thinking as <T E=id> when includeThinking is true", () => {
+  it("includes thinking as <THINKING entry=id> when includeThinking is true", () => {
     const text = renderBlocks([assistantEntry("a1", [thinking, { type: "text", text: "answer" }])], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<T E=a1>Let me think.</T><A E=a1>answer</A>");
+    expect(text).toBe("<THINKING entry=a1>Let me think.</THINKING><ASSISTANT entry=a1>answer</ASSISTANT>");
   });
 
   it("strips ANSI escape codes from thinking", () => {
@@ -198,7 +201,7 @@ describe("renderBlocks: thinking", () => {
     const text = renderBlocks([assistantEntry("a1", [colored])], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<T E=a1>Let me think.</T>");
+    expect(text).toBe("<THINKING entry=a1>Let me think.</THINKING>");
   });
 
   it("strips the leading 'Thinking:' prefix from thinking", () => {
@@ -206,7 +209,7 @@ describe("renderBlocks: thinking", () => {
     const text = renderBlocks([assistantEntry("a1", [prefixed])], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<T E=a1>Let me think.</T>");
+    expect(text).toBe("<THINKING entry=a1>Let me think.</THINKING>");
   });
 
   it("strips ANSI then the 'Thinking:' prefix (ANSI-colored prefix)", () => {
@@ -217,7 +220,7 @@ describe("renderBlocks: thinking", () => {
     const text = renderBlocks([assistantEntry("a1", [colored])], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<T E=a1>Let me think.</T>");
+    expect(text).toBe("<THINKING entry=a1>Let me think.</THINKING>");
   });
 
   it("always skips redacted thinking even when includeThinking is true", () => {
@@ -230,7 +233,7 @@ describe("renderBlocks: thinking", () => {
     const text = renderBlocks([assistantEntry("a1", [redacted, { type: "text", text: "answer" }])], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<A E=a1>answer</A>");
+    expect(text).toBe("<ASSISTANT entry=a1>answer</ASSISTANT>");
   });
 });
 
@@ -250,7 +253,7 @@ describe("renderBlocks: tool block cap", () => {
     const cBlock = renderBlocks(entries, opts)[0];
     expect(cBlock.text).toContain("[…truncated…]");
     // head is first ~200 chars of the args JSON, tail is last ~200 chars
-    const inner = cBlock.text.replace(/^<C E=e2 tool=run>/, "").replace(/<\/C>$/, "");
+    const inner = cBlock.text.replace(/^<TOOLCALL:run entry=e2>/, "").replace(/<\/TOOLCALL>$/, "");
     expect(inner.startsWith('{"blob":"xxxx')).toBe(true);
     expect(inner.endsWith('xxxx"}')).toBe(true);
   });
@@ -263,7 +266,7 @@ describe("renderBlocks: tool block cap", () => {
     ];
     const rBlock = renderBlocks(entries, opts)[1];
     expect(rBlock.text).toContain("[…truncated…]");
-    const inner = rBlock.text.replace(/^<R E=e3>/, "").replace(/<\/R>$/, "");
+    const inner = rBlock.text.replace(/^<TOOLRESULT entry=e3>/, "").replace(/<\/TOOLRESULT>$/, "");
     expect(inner.startsWith("yyyy")).toBe(true);
     expect(inner.endsWith("yyyy")).toBe(true);
   });
@@ -277,7 +280,7 @@ describe("renderBlocks: tool block cap", () => {
     const text = renderBlocks(entries, opts)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe('<C E=e2 tool=run>{"a":1}</C><R E=e3>small result</R>');
+    expect(text).toBe('<TOOLCALL:run entry=e2>{"a":1}</TOOLCALL><TOOLRESULT entry=e3>small result</TOOLRESULT>');
   });
 
   it("renders tool args/results in full when the cap is null (no truncation)", () => {
@@ -295,18 +298,18 @@ describe("renderBlocks: tool block cap", () => {
 // --- entry-type filtering ---------------------------------------------------
 
 describe("renderBlocks: entry-type filtering", () => {
-  it("renders custom_message as <U E=id>", () => {
+  it("renders custom_message as <USER entry=id>", () => {
     const text = renderBlocks([customMessageEntry("cm1", "injected context")], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<U E=cm1>injected context</U>");
+    expect(text).toBe("<USER entry=cm1>injected context</USER>");
   });
 
-  it("renders branch_summary as <U E=id>", () => {
+  it("renders branch_summary as <USER entry=id>", () => {
     const text = renderBlocks([branchSummaryEntry("bs1", "prior branch summary")], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<U E=bs1>prior branch summary</U>");
+    expect(text).toBe("<USER entry=bs1>prior branch summary</USER>");
   });
 
   it("skips operational entry types (model_change, thinking_level_change, label, session_info, custom)", () => {
@@ -321,23 +324,24 @@ describe("renderBlocks: entry-type filtering", () => {
     const text = renderBlocks(entries, NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<U E=u1>real</U>");
+    expect(text).toBe("<USER entry=u1>real</USER>");
   });
 });
 
 // --- buildChunks: token gating & C-R atomicity -----------------------------
 
 describe("buildChunks", () => {
-  it("returns {text, allowedIds, lastEntryId} per chunk where allowedIds is exactly the E= ids in text", () => {
+  it("returns {text, allowedIds, lastEntryId} per chunk where allowedIds is exactly the entry= ids in text", () => {
     const entries: SessionEntry[] = [userEntry("u1", "hello world"), userEntry("u2", "bye now")];
     const chunks = buildChunks(entries, {
       tokenThreshold: Number.POSITIVE_INFINITY,
       toolBlockCapTokens: null,
       includeThinking: true,
+      includeEntryId: true,
     });
     expect(chunks).toHaveLength(1);
     const only = chunks[0];
-    expect(only.text).toBe("<U E=u1>hello world</U><U E=u2>bye now</U>");
+    expect(only.text).toBe("<USER entry=u1>hello world</USER><USER entry=u2>bye now</USER>");
     expect(only.allowedIds).toEqual(new Set(["u1", "u2"]));
     // lastEntryId = the highest-branch-position entry in the chunk (blocks in entry order)
     expect(only.lastEntryId).toBe("u2");
@@ -353,10 +357,11 @@ describe("buildChunks", () => {
       tokenThreshold: 100,
       toolBlockCapTokens: null,
       includeThinking: true,
+      includeEntryId: true,
     });
     expect(chunks.length).toBe(2);
-    expect(chunks[0].text).toBe(`<U E=u1>${"a".repeat(400)}</U>`);
-    expect(chunks[1].text).toBe(`<U E=u2>${"b".repeat(400)}</U>`);
+    expect(chunks[0].text).toBe(`<USER entry=u1>${"a".repeat(400)}</USER>`);
+    expect(chunks[1].text).toBe(`<USER entry=u2>${"b".repeat(400)}</USER>`);
     // each chunk's lastEntryId is its own tail (entry-order blocks) — the basis
     // for advancing the frontier without re-scanning the gap per chunk.
     expect(chunks[0].lastEntryId).toBe("u1");
@@ -374,13 +379,14 @@ describe("buildChunks", () => {
       tokenThreshold: 50, // tiny => would split if C-R were separable
       toolBlockCapTokens: null,
       includeThinking: true,
+      includeEntryId: true,
     });
     // both ids land in the same chunk
     const owning = chunks.filter((c) => c.allowedIds.has("a1") || c.allowedIds.has("r1"));
     expect(owning).toHaveLength(1);
     expect(owning[0].allowedIds).toEqual(new Set(["a1", "r1"]));
-    expect(owning[0].text).toContain("<C E=a1");
-    expect(owning[0].text).toContain("<R E=r1");
+    expect(owning[0].text).toContain("entry=a1");
+    expect(owning[0].text).toContain("entry=r1");
   });
 
   it("keeps a multi-block assistant entry's blocks in order with its tool calls paired", () => {
@@ -397,9 +403,10 @@ describe("buildChunks", () => {
       tokenThreshold: Number.POSITIVE_INFINITY,
       toolBlockCapTokens: null,
       includeThinking: true,
+      includeEntryId: true,
     });
     expect(chunks[0].text).toBe(
-      "<A E=a1>step 1</A><T E=a1>plan</T><C E=a1 tool=ls>{}</C><R E=r1>out</R><U E=u2>next</U>",
+      "<ASSISTANT entry=a1>step 1</ASSISTANT><THINKING entry=a1>plan</THINKING><TOOLCALL:ls entry=a1>{}</TOOLCALL><TOOLRESULT entry=r1>out</TOOLRESULT><USER entry=u2>next</USER>",
     );
   });
 
@@ -422,14 +429,14 @@ describe("renderBlocks: ANSI stripped from all text (not only thinking)", () => 
     const text = renderBlocks([entry], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<U E=u1>red hello world</U>");
+    expect(text).toBe("<USER entry=u1>red hello world</USER>");
   });
 
   it("strips ANSI from assistant text", () => {
     const text = renderBlocks([assistantEntry("a1", [{ type: "text", text: "\u001b[32mok\u001b[0m done" }])], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<A E=a1>ok done</A>");
+    expect(text).toBe("<ASSISTANT entry=a1>ok done</ASSISTANT>");
   });
 
   it("strips ANSI from tool result text", () => {
@@ -440,7 +447,7 @@ describe("renderBlocks: ANSI stripped from all text (not only thinking)", () => 
     const text = renderBlocks(entries, NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toContain("<R E=r1>out put</R>");
+    expect(text).toContain("<TOOLRESULT entry=r1>out put</TOOLRESULT>");
   });
 
   it("strips ANSI with ':' params (24-bit color) and '?' private modes", () => {
@@ -451,7 +458,7 @@ describe("renderBlocks: ANSI stripped from all text (not only thinking)", () => 
     const text = renderBlocks([assistantEntry("a1", [colored])], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<T E=a1>x</T>");
+    expect(text).toBe("<THINKING entry=a1>x</THINKING>");
   });
 
   it("strips OSC sequences (terminal titles / hyperlinks) and the C1 8-bit intro", () => {
@@ -460,7 +467,7 @@ describe("renderBlocks: ANSI stripped from all text (not only thinking)", () => 
     const text = renderBlocks([userEntry("u1", osc + c1)], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<U E=u1>beforeafter</U>");
+    expect(text).toBe("<USER entry=u1>beforeafter</USER>");
   });
 
   it("strips OSC-8 hyperlinks terminated by the String Terminator (ESC \\)", () => {
@@ -469,7 +476,7 @@ describe("renderBlocks: ANSI stripped from all text (not only thinking)", () => 
     const text = renderBlocks([userEntry("u1", link)], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<U E=u1>clickhere</U>");
+    expect(text).toBe("<USER entry=u1>clickhere</USER>");
   });
 });
 
@@ -488,12 +495,13 @@ describe("buildChunks: entry-bounded (whole entry never split)", () => {
       tokenThreshold: 50, // tiny — forces a split at the entry boundary only
       toolBlockCapTokens: null,
       includeThinking: true,
+      includeEntryId: true,
     });
     // a1's text AND its tool-call land in the same chunk (whole entry)
     const a1Chunks = chunks.filter((c) => c.allowedIds.has("a1"));
     expect(a1Chunks).toHaveLength(1);
-    expect(a1Chunks[0].text).toContain("<A E=a1>");
-    expect(a1Chunks[0].text).toContain("<C E=a1 tool=ls>");
+    expect(a1Chunks[0].text).toContain("<ASSISTANT entry=a1>");
+    expect(a1Chunks[0].text).toContain("<TOOLCALL:ls entry=a1>");
   });
 
   it("renders multiple tool calls in one assistant entry, each followed by its result", () => {
@@ -509,8 +517,11 @@ describe("buildChunks: entry-bounded (whole entry never split)", () => {
       tokenThreshold: Number.POSITIVE_INFINITY,
       toolBlockCapTokens: null,
       includeThinking: true,
+      includeEntryId: true,
     });
-    expect(chunks[0].text).toBe("<C E=a1 tool=ls>{}</C><R E=r1>ls-out</R><C E=a1 tool=read>{}</C><R E=r2>read-out</R>");
+    expect(chunks[0].text).toBe(
+      "<TOOLCALL:ls entry=a1>{}</TOOLCALL><TOOLRESULT entry=r1>ls-out</TOOLRESULT><TOOLCALL:read entry=a1>{}</TOOLCALL><TOOLRESULT entry=r2>read-out</TOOLRESULT>",
+    );
   });
 
   it("a single oversized entry-group becomes its own chunk (never split mid-entry)", () => {
@@ -519,6 +530,7 @@ describe("buildChunks: entry-bounded (whole entry never split)", () => {
       tokenThreshold: 10, // far below the ~250-token block
       toolBlockCapTokens: null,
       includeThinking: true,
+      includeEntryId: true,
     });
     expect(chunks).toHaveLength(1);
     expect(chunks[0].allowedIds).toEqual(new Set(["u1"]));
@@ -526,21 +538,21 @@ describe("buildChunks: entry-bounded (whole entry never split)", () => {
 });
 
 describe("renderBlocks: orphan calls and results", () => {
-  it("emits an orphan tool call (no matching result) as a bare <C>", () => {
+  it("emits an orphan tool call (no matching result) as a bare <TOOLCALL>", () => {
     const text = renderBlocks(
       [assistantEntry("a1", [{ type: "toolCall", id: "c1", name: "ls", arguments: {} }])],
       NO_CAP,
     )
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<C E=a1 tool=ls>{}</C>");
+    expect(text).toBe("<TOOLCALL:ls entry=a1>{}</TOOLCALL>");
   });
 
-  it("emits an orphan tool result (no matching call) as a bare <R>", () => {
+  it("emits an orphan tool result (no matching call) as a bare <TOOLRESULT>", () => {
     const text = renderBlocks([toolResultEntry("r1", "orphan", "run", "out", false)], NO_CAP)
       .map((b) => b.text)
       .join("");
-    expect(text).toBe("<R E=r1>out</R>");
+    expect(text).toBe("<TOOLRESULT entry=r1>out</TOOLRESULT>");
   });
 });
 

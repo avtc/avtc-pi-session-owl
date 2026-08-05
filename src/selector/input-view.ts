@@ -107,6 +107,7 @@ export interface TailBoundary {
 }
 
 const NOT_FOUND = -1;
+const OMIT_ENTRY_ID = false;
 const TRUNCATION_MARKER = "…<truncated events>…";
 
 /**
@@ -144,7 +145,7 @@ export function buildTail(ctx: TailContext, boundary: TailBoundary, options: Chu
   const preludeParts: string[] = [];
   if (precedingAgentIndex !== NOT_FOUND) {
     const agentEntry = entryAt(branch, precedingAgentIndex);
-    const agentBlock = renderAssistantTextBlock(agentEntry); // sanitized, text-only
+    const agentBlock = renderAssistantTextBlock(agentEntry, OMIT_ENTRY_ID); // sanitized, text-only; no entry id (recall consumer)
     if (agentBlock.length > 0) preludeParts.push(agentBlock);
   }
   const userText = renderTail([userEntry], options);
@@ -227,9 +228,9 @@ export function buildTodo(ctx: TodoContext): string {
 
 // --- full input-view assembly ----------------------------------------------
 
-/** The tail legend (Observer XML-tag format), WITHOUT the E= attribute — the
- *  Selector needs the tag glossary, not the citation convention. */
-const TAIL_LEGEND_NO_E = "U user · A assistant · C tool-call · R tool-result · T thinking";
+/** The tail legend — the self-documenting uppercase tag forms (no entry=id:
+ *  the Selector is a recall consumer, not a citator). */
+const TAIL_LEGEND_NO_E = "<USER> · <ASSISTANT> · <THINKING> · <TOOLCALL:name> · <TOOLRESULT>";
 
 /** Full args for assembling the Selector's agentLoop-start input view. */
 export interface SelectorInputViewArgs {

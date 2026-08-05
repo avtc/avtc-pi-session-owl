@@ -202,11 +202,11 @@ afterAll(() => {
   _resetMemkeeperSettingsHandle();
 });
 
-/** Parse the `E=<id>` citation markers out of a chunk's text (the Observer's
+/** Parse the `entry=<id>` citation markers out of a chunk's text (the Observer's
  *  record_observations tool validates sourceEntryIds against exactly these). */
 function parseChunkIds(text: string): string[] {
   const ids: string[] = [];
-  const re = /E=(\S+?)>/g;
+  const re = /entry=(\S+?)>/g;
   let m: RegExpExecArray | null = re.exec(text);
   while (m !== null) {
     ids.push(m[1] as string);

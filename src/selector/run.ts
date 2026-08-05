@@ -329,6 +329,7 @@ function buildInputView(sourceGraph: Graph, input: SelectorRunInput): SelectorIn
       tokenThreshold: input.settings.observerThresholdTokens,
       toolBlockCapTokens: input.settings.observerToolBlockCapTokens,
       includeThinking: input.settings.observerIncludeThinking,
+      includeEntryId: false,
     },
   });
 }

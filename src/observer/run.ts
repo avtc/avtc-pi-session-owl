@@ -180,6 +180,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     tokenThreshold: input.settings.observerThresholdTokens,
     toolBlockCapTokens: input.settings.observerToolBlockCapTokens,
     includeThinking: input.settings.observerIncludeThinking,
+    includeEntryId: true,
   };
   const chunks = buildChunks(input.unobserved, chunkOptions);
 

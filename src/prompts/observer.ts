@@ -12,13 +12,11 @@ The full detail stays in the source: a decision is worth its outcome and
 rationale, not the discussion; a constraint is worth its rule, not the exchange
 that surfaced it.
 
-The chunk is a sequence of tagged blocks; each block carries its source entry id
-as E=id:
-- <U E=id> user text
-- <A E=id> assistant text
-- <T E=id> assistant thinking
-- <C E=id tool=name> a tool call, immediately followed by its own result
-  <R E=id> ... </R>, or <R E=id error> when the call failed
+The chunk is a sequence of tagged blocks; each carries its source entry id as
+entry=id:
+- <USER entry=id>  <ASSISTANT entry=id>  <THINKING entry=id>
+- <TOOLCALL:name entry=id> — immediately followed by its own result
+  <TOOLRESULT entry=id> (or <TOOLRESULT entry=id error> when the call failed)
 
 Each observation carries an importance — how much it matters if lost, by nature:
 - crit — a hard, persistent constraint or correction; losing it would cause

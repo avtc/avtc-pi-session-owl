@@ -14,8 +14,8 @@ Legend — the working tree uses these marks:
 n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived
 (no mark = active)
 ${IMPORTANCE_GLOSS} Set it when you make a node (\`mkdir\`/\`merge\`) or re-rate it (\`set_meta\`).
-The recent tail is tagged blocks: U user, A assistant, C tool-call, R tool-result,
-T thinking.
+The recent tail is tagged blocks: <USER> · <ASSISTANT> · <THINKING> ·
+<TOOLCALL:name> · <TOOLRESULT>.
 
 You're given the working tree (the memory graph at its roots), the recent tail, the
 todo (in-progress + pending), and the files touched since the last compaction. Read

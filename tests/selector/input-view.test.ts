@@ -385,7 +385,7 @@ function ctxFor(branch: SessionEntry[]): TailContext {
   };
 }
 
-const CHUNK_OPTS = { tokenThreshold: 1000, toolBlockCapTokens: null, includeThinking: false };
+const CHUNK_OPTS = { tokenThreshold: 1000, toolBlockCapTokens: null, includeThinking: false, includeEntryId: false };
 
 describe("buildTail", () => {
   it("renders the retained tail verbatim when the last user message is within the tail", () => {
@@ -427,14 +427,14 @@ describe("buildTail", () => {
     const marker = "<truncated events>";
     const prelude = out.slice(0, out.indexOf(marker));
     expect(prelude).toContain("the opening ask");
-    // ...but NO <A> agent block in the PRELUDE (there is no preceding agent text)
+    // ...but NO <ASSISTANT> agent block in the PRELUDE (there is no preceding agent text)
     expect(prelude).not.toContain("<A");
     // the retained tail still renders (a1 is in the tail)
     expect(out).toContain("tail start");
   });
 
-  it("renders one <A> block per text part in the preceding agent (byte-consistent with the tail)", () => {
-    // A multi-text-part assistant: the prelude must emit one <A> per text part,
+  it("renders one <ASSISTANT> block per text part in the preceding agent (byte-consistent with the tail)", () => {
+    // A multi-text-part assistant: the prelude must emit one <ASSISTANT> per text part,
     // matching what the tail would render for the same entry (not one joined block).
     const message: AssistantMessage = {
       role: "assistant",
@@ -452,9 +452,9 @@ describe("buildTail", () => {
     const multiPart: SessionMessageEntry = { type: "message", id: "a0", parentId: null, timestamp: FIXED_TS, message };
     const branch: SessionEntry[] = [multiPart, userEntry("u0", "the ask"), assistantEntry("a2", "tail begins")];
     const out = buildTail(ctxFor(branch), { firstKeptEntryId: "a2" }, CHUNK_OPTS);
-    // Two separate <A> blocks (per part), NOT one joined block.
-    expect(out).toContain("<A E=a0>First sentence.</A>");
-    expect(out).toContain("<A E=a0>Second sentence.</A>");
+    // Two separate <ASSISTANT> blocks (per part), NOT one joined block.
+    expect(out).toContain("<ASSISTANT>First sentence.</ASSISTANT>");
+    expect(out).toContain("<ASSISTANT>Second sentence.</ASSISTANT>");
     expect(out).not.toContain("First sentence.Second sentence.");
   });
 
@@ -495,7 +495,7 @@ describe("buildTail", () => {
     const out = buildTail(ctxFor(branch), { firstKeptEntryId: "a2" }, CHUNK_OPTS);
     expect(out).toContain("the text reply"); // text surfaced
     expect(out).not.toContain("the thinking"); // thinking excluded
-    expect(out).not.toContain("<C "); // tool call excluded (no <C> in prelude)
+    expect(out).not.toContain("<TOOLCALL:"); // tool call excluded (no <TOOLCALL> in prelude)
   });
 
   it("prepends [last agent text] + [last user] + truncation marker when last user is before the cut", () => {
@@ -541,7 +541,12 @@ describe("buildTail", () => {
       branch.push(userEntry(`u${i}`, `message body ${i} with enough text to accumulate tokens`));
     }
     const cutId = "u0"; // whole branch is the tail
-    const multiChunkOpts = { tokenThreshold: 50, toolBlockCapTokens: null, includeThinking: false };
+    const multiChunkOpts = {
+      tokenThreshold: 50,
+      toolBlockCapTokens: null,
+      includeThinking: false,
+      includeEntryId: false,
+    };
     const out = buildTail(ctxFor(branch), { firstKeptEntryId: cutId }, multiChunkOpts);
     // First, middle, and last entries all present → multi-chunk join kept it whole.
     expect(out).toContain("message body 0 ");
@@ -630,7 +635,7 @@ function sourceGraphForAssembly(): MemkeeperGraph {
   return new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 4 });
 }
 
-const ASSEMBLY_OPTS = { tokenThreshold: 1000, toolBlockCapTokens: null, includeThinking: false };
+const ASSEMBLY_OPTS = { tokenThreshold: 1000, toolBlockCapTokens: null, includeThinking: false, includeEntryId: false };
 
 // Reconstruct the full per-pass message body the Selector sends (working tree +
 // context), mirroring run.ts passMessages without the preamble.
@@ -659,7 +664,7 @@ describe("buildSelectorInputView", () => {
     expect(view.indexOf("the ask")).toBeLessThan(view.indexOf("n.. node"));
   });
 
-  it("includes the tree legend (RENDER_LEGEND) and the tail legend WITHOUT E=", () => {
+  it("includes the tree legend (RENDER_LEGEND) and the tail legend WITHOUT entry=", () => {
     const view = assemble(
       buildSelectorInputView({
         sourceGraph: sourceGraphForAssembly(),
@@ -672,11 +677,11 @@ describe("buildSelectorInputView", () => {
       }),
     );
     expect(view).toContain("n.. node"); // tree legend present
-    expect(view).toContain("U user"); // tail legend present
-    // The tail legend line has no E= attribute (redundant for the Selector).
-    const legendLine = view.split("\n").find((line) => line.includes("U user"));
+    expect(view).toContain("<USER>"); // tail legend present (self-documenting uppercase tags)
+    // The tail legend line has no entry= attribute (redundant for the Selector).
+    const legendLine = view.split("\n").find((line) => line.includes("<USER>"));
     expect(legendLine).toBeDefined();
-    expect(legendLine?.includes("E=")).toBe(false);
+    expect(legendLine?.includes("entry=")).toBe(false);
   });
 
   it("omits the todo section entirely when the bridge is absent (null)", () => {
