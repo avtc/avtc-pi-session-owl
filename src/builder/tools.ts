@@ -34,12 +34,12 @@ export {
   MERGE_TOOL,
   MKDIR_PARAMS,
   MKDIR_TOOL,
-  MV_PARAMS,
   MV_TOOL,
 } from "../graph/mutate-tools.js";
-// Re-export the shared names so existing import sites (compaction/hook, the run,
-// tests) keep resolving through this module while the canonical definitions live
-// in graph/read-tools + graph/mutate-tools.
+// Re-export the Builder toolset names + param schemas so callers (the run, the
+// compaction hook, tests) can name the full Builder surface through the module
+// that assembles it. The canonical definitions live in graph/read-tools +
+// graph/mutate-tools.
 export {
   CAT_TOOL,
   FIND_TOOL,
@@ -114,7 +114,7 @@ const SET_META_PARAMS = Type.Object({
   nodeId: Type.String({ description: "The node to update." }),
   importance: Type.Optional({
     ...ImportanceSchema,
-    description: "Re-rate the node — how much it matters if lost.",
+    description: "How much the node matters if lost — crit, high, med, or low.",
   }),
   archived: Type.Optional(Type.Boolean({ description: "True to archive, false to restore to active." })),
   summary: Type.Optional(Type.String({ minLength: 1, description: "A new summary for the node." })),

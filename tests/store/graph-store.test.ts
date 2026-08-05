@@ -108,7 +108,7 @@ describe("GraphStore singleton", () => {
     const store = getGraphStore();
     store.graph.nodes.set(
       "n1" as NodeId,
-      makeNode({ id: "n1", summary: "x", importance: "medium", state: "active", parentNode: null, createdAt: "t" }),
+      makeNode({ id: "n1", summary: "x", importance: "med", state: "active", parentNode: null, createdAt: "t" }),
     );
     store.observerFrontier = "e5";
     resetForNewSession();
@@ -144,7 +144,7 @@ describe("persist methods (PERSIST-ONLY)", () => {
       type: "create_node",
       id: "n1" as NodeId,
       summary: "x",
-      importance: "medium" as Importance,
+      importance: "med" as Importance,
       parentNode: null,
       state: "active",
     };
@@ -161,7 +161,7 @@ describe("persist methods (PERSIST-ONLY)", () => {
     applyCreateNode(store.graph, {
       id: "n1" as NodeId,
       summary: "x",
-      importance: "medium" as Importance,
+      importance: "med" as Importance,
       parentNode: null,
       state: "active",
     });
@@ -193,7 +193,7 @@ describe("load reconstruction", () => {
           summary: "the goal",
           summaryTokens: 2,
           state: "active",
-          importance: "critical",
+          importance: "crit",
           parentNode: null,
           observationIds: [],
           childNodeIds: ["n1"],
@@ -205,7 +205,7 @@ describe("load reconstruction", () => {
           summary: "branch",
           summaryTokens: 2,
           state: "active",
-          importance: "medium",
+          importance: "med",
           parentNode: N_GOAL,
           observationIds: ["o1"],
           childNodeIds: [],
@@ -226,7 +226,7 @@ describe("load reconstruction", () => {
       coversFromId: null,
       coversUpToId: "e2",
       records: [
-        { id: "o1", content: "first", importance: "medium", sourceEntryIds: ["1"], timestamp: "t0", parentNode: "n1" },
+        { id: "o1", content: "first", importance: "med", sourceEntryIds: ["1"], timestamp: "t0", parentNode: "n1" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -286,7 +286,7 @@ describe("load reconstruction", () => {
         type: "create_node",
         id: "n1",
         summary: "first wrapper",
-        importance: "medium",
+        importance: "med",
         parentNode: null,
         state: "active",
       },
@@ -322,7 +322,7 @@ describe("load reconstruction", () => {
         type: "create_node",
         id: "n1",
         summary: "wrap",
-        importance: "medium",
+        importance: "med",
         parentNode: null,
         state: "active",
       },
@@ -348,7 +348,7 @@ describe("load reconstruction", () => {
       coversFromId: null,
       coversUpToId: "e4",
       records: [
-        { id: "o2", content: "second", importance: "medium", sourceEntryIds: ["3"], timestamp: "t2", parentNode: "n1" },
+        { id: "o2", content: "second", importance: "med", sourceEntryIds: ["3"], timestamp: "t2", parentNode: "n1" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -648,7 +648,7 @@ describe("load reconstruction", () => {
       applyCreateNode(producer, {
         id: "n2" as NodeId,
         summary: "root two",
-        importance: "medium",
+        importance: "med",
         parentNode: null,
         state: "active",
       }),
@@ -774,7 +774,7 @@ describe("load edge cases", () => {
           summary: "branch",
           summaryTokens: 1,
           state: "active",
-          importance: "medium",
+          importance: "med",
           parentNode: null,
           observationIds: [],
           childNodeIds: [],

@@ -33,7 +33,7 @@ const NO_OP_CTX = {
 } as const;
 
 // --- test graph ------------------------------------------------------------
-// Roots: nGoal (critical, oInitialPrompt) · n7 (high, "Auth migration to JWT",
+// Roots: nGoal (crit, oInitialPrompt) · n7 (high, "Auth migration to JWT",
 //   child n8 + obs o5) · n12 (new state — renders active to non-Builder ·
 //   "Build failed") · n20 (archived, "Old YAML config") · n99 (obsolete,
 //   superseded by n7, obs o9). Observations carry distinct timestamps for
@@ -46,7 +46,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: N_GOAL,
     summary: "the public API must stay stable",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
   });
@@ -54,7 +54,7 @@ function buildGraph(): MemkeeperGraph {
     obs: makeObservation({
       id: "oInitialPrompt",
       content: "build a memory extension",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: T0,
       parentNode: N_GOAL,
@@ -89,7 +89,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: "n12",
     summary: "Build failed: TS2322 at router.ts",
-    importance: "medium",
+    importance: "med",
     parentNode: null,
     state: "new",
   });
@@ -106,7 +106,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: "n99",
     summary: "Auth via sessions (old approach)",
-    importance: "medium",
+    importance: "med",
     parentNode: null,
     state: "active",
   });
@@ -114,7 +114,7 @@ function buildGraph(): MemkeeperGraph {
     obs: makeObservation({
       id: "o9",
       content: "Sessions were the prior auth approach",
-      importance: "medium",
+      importance: "med",
       sourceEntryIds: ["3"],
       timestamp: T3,
       parentNode: "n99",
@@ -147,7 +147,7 @@ function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
   applyCreateNode(curated, {
     id: N_GOAL,
     summary: "CURATED goal: stable public API",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
   });
@@ -155,7 +155,7 @@ function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
     obs: makeObservation({
       id: "oInitialPrompt",
       content: "build a memory extension",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: T0,
       parentNode: N_GOAL,
@@ -236,7 +236,7 @@ describe("mk_recall", () => {
     applyCreateNode(g, {
       id: "n1",
       summary: "slow target",
-      importance: "medium",
+      importance: "med",
       parentNode: null,
       state: "active",
     });
@@ -244,7 +244,7 @@ describe("mk_recall", () => {
       obs: makeObservation({
         id: "o1",
         content: "a".repeat(4000).concat("!"),
-        importance: "medium",
+        importance: "med",
         sourceEntryIds: [],
         timestamp: T0,
         parentNode: "n1",
@@ -337,14 +337,14 @@ describe("mk_recall", () => {
       _setGetMemkeeperSettings(null);
     });
 
-    it("obs ranking importance = max(obs, parent node) — a low obs under a critical node ranks as critical", async () => {
+    it("obs ranking importance = max(obs, parent node) — a low obs under a crit node ranks as crit", async () => {
       resetForNewSession();
       setClock(() => T0);
       const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       applyCreateNode(g, {
         id: "n1",
         summary: "Critical constraint area",
-        importance: "critical",
+        importance: "crit",
         parentNode: null,
         state: "active",
       });
@@ -356,7 +356,7 @@ describe("mk_recall", () => {
         state: "active",
       });
       // a LOW obs under the CRITICAL node, matching the same query as a low-obs
-      // under the low node — the critical-parented one must rank first.
+      // under the low node — the crit-parented one must rank first.
       applyRecordObservation(g, {
         obs: makeObservation({
           id: "o1",
@@ -385,7 +385,7 @@ describe("mk_recall", () => {
       const idxLow = out.indexOf("o2");
       expect(idxCrit).toBeGreaterThan(-1);
       expect(idxLow).toBeGreaterThan(-1);
-      expect(idxCrit).toBeLessThan(idxLow); // critical-parented ranks first
+      expect(idxCrit).toBeLessThan(idxLow); // crit-parented ranks first
     });
   });
 
@@ -510,7 +510,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
         applyCreateNode(g, {
           id: `n${i}` as Node["id"],
           summary: `alpha item ${i}`,
-          importance: "medium",
+          importance: "med",
           parentNode: null,
           state: "active",
         });
@@ -539,7 +539,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
         applyCreateNode(g, {
           id: `n${i}` as Node["id"],
           summary: `beta item ${i}`,
-          importance: "medium",
+          importance: "med",
           parentNode: null,
           state: "active",
         });
@@ -741,7 +741,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     });
   });
 
-  // --- AD18: result token budget + targeted extraction (contentPattern / lines) --
+  // --- result token budget + targeted extraction (contentPattern / lines) --
 
   describe("result token budget + extraction", () => {
     it("fullDetails single observation is returned whole (uncapped)", async () => {
@@ -885,6 +885,46 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       seedSource();
       const out = text(await recall(tool(), { ids: ["o5"], lines: "bad" }));
       expect(out).toContain("Invalid line range");
+    });
+
+    // --- contentPattern-alone greps every observation (not a root-browse no-op) ---
+
+    it("contentPattern alone greps every observation (not root browse)", async () => {
+      // No ids, no query, no bounds: contentPattern must grep all observations,
+      // not silently fall back to the root-node browse view.
+      seedSource();
+      const out = text(await recall(tool(), { contentPattern: "JWT" }));
+      expect(out).toContain("Chose JWT for stateless auth");
+      expect(out).toContain("o5");
+      // root-browse would show node one-liners (summaries), not a grep excerpt.
+      expect(out).not.toContain("the public API must stay stable");
+    });
+
+    // --- lines is a single-observation slice ---
+
+    it("lines without ids errors (no target)", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { lines: "1-1" }));
+      expect(out).toContain("single observation");
+    });
+
+    it("lines + query errors (query yields many)", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { query: "auth", lines: "1-1" }));
+      expect(out).toContain("single observation");
+    });
+
+    it("lines + contentPattern errors (mutually exclusive)", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["o5"], lines: "1-1", contentPattern: "JWT" }));
+      expect(out).toContain("can't be combined");
+    });
+
+    it("lines on a multi-observation target errors", async () => {
+      // two observation ids -> not a single-observation target.
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["o5", "oInitialPrompt"], lines: "1-1" }));
+      expect(out).toContain("single observation");
     });
   });
 });

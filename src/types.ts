@@ -43,27 +43,19 @@ export type NodeId = GeneratedNodeId | typeof N_GOAL | typeof N_IRRELEVANT;
 
 // --- Importance ------------------------------------------------------------
 
-export type Importance = "critical" | "high" | "medium" | "low";
+export type Importance = "crit" | "high" | "med" | "low";
 
 /** Ranking value for each importance (higher = more consequential if lost). */
 export const IMPORTANCE_RANK: Record<Importance, number> = {
-  critical: 4,
+  crit: 4,
   high: 3,
-  medium: 2,
+  med: 2,
   low: 1,
-};
-
-/** Render abbreviations (text words — not colored emoji). */
-export const IMPORTANCE_ABBR: Record<Importance, string> = {
-  critical: "crit",
-  high: "high",
-  medium: "med",
-  low: "low",
 };
 
 /** The canonical importance value list, derived from IMPORTANCE_RANK so the
  *  union, the settings schema enum, and the codecs decoder set cannot drift.
- *  Order is critical→low (matches the union + IMPORTANCE_RANK key order). */
+ *  Order is crit→low (matches the union + IMPORTANCE_RANK key order). */
 export const IMPORTANCE_VALUES = Object.keys(IMPORTANCE_RANK) as readonly Importance[];
 
 // --- Node state ------------------------------------------------------------

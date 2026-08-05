@@ -134,7 +134,7 @@ describe("structural validators", () => {
     expect(nGoalInvariants(g)).toBe(false);
   });
 
-  it("nGoalInvariants fails when nGoal importance is not critical", () => {
+  it("nGoalInvariants fails when nGoal importance is not crit", () => {
     const g = validGraph();
     node(g, N_GOAL).importance = "low";
     expect(nGoalInvariants(g)).toBe(false);
@@ -222,7 +222,7 @@ function nodeWith(overrides: Partial<Node> & Pick<Node, "id">): Node {
     id: overrides.id,
     summary,
     summaryTokens: estimateContentTokens(summary),
-    importance: overrides.importance ?? ("medium" as Importance),
+    importance: overrides.importance ?? ("med" as Importance),
     state: overrides.state ?? "active",
     parentNode: overrides.parentNode ?? null,
     observationIds: overrides.observationIds ?? [],
@@ -243,7 +243,7 @@ function obsWith(overrides: Partial<Observation> & Pick<Observation, "id" | "par
     id: overrides.id,
     content,
     contentTokens: estimateContentTokens(content),
-    importance: overrides.importance ?? "medium",
+    importance: overrides.importance ?? "med",
     sourceEntryIds: overrides.sourceEntryIds ?? ["1"],
     timestamp: overrides.timestamp ?? "2026-07-29T09:00:00.000Z",
     parentNode: overrides.parentNode,
@@ -268,12 +268,12 @@ function observation(graph: MemkeeperGraph, id: ObsId): Observation {
 function validGraph(): MemkeeperGraph {
   const nodes = new Map<NodeId, Node>();
   const observations = new Map<ObsId, Observation>();
-  nodes.set(N_GOAL, nodeWith({ id: N_GOAL, importance: "critical", state: "active" }));
+  nodes.set(N_GOAL, nodeWith({ id: N_GOAL, importance: "crit", state: "active" }));
   nodes.set("n5" as NodeId, nodeWith({ id: "n5", summary: "branch five", parentNode: null }));
   nodes.set("n6" as NodeId, nodeWith({ id: "n6", summary: "child six", parentNode: "n5" as NodeId }));
   nodes.get("n5")?.childNodeIds.push("n6" as NodeId);
 
-  const oInit = obsWith({ id: O_INITIAL_PROMPT, content: "the goal", importance: "critical", parentNode: N_GOAL });
+  const oInit = obsWith({ id: O_INITIAL_PROMPT, content: "the goal", importance: "crit", parentNode: N_GOAL });
   const o1 = obsWith({ id: "o1", content: "first", parentNode: N_GOAL });
   const o2 = obsWith({ id: "o2", content: "second", parentNode: "n5" as NodeId });
   const o3 = obsWith({ id: "o3", content: "third", parentNode: "n6" as NodeId });

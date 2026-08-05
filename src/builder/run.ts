@@ -104,7 +104,10 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   // Ensure-ready fast-path: a root view already under the threshold is
   // render-ready — skip the LLM passes entirely, just flush `new` arrivals so
   // they never linger as stale glyphs. A deliberate skip IS a normal stage-end
-  // for flush purposes. No stage is opened (no startStage).
+  // for flush purposes. No stage is opened (no startStage). Re-check abort
+  // after the model-resolution await: compaction may have signalled during it,
+  // and abort must preserve `new` (mirrors the convergence-loop guard).
+  if (input.signal.aborted) return;
   if (measureRootViewTokens(graph, "builder") < input.settings.builderRootViewThreshold) {
     flushNew(input.widget, store);
     return;

@@ -5,7 +5,7 @@
 // Builder ls/find, the Selector, mk_recall, the user /mk:* commands, and the
 // compaction summary.
 
-import { estimateContentTokens, IMPORTANCE_ABBR, type Node, type Observation } from "../types.js";
+import { estimateContentTokens, type Node, type Observation } from "../types.js";
 
 export type RenderViewer = "builder" | "nonBuilder";
 
@@ -52,11 +52,6 @@ function firstLine(text: string): string {
 const EMPTY_OBS_LIST = 0;
 const NOT_FOUND = -1;
 const START_INDEX = 0;
-
-/** The render abbreviation for an importance (crit/high/med/low). */
-export function importanceAbbr(imp: Node["importance"]): string {
-  return IMPORTANCE_ABBR[imp];
-}
 
 interface ParsedTimestamp {
   date: string;
@@ -220,7 +215,7 @@ export interface RenderableObservation {
 
 /** Render one node as a line (no indent — callers apply depth indentation). */
 export function formatNodeLine(node: RenderableNode, options: LineOptions): string {
-  const parts: string[] = [`${node.id} · ${stateGlyph(node, options.viewer)}${importanceAbbr(node.importance)}`];
+  const parts: string[] = [`${node.id} · ${stateGlyph(node, options.viewer)}${node.importance}`];
   const summary = singleLine(node.summary);
   if (summary !== "") {
     parts.push(summary);
@@ -242,7 +237,7 @@ export function formatNodeLine(node: RenderableNode, options: LineOptions): stri
 
 /** Render one observation as a line (no indent — callers apply depth indentation). */
 export function formatObservationLine(obs: RenderableObservation, options: LineOptions): string {
-  const parts: string[] = [`${obs.id} · ${importanceAbbr(obs.importance)}`];
+  const parts: string[] = [`${obs.id} · ${obs.importance}`];
   const formatContent = options.formatContent ?? singleLine;
   const content = formatContent(obs.content);
   if (content !== "") parts.push(content);

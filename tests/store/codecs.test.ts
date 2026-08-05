@@ -38,7 +38,7 @@ function sampleNode() {
   return makeNode({
     id: "n1" as NodeId,
     summary: "bug fix landed",
-    importance: "critical" as Importance,
+    importance: "crit" as Importance,
     state: "active",
     parentNode: N_GOAL,
     observationIds: ["o1" as ObsId],
@@ -106,7 +106,7 @@ describe("node codec", () => {
     expect(wire.summary).toBe("bug fix landed");
     expect(wire.summaryTokens).toBe(4); // "bug fix landed" = 14 chars / 4 = 4 (ceil)
     expect(wire.state).toBe("active");
-    expect(wire.importance).toBe("critical");
+    expect(wire.importance).toBe("crit");
     expect(wire.parentNode).toBe(N_GOAL);
     expect(wire.observationIds).toEqual(["o1"]);
     expect(wire.supersededBy).toBeNull();
@@ -157,7 +157,7 @@ describe("selection snapshot codec", () => {
     const prompt = makeObservation({
       id: O_INITIAL_PROMPT,
       content: "build memkeeper",
-      importance: "critical" as Importance,
+      importance: "crit" as Importance,
       sourceEntryIds: [],
       timestamp: "2026-07-29T09:00:00.000Z",
       parentNode: N_GOAL,
@@ -196,7 +196,7 @@ describe("selection snapshot codec", () => {
       summary: "x",
       summaryTokens: 1,
       state: "bogus", // invalid state
-      importance: "medium",
+      importance: "med",
       parentNode: null,
       observationIds: [],
       childNodeIds: [],

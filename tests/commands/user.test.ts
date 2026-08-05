@@ -21,7 +21,7 @@ const T1 = "2026-07-17T14:30:00.000Z";
 const T3 = "2026-07-19T10:00:00.000Z";
 
 /** Build a source graph with roots including obsolete + archived + new.
- *  Roots: nGoal (critical) · n7 (high, "Auth migration to JWT", child n8 + obs o5)
+ *  Roots: nGoal (crit) · n7 (high, "Auth migration to JWT", child n8 + obs o5)
  *  · n12 (new state — renders active to non-Builder · "Build failed") · n20
  *  (archived, "Old YAML config") · n99 (obsolete, superseded by n7, obs o9). */
 function buildGraph(): MemkeeperGraph {
@@ -31,7 +31,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: N_GOAL,
     summary: "the public API must stay stable",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
   });
@@ -39,7 +39,7 @@ function buildGraph(): MemkeeperGraph {
     obs: makeObservation({
       id: "oInitialPrompt",
       content: "build a memory extension",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: T0,
       parentNode: N_GOAL,
@@ -74,7 +74,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: "n12",
     summary: "Build failed: TS2322 at router.ts",
-    importance: "medium",
+    importance: "med",
     parentNode: null,
     state: "new",
   });
@@ -91,7 +91,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: "n99",
     summary: "Auth via sessions (old approach)",
-    importance: "medium",
+    importance: "med",
     parentNode: null,
     state: "active",
   });
@@ -99,7 +99,7 @@ function buildGraph(): MemkeeperGraph {
     obs: makeObservation({
       id: "o9",
       content: "Sessions were the prior auth approach",
-      importance: "medium",
+      importance: "med",
       sourceEntryIds: ["3"],
       timestamp: T3,
       parentNode: "n99",
@@ -175,7 +175,7 @@ describe("/mk:* user commands", () => {
       expect(text).toContain("n20 ·");
       // obsolete n99 EXCLUDED from default ls
       expect(text).not.toContain("n99 ·");
-      // nGoal (critical) appears before n7 (high)
+      // nGoal (crit) appears before n7 (high)
       expect(text.indexOf("nGoal")).toBeLessThan(text.indexOf("n7 ·"));
     });
 

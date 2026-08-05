@@ -33,7 +33,7 @@ describe("applyCreateNode", () => {
     const delta = applyCreateNode(g, {
       id: "n1",
       summary: "a container",
-      importance: "medium",
+      importance: "med",
       parentNode: null,
       state: "active",
     });
@@ -41,7 +41,7 @@ describe("applyCreateNode", () => {
       type: "create_node",
       id: "n1",
       summary: "a container",
-      importance: "medium",
+      importance: "med",
       parentNode: null,
       state: "active",
     });
@@ -232,7 +232,7 @@ describe("applyMv", () => {
     const g = graphWithTwoRoots();
     // reparent n2 under n1, add n3 under n2
     applyMv(g, { sourceIds: ["n2"], destId: "n1" }, MUTATE_SOURCE);
-    applyCreateNode(g, { id: "n3", summary: "leaf", importance: "medium", parentNode: "n2", state: "active" });
+    applyCreateNode(g, { id: "n3", summary: "leaf", importance: "med", parentNode: "n2", state: "active" });
     applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n3" }) });
     // move the sole observation to n2's sibling root (the other root from graphWithTwoRoots)
     applyMv(g, { sourceIds: ["o1"], destId: "n1" }, MUTATE_SOURCE);
@@ -249,14 +249,14 @@ describe("applyMv", () => {
 describe("timestamp range propagation", () => {
   it("recomputes ancestor ranges when a descendant observation changes", () => {
     const g = bareGraph();
-    applyCreateNode(g, { id: "n1", summary: "root", importance: "medium", parentNode: null, state: "active" });
-    applyCreateNode(g, { id: "n2", summary: "child", importance: "medium", parentNode: "n1", state: "active" });
+    applyCreateNode(g, { id: "n1", summary: "root", importance: "med", parentNode: null, state: "active" });
+    applyCreateNode(g, { id: "n2", summary: "child", importance: "med", parentNode: "n1", state: "active" });
     // record an obs under n2 at 10:00 -> n1 and n2 ranges must both span it
     applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n2" }) });
     expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29T10:00:00.000Z");
     expect(nodeById(g, "n2").timestamps.rangeStart).toBe("2026-07-29T10:00:00.000Z");
     // move the obs out of n2 to a new root n3 -> n2 and n1 ranges must update
-    applyCreateNode(g, { id: "n3", summary: "other", importance: "medium", parentNode: null, state: "active" });
+    applyCreateNode(g, { id: "n3", summary: "other", importance: "med", parentNode: null, state: "active" });
     applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T10:00:00.000Z", parentNode: "n2" }) });
     applyMv(g, { sourceIds: ["o2"], destId: "n3" }, MUTATE_SOURCE);
     // n2 still has o1 (10:00); n3 now has o2 (10:00) — both stay 10:00
@@ -266,9 +266,9 @@ describe("timestamp range propagation", () => {
 
   it("recomputes the ancestor range when a grandchild observation moves away", () => {
     const g = bareGraph();
-    applyCreateNode(g, { id: "n1", summary: "root", importance: "medium", parentNode: null, state: "active" });
-    applyCreateNode(g, { id: "n2", summary: "mid", importance: "medium", parentNode: "n1", state: "active" });
-    applyCreateNode(g, { id: "n3", summary: "leaf", importance: "medium", parentNode: "n2", state: "active" });
+    applyCreateNode(g, { id: "n1", summary: "root", importance: "med", parentNode: null, state: "active" });
+    applyCreateNode(g, { id: "n2", summary: "mid", importance: "med", parentNode: "n1", state: "active" });
+    applyCreateNode(g, { id: "n3", summary: "leaf", importance: "med", parentNode: "n2", state: "active" });
     // n2 keeps its own observation so the chain survives n3's dissolution
     applyRecordObservation(g, { obs: obsWith({ id: "o9", timestamp: "2026-07-29T09:00:00.000Z", parentNode: "n2" }) });
     applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: "2026-07-29T08:00:00.000Z", parentNode: "n3" }) });
@@ -276,7 +276,7 @@ describe("timestamp range propagation", () => {
     expect(nodeById(g, "n1").timestamps.rangeStart).toBe("2026-07-29T08:00:00.000Z");
     expect(nodeById(g, "n1").timestamps.rangeEnd).toBe("2026-07-29T09:00:00.000Z");
     // move o1 out to a fresh root; n3 dissolves but n1/n2 survive on oKeep
-    applyCreateNode(g, { id: "n4", summary: "fresh", importance: "medium", parentNode: null, state: "active" });
+    applyCreateNode(g, { id: "n4", summary: "fresh", importance: "med", parentNode: null, state: "active" });
     applyMv(g, { sourceIds: ["o1"], destId: "n4" }, MUTATE_SOURCE);
     expect(g.nodes.has("n3")).toBe(false);
     expect(nodeById(g, "n4").timestamps.rangeStart).toBe("2026-07-29T08:00:00.000Z");
@@ -324,12 +324,12 @@ describe("applyMerge", () => {
     applyRecordObservation(g, { obs: obsWith({ id: "o2", timestamp: "2026-07-29T11:00:00.000Z", parentNode: "n2" }) });
     const delta = applyMerge(
       g,
-      { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root", importance: "medium" },
+      { sourceIds: ["n1", "n2"], destId: null, newSummary: "fresh root", importance: "med" },
       MUTATE_SOURCE,
     );
     expect(delta.destId).toBeNull();
     expect(delta.resolvedDestId).toBeDefined();
-    expect(delta.importance).toBe("medium");
+    expect(delta.importance).toBe("med");
     // replay on a graph whose nextNodeId counter is LOWER than at original apply
     // (simulating a skipped counter-advancing delta): the resolved id must win.
     const g2 = graphWithTwoRoots();
@@ -340,7 +340,7 @@ describe("applyMerge", () => {
         sourceIds: ["n1", "n2"],
         destId: null,
         newSummary: "fresh root",
-        importance: "medium",
+        importance: "med",
         resolvedDestId: delta.resolvedDestId,
       },
       MUTATE_SOURCE,
@@ -442,11 +442,11 @@ describe("applySetMeta", () => {
     const g = graphWithTwoRoots();
     const delta = applySetMeta(
       g,
-      { nodeId: "n1", importance: "critical", archived: null, obsolete: null, summary: null },
+      { nodeId: "n1", importance: "crit", archived: null, obsolete: null, summary: null },
       MUTATE_SOURCE,
     );
-    expect(delta.importance).toBe("critical");
-    expect(nodeById(g, "n1").importance).toBe("critical");
+    expect(delta.importance).toBe("crit");
+    expect(nodeById(g, "n1").importance).toBe("crit");
   });
 
   it("archives and resurrects from archived", () => {
@@ -604,8 +604,8 @@ describe("always-attached invariant holds after core mutations", () => {
         parentNode: "n1",
       }),
     });
-    applyCreateNode(g, { id: "n2", summary: "second root", importance: "medium", parentNode: null, state: "active" });
-    applyCreateNode(g, { id: "n3", summary: "child", importance: "medium", parentNode: "n2", state: "active" });
+    applyCreateNode(g, { id: "n2", summary: "second root", importance: "med", parentNode: null, state: "active" });
+    applyCreateNode(g, { id: "n3", summary: "child", importance: "med", parentNode: "n2", state: "active" });
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o2",
@@ -650,33 +650,33 @@ function bareGraph(): MemkeeperGraph {
 
 function bareGraphWithRoot(id: NodeId): MemkeeperGraph {
   const g = bareGraph();
-  applyCreateNode(g, { id, summary: "root", importance: "medium", parentNode: null, state: "active" });
+  applyCreateNode(g, { id, summary: "root", importance: "med", parentNode: null, state: "active" });
   return g;
 }
 
 /** Two active root nodes n1, n2 (no observations). */
 function graphWithTwoRoots(): MemkeeperGraph {
   const g = bareGraph();
-  applyCreateNode(g, { id: "n1", summary: "root one", importance: "medium", parentNode: null, state: "active" });
-  applyCreateNode(g, { id: "n2", summary: "root two", importance: "medium", parentNode: null, state: "active" });
+  applyCreateNode(g, { id: "n1", summary: "root one", importance: "med", parentNode: null, state: "active" });
+  applyCreateNode(g, { id: "n2", summary: "root two", importance: "med", parentNode: null, state: "active" });
   return g;
 }
 
-/** nGoal (critical, root) with oInitialPrompt attached, plus an empty root n1. */
+/** nGoal (crit, root) with oInitialPrompt attached, plus an empty root n1. */
 function graphWithNGoal(): MemkeeperGraph {
   const g = bareGraph();
-  applyCreateNode(g, { id: N_GOAL, summary: "the goal", importance: "critical", parentNode: null, state: "active" });
+  applyCreateNode(g, { id: N_GOAL, summary: "the goal", importance: "crit", parentNode: null, state: "active" });
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "oInitialPrompt",
       content: "the initial prompt",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,
       parentNode: N_GOAL,
     }),
   });
-  applyCreateNode(g, { id: "n1", summary: "other root", importance: "medium", parentNode: null, state: "active" });
+  applyCreateNode(g, { id: "n1", summary: "other root", importance: "med", parentNode: null, state: "active" });
   return g;
 }
 
@@ -698,7 +698,7 @@ function obsWith(overrides: Partial<Observation> & Pick<Observation, "id" | "tim
     id: overrides.id,
     content,
     contentTokens: estimateContentTokens(content),
-    importance: overrides.importance ?? ("medium" as Importance),
+    importance: overrides.importance ?? ("med" as Importance),
     sourceEntryIds: overrides.sourceEntryIds ?? ["1"],
     timestamp: overrides.timestamp,
     parentNode: overrides.parentNode,

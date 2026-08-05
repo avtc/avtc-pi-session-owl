@@ -97,14 +97,14 @@ export function isUnstuckAutoContinue(message: AgentMessage): boolean {
 
 // --- nGoal seed ------------------------------------------------------------
 
-/** Seed nGoal into an empty graph (active/critical/empty summary) + persist it. */
+/** Seed nGoal into an empty graph (active/crit/empty summary) + persist it. */
 function ensureNGoalSeeded(store: StoreContext): void {
   const graph = getGraphStore().graph;
   if (graph.nodes.has(N_GOAL)) return;
   const delta = applyCreateNode(graph, {
     id: N_GOAL,
     summary: "",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
   });
@@ -157,7 +157,7 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   const obs = makeObservation({
     id: O_INITIAL_PROMPT,
     content: text,
-    importance: "critical",
+    importance: "crit",
     sourceEntryIds: [firstUser.id],
     timestamp: toStoredTimestamp(firstUser.timestamp),
     parentNode: N_GOAL,

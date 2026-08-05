@@ -82,7 +82,7 @@ export function buildWorkingCopy(source: MemkeeperGraph): SelectorWorkingCopy {
       makeNode({
         id: N_IRRELEVANT,
         summary: "Irrelevant",
-        importance: "medium",
+        importance: "med",
         parentNode: null,
         state: "active",
         createdAt: nowStoredTimestamp(),

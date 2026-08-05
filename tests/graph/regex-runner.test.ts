@@ -15,6 +15,23 @@ describe("runRegexTests", () => {
     if ("results" in res) expect(res.results).toEqual([true, false, true, false]);
   });
 
+  it("spans multiple result chunks (130 strings) with every index correct", async () => {
+    // CHUNK_SIZE = 64: 130 strings spans three posted batches (64 + 64 + 2).
+    // This verifies indices 64+ land at the correct results slots across
+    // multiple batched postMessage calls on normal completion (no timeout).
+    const total = 130;
+    const inputs = Array.from({ length: total }, (_, i) => (i % 3 === 0 ? `match-${i}-foo` : `nomatch-${i}`));
+    const res = await runRegexTests(/foo/, inputs, 5000);
+    expect("results" in res).toBe(true);
+    expect("testedCount" in res).toBe(false); // no testedCount on normal completion
+    if ("results" in res) {
+      expect(res.results).toHaveLength(total);
+      for (let i = 0; i < total; i++) {
+        expect(res.results[i], `index ${i}`).toBe(i % 3 === 0);
+      }
+    }
+  });
+
   it("respects regex flags (case-insensitive)", async () => {
     const res = await runRegexTests(/foo/i, ["FOO", "bar"], 5000);
     if ("results" in res) expect(res.results).toEqual([true, false]);
@@ -32,10 +49,12 @@ describe("runRegexTests", () => {
     // carries the PARTIAL results found so far + a timed-out marker (not a bare
     // error) so callers can surface what was matched.
     const evil = /(a+)+$/;
-    // the worker posts results in fixed-size chunks, so partial results are
-    // captured at chunk boundaries: enough fast strings to fill at least one
-    // chunk complete before the catastrophic one hangs (testedCount >= 1),
-    // while the catastrophic slot stays untested (false).
+    // the worker posts results in fixed-size chunks (CHUNK_SIZE = 64), so partial
+    // results are captured at chunk boundaries: enough fast strings to fill
+    // exactly one chunk (indices 0..63) before the catastrophic string (index
+    // 70) hangs. testedCount is therefore exactly 64 (one posted chunk), the
+    // untested tail (64..70) stays false, and the catastrophic slot itself is
+    // never tested.
     const fast = Array.from({ length: 70 }, () => "plain text");
     const input = "a".repeat(2000).concat("!");
     const t0 = Date.now();
@@ -43,12 +62,17 @@ describe("runRegexTests", () => {
     const elapsed = Date.now() - t0;
     expect("testedCount" in res).toBe(true);
     expect("results" in res).toBe(true);
-    if ("testedCount" in res) {
+    if ("testedCount" in res && "results" in res) {
       // killed promptly, not after the pattern's natural (multi-second+) runtime
       expect(elapsed).toBeLessThan(2000);
-      // at least one chunk of fast strings was posted before the hang
-      expect(res.testedCount).toBeGreaterThanOrEqual(1);
+      // exactly one posted chunk (the 64 fast strings) before the hang
+      expect(res.testedCount).toBe(64);
       expect(res.timedOutMs).toBeGreaterThanOrEqual(500);
+      // the posted chunk is correct: indices 0..63 all tested false (no match);
+      // the untested tail (64..70) stays false (default).
+      expect(res.results).toHaveLength(71);
+      expect(res.results.slice(0, 64).every((r) => r === false)).toBe(true);
+      expect(res.results.slice(64).every((r) => r === false)).toBe(true);
     }
   });
 

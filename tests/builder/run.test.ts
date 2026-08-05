@@ -123,7 +123,7 @@ function seedGraph(newRoots: Array<{ id: NodeId; summary: string }>): MemkeeperG
   applyCreateNode(g, {
     id: N_GOAL,
     summary: "goal",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
   });
@@ -131,7 +131,7 @@ function seedGraph(newRoots: Array<{ id: NodeId; summary: string }>): MemkeeperG
     obs: makeObservation({
       id: "oInitialPrompt",
       content: "build a memory extension",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,
       parentNode: N_GOAL,
@@ -141,7 +141,7 @@ function seedGraph(newRoots: Array<{ id: NodeId; summary: string }>): MemkeeperG
     applyCreateNode(g, {
       id: root.id,
       summary: root.summary,
-      importance: "medium",
+      importance: "med",
       parentNode: null,
       state: "new",
     });
@@ -387,6 +387,39 @@ describe("runBuilder", () => {
     });
     // aborted before start → new nodes stay new (no stage, no flush); the
     // ensure-ready gate / next run re-processes them.
+    expect(g.nodes.get("n3")?.state).toBe("new");
+    expect(flushNewCount(cap.appended)).toBe(0);
+  });
+
+  it("aborts during model resolution: fast-path preserves new nodes (post-await guard)", async () => {
+    const g = seedGraph([{ id: "n3", summary: "fresh arrival" }]);
+    expect(g.nodes.get("n3")?.state).toBe("new");
+    const ac = new AbortController();
+    const fakeModel = { provider: "test", id: "builder-model" } as unknown as ExtensionContext["model"];
+    // abort the controller DURING the model-resolution await (before it resolves),
+    // so resolution succeeds but the signal is aborted by the time the fast-path
+    // check runs — the post-await guard must preserve `new` instead of flushing.
+    const ctx: ExtensionContext = {
+      ...makeFakeCtx(),
+      modelRegistry: {
+        find: () => fakeModel,
+        getApiKeyAndHeaders: async () => {
+          ac.abort();
+          return { ok: true as const, apiKey: "key" };
+        },
+      } as unknown as ExtensionContext["modelRegistry"],
+    };
+    const cap = makeFakePi();
+    await runBuilder({
+      pi: cap.pi,
+      ctx,
+      settings: settings({ builderRootViewThreshold: 1_000_000 }),
+      signal: ac.signal,
+      widget: recordingWidget(),
+      scope: null,
+      runStageFn: scriptRunStage({ passes: [] }),
+    });
+    // post-await guard fired → `new` preserved (abort preserves new invariant)
     expect(g.nodes.get("n3")?.state).toBe("new");
     expect(flushNewCount(cap.appended)).toBe(0);
   });

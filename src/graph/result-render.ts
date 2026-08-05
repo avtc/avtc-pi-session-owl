@@ -19,7 +19,14 @@
 
 import { pluralize } from "../format/render.js";
 import { estimateContentTokens } from "../types.js";
-import { budgetReachedFooter, budgetWindow, parseLineRange, runGrepExcerpts, sliceLineRange } from "./result-budget.js";
+import {
+  budgetReachedFooter,
+  budgetWindow,
+  grepTimeoutNote,
+  parseLineRange,
+  runGrepExcerpts,
+  sliceLineRange,
+} from "./result-budget.js";
 
 /** How to render an observation's content within a result. */
 export type ContentMode =
@@ -38,13 +45,18 @@ export interface GrepSpec {
 /** Resolve the content mode from the new extraction params. Precedence
  *  (most-explicit first): lines > contentPattern > fullDetails > terse.
  *  `grep` is null when contentPattern is absent; the caller compiles it first
- *  (so this module never imports the regex compiler — no circular dep). */
+ *  (so this module never imports the regex compiler — no circular dep). `lines`
+ *  and `contentPattern` are mutually exclusive — passing both is an error. */
 export function resolveContentMode(
   fullDetails: boolean,
   grep: GrepSpec | null,
   lines: string | undefined,
 ): ContentMode | { error: string } {
-  if (lines !== undefined && lines !== "") {
+  const hasLines = lines !== undefined && lines !== "";
+  if (hasLines && grep !== null) {
+    return { error: "Pass only one of `lines` or `contentPattern` — they can't be combined." };
+  }
+  if (hasLines) {
     const parsed = parseLineRange(lines);
     if ("error" in parsed) return parsed;
     return { kind: "lines", start: parsed.start, end: parsed.end };
@@ -208,10 +220,7 @@ async function renderGrepBudgeted(items: RenderItem[], opts: BudgetedOptions): P
   const matchesPerItem = result.matchesPerItem;
   const perObsExcerpts = result.excerpts;
 
-  const timedOutNote =
-    result.timedOutMs !== null
-      ? `grep timed out after ${(result.timedOutMs / 1000).toFixed(0)}s · partial excerpts`
-      : null;
+  const timedOutNote = result.timedOutMs !== null ? grepTimeoutNote(result.timedOutMs) : null;
 
   let total = 0;
   const parts: string[] = [];

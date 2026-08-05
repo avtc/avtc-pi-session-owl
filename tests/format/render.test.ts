@@ -8,7 +8,6 @@ import {
   formatObservationLine,
   formatTimestamp,
   formatTimestampRange,
-  importanceAbbr,
   RENDER_LEGEND,
   toStoredTimestamp,
 } from "../../src/format/render.js";
@@ -16,15 +15,6 @@ import type { Node, Observation } from "../../src/types.js";
 import { estimateContentTokens, N_GOAL } from "../../src/types.js";
 
 const FIXED_NOW = "2026-07-29T09:00:00.000Z";
-
-describe("importanceAbbr", () => {
-  it("maps each importance to its render word", () => {
-    expect(importanceAbbr("critical")).toBe("crit");
-    expect(importanceAbbr("high")).toBe("high");
-    expect(importanceAbbr("medium")).toBe("med");
-    expect(importanceAbbr("low")).toBe("low");
-  });
-});
 
 describe("formatTimestamp", () => {
   it("renders a stored YYYY-MM-DD HH:MM as Jul 28 14:30", () => {
@@ -147,7 +137,7 @@ describe("formatNodeLine", () => {
   });
 
   it("omits the child count when the node has only observations", () => {
-    const node = makeNode({ id: "nGoal", summary: "the goal", importance: "critical", observationIds: repeatObs(2) });
+    const node = makeNode({ id: "nGoal", summary: "the goal", importance: "crit", observationIds: repeatObs(2) });
     expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe("nGoal · crit · the goal · 2obs · Jul 29 09:00");
   });
 
@@ -160,7 +150,7 @@ describe("formatNodeLine", () => {
     const node = makeNode({
       id: "n2",
       summary: "YAML config",
-      importance: "medium",
+      importance: "med",
       state: "obsolete",
       supersededBy: "n7",
     });
@@ -171,7 +161,7 @@ describe("formatNodeLine", () => {
     const node = makeNode({
       id: "n12",
       summary: "Build failed: TS2322",
-      importance: "medium",
+      importance: "med",
       state: "new",
       observationIds: repeatObs(1),
     });
@@ -184,7 +174,7 @@ describe("formatNodeLine", () => {
     const node = makeNode({
       id: "n12",
       summary: "Build failed: TS2322",
-      importance: "medium",
+      importance: "med",
       state: "new",
       observationIds: repeatObs(1),
     });
@@ -200,7 +190,7 @@ describe("formatNodeLine", () => {
     const node = makeNode({
       id: "n15",
       summary: "",
-      importance: "medium",
+      importance: "med",
       state: "new",
       observationIds: repeatObs(1),
     });
@@ -216,7 +206,7 @@ describe("formatNodeLine", () => {
     const node = makeNode({
       id: "n15",
       summary: "",
-      importance: "medium",
+      importance: "med",
       state: "new",
       observationIds: repeatObs(1),
     });
@@ -316,7 +306,7 @@ describe("singleLine rendering", () => {
   });
 
   it("omits the summary segment when it is empty (no double delimiter)", () => {
-    const node = makeNode({ id: "n1", summary: "", importance: "medium", observationIds: repeatObs(1) });
+    const node = makeNode({ id: "n1", summary: "", importance: "med", observationIds: repeatObs(1) });
     const line = formatNodeLine(node, { viewer: "nonBuilder" });
     expect(line).not.toContain("·  ·");
     expect(line).toBe("n1 · med · 1obs · Jul 29 09:00");

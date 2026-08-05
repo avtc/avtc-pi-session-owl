@@ -103,7 +103,7 @@ function scriptedRunStage(batchesPerChunk: RecordObservationInput[][]): {
 
 type RecordObservationInput = {
   content: string;
-  importance: "critical" | "high" | "medium" | "low";
+  importance: "crit" | "high" | "med" | "low";
   sourceEntryIds: string[];
 };
 
@@ -280,8 +280,8 @@ describe("runObserver", () => {
     ];
     const script = scriptedRunStage([
       [
-        { content: "Every commit must keep the build green.", importance: "critical", sourceEntryIds: ["a1"] }, // good
-        { content: "Foreign fact.", importance: "medium", sourceEntryIds: ["ZZZ-not-in-chunk"] }, // foreign id
+        { content: "Every commit must keep the build green.", importance: "crit", sourceEntryIds: ["a1"] }, // good
+        { content: "Foreign fact.", importance: "med", sourceEntryIds: ["ZZZ-not-in-chunk"] }, // foreign id
       ],
     ]);
 
@@ -291,7 +291,7 @@ describe("runObserver", () => {
     const graph = getGraphStore().graph;
     const newNodes = [...graph.nodes.values()].filter((n) => n.state === "new");
     expect(newNodes).toHaveLength(1);
-    expect(newNodes[0].importance).toBe("critical");
+    expect(newNodes[0].importance).toBe("crit");
     expect(script.acks[0]).toMatch(/recorded 1/i);
     expect(script.acks[0]).toMatch(/reject/i);
 

@@ -258,7 +258,7 @@ function addRootNode(id: NodeId, state: "new" | "active" | "archived" | "obsolet
     makeNode({
       id,
       summary: ROOT_NODE_SUMMARY,
-      importance: "medium",
+      importance: "med",
       state,
       parentNode: null,
       createdAt: "2026-07-28T14:30:00.000Z",

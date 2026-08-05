@@ -50,7 +50,7 @@ function node(over: Partial<Node>): Node {
     summary: over.summary ?? "a node",
     summaryTokens: over.summaryTokens ?? Math.ceil((over.summary ?? "a node").length / 4),
     state: over.state ?? "active",
-    importance: over.importance ?? "medium",
+    importance: over.importance ?? "med",
     parentNode: over.parentNode ?? null,
     observationIds: over.observationIds ?? [],
     childNodeIds: over.childNodeIds ?? [],
@@ -72,7 +72,7 @@ function obs(
   id: ObsId;
   content: string;
   contentTokens: number;
-  importance: "medium";
+  importance: "med";
   sourceEntryIds: string[];
   timestamps: { createdAt: string };
 } {
@@ -80,7 +80,7 @@ function obs(
     id,
     content,
     contentTokens,
-    importance: "medium",
+    importance: "med",
     sourceEntryIds: [],
     timestamps: { createdAt: "2026-07-28T09:00:00.000Z" },
   };
@@ -253,7 +253,7 @@ describe("gatherStatusInput", () => {
       id: "o1",
       content: "x",
       contentTokens: 40,
-      importance: "medium",
+      importance: "med",
       sourceEntryIds: [],
       timestamps: {
         createdAt: "2026-07-28T09:00:00.000Z",

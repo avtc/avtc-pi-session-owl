@@ -77,6 +77,9 @@ const DEFAULT_CONTEXT_LINES = 2;
 /** Named booleans for `resolveToolMode`'s default-full flag (no bare literals). */
 const MODE_DEFAULT_FULL = true;
 const MODE_DEFAULT_TERSE = false;
+/** find has no `lines` param (incompatible with its required `query`); pass
+ *  this so `resolveToolMode` never enters lines mode for a find call. */
+const NO_LINES: string | undefined = undefined;
 
 // --- extraction param schemas (contentPattern / contextLines / lines) -------
 // Shared by `cat`, `find` (and mirrored in mk_recall). `ls` is structure-only,
@@ -85,7 +88,7 @@ const MODE_DEFAULT_TERSE = false;
 const ContentPatternSchema = Type.Optional(
   Type.String({
     description:
-      "Regex matched against each result observation's content lines; returns the matching lines plus `contextLines` around each (grep-style, with line numbers), not whole content. Use to pull just the relevant excerpt from a large observation.",
+      "Extract matching lines from observations as grep-style excerpts (with `contextLines` and line numbers) instead of the whole text — greps every observation, or just those an `ids` drill or `query` search returns.",
   }),
 );
 const ContextLinesSchema = Type.Optional(
@@ -97,7 +100,7 @@ const ContextLinesSchema = Type.Optional(
 const LinesSchema = Type.Optional(
   Type.String({
     description:
-      "Show only the given line range of each result observation's content, e.g. '40-60'. Use to read a window around a `contentPattern` match's line number.",
+      "Read a line range (e.g. '40-60') of a single observation — pass an observation id, or a node id with one observation.",
   }),
 );
 
@@ -209,7 +212,7 @@ export interface OrderableNode {
   timestamps: { rangeEnd: string };
 }
 
-/** Importance desc (critical→low), then rangeEnd recency desc (newer first). */
+/** Importance desc (crit→low), then rangeEnd recency desc (newer first). */
 function compareNodeOrder<T extends OrderableNode>(a: T, b: T): number {
   const byImportance = IMPORTANCE_RANK[b.importance] - IMPORTANCE_RANK[a.importance];
   if (byImportance !== 0) return byImportance;
@@ -362,7 +365,7 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
   return {
     name: LS_TOOL,
     description:
-      "List one level of the memory graph — the root nodes with no id, or a node's direct children (subnodes and observations).",
+      "List one level of the memory graph — the root nodes, or a node's children (subnodes and observations).",
     label: "List",
     parameters: LS_PARAMS,
     async execute(_toolCallId, params) {
@@ -445,12 +448,26 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
       if (stale) {
         return staleResult(page);
       }
-      // resolve content mode + budget (precedence lines > contentPattern > full
-      // > terse). cat is a full read, so the default mode is `full`; grep/lines
-      // override it. A single-observation target is unbudgeted in any mode.
+      // resolve content mode + budget. cat is a full read, so the default mode
+      // is `full`; grep/lines override it. `lines` and `contentPattern` are
+      // mutually exclusive (resolveContentMode errors if both are set). A
+      // single-observation target is unbudgeted in any mode.
       const modeRes = resolveToolMode(MODE_DEFAULT_FULL, params.contentPattern, params.contextLines, params.lines);
       if ("error" in modeRes) {
         return { content: [{ type: "text", text: modeRes.error }], details: { error: true } };
+      }
+      // `lines` reads a range of ONE observation — error unless the ids resolve
+      // to exactly one connected observation (an obs id, or a node with one).
+      if (modeRes.kind === "lines" && singleObsTargetCount(graph, params.ids) !== 1) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "`lines` reads a range of a single observation — pass one observation id, or a node id with one observation.",
+            },
+          ],
+          details: { error: true },
+        };
       }
       const items = window.map(catUnitToItem);
       // A single-observation target is unbudgeted in ANY mode (full / lines /
@@ -582,13 +599,15 @@ export function renderCatUnit(unit: CatUnit): string {
 // --- find ------------------------------------------------------------------
 
 const FIND_PARAMS = Type.Object({
-  query: Type.String({ description: "Regex (JS) to match against node summaries and observation content." }),
+  query: Type.String({
+    description:
+      "Find items by regex (JS) over node summaries and observation content. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
+  }),
   includeSuperseded: Type.Optional(
     Type.Boolean({ description: "Include superseded and obsolete items (default false — current memory only)." }),
   ),
   contentPattern: ContentPatternSchema,
   contextLines: ContextLinesSchema,
-  lines: LinesSchema,
   page: Type.Optional(PageSchema),
 });
 
@@ -706,8 +725,7 @@ interface ObsMatch extends FindMatch {
 function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof FIND_PARAMS> {
   return {
     name: FIND_TOOL,
-    description:
-      "Search the whole memory graph by regex — node summaries and observation content. Flat results, each showing its parent.",
+    description: "Search the whole memory graph by regex through node summaries and observation content.",
     label: "Find",
     parameters: FIND_PARAMS,
     async execute(_toolCallId, params) {
@@ -732,8 +750,10 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
         return { content: [{ type: "text", text: empty }], details: { count: 0, more: false } };
       }
 
-      // resolve content mode (find has no fullDetails param → terse/grep/lines).
-      const modeRes = resolveToolMode(MODE_DEFAULT_TERSE, params.contentPattern, params.contextLines, params.lines);
+      // resolve content mode (find has no fullDetails param → terse or grep;
+      // find has no `lines` param — lines is a single-observation slice that
+      // needs an `ids` target, incompatible with find's required `query`).
+      const modeRes = resolveToolMode(MODE_DEFAULT_TERSE, params.contentPattern, params.contextLines, NO_LINES);
       if ("error" in modeRes) {
         return { content: [{ type: "text", text: modeRes.error }], details: { error: true } };
       }
@@ -747,7 +767,7 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
         return { content: [{ type: "text", text }], details: { count: out.count, more: out.more } };
       }
 
-      // grep / lines: expand the matched OBSERVATIONS' content; node matches stay
+      // grep: expand the matched OBSERVATIONS' content; node matches stay
       // header-only (they have no observation content).
       const items: RenderItem[] = window.map((m) => {
         const match = m as FindMatch & { obs?: Observation };
@@ -830,7 +850,7 @@ export function makeTryFinishTool(
   return {
     name: TRY_FINISH_TOOL,
     description:
-      "Signal the graph is organized and check the root view fits the budget. Accepts when it fits; otherwise reports the overrun and asks for more consolidation.",
+      "Call when you've finished organizing. Ends the run if the root view fits the budget; otherwise reports the overrun so you can consolidate more.",
     label: "Finish",
     parameters: TRY_FINISH_PARAMS,
     async execute(): Promise<AgentToolResult<unknown>> {

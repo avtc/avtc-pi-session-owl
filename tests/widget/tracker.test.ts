@@ -23,7 +23,7 @@ function seedObs(id: ObsId, parentNode: NodeId): void {
     obs: makeObservation({
       id,
       content: "x".repeat(NUM_FORTY),
-      importance: "medium",
+      importance: "med",
       sourceEntryIds: [],
       timestamp: "2026-07-30T00:00:00Z",
       parentNode,

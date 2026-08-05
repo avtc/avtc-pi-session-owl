@@ -36,12 +36,13 @@ describe("resolveContentMode", () => {
     });
   });
   it("lines when lines set", () => {
-    expect(resolveContentMode(false, grep("foo"), "40-60")).toEqual({ kind: "lines", start: 40, end: 60 });
+    expect(resolveContentMode(false, null, "40-60")).toEqual({ kind: "lines", start: 40, end: 60 });
   });
-  it("precedence: lines > contentPattern > fullDetails", () => {
-    // lines wins over grep + fullDetails
-    expect(resolveContentMode(true, grep("foo"), "1-3")).toEqual({ kind: "lines", start: 1, end: 3 });
-    // grep wins over fullDetails
+  it("lines and contentPattern are mutually exclusive", () => {
+    // both set -> error (no silent override)
+    const both = resolveContentMode(true, grep("foo"), "1-3");
+    expect("error" in both).toBe(true);
+    // grep alone still wins over fullDetails
     const m = resolveContentMode(true, grep("foo"), undefined);
     expect("error" in m ? null : m.kind).toBe("grep");
   });

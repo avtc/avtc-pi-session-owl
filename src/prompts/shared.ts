@@ -9,4 +9,4 @@
  *  Builder and Selector prompts prepend this, then append their own trailing
  *  "set it when..." clause (the actions differ by role). */
 export const IMPORTANCE_GLOSS =
-  "Importance is how much a node matters if lost: critical — a hard, persistent constraint or correction; high — a decision, choice, or unresolved blocker; medium — meaningful context, not itself a decision or constraint; low — routine activity or minor detail.";
+  "Importance is how much a node matters if lost: crit — a hard, persistent constraint or correction; high — a decision, choice, or unresolved blocker; med — meaningful context, not itself a decision or constraint; low — routine activity or minor detail.";

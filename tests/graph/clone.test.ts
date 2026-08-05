@@ -10,7 +10,7 @@ describe("cloneNode", () => {
     const source = makeNode({
       id: N_GOAL,
       summary: "the goal",
-      importance: "critical",
+      importance: "crit",
       parentNode: null,
       state: "active",
       createdAt: "2026-07-28T09:00:00.000Z",
@@ -54,7 +54,7 @@ describe("cloneObservation", () => {
     const source = makeObservation({
       id: "o1",
       content: "fact",
-      importance: "medium",
+      importance: "med",
       sourceEntryIds: ["e2"],
       parentNode: "n3",
       timestamp: "2026-07-28T10:00:00.000Z",
@@ -69,7 +69,7 @@ describe("cloneObservation", () => {
     const source = makeObservation({
       id: "o1",
       content: "fact",
-      importance: "medium",
+      importance: "med",
       sourceEntryIds: ["e2"],
       parentNode: "n3",
       timestamp: "2026-07-28T10:00:00.000Z",

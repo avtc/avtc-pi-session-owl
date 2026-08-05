@@ -158,7 +158,7 @@ describe("onSessionStart", () => {
     const graph = getGraphStore().graph;
     expect(graph.nodes.has(N_GOAL)).toBe(true);
     const ngoal = graph.nodes.get(N_GOAL);
-    expect(ngoal?.importance).toBe("critical");
+    expect(ngoal?.importance).toBe("crit");
     expect(ngoal?.state).toBe("active");
     expect(ngoal?.summary).toBe("");
     expect(graph.hasInitialPrompt).toBe(false); // oInitialPrompt NOT captured here
@@ -208,7 +208,7 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(obs?.content).toBe("Build me a CLI tool");
     expect(obs?.parentNode).toBe(N_GOAL);
     expect(obs?.sourceEntryIds).toEqual(["u1"]);
-    expect(obs?.importance).toBe("critical");
+    expect(obs?.importance).toBe("crit");
     // nGoal summary seeded from the first non-empty line
     expect(graph.nodes.get(N_GOAL)?.summary).toBe("Build me a CLI tool");
     // frontier advanced past the first user message (Observer never re-observes it)

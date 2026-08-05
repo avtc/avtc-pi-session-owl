@@ -21,7 +21,7 @@ function sNode(id: string, over: Partial<SerializedNode> & { summary: string }):
     summary: over.summary,
     summaryTokens: over.summaryTokens ?? 4,
     state: over.state ?? "active",
-    importance: over.importance ?? "medium",
+    importance: over.importance ?? "med",
     parentNode: over.parentNode ?? null,
     observationIds: over.observationIds ?? [],
     childNodeIds: over.childNodeIds ?? [],
@@ -39,7 +39,7 @@ function sObs(id: string, content: string, over: Partial<SerializedObservation>)
   return {
     id,
     content,
-    importance: over.importance ?? "critical",
+    importance: over.importance ?? "crit",
     sourceEntryIds: over.sourceEntryIds ?? [],
     timestamp: over.timestamp ?? "2026-07-28T09:00:00.000Z",
     parentNode: over.parentNode ?? N_GOAL,
@@ -143,13 +143,13 @@ describe("renderSummary — observations-root", () => {
     return nodeGraph(nodes);
   }
 
-  it("renders all non-obsolete source roots (nGoal first even when a newer critical root exists)", () => {
+  it("renders all non-obsolete source roots (nGoal first even when a newer crit root exists)", () => {
     const out = renderSummary({
       graph: graphWith([
         sNode("nGoal", {
           id: N_GOAL,
           summary: "Build the extension",
-          importance: "critical",
+          importance: "crit",
           childNodeIds: ["o1"],
           observationIds: ["o1"],
           // nGoal OLDER than n3 — a pure importance/recency sort would put n3 first.
@@ -163,7 +163,7 @@ describe("renderSummary — observations-root", () => {
         sNode("n7", { summary: "Selector spec", importance: "high" }),
         sNode("n3", {
           summary: "Mechanical render",
-          importance: "critical",
+          importance: "crit",
           timestamps: {
             createdAt: "2026-07-28T14:00:00.000Z",
             updatedAt: "2026-07-28T14:30:00.000Z",
@@ -191,9 +191,9 @@ describe("renderSummary — observations-root", () => {
   it("renders archived roots with 📦 and new nodes as active (no 🆕)", () => {
     const out = renderSummary({
       graph: graphWith([
-        sNode("nGoal", { id: N_GOAL, summary: "g", importance: "critical" }),
+        sNode("nGoal", { id: N_GOAL, summary: "g", importance: "crit" }),
         sNode("nArch", { summary: "cold", importance: "low", state: "archived" }),
-        sNode("nNew", { summary: "fresh", importance: "medium", state: "new" }),
+        sNode("nNew", { summary: "fresh", importance: "med", state: "new" }),
       ]),
       selectedTree: null,
       oInitialPrompt: PROMPT,
@@ -210,9 +210,9 @@ describe("renderSummary — selected-root", () => {
   it("renders selected tree roots (nGoal first, nIrrelevant last)", () => {
     const tree = selection(
       [
-        sNode("nGoal", { id: N_GOAL, summary: "Build the extension", importance: "critical" }),
+        sNode("nGoal", { id: N_GOAL, summary: "Build the extension", importance: "crit" }),
         sNode("n7", { summary: "Selector spec", importance: "high" }),
-        sNode("n3", { summary: "Mechanical render", importance: "critical" }),
+        sNode("n3", { summary: "Mechanical render", importance: "crit" }),
         sNode(N_IRRELEVANT, { id: N_IRRELEVANT, summary: "Irrelevant", importance: "low" }),
       ],
       PROMPT,
@@ -240,8 +240,8 @@ describe("renderSummary — selected-root", () => {
   it("falls back to source roots when selectedTree is null (no selected tree yet)", () => {
     const out = renderSummary({
       graph: nodeGraph([
-        sNode("nGoal", { id: N_GOAL, summary: "g", importance: "critical" }),
-        sNode("n5", { summary: "other", importance: "medium" }),
+        sNode("nGoal", { id: N_GOAL, summary: "g", importance: "crit" }),
+        sNode("n5", { summary: "other", importance: "med" }),
       ]),
       selectedTree: null,
       oInitialPrompt: PROMPT,

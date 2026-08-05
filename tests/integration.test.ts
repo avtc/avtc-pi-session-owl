@@ -225,7 +225,7 @@ function scriptObserverRecordsOnePerChunk(): { recorded: number } {
     const ids = parseChunkIds(text);
     if (ids.length > 0 && typeof tool?.execute === "function") {
       await tool.execute("call-1", {
-        observations: [{ content: "observed fact", importance: "medium", sourceEntryIds: [ids[0] as string] }],
+        observations: [{ content: "observed fact", importance: "med", sourceEntryIds: [ids[0] as string] }],
       });
       state.recorded += 1;
     }
@@ -521,7 +521,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
             type: "create_node",
             id: N_GOAL,
             summary: "reloaded goal",
-            importance: "critical",
+            importance: "crit",
             parentNode: null,
             state: "active",
           },

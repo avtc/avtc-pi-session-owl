@@ -488,7 +488,7 @@ describe("runStage — config wiring", () => {
         systemPrompt: "SYS",
         messages: [{ role: "user", content: [], timestamp: 0 }] as unknown as AgentMessage[],
         tools,
-        reasoning: "medium" as ThinkingLevel,
+        reasoning: "med" as ThinkingLevel,
       }),
     );
     expect(captured).toHaveLength(1);
@@ -496,6 +496,6 @@ describe("runStage — config wiring", () => {
     expect(captured[0]?.ctx.tools).toBe(tools);
     expect(captured[0]?.cfg.toolExecution).toBe(SEQUENTIAL);
     expect(typeof captured[0]?.cfg.shouldStopAfterTurn).toBe("function");
-    expect(captured[0]?.cfg).toHaveProperty("reasoning", "medium");
+    expect(captured[0]?.cfg).toHaveProperty("reasoning", "med");
   });
 });

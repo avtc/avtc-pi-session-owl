@@ -15,7 +15,7 @@ function g(): MemkeeperGraph {
   const nGoal = makeNode({
     id: N_GOAL,
     summary: "the goal",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
     createdAt: "2026-07-28T09:00:00.000Z",
@@ -31,7 +31,7 @@ function g(): MemkeeperGraph {
   const nNew = makeNode({
     id: "n4",
     summary: "fresh",
-    importance: "medium",
+    importance: "med",
     parentNode: null,
     state: "new",
     createdAt: "2026-07-28T09:00:00.000Z",
@@ -61,7 +61,7 @@ function g(): MemkeeperGraph {
   const oInit = makeObservation({
     id: O_INITIAL_PROMPT,
     content: "initial",
-    importance: "critical",
+    importance: "crit",
     sourceEntryIds: ["u1"],
     parentNode: N_GOAL,
     timestamp: "2026-07-28T09:00:00.000Z",
@@ -69,7 +69,7 @@ function g(): MemkeeperGraph {
   const o1 = makeObservation({
     id: "o1",
     content: "fact",
-    importance: "medium",
+    importance: "med",
     sourceEntryIds: ["e2"],
     parentNode: "n3",
     timestamp: "2026-07-28T10:00:00.000Z",
@@ -146,7 +146,7 @@ describe("buildWorkingCopy", () => {
       makeNode({
         id: N_GOAL,
         summary: "g",
-        importance: "critical",
+        importance: "crit",
         parentNode: null,
         state: "active",
         createdAt: "2026-07-28T09:00:00.000Z",
@@ -167,7 +167,7 @@ describe("buildWorkingCopy", () => {
     const nGoal = makeNode({
       id: N_GOAL,
       summary: "g",
-      importance: "critical",
+      importance: "crit",
       parentNode: null,
       state: "active",
       createdAt: "2026-07-28T09:00:00.000Z",
@@ -188,7 +188,7 @@ describe("buildWorkingCopy", () => {
       makeObservation({
         id: O_INITIAL_PROMPT,
         content: "goal",
-        importance: "critical",
+        importance: "crit",
         sourceEntryIds: ["u1"],
         timestamp: "2026-07-28T09:00:00.000Z",
         parentNode: N_GOAL,
@@ -211,7 +211,7 @@ describe("buildWorkingCopy", () => {
     const nGoal = makeNode({
       id: N_GOAL,
       summary: "g",
-      importance: "critical",
+      importance: "crit",
       parentNode: null,
       state: "active",
       createdAt: "2026-07-28T09:00:00.000Z",
@@ -231,7 +231,7 @@ describe("buildWorkingCopy", () => {
       makeObservation({
         id: O_INITIAL_PROMPT,
         content: "goal",
-        importance: "critical",
+        importance: "crit",
         sourceEntryIds: ["u1"],
         timestamp: "2026-07-28T09:00:00.000Z",
         parentNode: N_GOAL,
@@ -267,7 +267,7 @@ describe("buildWorkingCopy", () => {
     const nGoal = makeNode({
       id: N_GOAL,
       summary: "g",
-      importance: "critical",
+      importance: "crit",
       parentNode: null,
       state: "active",
       createdAt: "2026-07-28T09:00:00.000Z",
@@ -303,7 +303,7 @@ describe("buildWorkingCopy", () => {
       makeObservation({
         id: O_INITIAL_PROMPT,
         content: "goal",
-        importance: "critical",
+        importance: "crit",
         sourceEntryIds: ["u1"],
         timestamp: "2026-07-28T09:00:00.000Z",
         parentNode: N_GOAL,
@@ -600,7 +600,7 @@ function sourceGraphForAssembly(): MemkeeperGraph {
   const nGoal = makeNode({
     id: N_GOAL,
     summary: "the goal",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
     createdAt: "2026-07-28T09:00:00.000Z",
@@ -620,7 +620,7 @@ function sourceGraphForAssembly(): MemkeeperGraph {
     makeObservation({
       id: O_INITIAL_PROMPT,
       content: "build it",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["u1"],
       timestamp: "2026-07-28T09:00:00.000Z",
       parentNode: N_GOAL,
@@ -702,7 +702,7 @@ describe("buildSelectorInputView", () => {
       makeNode({
         id: N_GOAL,
         summary: "goal summary",
-        importance: "critical",
+        importance: "crit",
         parentNode: null,
         state: "active",
         createdAt: "2026-07-28T09:00:00.000Z",
@@ -747,7 +747,7 @@ describe("buildSelectorInputView", () => {
       makeObservation({
         id: O_INITIAL_PROMPT,
         content: "goal",
-        importance: "critical",
+        importance: "crit",
         sourceEntryIds: ["u1"],
         timestamp: "2026-07-28T09:00:00.000Z",
         parentNode: N_GOAL,

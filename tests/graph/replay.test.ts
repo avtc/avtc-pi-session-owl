@@ -22,7 +22,7 @@ function seedGraph(): MemkeeperGraph {
   const goal = makeNode({
     id: N_GOAL,
     summary: "the goal",
-    importance: "critical" as Importance,
+    importance: "crit" as Importance,
     state: "active",
     parentNode: null,
     createdAt: "2026-07-29T09:00:00.000Z",
@@ -30,7 +30,7 @@ function seedGraph(): MemkeeperGraph {
   const n1 = makeNode({
     id: "n1" as NodeId,
     summary: "branch one",
-    importance: "medium" as Importance,
+    importance: "med" as Importance,
     state: "active",
     parentNode: N_GOAL,
     createdAt: "2026-07-29T10:00:00.000Z",
@@ -41,7 +41,7 @@ function seedGraph(): MemkeeperGraph {
   const o1 = makeObservation({
     id: "o1" as ObsId,
     content: "first fact",
-    importance: "medium" as Importance,
+    importance: "med" as Importance,
     sourceEntryIds: ["5"],
     timestamp: "2026-07-29T10:00:00.000Z",
     parentNode: "n1" as NodeId,
@@ -94,7 +94,7 @@ describe("applyDelta replay dispatcher", () => {
     applyCreateNode(g, {
       id: "n2" as NodeId,
       summary: "dest",
-      importance: "medium" as Importance,
+      importance: "med" as Importance,
       parentNode: N_GOAL,
       state: "active",
     });
@@ -155,16 +155,16 @@ describe("applyDelta replay dispatcher", () => {
         parentNode: "n2" as NodeId,
       }),
     });
-    // n1 starts at medium; the merge re-rates it to critical.
-    expect(node(g, "n1").importance).toBe("medium");
+    // n1 starts at med; the merge re-rates it to crit.
+    expect(node(g, "n1").importance).toBe("med");
     const delta: MergeDelta = {
       type: "merge",
       sourceIds: ["n2" as NodeId],
       destId: "n1" as NodeId,
-      importance: "critical" as Importance,
+      importance: "crit" as Importance,
     };
     applyDelta(g, delta, MUTATE_SOURCE);
-    expect(node(g, "n1").importance).toBe("critical");
+    expect(node(g, "n1").importance).toBe("crit");
     expect(g.nodes.has("n2")).toBe(false);
   });
 
@@ -207,13 +207,13 @@ describe("applyDelta replay dispatcher", () => {
     const delta: SetMetaDelta = {
       type: "set_meta",
       nodeId: "n1" as NodeId,
-      importance: "critical" as Importance,
+      importance: "crit" as Importance,
       archived: null,
       obsolete: null,
       summary: "retitled",
     };
     applyDelta(g, delta, MUTATE_SOURCE);
-    expect(node(g, "n1").importance).toBe("critical");
+    expect(node(g, "n1").importance).toBe("crit");
     expect(node(g, "n1").summary).toBe("retitled");
   });
 
@@ -222,7 +222,7 @@ describe("applyDelta replay dispatcher", () => {
     applyCreateNode(g, {
       id: "n2" as NodeId,
       summary: "fresh",
-      importance: "medium" as Importance,
+      importance: "med" as Importance,
       parentNode: N_GOAL,
       state: "new",
     });

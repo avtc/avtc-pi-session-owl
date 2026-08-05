@@ -18,7 +18,7 @@ import { MemkeeperGraph, makeObservation, N_GOAL, type NodeId } from "../../src/
 const NOW = "2026-07-29T09:00:00.000Z";
 
 // --- test graph ------------------------------------------------------------
-// roots: nGoal (critical, with oInitialPrompt) + n7 (active, JWT) + n12 (new).
+// roots: nGoal (crit, with oInitialPrompt) + n7 (active, JWT) + n12 (new).
 // n7 has child n8 + observation o5.
 
 function buildGraph(): MemkeeperGraph {
@@ -27,7 +27,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: N_GOAL,
     summary: "the public API must stay stable",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
   });
@@ -35,7 +35,7 @@ function buildGraph(): MemkeeperGraph {
     obs: makeObservation({
       id: "oInitialPrompt",
       content: "build a memory extension",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,
       parentNode: N_GOAL,
@@ -68,7 +68,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: "n12",
     summary: "Build failed: TS2322",
-    importance: "medium",
+    importance: "med",
     parentNode: null,
     state: "new",
   });
@@ -146,7 +146,7 @@ describe("Builder mutate tools", () => {
       const g = buildGraph();
       const { ctx } = makeFakeStore();
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
-      const r = await callTool(tools, "mkdir", { summary: "Token signing", importance: "medium", parentId: "n7" });
+      const r = await callTool(tools, "mkdir", { summary: "Token signing", importance: "med", parentId: "n7" });
       expect(isError(r)).toBe(false);
       const parent = g.nodes.get("n7");
       // the new node is a child of n7
@@ -262,19 +262,19 @@ describe("Builder mutate tools", () => {
       const g = buildGraph();
       const { ctx, entries } = makeFakeStore();
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
-      // n7 starts at high (from buildGraph); the merge re-rates it to critical.
+      // n7 starts at high (from buildGraph); the merge re-rates it to crit.
       expect(g.nodes.get("n7")?.importance).toBe("high");
       const r = await callTool(tools, "merge", {
         sourceIds: ["n8"],
         destId: "n7",
-        importance: "critical",
+        importance: "crit",
       });
       expect(isError(r)).toBe(false);
       const deltas = graphDeltas(entries);
       const delta = deltas[0] as { type: string; importance?: string };
       expect(delta.type).toBe("merge");
-      expect(delta.importance).toBe("critical");
-      expect(g.nodes.get("n7")?.importance).toBe("critical");
+      expect(delta.importance).toBe("crit");
+      expect(g.nodes.get("n7")?.importance).toBe("crit");
       expect(g.nodes.get("n7")?.state).toBe("active");
     });
 
@@ -393,9 +393,9 @@ describe("Builder mutate tools", () => {
       const g = buildGraph();
       const { ctx, entries } = makeFakeStore();
       const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
-      const r = await callTool(tools, "set_meta", { nodeId: "n12", importance: "critical" });
+      const r = await callTool(tools, "set_meta", { nodeId: "n12", importance: "crit" });
       expect(isError(r)).toBe(false);
-      expect(g.nodes.get("n12")?.importance).toBe("critical");
+      expect(g.nodes.get("n12")?.importance).toBe("crit");
       const deltas = graphDeltas(entries);
       expect((deltas[0] as { type: string }).type).toBe("set_meta");
     });
@@ -535,9 +535,9 @@ describe("Builder mutate tools", () => {
       // importance is optional on the merge schema (required only at runtime
       // when destId === null); an existing-dest merge without importance is valid.
       expect(Check(MERGE_PARAMS, { sourceIds: ["n8"], destId: "n7", newSummary: "merged" })).toBe(true);
-      expect(
-        Check(MERGE_PARAMS, { sourceIds: ["n8"], destId: "n7", newSummary: "merged", importance: "critical" }),
-      ).toBe(true);
+      expect(Check(MERGE_PARAMS, { sourceIds: ["n8"], destId: "n7", newSummary: "merged", importance: "crit" })).toBe(
+        true,
+      );
     });
   });
 });

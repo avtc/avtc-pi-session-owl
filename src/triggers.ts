@@ -255,14 +255,14 @@ export interface StageRuns {
   runSelector: RunFn;
 }
 
-const NOOP_RUN: RunFn = async () => {};
+const NO_OP_RUN: RunFn = async () => {};
 
 /** The default (no-op) stage runs — the registry's value before activate wires
  *  the real runs, and the value tests reset to between files. */
 const DEFAULT_STAGE_RUNS: StageRuns = {
-  runObserver: NOOP_RUN,
-  runBuilder: NOOP_RUN,
-  runSelector: NOOP_RUN,
+  runObserver: NO_OP_RUN,
+  runBuilder: NO_OP_RUN,
+  runSelector: NO_OP_RUN,
 };
 
 let stageRuns: StageRuns = { ...DEFAULT_STAGE_RUNS };

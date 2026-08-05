@@ -100,7 +100,7 @@ export const MKDIR_PARAMS = Type.Object({
   summary: Type.String({ minLength: 1, description: "The new node's summary." }),
   importance: {
     ...ImportanceSchema,
-    description: "How much the new node matters if lost — critical, high, medium, or low.",
+    description: "How much the new node matters if lost — crit, high, med, or low.",
   },
   parentId: Type.Optional(Type.String({ description: "A parent node, or omit/null for the root." })),
 });
@@ -128,7 +128,7 @@ export const MERGE_PARAMS = Type.Object({
   importance: Type.Optional({
     ...ImportanceSchema,
     description:
-      "Set the destination's importance. Required when `destId` is null (names the new root's importance); optional otherwise (re-rates the destination).",
+      "How much the merged node matters if lost — crit, high, med, or low. Required when `destId` is null (names the new root); optional otherwise.",
   }),
 });
 
@@ -139,7 +139,7 @@ export const SELECTOR_SET_META_PARAMS = Type.Object({
   ),
   importance: Type.Optional({
     ...ImportanceSchema,
-    description: "Re-rate the node — how much it matters if lost.",
+    description: "How much the node matters if lost — crit, high, med, or low.",
   }),
 });
 
@@ -221,8 +221,7 @@ export function makeMvTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool
 export function makeMergeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof MERGE_PARAMS> {
   return {
     name: MERGE_TOOL,
-    description:
-      "Fold nodes into a destination, combining their contents; the absorbed nodes dissolve. Write a fresh summary for the result.",
+    description: "Fold nodes into a destination, combining their contents; the absorbed nodes dissolve.",
     label: "Merge",
     parameters: MERGE_PARAMS,
     async execute(_toolCallId, params) {

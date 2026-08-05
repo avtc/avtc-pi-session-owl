@@ -12,7 +12,7 @@ const asJson = (s: unknown): Record<string, unknown> => s as Record<string, unkn
 describe("ImportanceSchema", () => {
   it("is a string enum of the four importance levels", () => {
     expect(asJson(ImportanceSchema).type).toBe("string");
-    expect(asJson(ImportanceSchema).enum).toEqual(["critical", "high", "medium", "low"]);
+    expect(asJson(ImportanceSchema).enum).toEqual(["crit", "high", "med", "low"]);
   });
 });
 

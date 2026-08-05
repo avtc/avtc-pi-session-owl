@@ -49,7 +49,7 @@ const NOW = "2026-07-29T09:00:00.000Z";
 afterAll(() => setClock(null));
 
 // --- source-graph fixture --------------------------------------------------
-// nGoal(critical) + oInitialPrompt under it; n7(active, has obs o5) + n8(active,
+// nGoal(crit) + oInitialPrompt under it; n7(active, has obs o5) + n8(active,
 // child of n7); n12(new, empty); n13(archived). A realistic mix the Selector
 // reorganizes.
 
@@ -62,7 +62,7 @@ function buildSource(): MemkeeperGraph {
   applyCreateNode(g, {
     id: N_GOAL,
     summary: "the goal",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
   });
@@ -70,7 +70,7 @@ function buildSource(): MemkeeperGraph {
     obs: makeObservation({
       id: O_INITIAL_PROMPT,
       content: "the initial prompt",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["u1"],
       timestamp: NOW,
       parentNode: N_GOAL,
@@ -87,8 +87,8 @@ function buildSource(): MemkeeperGraph {
       parentNode: "n7",
     }),
   });
-  applyCreateNode(g, { id: "n8", summary: "JWT lib pick", importance: "medium", parentNode: "n7", state: "active" });
-  applyCreateNode(g, { id: "n12", summary: "fresh arrival", importance: "medium", parentNode: null, state: "new" });
+  applyCreateNode(g, { id: "n8", summary: "JWT lib pick", importance: "med", parentNode: "n7", state: "active" });
+  applyCreateNode(g, { id: "n12", summary: "fresh arrival", importance: "med", parentNode: null, state: "new" });
   applyCreateNode(g, { id: "n13", summary: "old config", importance: "low", parentNode: null, state: "archived" });
   return g;
 }
@@ -173,7 +173,7 @@ describe("Selector working-copy graph tools (mkdir/mv/merge)", () => {
 
   it("mkdir creates a new node in the working copy", async () => {
     const tools = makeSelectorGraphTools(working, SETTINGS);
-    const res = await callTool(tools, "mkdir", { summary: "new task group", importance: "medium" });
+    const res = await callTool(tools, "mkdir", { summary: "new task group", importance: "med" });
     expect(textOf(res)).toMatch(/Created (n\d+)/);
     const m = textOf(res).match(/Created (n\d+)/);
     expect(m).not.toBeNull();
@@ -234,9 +234,9 @@ describe("Selector set_meta (importance + summary; no lifecycle)", () => {
   it("re-rates a working-copy node's importance", async () => {
     const tools = makeSelectorGraphTools(working, SETTINGS);
     const before = working.graph.nodes.get("n7")?.importance;
-    await callTool(tools, SELECTOR_SET_META_TOOL, { nodeId: "n7", importance: "critical" });
+    await callTool(tools, SELECTOR_SET_META_TOOL, { nodeId: "n7", importance: "crit" });
     const node = working.graph.nodes.get("n7");
-    expect(node?.importance).toBe("critical");
+    expect(node?.importance).toBe("crit");
     expect(node?.importance).not.toBe(before);
   });
 

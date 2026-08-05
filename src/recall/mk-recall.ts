@@ -34,7 +34,13 @@ import {
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
 import { runRegexTests } from "../graph/regex-runner.js";
-import { budgetReachedFooter, budgetWindow, runGrepExcerpts, searchTimeoutNote } from "../graph/result-budget.js";
+import {
+  budgetReachedFooter,
+  budgetWindow,
+  grepTimeoutNote,
+  runGrepExcerpts,
+  searchTimeoutNote,
+} from "../graph/result-budget.js";
 import { type ContentMode, contentBlock, grepBlock, resolveContentMode } from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -566,7 +572,7 @@ const MK_RECALL_PARAMS = Type.Object({
   query: Type.Optional(
     Type.String({
       description:
-        "Regex (JS) over node summaries and observation content. Match several terms in one call with alternation, e.g. auth|jwt|login. An invalid pattern returns an error string; fix it and retry. A pattern that runs too long is stopped — partial matches come back with a note to narrow the query.",
+        "Find items by regex (JS) over node summaries and observation content. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
     }),
   ),
   from: Type.Optional(
@@ -594,7 +600,7 @@ const MK_RECALL_PARAMS = Type.Object({
   contentPattern: Type.Optional(
     Type.String({
       description:
-        "Regex matched against each result observation's content lines; returns the matching lines plus `contextLines` around each (grep-style, with line numbers), not whole content. Use to pull just the relevant excerpt from a large observation.",
+        "Extract matching lines from observations as grep-style excerpts (with `contextLines` and line numbers) instead of the whole text — greps every observation, or just those an `ids` drill or `query` search returns.",
     }),
   ),
   contextLines: Type.Optional(
@@ -606,7 +612,7 @@ const MK_RECALL_PARAMS = Type.Object({
   lines: Type.Optional(
     Type.String({
       description:
-        "Show only the given line range of each result observation's content, e.g. '40-60'. Use to read a window around a `contentPattern` match's line number.",
+        "Read a line range (e.g. '40-60') of a single observation — pass an observation id, or a node id with one observation.",
     }),
   ),
   take: Type.Optional(Type.Integer({ minimum: 0, description: "Page size (default 50; 0 returns all)." })),
@@ -616,7 +622,7 @@ const MK_RECALL_PARAMS = Type.Object({
 });
 
 const MK_RECALL_DESCRIPTION =
-  "Recall your preserved session memory — the durable context kept across compactions. Fetch the detail behind any id in the memory summary (n.. = node, o.. = observation), search all captured memory by regex, or filter by time. Each node in the result lists its children by id; call again with a child id to descend. Results are a compact indented tree (n.. node, o.. observation) with importance (crit/high/med/low — how much it matters if lost) and timestamps. Read-only.";
+  "Recall the session memory preserved across compactions. Fetch the detail behind any id in the memory summary, search all captured memory by regex, or filter by time.";
 
 // --- execute ---------------------------------------------------------------
 
@@ -692,9 +698,7 @@ async function computeGrepExcerpts(
   const result = await runGrepExcerpts(items, pattern, context, getMemkeeperSettings().findTimeoutMs);
   if ("error" in result) return result;
   if (result.timedOutMs !== null) {
-    const seconds = result.timedOutMs / 1000;
-    const note = `Grep timed out after ${seconds}s — partial excerpts only; refine or narrow the pattern.`;
-    return { excerpts: result.excerpts, note };
+    return { excerpts: result.excerpts, note: grepTimeoutNote(result.timedOutMs) };
   }
   return { excerpts: result.excerpts, note: null };
 }
@@ -716,6 +720,15 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
     return executeIds(target, params.ids, params.take, params.afterId, mode);
   }
 
+  // `lines` reads a range of ONE observation — it needs an `ids` target. With
+  // no ids it has nothing to slice (this also forbids `lines` + `query`, since
+  // query yields many). contentPattern-alone is fine — it greps every obs below.
+  if (mode.kind === "lines") {
+    return err(
+      "`lines` reads a range of a single observation — pass one observation id, or a node id with one observation.",
+    );
+  }
+
   const target = resolveTarget();
 
   // --- search/list path ---
@@ -730,7 +743,9 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   const bounds = resolveBounds(params.from, params.to);
   if (bounds.error !== null) return err(bounds.error);
 
-  const noFilters = regex === null && bounds.from === null && bounds.to === null;
+  // contentPattern-alone greps every observation: keep it out of the root-browse
+  // path (which returns root nodes only, leaving grep with nothing to operate on).
+  const noFilters = regex === null && bounds.from === null && bounds.to === null && mode.kind !== "grep";
   let list: SearchCandidate[];
   let note: string | undefined;
   if (noFilters) {
@@ -814,6 +829,17 @@ async function executeIds(
   afterId: string | undefined,
   mode: ContentMode,
 ): Promise<RecallResult> {
+  // `lines` reads a range of ONE observation — error unless the ids resolve to
+  // exactly one connected observation (an obs id, or a node with one). With more,
+  // the range is ambiguous across several observations.
+  if (
+    mode.kind === "lines" &&
+    !(ids.length === 1 && countConnectedObservations(target.nodes, target.observations, ids[0]) === 1)
+  ) {
+    return err(
+      "`lines` reads a range of a single observation — pass one observation id, or a node id with one observation.",
+    );
+  }
   // Build a flat list of payload blocks (one per requested id), then paginate
   // over the requested ids (each id is one paginatable unit).
   const units: { id: string; text: string }[] = [];

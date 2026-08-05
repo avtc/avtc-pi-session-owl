@@ -48,7 +48,7 @@ describe("SELECTOR_SYSTEM prompt", () => {
         "Legend — the working tree uses these marks:",
         "n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived",
         "(no mark = active)",
-        "Importance is how much a node matters if lost: critical — a hard, persistent constraint or correction; high — a decision, choice, or unresolved blocker; medium — meaningful context, not itself a decision or constraint; low — routine activity or minor detail. Set it when you make a node (`mkdir`/`merge`) or re-rate it (`set_meta`).",
+        "Importance is how much a node matters if lost: crit — a hard, persistent constraint or correction; high — a decision, choice, or unresolved blocker; med — meaningful context, not itself a decision or constraint; low — routine activity or minor detail. Set it when you make a node (`mkdir`/`merge`) or re-rate it (`set_meta`).",
         "The recent tail is tagged blocks: U user, A assistant, C tool-call, R tool-result,",
         "T thinking.",
         "",

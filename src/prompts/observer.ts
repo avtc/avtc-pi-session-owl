@@ -21,10 +21,10 @@ as E=id:
   <R E=id> ... </R>, or <R E=id error> when the call failed
 
 Each observation carries an importance — how much it matters if lost, by nature:
-- critical — a hard, persistent constraint or correction; losing it would cause
+- crit — a hard, persistent constraint or correction; losing it would cause
   real harm
 - high — a decision, choice, or unresolved blocker
-- medium — meaningful context that is not itself a decision or constraint
+- med — meaningful context that is not itself a decision or constraint
 - low — routine activity or minor detail with little durable consequence
 
 Call record_observations with a batch (array) of observations, as many times as
@@ -35,7 +35,7 @@ with the single word Done; if the chunk has nothing worth capturing, skip the
 tool and reply Done.
 
 Examples:
-- content: "Every commit must keep the build green." — importance: critical —
+- content: "Every commit must keep the build green." — importance: crit —
   sourceEntryIds: ["12"]
 - content: "Chose vitest for all new tests." — importance: high —
   sourceEntryIds: ["7", "9"]`;

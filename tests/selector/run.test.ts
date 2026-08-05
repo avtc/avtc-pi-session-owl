@@ -80,7 +80,7 @@ function seedGraph(roots: Array<{ id: NodeId; summary: string; state?: "active" 
   applyCreateNode(g, {
     id: N_GOAL,
     summary: "goal",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
   });
@@ -88,7 +88,7 @@ function seedGraph(roots: Array<{ id: NodeId; summary: string; state?: "active" 
     obs: makeObservation({
       id: "oInitialPrompt",
       content: "build a memory extension",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,
       parentNode: N_GOAL,
@@ -98,7 +98,7 @@ function seedGraph(roots: Array<{ id: NodeId; summary: string; state?: "active" 
     applyCreateNode(g, {
       id: root.id,
       summary: root.summary,
-      importance: "medium",
+      importance: "med",
       parentNode: null,
       state: root.state ?? "active",
     });

@@ -135,6 +135,14 @@ export function searchTimeoutNote(timedOutMs: number, testedCount: number, total
   return `Search timed out after ${seconds}s — tested ${testedCount} of ${total} items before the kill. These are partial results; refine or narrow the query.`;
 }
 
+/** The note surfaced when a contentPattern-grep over observation content lines
+ *  times out: partial excerpts are returned. Shared by cat/find (result-render)
+ *  and mk_recall (grep excerpts). */
+export function grepTimeoutNote(timedOutMs: number): string {
+  const seconds = Math.floor(timedOutMs / 1000);
+  return `Grep timed out after ${seconds}s — partial excerpts only; refine or narrow the pattern.`;
+}
+
 /** Outcome of batching a contentPattern over many items' content lines in one
  *  worker round-trip (see runGrepExcerpts). */
 export interface GrepExcerptsOutcome {

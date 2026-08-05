@@ -6,7 +6,6 @@ import type { Importance, NodeId, NodeState, ObsId } from "../src/types.js";
 import {
   CHARS_PER_TOKEN_ESTIMATE,
   estimateContentTokens,
-  IMPORTANCE_ABBR,
   IMPORTANCE_RANK,
   MemkeeperGraph,
   makeNode,
@@ -19,17 +18,10 @@ import {
 } from "../src/types.js";
 
 describe("Importance", () => {
-  it("ranks critical > high > medium > low", () => {
-    expect(IMPORTANCE_RANK.critical).toBeGreaterThan(IMPORTANCE_RANK.high);
-    expect(IMPORTANCE_RANK.high).toBeGreaterThan(IMPORTANCE_RANK.medium);
-    expect(IMPORTANCE_RANK.medium).toBeGreaterThan(IMPORTANCE_RANK.low);
-  });
-
-  it("abbreviates to crit/high/med/low for rendering", () => {
-    expect(IMPORTANCE_ABBR.critical).toBe("crit");
-    expect(IMPORTANCE_ABBR.high).toBe("high");
-    expect(IMPORTANCE_ABBR.medium).toBe("med");
-    expect(IMPORTANCE_ABBR.low).toBe("low");
+  it("ranks crit > high > med > low", () => {
+    expect(IMPORTANCE_RANK.crit).toBeGreaterThan(IMPORTANCE_RANK.high);
+    expect(IMPORTANCE_RANK.high).toBeGreaterThan(IMPORTANCE_RANK.med);
+    expect(IMPORTANCE_RANK.med).toBeGreaterThan(IMPORTANCE_RANK.low);
   });
 });
 
@@ -86,13 +78,13 @@ describe("makeObservation", () => {
     const obs = makeObservation({
       id: "o1" as ObsId,
       content: "abcdefgh",
-      importance: "medium" as Importance,
+      importance: "med" as Importance,
       sourceEntryIds: ["12"],
       timestamp: "2026-07-29T14:30:00.000Z",
       parentNode: N_GOAL as NodeId,
     });
     expect(obs.contentTokens).toBe(2);
-    expect(obs.importance).toBe("medium");
+    expect(obs.importance).toBe("med");
     expect(obs.parentNode).toBe(N_GOAL);
   });
 });
@@ -147,7 +139,7 @@ describe("MemkeeperGraph", () => {
       makeObservation({
         id: O_INITIAL_PROMPT as ObsId,
         content: "the goal",
-        importance: "critical" as Importance,
+        importance: "crit" as Importance,
         sourceEntryIds: ["1"],
         timestamp: "2026-07-29T09:00:00.000Z",
         parentNode: N_GOAL as NodeId,
@@ -165,13 +157,13 @@ describe("MemkeeperGraph", () => {
     const goal = makeNode({
       id: N_GOAL,
       summary: "the goal",
-      importance: "critical" as Importance,
+      importance: "crit" as Importance,
       state: "active",
       parentNode: null,
       createdAt: "2026-07-29T09:00:00.000Z",
     });
     expect(goal.state).toBe("active");
-    expect(goal.importance).toBe("critical");
+    expect(goal.importance).toBe("crit");
   });
 });
 

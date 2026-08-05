@@ -96,7 +96,7 @@ function seedStoreGraph(): void {
     summary: "the goal",
     summaryTokens: 8,
     state: "active",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     observationIds: [],
     childNodeIds: [],

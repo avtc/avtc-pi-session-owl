@@ -23,7 +23,7 @@ import { MemkeeperGraph, makeObservation, N_GOAL, N_IRRELEVANT, type NodeId, typ
 const NOW = "2026-07-29T09:00:00.000Z";
 
 // --- test graph ------------------------------------------------------------
-// roots: nGoal (critical) + n7 (active, JWT auth) + n12 (active, build failed) +
+// roots: nGoal (crit) + n7 (active, JWT auth) + n12 (active, build failed) +
 //        n20 (archived, old config) + nOld (obsolete, superseded by n7).
 // n7 has children: n8 (active, JWT lib pick) + observation o5 (chose JWT).
 // nOld has observation oOld (obsolete's retained evidence).
@@ -36,7 +36,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: N_GOAL,
     summary: "the public API must stay stable",
-    importance: "critical",
+    importance: "crit",
     parentNode: null,
     state: "active",
   });
@@ -44,7 +44,7 @@ function buildGraph(): MemkeeperGraph {
     obs: makeObservation({
       id: "oInitialPrompt",
       content: "build a memory extension",
-      importance: "critical",
+      importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,
       parentNode: N_GOAL,
@@ -81,7 +81,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: "n12",
     summary: "Build failed: TS2322 at router.ts:88",
-    importance: "medium",
+    importance: "med",
     parentNode: null,
     state: "new",
   });
@@ -100,7 +100,7 @@ function buildGraph(): MemkeeperGraph {
   applyCreateNode(g, {
     id: "n99",
     summary: "Auth via sessions (old approach)",
-    importance: "medium",
+    importance: "med",
     parentNode: null,
     state: "active",
   });
@@ -108,7 +108,7 @@ function buildGraph(): MemkeeperGraph {
     obs: makeObservation({
       id: "o9",
       content: "Sessions were the prior auth approach",
-      importance: "medium",
+      importance: "med",
       sourceEntryIds: ["3"],
       timestamp: NOW,
       parentNode: "n99",
@@ -318,7 +318,7 @@ describe("Builder read tools", () => {
         obs: makeObservation({
           id: "o100",
           content: "a".repeat(4000).concat("!"),
-          importance: "medium",
+          importance: "med",
           sourceEntryIds: [],
           timestamp: NOW,
           parentNode: "n7",
@@ -330,6 +330,36 @@ describe("Builder read tools", () => {
     });
 
     afterEach(() => _resetGetMemkeeperSettings());
+  });
+
+  describe("find has no `lines` param (incompatible with required query)", () => {
+    it("the find schema omits lines", () => {
+      const tools = makeBuilderReadTools(buildGraph());
+      const find = tools.find((t) => t.name === "find");
+      if (find === undefined) throw new Error("find tool not found");
+      const props = (find.parameters as { properties: Record<string, unknown> }).properties;
+      expect("lines" in props).toBe(false);
+      // contentPattern remains (grep within query matches).
+      expect("contentPattern" in props).toBe(true);
+    });
+  });
+
+  describe("cat `lines` is a single-observation slice", () => {
+    it("cat lines + contentPattern errors (mutually exclusive)", async () => {
+      const out = textOf(await callTool(tools(), "cat", { ids: ["o5"], lines: "1-1", contentPattern: "JWT" }));
+      expect(out).toContain("can't be combined");
+    });
+
+    it("cat lines on a multi-observation node errors", async () => {
+      // n7 has one obs (o5) here; use two observation ids for a multi-obs target.
+      const out = textOf(await callTool(tools(), "cat", { ids: ["o5", "oInitialPrompt"], lines: "1-1" }));
+      expect(out).toContain("single observation");
+    });
+
+    it("cat lines on a single observation works", async () => {
+      const out = textOf(await callTool(tools(), "cat", { ids: ["o5"], lines: "1-1" }));
+      expect(out).toContain("1: Chose JWT for stateless auth");
+    });
   });
 
   describe("cursor pagination round-trip", () => {
@@ -461,9 +491,9 @@ describe("orderActiveSetRoots — canonical active-set ordering", () => {
     over as unknown as import("../../src/format/render.js").RenderableNode;
   const HIGH_RECENT = R({ id: "n7", importance: "high", timestamps: { rangeEnd: "2026-07-29T09:00:00Z" } });
   const HIGH_OLDER = R({ id: "n8", importance: "high", timestamps: { rangeEnd: "2026-07-28T09:00:00Z" } });
-  const MED = R({ id: "n12", importance: "medium", timestamps: { rangeEnd: "2026-07-29T10:00:00Z" } });
-  const GOAL = R({ id: N_GOAL, importance: "critical", timestamps: { rangeEnd: "2026-07-28T08:00:00Z" } });
-  const IRRELEVANT = R({ id: N_IRRELEVANT, importance: "medium", timestamps: { rangeEnd: "2026-07-29T11:00:00Z" } });
+  const MED = R({ id: "n12", importance: "med", timestamps: { rangeEnd: "2026-07-29T10:00:00Z" } });
+  const GOAL = R({ id: N_GOAL, importance: "crit", timestamps: { rangeEnd: "2026-07-28T08:00:00Z" } });
+  const IRRELEVANT = R({ id: N_IRRELEVANT, importance: "med", timestamps: { rangeEnd: "2026-07-29T11:00:00Z" } });
 
   it("places nGoal first and nIrrelevant last regardless of importance/recency", () => {
     // feed them out of order: irrelevant + med first, goal last
@@ -485,14 +515,14 @@ describe("orderActiveSetRoots — canonical active-set ordering", () => {
   });
 });
 
-// --- AD18: result token budget + targeted extraction (contentPattern / lines) --
+// --- result token budget + targeted extraction (contentPattern / lines) --
 
 describe("result token budget + extraction", () => {
   /** Build a graph whose o5 observation has multi-line grep-able content. */
   function grepGraph(): MemkeeperGraph {
     setClock(() => NOW);
     const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
-    applyCreateNode(g, { id: N_GOAL, summary: "Goal", importance: "critical", parentNode: null, state: "active" });
+    applyCreateNode(g, { id: N_GOAL, summary: "Goal", importance: "crit", parentNode: null, state: "active" });
     applyCreateNode(g, {
       id: "n7" as NodeId,
       summary: "Auth migration to JWT",
@@ -524,7 +554,7 @@ describe("result token budget + extraction", () => {
     applyCreateNode(g, {
       id: "n8" as NodeId,
       summary: "other",
-      importance: "medium",
+      importance: "med",
       parentNode: null,
       state: "active",
     });
@@ -532,7 +562,7 @@ describe("result token budget + extraction", () => {
       obs: makeObservation({
         id: "o9" as ObsId,
         content: "x".repeat(200),
-        importance: "medium",
+        importance: "med",
         timestamp: NOW,
         sourceEntryIds: ["e9"],
         parentNode: "n8" as NodeId,
@@ -562,7 +592,7 @@ describe("result token budget + extraction", () => {
       obs: makeObservation({
         id: "o200",
         content: "second observation under n7",
-        importance: "medium",
+        importance: "med",
         sourceEntryIds: [],
         timestamp: NOW,
         parentNode: "n7",
@@ -611,7 +641,7 @@ describe("result token budget + extraction", () => {
       obs: makeObservation({
         id: "o100",
         content: "a".repeat(4000).concat("!"),
-        importance: "medium",
+        importance: "med",
         sourceEntryIds: [],
         timestamp: NOW,
         parentNode: "n7",

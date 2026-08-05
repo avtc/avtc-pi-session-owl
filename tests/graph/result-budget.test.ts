@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   budgetWindow,
   buildGrepExcerpt,
+  grepTimeoutNote,
   parseLineRange,
   searchTimeoutNote,
   sliceLineRange,
@@ -134,5 +135,17 @@ describe("searchTimeoutNote", () => {
     const note = searchTimeoutNote(300, 0, 5);
     expect(note).toContain("after 0s —");
     expect(note).toContain("tested 0 of 5 items");
+  });
+});
+
+describe("grepTimeoutNote", () => {
+  it("formats floored seconds with the partial-excerpts hint", () => {
+    expect(grepTimeoutNote(30_000)).toBe(
+      "Grep timed out after 30s — partial excerpts only; refine or narrow the pattern.",
+    );
+  });
+
+  it("floors fractional seconds to a whole number", () => {
+    expect(grepTimeoutNote(300)).toContain("after 0s —");
   });
 });

@@ -112,7 +112,7 @@ export function noCycles(graph: MemkeeperGraph): boolean {
 
 /**
  * The predefined goal node invariants: nGoal exists, sits at the root, is
- * active and critical, carries no supersession, and the permanent seed
+ * active and crit, carries no supersession, and the permanent seed
  * observation `oInitialPrompt` is attached to it (and thus undetachable).
  */
 export function nGoalInvariants(graph: MemkeeperGraph): boolean {
@@ -120,7 +120,7 @@ export function nGoalInvariants(graph: MemkeeperGraph): boolean {
   if (goal === undefined) return false;
   if (goal.parentNode !== null) return false;
   if (goal.state !== "active") return false;
-  if (goal.importance !== "critical") return false;
+  if (goal.importance !== "crit") return false;
   if (goal.supersededBy !== null) return false;
   const seed = graph.observations.get(O_INITIAL_PROMPT);
   if (seed === undefined) return false;
