@@ -30,7 +30,7 @@ export interface StatusInput {
   /** Compaction entries on the active branch. */
   compactionCount: number;
   nodes: Node[];
-  observations: Pick<Observation, "summaryTokens">[];
+  observations: Pick<Observation, "summaryTokens" | "detailsTokens">[];
   /** The non-obsolete root-view tokens (chars/4 of the rendered root view). */
   rootsViewTokens: number;
   /** The selected-tree root-view tokens, or null when there is no selected tree
@@ -62,22 +62,18 @@ export function buildStatusReport(input: StatusInput): string {
   // --- Memory section (counts with separators; columns aligned: labels +
   //  counts right-aligned so the token column lines up) ---
   const obsCount = input.observations.length;
-  const obsTokens = sum(input.observations, (o) => o.summaryTokens);
+  const rawTokens = sum(input.observations, (o) => o.detailsTokens); // verbatim source size
+  const summarizedTokens = sum(input.observations, (o) => o.summaryTokens) + sum(input.nodes, (n) => n.summaryTokens); // node + obs summaries
   const nodeCount = input.nodes.length;
-  const nodeTokens = sum(input.nodes, (n) => n.summaryTokens);
   const LABEL_WIDTH = 12; // "observations" is the longest label
-  // count width derived from the actual counts so alignment holds at any
-  // magnitude (a fixed width would let very large counts drift the column).
   const obsCountStr = formatCount(obsCount);
   const nodeCountStr = formatCount(nodeCount);
   const countWidth = Math.max(obsCountStr.length, nodeCountStr.length);
   lines.push("", "Memory");
-  lines.push(
-    `  ${"observations".padStart(LABEL_WIDTH)}  ${obsCountStr.padStart(countWidth)}  ${formatTokens(obsTokens)} tok`,
-  );
-  lines.push(
-    `  ${"nodes".padStart(LABEL_WIDTH)}  ${nodeCountStr.padStart(countWidth)}  ${formatTokens(nodeTokens)} tok`,
-  );
+  lines.push(`  ${"observations".padStart(LABEL_WIDTH)}  ${obsCountStr.padStart(countWidth)}`);
+  lines.push(`  ${"nodes".padStart(LABEL_WIDTH)}  ${nodeCountStr.padStart(countWidth)}`);
+  lines.push(`  ${"Raw tokens".padStart(LABEL_WIDTH)}  ${formatTokens(rawTokens)} (verbatim source)`);
+  lines.push(`  ${"Summarized".padStart(LABEL_WIDTH)}  ${formatTokens(summarizedTokens)} (node + obs summaries)`);
   lines.push(
     `  roots view  ${formatTokens(input.rootsViewTokens)} / ${formatTokens(input.settings.builderRootViewThreshold)}`,
   );

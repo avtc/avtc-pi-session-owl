@@ -218,7 +218,7 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
     coversFromId: null,
     coversUpToId: firstUser.id,
     records: [encodeObservation(obs)],
-    tokenCount: obs.summaryTokens,
+    tokenCount: obs.detailsTokens, // verbatim source size (matches the Observer delta's raw-token semantics)
   };
   appendObservation(store, observationEntry);
 }

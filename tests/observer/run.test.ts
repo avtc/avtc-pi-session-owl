@@ -186,7 +186,9 @@ describe("runObserver", () => {
     const obsEntry = obsEntries[0].data as { coversFromId: string | null; coversUpToId: string; tokenCount: number };
     expect(obsEntry.coversFromId).toBe("u1");
     expect(obsEntry.coversUpToId).toBe("a1");
-    expect(obsEntry.tokenCount).toBe(Math.ceil("Chose vitest for all new tests.".length / 4));
+    // tokenCount = the verbatim source size (Σ detailsTokens), NOT the summary.
+    // The verbatim render of a1 is '<ASSISTANT>we chose vitest for tests</ASSISTANT>'.
+    expect(obsEntry.tokenCount).toBe(Math.ceil("<ASSISTANT>we chose vitest for tests</ASSISTANT>".length / 4));
 
     // the wrapper node exists in-memory at root, state new, with the obs
     const graph = getGraphStore().graph;
@@ -456,8 +458,10 @@ describe("runObserver", () => {
     expect(entry.records.map((r) => r.summary)).toEqual(["Initial goal stated.", "Chose vitest."]);
     expect(entry.coversFromId).toBe("u1");
     expect(entry.coversUpToId).toBe("a1");
-    // exact tokenCount = sum of the two records' chars/4 estimates.
-    const expectedTokens = Math.ceil("Initial goal stated.".length / 4) + Math.ceil("Chose vitest.".length / 4);
+    // exact tokenCount = sum of the two records' VERBATIM SOURCE sizes (detailsTokens).
+    const u1Details = "<USER>initial prompt captured mechanically</USER>";
+    const a1Details = "<ASSISTANT>chose vitest</ASSISTANT>";
+    const expectedTokens = Math.ceil(u1Details.length / 4) + Math.ceil(a1Details.length / 4);
     expect(entry.tokenCount).toBe(expectedTokens);
     // two wrapper create_node deltas batched into ONE memkeeper.graph_delta
     // entry (the Observer persists its wrapper batch as a single envelope).

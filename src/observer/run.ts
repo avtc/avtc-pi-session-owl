@@ -368,7 +368,7 @@ function persistObservationBatch(
     if (obs === undefined) {
       throw new Error("observer wrap: observation missing");
     }
-    tokenCount += obs.summaryTokens;
+    tokenCount += obs.detailsTokens; // verbatim source size processed this batch (matches the threshold gate's raw-token semantics)
     return encodeObservation(obs);
   });
   const coversFromId = unobserved[FIRST]?.id ?? null;

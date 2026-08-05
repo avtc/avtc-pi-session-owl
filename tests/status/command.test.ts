@@ -68,10 +68,12 @@ function obs(
   id: ObsId,
   content: string,
   summaryTokens: number,
+  detailsTokens: number,
 ): {
   id: ObsId;
   content: string;
   summaryTokens: number;
+  detailsTokens: number;
   importance: "med";
   sourceEntryIds: string[];
   timestamps: { createdAt: string };
@@ -80,6 +82,7 @@ function obs(
     id,
     content,
     summaryTokens,
+    detailsTokens,
     importance: "med",
     sourceEntryIds: [],
     timestamps: { createdAt: "2026-07-28T09:00:00.000Z" },
@@ -120,25 +123,32 @@ describe("buildStatusReport", () => {
     expect(report).toContain("03:00:0"); // ~3h duration (seconds may vary by 1)
   });
 
-  it("Memory section: observation + node counts + their cached token sums", () => {
+  it("Memory section: counts + raw (verbatim source) + summarized (node+obs) tokens", () => {
     const report = buildStatusReport(
       input({
         nodes: [node({ id: "n1", summaryTokens: 320 }), node({ id: "n2", summaryTokens: 80 })],
-        observations: [obs("o1", "x", 4500), obs("o2", "y", 1500)],
+        // obs summaries: 100 + 50 = 150; obs details (verbatim source): 4500 + 1500 = 6000
+        observations: [obs("o1", "x", 100, 4500), obs("o2", "y", 50, 1500)],
       }),
     );
     expect(report).toContain("Memory");
     expect(report).toContain("observations");
     expect(report).toContain("2");
-    expect(report).toContain("6.0k tok"); // 4500 + 1500 = 6000 → "6.0k"
+    // Raw tokens = Σ detailsTokens (verbatim source) = 6000 → "6.0k"
+    expect(report).toContain("Raw tokens");
+    expect(report).toContain("6.0k");
+    expect(report).toContain("(verbatim source)");
+    // Summarized tokens = Σ node.summaryTokens + Σ obs.summaryTokens = 400 + 150 = 550
+    expect(report).toContain("Summarized");
+    expect(report).toContain("550");
+    expect(report).toContain("(node + obs summaries)");
     expect(report).toContain("nodes");
-    expect(report).toContain("400 tok"); // 320 + 80 = 400
   });
 
   it("counts use thousands separators (formatCount) and the count column is right-aligned", () => {
     const bigNodes: Node[] = [];
-    const bigObs: { summaryTokens: number }[] = [];
-    for (let i = 0; i < 1245; i += 1) bigObs.push({ summaryTokens: 0 });
+    const bigObs: { summaryTokens: number; detailsTokens: number }[] = [];
+    for (let i = 0; i < 1245; i += 1) bigObs.push({ summaryTokens: 0, detailsTokens: 0 });
     for (let i = 0; i < 95; i += 1) bigNodes.push(node({ id: `n${i}` as unknown as Node["id"], summaryTokens: 0 }));
     const report = buildStatusReport(input({ nodes: bigNodes, observations: bigObs }));
     const memoryLines = report
@@ -148,18 +158,18 @@ describe("buildStatusReport", () => {
     // counts present with separators
     expect(memoryLines[0]).toContain("1,245");
     expect(memoryLines[1]).toContain("95");
-    // right-aligned counts: both counts END at the same column (the token column
-    // — "X tok" — starts at the same index on both lines).
-    const tokenColObs = memoryLines[0].indexOf("tok");
-    const tokenColNodes = memoryLines[1].indexOf("tok");
-    expect(tokenColObs).toBe(tokenColNodes);
+    // right-aligned counts: both count strings END at the same column (padStart
+    // to the derived count width).
+    const obsEnd = memoryLines[0].indexOf("1,245") + "1,245".length;
+    const nodesEnd = memoryLines[1].indexOf("95") + "95".length;
+    expect(obsEnd).toBe(nodesEnd);
   });
 
   it("count column stays aligned even when counts exceed the typical width (100k+)", () => {
     // A fixed count width (e.g. 6 → max 99,999) would let 100,000 drift the
     // column. The width is derived from the actual counts, so it holds.
-    const bigObs: { summaryTokens: number }[] = [];
-    for (let i = 0; i < 100_000; i += 1) bigObs.push({ summaryTokens: 0 });
+    const bigObs: { summaryTokens: number; detailsTokens: number }[] = [];
+    for (let i = 0; i < 100_000; i += 1) bigObs.push({ summaryTokens: 0, detailsTokens: 0 });
     const report = buildStatusReport(input({ nodes: [node({ id: "n1", summaryTokens: 0 })], observations: bigObs }));
     const memoryLines = report
       .split("\n")
@@ -167,8 +177,10 @@ describe("buildStatusReport", () => {
     expect(memoryLines.length).toBe(2);
     expect(memoryLines[0]).toContain("100,000");
     expect(memoryLines[1]).toContain("1");
-    // token column aligned regardless of the 6-digit count magnitude.
-    expect(memoryLines[0].indexOf("tok")).toBe(memoryLines[1].indexOf("tok"));
+    // count column aligned regardless of the 6-digit count magnitude.
+    const obsEnd = memoryLines[0].indexOf("100,000") + "100,000".length;
+    const nodesEnd = memoryLines[1].indexOf("1") + "1".length;
+    expect(obsEnd).toBe(nodesEnd);
   });
 
   it("roots view line shows viewTokens / builderRootViewThreshold", () => {
