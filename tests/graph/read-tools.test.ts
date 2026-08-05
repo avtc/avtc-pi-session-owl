@@ -18,6 +18,7 @@ import {
   nonObsoleteRootsOf,
   orderActiveSetRoots,
 } from "../../src/graph/read-tools.js";
+import { clearEntryResolver, setEntryResolver } from "../../src/store/graph-store.js";
 import { MemkeeperGraph, makeObservation, N_GOAL, N_IRRELEVANT, type NodeId, type ObsId } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
@@ -259,6 +260,29 @@ describe("Builder read tools", () => {
       expect(out).toContain("n7");
       expect(out).toContain("n8");
       expect(out).toContain("o5");
+    });
+
+    it("query matches a hit present ONLY in an observation's verbatim source (not its summary)", async () => {
+      // o5's summary "Chose JWT for stateless auth" omits 'HS256', but its
+      // verbatim source (resolved from sourceEntryId '2') contains it.
+      const userEntry = (body: string): unknown => ({
+        id: "2",
+        type: "message",
+        parentId: null,
+        timestamp: 0,
+        message: { role: "user", content: body },
+      });
+      setEntryResolver((ids) =>
+        ids.filter((id) => id === "2").map(() => userEntry("we picked jsonwebtoken for its HS256 HMAC support")),
+      );
+      try {
+        const out = textOf(await callTool(tools(), "find", { query: "HS256" }));
+        // 'HS256' is in the verbatim source only; o5 surfacing proves the find
+        // path matches observation details, not just the one-line summary.
+        expect(out).toContain("o5");
+      } finally {
+        clearEntryResolver();
+      }
     });
 
     it("parent-state rule: excludes observations under an obsolete node by default", async () => {

@@ -482,6 +482,90 @@ describe("mk_recall", () => {
     });
   });
 
+  describe("query + contentPattern match over observation DETAILS (verbatim source), not just summary", () => {
+    afterEach(() => _resetGetMemkeeperSettings());
+
+    /** Seed one node n1 with observation oLib whose summary omits a keyword but
+     *  whose verbatim source (resolved from sourceEntryId e1) contains it. */
+    function seedDetailsOnly(keywordInSource: string): void {
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(g, {
+        id: "n1",
+        summary: "Picked the auth library",
+        importance: "high",
+        parentNode: null,
+        state: "active",
+      });
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "oLib" as ObsId,
+          summary: "Chose the auth library",
+          importance: "high",
+          sourceEntryIds: ["e1"],
+          timestamp: T1,
+          parentNode: "n1",
+        }),
+      });
+      setClock(null);
+      getGraphStore().graph = g;
+      // verbatim source contains a keyword the one-line summary does NOT.
+      wireResolver({ e1: `we picked jsonwebtoken for its ${keywordInSource} HMAC support` });
+    }
+
+    it("query finds a hit present ONLY in the verbatim source (not the one-line summary)", async () => {
+      seedDetailsOnly("HS256");
+      const out = text(await recall(tool(), { query: "HS256" }));
+      // 'HS256' is absent from the summary ("Chose the auth library") but present
+      // in the verbatim source — so oLib surfacing proves details matching works.
+      // (query renders terse one-liners, so the keyword itself isn't shown.)
+      expect(out).toContain("oLib");
+      expect(out).toContain("in n1");
+      expect(out).toContain("Chose the auth library");
+    });
+
+    it("contentPattern finds a hit present ONLY in the verbatim source and renders it as an excerpt", async () => {
+      seedDetailsOnly("HS256");
+      // query 'auth' narrows to oLib via its summary; contentPattern 'HS256'
+      // (only in the verbatim source) must extract that line as an excerpt.
+      const out = text(await recall(tool(), { query: "auth", contentPattern: "HS256", contextLines: 0 }));
+      expect(out).toContain("oLib");
+      expect(out).toContain("HS256"); // grep excerpt drawn from the verbatim source
+    });
+
+    it("an observation whose contentPattern hit is only in its summary renders as a header (not dropped)", async () => {
+      // summary has 'auth'; verbatim source does NOT — contentPattern 'auth'
+      // matches the summary, so the obs passes the filter, but yields zero
+      // detail-excerpts → header-only (Option C: no drop).
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(g, {
+        id: "n1",
+        summary: "Picked the auth library",
+        importance: "high",
+        parentNode: null,
+        state: "active",
+      });
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "oLib" as ObsId,
+          summary: "Chose the auth library",
+          importance: "high",
+          sourceEntryIds: ["e1"],
+          timestamp: T1,
+          parentNode: "n1",
+        }),
+      });
+      setClock(null);
+      getGraphStore().graph = g;
+      wireResolver({ e1: "we picked jsonwebtoken for its HMAC support" }); // no 'auth' in source
+      const out = text(await recall(tool(), { contentPattern: "auth", contextLines: 0 }));
+      expect(out).toContain("oLib"); // header present (not dropped)
+    });
+  });
+
   describe("query cap", () => {
     it("an over-long regex returns an error string (not a crash)", async () => {
       seedSource();
