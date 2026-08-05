@@ -53,7 +53,7 @@ describe("cloneObservation", () => {
   it("produces an independent deep copy (mutating the clone does not affect the source)", () => {
     const source = makeObservation({
       id: "o1",
-      content: "fact",
+      summary: "fact",
       importance: "med",
       sourceEntryIds: ["e2"],
       parentNode: "n3",
@@ -68,7 +68,7 @@ describe("cloneObservation", () => {
   it("does not share the sourceEntryIds array reference with the source", () => {
     const source = makeObservation({
       id: "o1",
-      content: "fact",
+      summary: "fact",
       importance: "med",
       sourceEntryIds: ["e2"],
       parentNode: "n3",

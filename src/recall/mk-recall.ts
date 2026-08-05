@@ -54,7 +54,7 @@ const VIEWER: RenderViewer = "nonBuilder";
  *  observations (mirrors the graph-backed render so mk_recall matches the
  *  displayed tree). */
 function targetObservationContent(target: RecallTarget): (obsId: string) => string | undefined {
-  return (obsId: string): string | undefined => target.observations.get(obsId)?.content;
+  return (obsId: string): string | undefined => target.observations.get(obsId)?.summary;
 }
 /** Single-line content cap for terse results (full content shows in fullDetails). */
 const TERSE_CONTENT_MAX = 120;
@@ -255,7 +255,7 @@ function serializedNodeToView(sn: SerializedNode): RenderableNode {
 function serializedObservationToView(so: SerializedObservation): RecallObservation {
   return {
     id: so.id,
-    content: so.content,
+    summary: so.summary,
     importance: so.importance,
     timestamp: so.timestamp,
     parentNode: so.parentNode,
@@ -435,7 +435,7 @@ function renderObservationBlock(
   if (mode.kind === "terse") return terseObservationLine(obs, showParent);
   const header = observationHeader(obs, showParent);
   if (mode.kind === "grep") return grepBlock(header, excerpts);
-  return contentBlock(header, obs.content, mode);
+  return contentBlock(header, obs.summary, mode);
 }
 
 /** A terse observation line: delegates to the shared formatObservationLine with
@@ -516,7 +516,7 @@ async function buildSearchCandidates(
   let passes = new Array<boolean>(nodeCount + obsJobs.length).fill(true);
   let note: string | undefined;
   if (filters.length > 0) {
-    const texts = [...nodeJobs.map((j) => j.node.summary), ...obsJobs.map((j) => j.obs.content)];
+    const texts = [...nodeJobs.map((j) => j.node.summary), ...obsJobs.map((j) => j.obs.summary)];
     const filtered = await intersectRegexFilters(texts, filters);
     if ("error" in filtered) return { error: filtered.error };
     passes = filtered.passes;
@@ -726,7 +726,7 @@ async function computeGrepExcerpts(
   pattern: RegExp,
   context: number,
 ): Promise<{ excerpts: ReadonlyMap<string, string[]>; note: string | null } | { error: string }> {
-  const items = observations.map((o) => ({ id: o.id, content: o.content }));
+  const items = observations.map((o) => ({ id: o.id, content: o.summary }));
   const result = await runGrepExcerpts(items, pattern, context, getMemkeeperSettings().findTimeoutMs);
   if ("error" in result) return result;
   if (result.timedOutMs !== null) {

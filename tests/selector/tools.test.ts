@@ -69,7 +69,7 @@ function buildSource(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: O_INITIAL_PROMPT,
-      content: "the initial prompt",
+      summary: "the initial prompt",
       importance: "crit",
       sourceEntryIds: ["u1"],
       timestamp: NOW,
@@ -80,7 +80,7 @@ function buildSource(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "o5",
-      content: "chose JWT",
+      summary: "chose JWT",
       importance: "high",
       sourceEntryIds: ["e5"],
       timestamp: NOW,

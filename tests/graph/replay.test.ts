@@ -40,7 +40,7 @@ function seedGraph(): MemkeeperGraph {
   goal.childNodeIds.push("n1" as NodeId);
   const o1 = makeObservation({
     id: "o1" as ObsId,
-    content: "first fact",
+    summary: "first fact",
     importance: "med" as Importance,
     sourceEntryIds: ["5"],
     timestamp: "2026-07-29T10:00:00.000Z",
@@ -78,7 +78,7 @@ describe("applyDelta replay dispatcher", () => {
     const g = seedGraph();
     const obs = makeObservation({
       id: "o5" as ObsId,
-      content: "fifth fact",
+      summary: "fifth fact",
       importance: "low" as Importance,
       sourceEntryIds: ["7"],
       timestamp: "2026-07-29T11:00:00.000Z",
@@ -117,7 +117,7 @@ describe("applyDelta replay dispatcher", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o9" as ObsId,
-        content: "in n2",
+        summary: "in n2",
         importance: "low" as Importance,
         sourceEntryIds: ["8"],
         timestamp: "2026-07-29T12:00:00.000Z",
@@ -148,7 +148,7 @@ describe("applyDelta replay dispatcher", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o9" as ObsId,
-        content: "in n2",
+        summary: "in n2",
         importance: "low" as Importance,
         sourceEntryIds: ["8"],
         timestamp: "2026-07-29T12:00:00.000Z",

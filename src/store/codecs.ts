@@ -7,7 +7,7 @@
 // Tolerant-reader contract: decoders return `null` on any
 // malformed input rather than throwing — a single bad entry/details is skipped,
 // never poisoning the session. Unknown additive fields are ignored (forward-
-// compatible). `contentTokens`/`summaryTokens` are recomputed on decode (never
+// compatible). `summaryTokens`/`summaryTokens` are recomputed on decode (never
 // trusted from the wire).
 
 import type { GraphDelta } from "../graph/mutations.js";
@@ -82,10 +82,10 @@ export function cloneLedger(ledger: UsageLedger): UsageLedger {
 
 // --- serialized wire types -------------------------------------------------
 
-/** Wire observation: content + provenance + parentNode; NO contentTokens. */
+/** Wire observation: summary + provenance + parentNode; NO summaryTokens/detailsLines/detailsTokens (recomputed on decode). */
 export interface SerializedObservation {
   id: string;
-  content: string;
+  summary: string;
   importance: Importance;
   sourceEntryIds: string[];
   timestamp: string;
@@ -193,13 +193,16 @@ function isState(v: unknown): v is NodeState {
   return typeof v === "string" && STATE_SET.has(v);
 }
 
-/** Decode a serialized observation; recompute contentTokens. Null if malformed. */
+/** Decode a serialized observation; recompute summaryTokens/details. Null if malformed.
+ *  Tolerant-reader: accepts both `summary` (current) and `content` (legacy wire
+ *  form) — old pre-rename entries persist (no-prune) and must still decode. */
 export function decodeObservation(raw: unknown): Observation | null {
   if (!isObject(raw)) return null;
-  const { id, content, importance, sourceEntryIds, timestamp, parentNode } = raw;
+  const { id, summary, content, importance, sourceEntryIds, timestamp, parentNode } = raw;
+  const text = typeof summary === "string" ? summary : content;
   if (
     typeof id !== "string" ||
-    typeof content !== "string" ||
+    typeof text !== "string" ||
     !isImportance(importance) ||
     !Array.isArray(sourceEntryIds) ||
     sourceEntryIds.some((s) => typeof s !== "string") ||
@@ -210,7 +213,7 @@ export function decodeObservation(raw: unknown): Observation | null {
   }
   return makeObservation({
     id: id as ObsId,
-    content,
+    summary: text,
     importance,
     sourceEntryIds: sourceEntryIds as string[],
     timestamp,
@@ -411,11 +414,11 @@ export function decodeDetails(raw: unknown): MemkeeperDetails | null {
 
 // --- encoders (in-memory -> wire) ------------------------------------------
 
-/** Encode an observation to its wire form (drops contentTokens). */
+/** Encode an observation to its wire form (drops summaryTokens/detailsLines/detailsTokens). */
 export function encodeObservation(obs: Observation): SerializedObservation {
   return {
     id: obs.id,
-    content: obs.content,
+    summary: obs.summary,
     importance: obs.importance,
     sourceEntryIds: [...obs.sourceEntryIds],
     timestamp: obs.timestamp,

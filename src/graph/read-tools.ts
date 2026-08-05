@@ -346,7 +346,7 @@ export function nodeLineOptions(
 } {
   return {
     viewer,
-    observationContent: (obsId: string): string | undefined => graph.observations.get(obsId as ObsId)?.content,
+    observationContent: (obsId: string): string | undefined => graph.observations.get(obsId as ObsId)?.summary,
   };
 }
 
@@ -585,14 +585,14 @@ export function buildCatUnits(graph: MemkeeperGraph, ids: string[], viewer: Rend
           id: o.id,
           preamble: index === 0 ? nodeHeader : undefined,
           header: catObsHeader(o),
-          content: o.content,
+          content: o.summary,
         });
       });
       continue;
     }
     const obs = graph.observations.get(id as ObsId);
     if (obs !== undefined) {
-      units.push({ id: obs.id, header: catObsHeader(obs), content: obs.content });
+      units.push({ id: obs.id, header: catObsHeader(obs), content: obs.summary });
       continue;
     }
     units.push({ id, header: `No node or observation with id ${id}.` });
@@ -639,14 +639,14 @@ function buildCatGrepItems(
       }
       matchingObs.forEach((o, index) => {
         const header = index === 0 ? `${nodeHeader}\n${catObsHeader(o)}` : catObsHeader(o);
-        items.push({ id: o.id, header, content: o.content });
+        items.push({ id: o.id, header, content: o.summary });
       });
       continue;
     }
     const obs = graph.observations.get(id as ObsId);
     if (obs !== undefined) {
       if (obsMatch.has(obs.id)) {
-        items.push({ id: obs.id, header: catObsHeader(obs), content: obs.content });
+        items.push({ id: obs.id, header: catObsHeader(obs), content: obs.summary });
       }
     }
     // missing id: silently dropped in grep mode (nothing matched).
@@ -690,7 +690,7 @@ async function buildCatGrepItemsWithMatches(
       }
     }
   }
-  const texts = [...summaryNodes.map((n) => n.summary), ...obsList.map((o) => o.content)];
+  const texts = [...summaryNodes.map((n) => n.summary), ...obsList.map((o) => o.summary)];
   const outcome = await runRegexTests(grep.pattern, texts, getMemkeeperSettings().findTimeoutMs);
   if ("error" in outcome) return { error: outcome.error };
   const summaryMatch = new Set<string>();
@@ -791,7 +791,7 @@ export async function collectFindMatches(
       obsJobs.push({ obs, parent: node.id });
     }
   }
-  const texts: string[] = [...nodeJobs.map((j) => j.text), ...obsJobs.map((j) => j.obs.content)];
+  const texts: string[] = [...nodeJobs.map((j) => j.text), ...obsJobs.map((j) => j.obs.summary)];
   const nodeCount = nodeJobs.length;
   // an item passes the intersection only if it matches EVERY regex (worker-bounded).
   const filtered = await intersectRegexFilters(texts, regexes);
@@ -903,7 +903,7 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
       // nodes render headers (candidates are pre-filtered by contentPattern).
       const items: RenderItem[] = window.map((m) => {
         const match = m as FindMatch & { obs?: Observation };
-        return { id: m.id, header: m.render, content: match.obs?.content };
+        return { id: m.id, header: m.render, content: match.obs?.summary };
       });
       const rendered = await renderBudgeted(items, {
         budget,

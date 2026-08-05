@@ -35,10 +35,10 @@ function sNode(id: string, over: Partial<SerializedNode> & { summary: string }):
   };
 }
 
-function sObs(id: string, content: string, over: Partial<SerializedObservation>): SerializedObservation {
+function sObs(id: string, summary: string, over: Partial<SerializedObservation>): SerializedObservation {
   return {
     id,
-    content,
+    summary,
     importance: over.importance ?? "crit",
     sourceEntryIds: over.sourceEntryIds ?? [],
     timestamp: over.timestamp ?? "2026-07-28T09:00:00.000Z",

@@ -26,7 +26,7 @@ import { MemkeeperGraph, makeNode, makeObservation, N_GOAL, O_INITIAL_PROMPT } f
 function sampleObs() {
   return makeObservation({
     id: "o1" as ObsId,
-    content: "abcdefgh", // 2 tokens at chars/4
+    summary: "abcdefgh", // 2 tokens at chars/4
     importance: "high" as Importance,
     sourceEntryIds: ["12", "13"],
     timestamp: "2026-07-29T14:30:00.000Z",
@@ -69,10 +69,10 @@ describe("customType constants", () => {
 describe("observation codec", () => {
   it("round-trips an observation", () => {
     const wire = encodeObservation(sampleObs());
-    // contentTokens is NOT on the wire (recomputed on decode)
-    expect(wire).not.toHaveProperty("contentTokens");
+    // summaryTokens is NOT on the wire (recomputed on decode)
+    expect(wire).not.toHaveProperty("summaryTokens");
     expect(wire.id).toBe("o1");
-    expect(wire.content).toBe("abcdefgh");
+    expect(wire.summary).toBe("abcdefgh");
     expect(wire.importance).toBe("high");
     expect(wire.sourceEntryIds).toEqual(["12", "13"]);
     expect(wire.timestamp).toBe("2026-07-29T14:30:00.000Z");
@@ -80,7 +80,7 @@ describe("observation codec", () => {
 
     const decoded = decodeObservation(wire);
     expect(decoded).not.toBeNull();
-    expect(decoded?.contentTokens).toBe(2); // recomputed
+    expect(decoded?.summaryTokens).toBe(2); // recomputed
     expect(decoded?.parentNode).toBe(N_GOAL);
   });
 
@@ -156,7 +156,7 @@ describe("selection snapshot codec", () => {
     g.observations.set(obs.id, obs);
     const prompt = makeObservation({
       id: O_INITIAL_PROMPT,
-      content: "build memkeeper",
+      summary: "build memkeeper",
       importance: "crit" as Importance,
       sourceEntryIds: [],
       timestamp: "2026-07-29T09:00:00.000Z",

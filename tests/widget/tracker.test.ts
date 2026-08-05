@@ -22,7 +22,7 @@ function seedObs(id: ObsId, parentNode: NodeId): void {
   applyRecordObservation(getGraphStore().graph, {
     obs: makeObservation({
       id,
-      content: "x".repeat(NUM_FORTY),
+      summary: "x".repeat(NUM_FORTY),
       importance: "med",
       sourceEntryIds: [],
       timestamp: "2026-07-30T00:00:00Z",

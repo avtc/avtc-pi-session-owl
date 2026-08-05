@@ -30,7 +30,7 @@ export interface StatusInput {
   /** Compaction entries on the active branch. */
   compactionCount: number;
   nodes: Node[];
-  observations: Pick<Observation, "contentTokens">[];
+  observations: Pick<Observation, "summaryTokens">[];
   /** The non-obsolete root-view tokens (chars/4 of the rendered root view). */
   rootsViewTokens: number;
   /** The selected-tree root-view tokens, or null when there is no selected tree
@@ -62,7 +62,7 @@ export function buildStatusReport(input: StatusInput): string {
   // --- Memory section (counts with separators; columns aligned: labels +
   //  counts right-aligned so the token column lines up) ---
   const obsCount = input.observations.length;
-  const obsTokens = sum(input.observations, (o) => o.contentTokens);
+  const obsTokens = sum(input.observations, (o) => o.summaryTokens);
   const nodeCount = input.nodes.length;
   const nodeTokens = sum(input.nodes, (n) => n.summaryTokens);
   const LABEL_WIDTH = 12; // "observations" is the longest label

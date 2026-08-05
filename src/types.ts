@@ -85,10 +85,14 @@ export interface NodeTimestamps {
 
 export interface Observation {
   id: ObsId;
-  /** Condensed essential summary (the full detail stays in the source). */
-  readonly content: string;
-  /** Cached chars/4 estimate, frozen at capture. */
-  readonly contentTokens: number;
+  /** The Observer's one-line condensed essence (the full detail stays in the source). */
+  readonly summary: string;
+  /** Cached chars/4 of the one-line summary, frozen at capture. Feeds summarized-tokens. */
+  readonly summaryTokens: number;
+  /** Line count of the verbatim source render (the "full detail"), frozen at capture. The terse size hint. */
+  readonly detailsLines: number;
+  /** chars/4 of the verbatim source render, frozen at capture. raw-tokens total sums this. */
+  readonly detailsTokens: number;
   readonly importance: Importance;
   /** Provenance — real session-entry ids. */
   readonly sourceEntryIds: string[];
@@ -97,6 +101,13 @@ export interface Observation {
   readonly timestamp: string;
   /** ALWAYS a real node id (the capture wrapper at first; regrouped later). */
   parentNode: NodeId;
+}
+
+/** Count lines of a string: a trailing newline is a terminator, not an extra
+ *  line; the empty string is 0 lines. (Shared by observation-size rendering and
+ *  verbatim-source render counting.) */
+export function countLines(text: string): number {
+  return text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 }
 
 /** Estimate the cached token count for a content/summary string. */
@@ -114,19 +125,26 @@ export function nowStoredTimestamp(): string {
   return new Date().toISOString();
 }
 
-/** Construct an observation, freezing `contentTokens` from `content`. */
+/** Construct an observation, freezing `summaryTokens` from `summary`. The
+ *  `detailsLines`/`detailsTokens` come from the verbatim-source render (SD-4);
+ *  TEMPORARILY (pre-SD-4) they are placeholder-derived from the summary so the
+ *  size hint stays non-zero until the Observer populates real source counts. */
 export function makeObservation(args: {
   id: ObsId;
-  content: string;
+  summary: string;
   importance: Importance;
   sourceEntryIds: string[];
   timestamp: string;
   parentNode: NodeId;
 }): Observation {
+  const summaryTokens = estimateContentTokens(args.summary);
   return {
     id: args.id,
-    content: args.content,
-    contentTokens: estimateContentTokens(args.content),
+    summary: args.summary,
+    summaryTokens,
+    // TEMPORARY placeholder (SD-4 replaces with real verbatim-source counts):
+    detailsLines: countLines(args.summary),
+    detailsTokens: summaryTokens,
     importance: args.importance,
     sourceEntryIds: args.sourceEntryIds,
     timestamp: args.timestamp,

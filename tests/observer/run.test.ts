@@ -102,7 +102,7 @@ function scriptedRunStage(batchesPerChunk: RecordObservationInput[][]): {
 }
 
 type RecordObservationInput = {
-  content: string;
+  summary: string;
   importance: "crit" | "high" | "med" | "low";
   sourceEntryIds: string[];
 };
@@ -167,7 +167,7 @@ describe("runObserver", () => {
       assistantEntry("a1", "we chose vitest for tests"),
     ];
     const script = scriptedRunStage([
-      [{ content: "Chose vitest for all new tests.", importance: "high", sourceEntryIds: ["a1"] }],
+      [{ summary: "Chose vitest for all new tests.", importance: "high", sourceEntryIds: ["a1"] }],
     ]);
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
@@ -198,7 +198,7 @@ describe("runObserver", () => {
     expect(wrapper?.observationIds).toHaveLength(1);
     const obsId = wrapper !== undefined ? wrapper.observationIds[0] : undefined;
     const obs = obsId !== undefined ? graph.observations.get(obsId) : undefined;
-    expect(obs?.content).toBe("Chose vitest for all new tests.");
+    expect(obs?.summary).toBe("Chose vitest for all new tests.");
 
     // frontier advanced to the last unobserved entry id
     expect(getGraphStore().observerFrontier).toBe("a1");
@@ -226,7 +226,7 @@ describe("runObserver", () => {
         message: { role: "assistant", content: [{ type: "text", text: "we chose vitest for tests" }] },
       } as unknown as SessionEntry,
     ];
-    const script = scriptedRunStage([[{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }]]);
+    const script = scriptedRunStage([[{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }]]);
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
 
@@ -260,7 +260,7 @@ describe("runObserver", () => {
     } as unknown as ExtensionContext;
     const notify = vi.spyOn(ctx.ui, "notify");
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
-    const script = scriptedRunStage([[{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }]]);
+    const script = scriptedRunStage([[{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }]]);
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
 
@@ -280,8 +280,8 @@ describe("runObserver", () => {
     ];
     const script = scriptedRunStage([
       [
-        { content: "Every commit must keep the build green.", importance: "crit", sourceEntryIds: ["a1"] }, // good
-        { content: "Foreign fact.", importance: "med", sourceEntryIds: ["ZZZ-not-in-chunk"] }, // foreign id
+        { summary: "Every commit must keep the build green.", importance: "crit", sourceEntryIds: ["a1"] }, // good
+        { summary: "Foreign fact.", importance: "med", sourceEntryIds: ["ZZZ-not-in-chunk"] }, // foreign id
       ],
     ]);
 
@@ -313,8 +313,8 @@ describe("runObserver", () => {
       assistantEntry("a2", `chose vitest ${"y".repeat(200)}`),
     ];
     const script = scriptedRunStage([
-      [{ content: "Bad 1.", importance: "low", sourceEntryIds: ["ZZZ"] }], // all-bad chunk 1
-      [{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a2"] }], // good chunk 2
+      [{ summary: "Bad 1.", importance: "low", sourceEntryIds: ["ZZZ"] }], // all-bad chunk 1
+      [{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a2"] }], // good chunk 2
     ]);
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn, thresholdTokens: 50 }));
@@ -341,7 +341,7 @@ describe("runObserver", () => {
       const tool = input.tools[0] as AgentTool;
       // execute the tool (records accumulate in-memory)...
       await tool.execute("c1", {
-        observations: [{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }],
+        observations: [{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }],
       });
       // ...then abort before the run completes
       controller.abort();
@@ -370,7 +370,7 @@ describe("runObserver", () => {
       const tool = input.tools[0] as AgentTool;
       // chunk 1 COMPLETES with a valid record (accumulates in allRecords)...
       await tool.execute("c1", {
-        observations: [{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }],
+        observations: [{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }],
       });
       // ...then abort fires before chunk 2 starts (chunk 2 never passes)
       if (chunk === 1) controller.abort();
@@ -397,7 +397,7 @@ describe("runObserver", () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
-    const script = scriptedRunStage([[{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }]]);
+    const script = scriptedRunStage([[{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }]]);
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
 
@@ -430,8 +430,8 @@ describe("runObserver", () => {
     // two chunks (threshold 1 → each entry its own chunk): [u1], [a1].
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
     const script = scriptedRunStage([
-      [{ content: "Initial goal stated.", importance: "high", sourceEntryIds: ["u1"] }], // chunk 1 [u1]
-      [{ content: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }], // chunk 2 [a1]
+      [{ summary: "Initial goal stated.", importance: "high", sourceEntryIds: ["u1"] }], // chunk 1 [u1]
+      [{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }], // chunk 2 [a1]
     ]);
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn, thresholdTokens: 1 }));
@@ -442,10 +442,10 @@ describe("runObserver", () => {
     const entry = obsEntries[0].data as {
       coversFromId: string | null;
       coversUpToId: string;
-      records: { content: string }[];
+      records: { summary: string }[];
       tokenCount: number;
     };
-    expect(entry.records.map((r) => r.content)).toEqual(["Initial goal stated.", "Chose vitest."]);
+    expect(entry.records.map((r) => r.summary)).toEqual(["Initial goal stated.", "Chose vitest."]);
     expect(entry.coversFromId).toBe("u1");
     expect(entry.coversUpToId).toBe("a1");
     // exact tokenCount = sum of the two records' chars/4 estimates.
@@ -474,7 +474,7 @@ describe("runObserver", () => {
       if (chunk === 1) {
         const tool = input.tools[0] as AgentTool;
         await tool.execute("c1", {
-          observations: [{ content: "Initial goal stated.", importance: "high", sourceEntryIds: ["u1"] }],
+          observations: [{ summary: "Initial goal stated.", importance: "high", sourceEntryIds: ["u1"] }],
         });
         return {
           messages: [] as AgentMessage[],
@@ -499,9 +499,9 @@ describe("runObserver", () => {
     const entry = obsEntries[0].data as {
       coversFromId: string | null;
       coversUpToId: string;
-      records: { content: string }[];
+      records: { summary: string }[];
     };
-    expect(entry.records.map((r) => r.content)).toEqual(["Initial goal stated."]);
+    expect(entry.records.map((r) => r.summary)).toEqual(["Initial goal stated."]);
     // frontier advanced ONLY to chunk 1's last entry (u1), NOT the gap tail (a2)
     expect(entry.coversUpToId).toBe("u1");
     expect(getGraphStore().observerFrontier).toBe("u1");
@@ -513,8 +513,8 @@ describe("runObserver", () => {
     // two chunks (threshold 1 → each entry its own chunk): [u1], [a1].
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
     const script = scriptedRunStage([
-      [{ content: "Goal.", importance: "high", sourceEntryIds: ["u1"] }],
-      [{ content: "Decision.", importance: "high", sourceEntryIds: ["a1"] }],
+      [{ summary: "Goal.", importance: "high", sourceEntryIds: ["u1"] }],
+      [{ summary: "Decision.", importance: "high", sourceEntryIds: ["a1"] }],
     ]);
     const calls: { method: string; args: unknown[] }[] = [];
     const widget: WidgetController = {

@@ -87,7 +87,7 @@ function seedGraph(roots: Array<{ id: NodeId; summary: string; state?: "active" 
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "oInitialPrompt",
-      content: "build a memory extension",
+      summary: "build a memory extension",
       importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,
@@ -305,7 +305,7 @@ describe("runSelector", () => {
     applyRecordObservation(getGraphStore().graph, {
       obs: makeObservation({
         id: "o9",
-        content: "a load-bearing constraint",
+        summary: "a load-bearing constraint",
         importance: "high",
         sourceEntryIds: ["5"],
         timestamp: NOW,

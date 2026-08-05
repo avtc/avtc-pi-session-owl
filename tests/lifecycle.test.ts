@@ -205,7 +205,7 @@ describe("captureInitialPromptIfAbsent", () => {
     const graph = getGraphStore().graph;
     expect(graph.hasInitialPrompt).toBe(true);
     const obs = graph.observations.get(O_INITIAL_PROMPT);
-    expect(obs?.content).toBe("Build me a CLI tool");
+    expect(obs?.summary).toBe("Build me a CLI tool");
     expect(obs?.parentNode).toBe(N_GOAL);
     expect(obs?.sourceEntryIds).toEqual(["u1"]);
     expect(obs?.importance).toBe("crit");
@@ -273,8 +273,8 @@ describe("captureInitialPromptIfAbsent", () => {
     await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
     captureInitialPromptIfAbsent(ctx, pi);
     const obs = getGraphStore().graph.observations.get(O_INITIAL_PROMPT);
-    expect(obs?.content).toBe("Build the memory extension");
-    expect(obs?.content).not.toContain(ansiRed);
+    expect(obs?.summary).toBe("Build the memory extension");
+    expect(obs?.summary).not.toContain(ansiRed);
   });
 
   it("persist the capture (observation entry + graph deltas incl. set_meta)", async () => {

@@ -22,7 +22,7 @@ export interface SummaryGraph {
   nodes: ReadonlyMap<string, RenderableNode>;
   /** Observation content by id (used to render a bare `new` node's first obs
    *  line in observations-root mode). Omitted when the caller has no access. */
-  observations?: ReadonlyMap<string, { readonly content: string }>;
+  observations?: ReadonlyMap<string, { readonly summary: string }>;
 }
 
 /** Inputs to renderSummary. */
@@ -49,7 +49,7 @@ const NO_TOUCHED_PLACEHOLDER = "(none)";
 
 const TOUCHED_HEADING = "## Recently touched";
 const NO_INITIAL_PROMPT = "(none captured yet)";
-const EMPTY_OBS_MAP: ReadonlyMap<string, { readonly content: string }> = new Map();
+const EMPTY_OBS_MAP: ReadonlyMap<string, { readonly summary: string }> = new Map();
 
 /**
  * Render the compaction summary text. Mechanical, never truncated. The
@@ -65,7 +65,7 @@ export function renderSummary(args: RenderSummaryArgs): string {
   lines.push("");
 
   lines.push(INITIAL_PROMPT_HEADING);
-  lines.push(args.oInitialPrompt === null ? NO_INITIAL_PROMPT : args.oInitialPrompt.content);
+  lines.push(args.oInitialPrompt === null ? NO_INITIAL_PROMPT : args.oInitialPrompt.summary);
   lines.push("");
 
   lines.push(ACTIVE_SET_HEADING);
@@ -73,7 +73,7 @@ export function renderSummary(args: RenderSummaryArgs): string {
   // immutable + shared (the selected tree carries only obs-id refs), so the
   // source graph's observation store is authoritative in both modes.
   const obsContent = args.graph.observations ?? EMPTY_OBS_MAP;
-  const resolveObs = (id: string): string | undefined => obsContent.get(id)?.content;
+  const resolveObs = (id: string): string | undefined => obsContent.get(id)?.summary;
   for (const root of activeSetRoots(args)) {
     lines.push(formatNodeLine(root, { viewer: "nonBuilder", observationContent: resolveObs }));
   }

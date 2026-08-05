@@ -15,7 +15,14 @@ import {
   validateGraph,
 } from "../../src/graph/invariants.js";
 import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/types.js";
-import { estimateContentTokens, MemkeeperGraph, N_GOAL, N_IRRELEVANT, O_INITIAL_PROMPT } from "../../src/types.js";
+import {
+  countLines,
+  estimateContentTokens,
+  MemkeeperGraph,
+  N_GOAL,
+  N_IRRELEVANT,
+  O_INITIAL_PROMPT,
+} from "../../src/types.js";
 
 describe("isSpecial", () => {
   it("treats nGoal and oInitialPrompt as source-graph specials", () => {
@@ -238,11 +245,13 @@ function nodeWith(overrides: Partial<Node> & Pick<Node, "id">): Node {
 }
 
 function obsWith(overrides: Partial<Observation> & Pick<Observation, "id" | "parentNode">): Observation {
-  const content = overrides.content ?? "content";
+  const summary = overrides.summary ?? "content";
   return {
     id: overrides.id,
-    content,
-    contentTokens: estimateContentTokens(content),
+    summary,
+    summaryTokens: estimateContentTokens(summary),
+    detailsLines: overrides.detailsLines ?? countLines(summary),
+    detailsTokens: overrides.detailsTokens ?? estimateContentTokens(summary),
     importance: overrides.importance ?? "med",
     sourceEntryIds: overrides.sourceEntryIds ?? ["1"],
     timestamp: overrides.timestamp ?? "2026-07-29T09:00:00.000Z",
@@ -273,10 +282,10 @@ function validGraph(): MemkeeperGraph {
   nodes.set("n6" as NodeId, nodeWith({ id: "n6", summary: "child six", parentNode: "n5" as NodeId }));
   nodes.get("n5")?.childNodeIds.push("n6" as NodeId);
 
-  const oInit = obsWith({ id: O_INITIAL_PROMPT, content: "the goal", importance: "crit", parentNode: N_GOAL });
-  const o1 = obsWith({ id: "o1", content: "first", parentNode: N_GOAL });
-  const o2 = obsWith({ id: "o2", content: "second", parentNode: "n5" as NodeId });
-  const o3 = obsWith({ id: "o3", content: "third", parentNode: "n6" as NodeId });
+  const oInit = obsWith({ id: O_INITIAL_PROMPT, summary: "the goal", importance: "crit", parentNode: N_GOAL });
+  const o1 = obsWith({ id: "o1", summary: "first", parentNode: N_GOAL });
+  const o2 = obsWith({ id: "o2", summary: "second", parentNode: "n5" as NodeId });
+  const o3 = obsWith({ id: "o3", summary: "third", parentNode: "n6" as NodeId });
   for (const o of [oInit, o1, o2, o3]) observations.set(o.id, o);
   nodes.get(N_GOAL)?.observationIds.push(O_INITIAL_PROMPT, "o1" as ObsId);
   nodes.get("n5")?.observationIds.push("o2" as ObsId);

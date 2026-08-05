@@ -28,14 +28,14 @@ Each observation carries an importance — how much it matters if lost, by natur
 - low — routine activity or minor detail with little durable consequence
 
 Call record_observations with a batch (array) of observations, as many times as
-needed to cover the chunk. Each item has three fields: content (the concise
-observation), importance, and sourceEntryIds (the source entry ids it draws on
+needed to cover the chunk. Each item has three fields: summary (the concise
+observation — the full detail stays in the source), importance, and sourceEntryIds (the source entry ids it draws on
 — an observation may span several blocks). When the chunk is fully covered, reply
 with the single word Done; if the chunk has nothing worth capturing, skip the
 tool and reply Done.
 
 Examples:
-- content: "Every commit must keep the build green." — importance: crit —
+- summary: "Every commit must keep the build green." — importance: crit —
   sourceEntryIds: ["12"]
-- content: "Chose vitest for all new tests." — importance: high —
+- summary: "Chose vitest for all new tests." — importance: high —
   sourceEntryIds: ["7", "9"]`;

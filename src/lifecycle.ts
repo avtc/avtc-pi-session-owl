@@ -153,10 +153,10 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   if (text.length === 0) return;
 
   // record oInitialPrompt under nGoal (built once via makeObservation; the
-  // persisted record derives from it, omitting the cached contentTokens).
+  // persisted record derives from it, omitting the cached summaryTokens).
   const obs = makeObservation({
     id: O_INITIAL_PROMPT,
-    content: text,
+    summary: text,
     importance: "crit",
     sourceEntryIds: [firstUser.id],
     timestamp: toStoredTimestamp(firstUser.timestamp),
@@ -185,7 +185,7 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
     coversFromId: null,
     coversUpToId: firstUser.id,
     records: [encodeObservation(obs)],
-    tokenCount: obs.contentTokens,
+    tokenCount: obs.summaryTokens,
   };
   appendObservation(store, observationEntry);
 }

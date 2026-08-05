@@ -53,7 +53,7 @@ function buildGraph(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "oInitialPrompt",
-      content: "build a memory extension",
+      summary: "build a memory extension",
       importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: T0,
@@ -78,7 +78,7 @@ function buildGraph(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "o5",
-      content: "Chose JWT for stateless auth",
+      summary: "Chose JWT for stateless auth",
       importance: "high",
       sourceEntryIds: ["2"],
       timestamp: T1,
@@ -113,7 +113,7 @@ function buildGraph(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "o9",
-      content: "Sessions were the prior auth approach",
+      summary: "Sessions were the prior auth approach",
       importance: "med",
       sourceEntryIds: ["3"],
       timestamp: T3,
@@ -154,7 +154,7 @@ function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
   applyRecordObservation(curated, {
     obs: makeObservation({
       id: "oInitialPrompt",
-      content: "build a memory extension",
+      summary: "build a memory extension",
       importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: T0,
@@ -181,7 +181,7 @@ function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
   applyRecordObservation(curated, {
     obs: makeObservation({
       id: "o5",
-      content: "Chose JWT for stateless auth",
+      summary: "Chose JWT for stateless auth",
       importance: "high",
       sourceEntryIds: ["2"],
       timestamp: T1,
@@ -243,7 +243,7 @@ describe("mk_recall", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o1",
-        content: "a".repeat(4000).concat("!"),
+        summary: "a".repeat(4000).concat("!"),
         importance: "med",
         sourceEntryIds: [],
         timestamp: T0,
@@ -360,7 +360,7 @@ describe("mk_recall", () => {
       applyRecordObservation(g, {
         obs: makeObservation({
           id: "o1",
-          content: "shared detail marker",
+          summary: "shared detail marker",
           importance: "low",
           sourceEntryIds: ["x1"],
           timestamp: T1,
@@ -370,7 +370,7 @@ describe("mk_recall", () => {
       applyRecordObservation(g, {
         obs: makeObservation({
           id: "o2",
-          content: "shared detail marker",
+          summary: "shared detail marker",
           importance: "low",
           sourceEntryIds: ["x2"],
           timestamp: T1,
@@ -472,7 +472,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       applyRecordObservation(g, {
         obs: makeObservation({
           id: "oLong" as ObsId,
-          content: longBody,
+          summary: longBody,
           importance: "high",
           sourceEntryIds: ["e1", "e2"],
           timestamp: T1,
@@ -630,7 +630,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       applyRecordObservation(curated, {
         obs: makeObservation({
           id: "o5",
-          content: "Chose JWT for stateless auth",
+          summary: "Chose JWT for stateless auth",
           importance: "high",
           sourceEntryIds: ["2"],
           timestamp: T1,
@@ -640,7 +640,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       applyRecordObservation(curated, {
         obs: makeObservation({
           id: "o50",
-          content: "ghost observation with no source",
+          summary: "ghost observation with no source",
           importance: "low",
           sourceEntryIds: ["99"],
           timestamp: T1,
@@ -718,7 +718,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       applyRecordObservation(g, {
         obs: makeObservation({
           id: "oLong" as ObsId,
-          content: "alpha first.\nbeta second line.\ngamma third.",
+          summary: "alpha first.\nbeta second line.\ngamma third.",
           importance: "high",
           sourceEntryIds: ["e1"],
           timestamp: T1,

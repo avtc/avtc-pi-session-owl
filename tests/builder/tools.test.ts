@@ -34,7 +34,7 @@ function buildGraph(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "oInitialPrompt",
-      content: "build a memory extension",
+      summary: "build a memory extension",
       importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,
@@ -58,7 +58,7 @@ function buildGraph(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "o5",
-      content: "Chose JWT for stateless auth",
+      summary: "Chose JWT for stateless auth",
       importance: "high",
       sourceEntryIds: ["2"],
       timestamp: NOW,

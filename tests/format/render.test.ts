@@ -12,7 +12,7 @@ import {
   toStoredTimestamp,
 } from "../../src/format/render.js";
 import type { Node, Observation } from "../../src/types.js";
-import { estimateContentTokens, N_GOAL } from "../../src/types.js";
+import { countLines, estimateContentTokens, N_GOAL } from "../../src/types.js";
 
 const FIXED_NOW = "2026-07-29T09:00:00.000Z";
 
@@ -106,7 +106,7 @@ describe("formatNodeLine", () => {
   it("uses grammar-correct singular for a multi-line obs size", () => {
     const obs = makeObservation({
       id: "o9",
-      content: "line one\nline two\nline three",
+      summary: "line one\nline two\nline three",
       importance: "high",
       timestamp: "2026-07-28T14:30:00.000Z",
     });
@@ -117,7 +117,7 @@ describe("formatNodeLine", () => {
   it("renders empty observation content as 0lines 0tokens", () => {
     const obs = makeObservation({
       id: "o1",
-      content: "",
+      summary: "",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
     });
@@ -127,7 +127,7 @@ describe("formatNodeLine", () => {
   it("counts a trailing newline as a terminator, not an extra line", () => {
     const obs = makeObservation({
       id: "o2",
-      content: "a single line with a trailing newline\n",
+      summary: "a single line with a trailing newline\n",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
     });
@@ -225,7 +225,7 @@ describe("formatObservationLine", () => {
   it("renders an observation with its single timestamp", () => {
     const obs = makeObservation({
       id: "o5",
-      content: "Chose JWT for stateless auth",
+      summary: "Chose JWT for stateless auth",
       importance: "high",
       timestamp: "2026-07-28T14:30:00.000Z",
     });
@@ -237,7 +237,7 @@ describe("formatObservationLine", () => {
   it("appends 'in <parent>' when showParent is set", () => {
     const obs = makeObservation({
       id: "o5",
-      content: "a fact",
+      summary: "a fact",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
     });
@@ -249,7 +249,7 @@ describe("formatObservationLine", () => {
   it("applies formatContent to transform the content line", () => {
     const obs = makeObservation({
       id: "o5",
-      content: "a fact",
+      summary: "a fact",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
     });
@@ -262,7 +262,7 @@ describe("formatObservationLine", () => {
   it("omits the content segment when formatContent returns empty (content-free header)", () => {
     const obs = makeObservation({
       id: "o5",
-      content: "a fact",
+      summary: "a fact",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
     });
@@ -297,7 +297,7 @@ describe("singleLine rendering", () => {
   it("collapses newlines in an observation's content", () => {
     const obs = makeObservation({
       id: "o1",
-      content: "a\nb\nc",
+      summary: "a\nb\nc",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
     });
@@ -346,13 +346,15 @@ function makeNode(fixture: NodeFixture): Node {
 }
 
 function makeObservation(
-  overrides: Partial<Observation> & Pick<Observation, "id" | "content" | "importance" | "timestamp">,
+  overrides: Partial<Observation> & Pick<Observation, "id" | "summary" | "importance" | "timestamp">,
 ): Observation {
-  const content = overrides.content;
+  const summary = overrides.summary;
   return {
     id: overrides.id,
-    content,
-    contentTokens: estimateContentTokens(content),
+    summary,
+    summaryTokens: estimateContentTokens(summary),
+    detailsLines: overrides.detailsLines ?? countLines(summary),
+    detailsTokens: overrides.detailsTokens ?? estimateContentTokens(summary),
     importance: overrides.importance,
     sourceEntryIds: overrides.sourceEntryIds ?? ["1"],
     timestamp: overrides.timestamp,

@@ -43,7 +43,7 @@ function buildGraph(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "oInitialPrompt",
-      content: "build a memory extension",
+      summary: "build a memory extension",
       importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,
@@ -69,7 +69,7 @@ function buildGraph(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "o5",
-      content: "Chose JWT for stateless auth",
+      summary: "Chose JWT for stateless auth",
       importance: "high",
       sourceEntryIds: ["2"],
       timestamp: NOW,
@@ -107,7 +107,7 @@ function buildGraph(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "o9",
-      content: "Sessions were the prior auth approach",
+      summary: "Sessions were the prior auth approach",
       importance: "med",
       sourceEntryIds: ["3"],
       timestamp: NOW,
@@ -211,7 +211,7 @@ describe("Builder read tools", () => {
       applyRecordObservation(g, {
         obs: makeObservation({
           id: "o6",
-          content: "Second JWT note",
+          summary: "Second JWT note",
           importance: "high",
           sourceEntryIds: ["4"],
           timestamp: NOW,
@@ -221,7 +221,7 @@ describe("Builder read tools", () => {
       applyRecordObservation(g, {
         obs: makeObservation({
           id: "o7",
-          content: "Third JWT note",
+          summary: "Third JWT note",
           importance: "high",
           sourceEntryIds: ["5"],
           timestamp: NOW,
@@ -317,7 +317,7 @@ describe("Builder read tools", () => {
       applyRecordObservation(g, {
         obs: makeObservation({
           id: "o100",
-          content: "a".repeat(4000).concat("!"),
+          summary: "a".repeat(4000).concat("!"),
           importance: "med",
           sourceEntryIds: [],
           timestamp: NOW,
@@ -533,7 +533,7 @@ describe("result token budget + extraction", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o5" as ObsId,
-        content: "line one\nthe token is secret\nline three\ntoken refresh logic\nline five",
+        summary: "line one\nthe token is secret\nline three\ntoken refresh logic\nline five",
         importance: "high",
         timestamp: NOW,
         sourceEntryIds: ["e5"],
@@ -561,7 +561,7 @@ describe("result token budget + extraction", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o9" as ObsId,
-        content: "x".repeat(200),
+        summary: "x".repeat(200),
         importance: "med",
         timestamp: NOW,
         sourceEntryIds: ["e9"],
@@ -591,7 +591,7 @@ describe("result token budget + extraction", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o200",
-        content: "second observation under n7",
+        summary: "second observation under n7",
         importance: "med",
         sourceEntryIds: [],
         timestamp: NOW,
@@ -659,7 +659,7 @@ describe("result token budget + extraction", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o100",
-        content: "a".repeat(4000).concat("!"),
+        summary: "a".repeat(4000).concat("!"),
         importance: "med",
         sourceEntryIds: [],
         timestamp: NOW,
@@ -726,7 +726,7 @@ describe("result token budget + extraction", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o99" as ObsId,
-        content: "nothing relevant here",
+        summary: "nothing relevant here",
         importance: "med",
         timestamp: NOW,
         sourceEntryIds: ["e99"],

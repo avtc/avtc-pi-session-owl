@@ -50,7 +50,7 @@ const FIRST = 0;
 
 /** A captured observation (validated; before id/timestamp/wrap assignment). */
 export interface RecordObservation {
-  readonly content: string;
+  readonly summary: string;
   readonly importance: Importance;
   readonly sourceEntryIds: string[];
 }
@@ -59,7 +59,7 @@ export interface RecordObservation {
 const RECORD_OBS_PARAMS = Type.Object({
   observations: Type.Array(
     Type.Object({
-      content: Type.String({
+      summary: Type.String({
         minLength: 1,
         description: "The observation, written concisely as its essential meaning.",
       }),
@@ -107,7 +107,7 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
           continue;
         }
         records.push({
-          content: raw.content,
+          summary: raw.summary,
           importance: raw.importance as Importance,
           sourceEntryIds: [...raw.sourceEntryIds],
         });
@@ -284,7 +284,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       applyRecordObservation(graph, {
         obs: makeObservation({
           id: obsId,
-          content: record.content,
+          summary: record.summary,
           importance: record.importance,
           sourceEntryIds: record.sourceEntryIds,
           timestamp,
@@ -358,7 +358,7 @@ function persistObservationBatch(
     if (obs === undefined) {
       throw new Error("observer wrap: observation missing");
     }
-    tokenCount += obs.contentTokens;
+    tokenCount += obs.summaryTokens;
     return encodeObservation(obs);
   });
   const coversFromId = unobserved[FIRST]?.id ?? null;

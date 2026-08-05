@@ -126,7 +126,7 @@ describe("persist methods (PERSIST-ONLY)", () => {
       coversFromId: null,
       coversUpToId: "e10",
       records: [
-        { id: "o1", content: "fact", importance: "high", sourceEntryIds: ["8"], timestamp: "t", parentNode: N_GOAL },
+        { id: "o1", summary: "fact", importance: "high", sourceEntryIds: ["8"], timestamp: "t", parentNode: N_GOAL },
       ],
       tokenCount: 1,
     };
@@ -226,7 +226,7 @@ describe("load reconstruction", () => {
       coversFromId: null,
       coversUpToId: "e2",
       records: [
-        { id: "o1", content: "first", importance: "med", sourceEntryIds: ["1"], timestamp: "t0", parentNode: "n1" },
+        { id: "o1", summary: "first", importance: "med", sourceEntryIds: ["1"], timestamp: "t0", parentNode: "n1" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -236,7 +236,7 @@ describe("load reconstruction", () => {
       coversFromId: "e6",
       coversUpToId: "e7",
       records: [
-        { id: "o5", content: "fifth", importance: "low", sourceEntryIds: ["6"], timestamp: "t1", parentNode: "n1" },
+        { id: "o5", summary: "fifth", importance: "low", sourceEntryIds: ["6"], timestamp: "t1", parentNode: "n1" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -295,7 +295,7 @@ describe("load reconstruction", () => {
       coversFromId: null,
       coversUpToId: "e2",
       records: [
-        { id: "o1", content: "first", importance: "high", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
+        { id: "o1", summary: "first", importance: "high", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -331,7 +331,7 @@ describe("load reconstruction", () => {
       coversFromId: null,
       coversUpToId: "e1",
       records: [
-        { id: "o1", content: "first", importance: "high", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
+        { id: "o1", summary: "first", importance: "high", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -348,7 +348,7 @@ describe("load reconstruction", () => {
       coversFromId: null,
       coversUpToId: "e4",
       records: [
-        { id: "o2", content: "second", importance: "med", sourceEntryIds: ["3"], timestamp: "t2", parentNode: "n1" },
+        { id: "o2", summary: "second", importance: "med", sourceEntryIds: ["3"], timestamp: "t2", parentNode: "n1" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -393,8 +393,8 @@ describe("load reconstruction", () => {
       coversFromId: null,
       coversUpToId: "e2",
       records: [
-        { id: "o1", content: "a", importance: "high", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
-        { id: "o2", content: "b", importance: "low", sourceEntryIds: ["2"], timestamp: "t", parentNode: "n2" },
+        { id: "o1", summary: "a", importance: "high", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
+        { id: "o2", summary: "b", importance: "low", sourceEntryIds: ["2"], timestamp: "t", parentNode: "n2" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -431,7 +431,7 @@ describe("load reconstruction", () => {
       records: [
         {
           id: "o1",
-          content: "a",
+          summary: "a",
           importance: "high",
           sourceEntryIds: ["1"],
           timestamp: "2026-07-28T09:00:00.000Z",
@@ -439,7 +439,7 @@ describe("load reconstruction", () => {
         },
         {
           id: "o2",
-          content: "b",
+          summary: "b",
           importance: "high",
           sourceEntryIds: ["2"],
           timestamp: "2026-07-28T10:00:00.000Z",
@@ -447,7 +447,7 @@ describe("load reconstruction", () => {
         },
         {
           id: "o3",
-          content: "c",
+          summary: "c",
           importance: "high",
           sourceEntryIds: ["3"],
           timestamp: "2026-07-28T11:00:00.000Z",
@@ -489,7 +489,7 @@ describe("load reconstruction", () => {
       coversFromId: null,
       coversUpToId: "e4",
       records: [
-        { id: "o9", content: "post", importance: "low", sourceEntryIds: ["3"], timestamp: "t", parentNode: "n9" },
+        { id: "o9", summary: "post", importance: "low", sourceEntryIds: ["3"], timestamp: "t", parentNode: "n9" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -523,7 +523,7 @@ describe("load reconstruction", () => {
       coversFromId: null,
       coversUpToId: "e4",
       records: [
-        { id: "o9", content: "post", importance: "low", sourceEntryIds: ["3"], timestamp: "t", parentNode: "n9" },
+        { id: "o9", summary: "post", importance: "low", sourceEntryIds: ["3"], timestamp: "t", parentNode: "n9" },
       ],
       tokenCount: 1,
     } satisfies ObservationEntry);
@@ -559,7 +559,7 @@ describe("load reconstruction", () => {
       records: [
         {
           id: "o1",
-          content: "native-skip",
+          summary: "native-skip",
           importance: "high",
           sourceEntryIds: ["4"],
           timestamp: "t",
@@ -705,7 +705,7 @@ describe("load edge cases", () => {
       records: [
         {
           id: "o1",
-          content: "orphan",
+          summary: "orphan",
           importance: "low",
           sourceEntryIds: ["1"],
           timestamp: "t",
@@ -801,7 +801,7 @@ describe("load edge cases", () => {
       records: [
         {
           id: "o1",
-          content: "later",
+          summary: "later",
           importance: "low",
           sourceEntryIds: ["2"],
           timestamp: "2026-07-09T12:00:00.000Z",

@@ -208,7 +208,7 @@ export interface RenderableNode {
 /** Structural observation shape the line helpers read. */
 export interface RenderableObservation {
   id: string;
-  content: string;
+  summary: string;
   importance: Observation["importance"];
   timestamp: string;
 }
@@ -239,10 +239,10 @@ export function formatNodeLine(node: RenderableNode, options: LineOptions): stri
 export function formatObservationLine(obs: RenderableObservation, options: LineOptions): string {
   const parts: string[] = [`${obs.id} · ${obs.importance}`];
   const formatContent = options.formatContent ?? singleLine;
-  const content = formatContent(obs.content);
+  const content = formatContent(obs.summary);
   if (content !== "") parts.push(content);
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
-  parts.push(observationSize(obs.content));
+  parts.push(observationSize(obs.summary));
   parts.push(formatTimestamp(obs.timestamp));
   return parts.join(" · ");
 }

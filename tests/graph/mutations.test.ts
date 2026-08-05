@@ -16,7 +16,7 @@ import {
   setClock,
 } from "../../src/graph/mutations.js";
 import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/types.js";
-import { estimateContentTokens, MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
+import { countLines, estimateContentTokens, MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 
@@ -85,7 +85,7 @@ describe("applyRecordObservation", () => {
     const g = bareGraphWithRoot("n1");
     const obs = makeObservation({
       id: "o1",
-      content: "first fact",
+      summary: "first fact",
       importance: "high",
       sourceEntryIds: ["12"],
       timestamp: "2026-07-29T10:00:00.000Z",
@@ -597,7 +597,7 @@ describe("always-attached invariant holds after core mutations", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o1",
-        content: "first",
+        summary: "first",
         importance: "high",
         sourceEntryIds: ["1"],
         timestamp: NOW,
@@ -609,7 +609,7 @@ describe("always-attached invariant holds after core mutations", () => {
     applyRecordObservation(g, {
       obs: makeObservation({
         id: "o2",
-        content: "second",
+        summary: "second",
         importance: "low",
         sourceEntryIds: ["2"],
         timestamp: NOW,
@@ -669,7 +669,7 @@ function graphWithNGoal(): MemkeeperGraph {
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "oInitialPrompt",
-      content: "the initial prompt",
+      summary: "the initial prompt",
       importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,
@@ -693,11 +693,13 @@ function obsById(g: MemkeeperGraph, id: ObsId): Observation {
 }
 
 function obsWith(overrides: Partial<Observation> & Pick<Observation, "id" | "timestamp" | "parentNode">): Observation {
-  const content = overrides.content ?? "content";
+  const summary = overrides.summary ?? "content";
   return {
     id: overrides.id,
-    content,
-    contentTokens: estimateContentTokens(content),
+    summary,
+    summaryTokens: estimateContentTokens(summary),
+    detailsLines: overrides.detailsLines ?? countLines(summary),
+    detailsTokens: overrides.detailsTokens ?? estimateContentTokens(summary),
     importance: overrides.importance ?? ("med" as Importance),
     sourceEntryIds: overrides.sourceEntryIds ?? ["1"],
     timestamp: overrides.timestamp,

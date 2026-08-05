@@ -67,11 +67,11 @@ function node(over: Partial<Node>): Node {
 function obs(
   id: ObsId,
   content: string,
-  contentTokens: number,
+  summaryTokens: number,
 ): {
   id: ObsId;
   content: string;
-  contentTokens: number;
+  summaryTokens: number;
   importance: "med";
   sourceEntryIds: string[];
   timestamps: { createdAt: string };
@@ -79,7 +79,7 @@ function obs(
   return {
     id,
     content,
-    contentTokens,
+    summaryTokens,
     importance: "med",
     sourceEntryIds: [],
     timestamps: { createdAt: "2026-07-28T09:00:00.000Z" },
@@ -137,8 +137,8 @@ describe("buildStatusReport", () => {
 
   it("counts use thousands separators (formatCount) and the count column is right-aligned", () => {
     const bigNodes: Node[] = [];
-    const bigObs: { contentTokens: number }[] = [];
-    for (let i = 0; i < 1245; i += 1) bigObs.push({ contentTokens: 0 });
+    const bigObs: { summaryTokens: number }[] = [];
+    for (let i = 0; i < 1245; i += 1) bigObs.push({ summaryTokens: 0 });
     for (let i = 0; i < 95; i += 1) bigNodes.push(node({ id: `n${i}` as unknown as Node["id"], summaryTokens: 0 }));
     const report = buildStatusReport(input({ nodes: bigNodes, observations: bigObs }));
     const memoryLines = report
@@ -158,8 +158,8 @@ describe("buildStatusReport", () => {
   it("count column stays aligned even when counts exceed the typical width (100k+)", () => {
     // A fixed count width (e.g. 6 → max 99,999) would let 100,000 drift the
     // column. The width is derived from the actual counts, so it holds.
-    const bigObs: { contentTokens: number }[] = [];
-    for (let i = 0; i < 100_000; i += 1) bigObs.push({ contentTokens: 0 });
+    const bigObs: { summaryTokens: number }[] = [];
+    for (let i = 0; i < 100_000; i += 1) bigObs.push({ summaryTokens: 0 });
     const report = buildStatusReport(input({ nodes: [node({ id: "n1", summaryTokens: 0 })], observations: bigObs }));
     const memoryLines = report
       .split("\n")
@@ -252,7 +252,7 @@ describe("gatherStatusInput", () => {
     graph.observations.set("o1", {
       id: "o1",
       content: "x",
-      contentTokens: 40,
+      summaryTokens: 40,
       importance: "med",
       sourceEntryIds: [],
       timestamps: {

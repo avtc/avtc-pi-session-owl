@@ -130,7 +130,7 @@ function seedGraph(newRoots: Array<{ id: NodeId; summary: string }>): MemkeeperG
   applyRecordObservation(g, {
     obs: makeObservation({
       id: "oInitialPrompt",
-      content: "build a memory extension",
+      summary: "build a memory extension",
       importance: "crit",
       sourceEntryIds: ["1"],
       timestamp: NOW,

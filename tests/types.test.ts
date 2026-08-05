@@ -74,16 +74,16 @@ describe("nowStoredTimestamp", () => {
 });
 
 describe("makeObservation", () => {
-  it("freezes contentTokens from content at construction", () => {
+  it("freezes summaryTokens from content at construction", () => {
     const obs = makeObservation({
       id: "o1" as ObsId,
-      content: "abcdefgh",
+      summary: "abcdefgh",
       importance: "med" as Importance,
       sourceEntryIds: ["12"],
       timestamp: "2026-07-29T14:30:00.000Z",
       parentNode: N_GOAL as NodeId,
     });
-    expect(obs.contentTokens).toBe(2);
+    expect(obs.summaryTokens).toBe(2);
     expect(obs.importance).toBe("med");
     expect(obs.parentNode).toBe(N_GOAL);
   });
@@ -138,7 +138,7 @@ describe("MemkeeperGraph", () => {
       O_INITIAL_PROMPT,
       makeObservation({
         id: O_INITIAL_PROMPT as ObsId,
-        content: "the goal",
+        summary: "the goal",
         importance: "crit" as Importance,
         sourceEntryIds: ["1"],
         timestamp: "2026-07-29T09:00:00.000Z",

@@ -225,7 +225,7 @@ function scriptObserverRecordsOnePerChunk(): { recorded: number } {
     const ids = parseChunkIds(text);
     if (ids.length > 0 && typeof tool?.execute === "function") {
       await tool.execute("call-1", {
-        observations: [{ content: "observed fact", importance: "med", sourceEntryIds: [ids[0] as string] }],
+        observations: [{ summary: "observed fact", importance: "med", sourceEntryIds: [ids[0] as string] }],
       });
       state.recorded += 1;
     }
@@ -263,7 +263,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     const graph = getGraphStore().graph;
     const obs = graph.observations.get(O_INITIAL_PROMPT);
     expect(obs).toBeDefined();
-    expect(obs?.content).toBe("Fix the login bug in auth.ts");
+    expect(obs?.summary).toBe("Fix the login bug in auth.ts");
     expect(obs?.parentNode).toBe(N_GOAL);
     // nGoal.summary seeded from the first non-empty line.
     expect(graph.nodes.get(N_GOAL)?.summary).toBe("Fix the login bug in auth.ts");

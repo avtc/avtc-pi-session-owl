@@ -60,7 +60,7 @@ function g(): MemkeeperGraph {
   nodes.set("n6", nObsolete);
   const oInit = makeObservation({
     id: O_INITIAL_PROMPT,
-    content: "initial",
+    summary: "initial",
     importance: "crit",
     sourceEntryIds: ["u1"],
     parentNode: N_GOAL,
@@ -68,7 +68,7 @@ function g(): MemkeeperGraph {
   });
   const o1 = makeObservation({
     id: "o1",
-    content: "fact",
+    summary: "fact",
     importance: "med",
     sourceEntryIds: ["e2"],
     parentNode: "n3",
@@ -187,7 +187,7 @@ describe("buildWorkingCopy", () => {
       O_INITIAL_PROMPT,
       makeObservation({
         id: O_INITIAL_PROMPT,
-        content: "goal",
+        summary: "goal",
         importance: "crit",
         sourceEntryIds: ["u1"],
         timestamp: "2026-07-28T09:00:00.000Z",
@@ -230,7 +230,7 @@ describe("buildWorkingCopy", () => {
       O_INITIAL_PROMPT,
       makeObservation({
         id: O_INITIAL_PROMPT,
-        content: "goal",
+        summary: "goal",
         importance: "crit",
         sourceEntryIds: ["u1"],
         timestamp: "2026-07-28T09:00:00.000Z",
@@ -241,7 +241,7 @@ describe("buildWorkingCopy", () => {
       "o5",
       makeObservation({
         id: "o5",
-        content: "dead fact",
+        summary: "dead fact",
         importance: "low",
         sourceEntryIds: ["e5"],
         timestamp: "2026-07-28T09:00:00.000Z",
@@ -302,7 +302,7 @@ describe("buildWorkingCopy", () => {
       O_INITIAL_PROMPT,
       makeObservation({
         id: O_INITIAL_PROMPT,
-        content: "goal",
+        summary: "goal",
         importance: "crit",
         sourceEntryIds: ["u1"],
         timestamp: "2026-07-28T09:00:00.000Z",
@@ -619,7 +619,7 @@ function sourceGraphForAssembly(): MemkeeperGraph {
     O_INITIAL_PROMPT,
     makeObservation({
       id: O_INITIAL_PROMPT,
-      content: "build it",
+      summary: "build it",
       importance: "crit",
       sourceEntryIds: ["u1"],
       timestamp: "2026-07-28T09:00:00.000Z",
@@ -746,7 +746,7 @@ describe("buildSelectorInputView", () => {
       O_INITIAL_PROMPT,
       makeObservation({
         id: O_INITIAL_PROMPT,
-        content: "goal",
+        summary: "goal",
         importance: "crit",
         sourceEntryIds: ["u1"],
         timestamp: "2026-07-28T09:00:00.000Z",
