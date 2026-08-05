@@ -17,6 +17,7 @@ import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-wor
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
 import { buildChunks, type ChunkOptions, type RenderedChunk } from "../format/chunk.js";
+import { computeDetailsCounts, type EntryResolver } from "../format/details.js";
 import { toStoredTimestamp } from "../format/render.js";
 import { applyCreateNode, applyRecordObservation, type GraphDelta } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
@@ -267,6 +268,11 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
 
     // wrap each record in a fresh `new` node at root, in-memory first (create_node
     // + record_observation), tracking the pairs for persistence.
+    // A local resolver over the in-hand unobserved entries computes each
+    // record's verbatim-source size hint (detailsLines/detailsTokens) without a
+    // session round-trip — the source entries are already in `entryById`.
+    const localResolver: EntryResolver = (ids) =>
+      ids.map((id) => entryById.get(id)).filter((entry): entry is SessionEntry => entry !== undefined);
     const pairs: WrappedPair[] = [];
     for (const record of allRecords) {
       const nodeId = `n${graph.nextNodeId}` as NodeId;
@@ -282,6 +288,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         .map((id) => entryById.get(id))
         .find((entry) => entry !== NO_SOURCE_ENTRY);
       const timestamp = firstSource !== undefined ? toStoredTimestamp(firstSource.timestamp) : nowStoredTimestamp();
+      const counts = computeDetailsCounts(record.sourceEntryIds, localResolver);
       applyRecordObservation(graph, {
         obs: makeObservation({
           id: obsId,
@@ -290,6 +297,8 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
           sourceEntryIds: record.sourceEntryIds,
           timestamp,
           parentNode: nodeId,
+          detailsLines: counts?.lines,
+          detailsTokens: counts?.tokens,
         }),
       });
       pairs.push({ nodeId, obsId });

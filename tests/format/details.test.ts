@@ -3,7 +3,7 @@
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearDetailsCache, renderDetails } from "../../src/format/details.js";
+import { clearDetailsCache, computeDetailsCounts, renderDetails } from "../../src/format/details.js";
 import { estimateContentTokens } from "../../src/types.js";
 
 // --- fake session entries (SessionEntry-shaped) ----------------------------
@@ -131,5 +131,38 @@ describe("renderDetails", () => {
     const resolve2 = resolverFor([e2]);
     const out = renderDetails("o7", ["u1"], resolve2);
     expect(out?.text).toBe("<USER>second</USER>");
+  });
+});
+
+describe("computeDetailsCounts", () => {
+  beforeEach(() => clearDetailsCache());
+
+  it("returns the verbatim-source line + token counts (no text, no cache)", () => {
+    const { call, result } = toolPair("c1", "bash", { command: "npm test" }, "r1", "line a\nline b", false);
+    const resolve = resolverFor([call, result]);
+    const counts = computeDetailsCounts(["c1", "r1"], resolve);
+    expect(counts).not.toBeNull();
+    // text is '<TOOLCALL:bash>{...}</TOOLCALL><TOOLRESULT>line a\nline b</TOOLRESULT>'
+    const expectedText = '<TOOLCALL:bash>{"command":"npm test"}</TOOLCALL><TOOLRESULT>line a\nline b</TOOLRESULT>';
+    expect(counts?.lines).toBe(2); // two lines in the result text
+    expect(counts?.tokens).toBe(estimateContentTokens(expectedText));
+    // computeDetailsCounts returns only counts (no text field)
+    expect(counts).not.toHaveProperty("text");
+  });
+
+  it("does NOT populate the details cache (capture counts must not cache every obs)", () => {
+    const e = userEntry("u1", "hello");
+    const resolve = resolverFor([e]);
+    computeDetailsCounts(["u1"], resolve);
+    // a resolver that throws proves renderDetails did NOT hit a cache populated by computeDetailsCounts
+    const throwingResolve = (): readonly unknown[] => {
+      throw new Error("cache should not have been populated by computeDetailsCounts");
+    };
+    expect(() => renderDetails("o8", ["u1"], throwingResolve)).toThrow();
+  });
+
+  it("returns null when no source entries resolve (source_unavailable)", () => {
+    const resolve = resolverFor([userEntry("u1", "hi")]);
+    expect(computeDetailsCounts(["9", "x"], resolve)).toBeNull();
   });
 });

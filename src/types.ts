@@ -126,9 +126,10 @@ export function nowStoredTimestamp(): string {
 }
 
 /** Construct an observation, freezing `summaryTokens` from `summary`. The
- *  `detailsLines`/`detailsTokens` come from the verbatim-source render (SD-4);
- *  TEMPORARILY (pre-SD-4) they are placeholder-derived from the summary so the
- *  size hint stays non-zero until the Observer populates real source counts. */
+ *  `detailsLines`/`detailsTokens` are the verbatim-source size hint, normally
+ *  computed at capture from the record's sourceEntryIds (computeDetailsCounts)
+ *  and passed in; when omitted (test fixtures / source-unavailable) they fall
+ *  back to a summary-derived estimate so the size hint stays non-zero. */
 export function makeObservation(args: {
   id: ObsId;
   summary: string;
@@ -136,15 +137,18 @@ export function makeObservation(args: {
   sourceEntryIds: string[];
   timestamp: string;
   parentNode: NodeId;
+  /** Verbatim-source line count (capture-computed); omitted -> summary-derived. */
+  detailsLines?: number;
+  /** Verbatim-source token count (capture-computed); omitted -> summary-derived. */
+  detailsTokens?: number;
 }): Observation {
   const summaryTokens = estimateContentTokens(args.summary);
   return {
     id: args.id,
     summary: args.summary,
     summaryTokens,
-    // TEMPORARY placeholder (SD-4 replaces with real verbatim-source counts):
-    detailsLines: countLines(args.summary),
-    detailsTokens: summaryTokens,
+    detailsLines: args.detailsLines ?? countLines(args.summary),
+    detailsTokens: args.detailsTokens ?? summaryTokens,
     importance: args.importance,
     sourceEntryIds: args.sourceEntryIds,
     timestamp: args.timestamp,

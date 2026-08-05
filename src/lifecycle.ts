@@ -17,7 +17,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings } from "./config/schema.js";
-import { clearDetailsCache } from "./format/details.js";
+import { clearDetailsCache, computeDetailsCounts, type EntryResolver } from "./format/details.js";
 import { toStoredTimestamp } from "./format/render.js";
 import { stripAnsi } from "./format/sanitize.js";
 import { applyCreateNode, applyRecordObservation, applySetMeta, MUTATE_SOURCE } from "./graph/mutations.js";
@@ -182,6 +182,9 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
 
   // record oInitialPrompt under nGoal (built once via makeObservation; the
   // persisted record derives from it, omitting the cached summaryTokens).
+  // The verbatim-source size hint comes from its single source entry.
+  const initialResolver: EntryResolver = (ids) => ids.filter((id) => id === firstUser.id).map(() => firstUser);
+  const counts = computeDetailsCounts([firstUser.id], initialResolver);
   const obs = makeObservation({
     id: O_INITIAL_PROMPT,
     summary: text,
@@ -189,6 +192,8 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
     sourceEntryIds: [firstUser.id],
     timestamp: toStoredTimestamp(firstUser.timestamp),
     parentNode: N_GOAL,
+    detailsLines: counts?.lines,
+    detailsTokens: counts?.tokens,
   });
   applyRecordObservation(graph, { obs });
 

@@ -200,6 +200,14 @@ describe("runObserver", () => {
     const obs = obsId !== undefined ? graph.observations.get(obsId) : undefined;
     expect(obs?.summary).toBe("Chose vitest for all new tests.");
 
+    // details counts are the VERBATIM SOURCE size (computed from the record's
+    // sourceEntryIds at capture), NOT the one-line summary placeholder. The
+    // verbatim render of a1 is '<ASSISTANT>we chose vitest for tests</ASSISTANT>'
+    // (43 chars -> 11 tokens, 1 line), distinct from the summary (32 chars -> 8).
+    expect(obs?.detailsLines).toBe(1);
+    expect(obs?.detailsTokens).toBe(Math.ceil("<ASSISTANT>we chose vitest for tests</ASSISTANT>".length / 4));
+    expect(obs?.detailsTokens).not.toBe(obs?.summaryTokens);
+
     // frontier advanced to the last unobserved entry id
     expect(getGraphStore().observerFrontier).toBe("a1");
   });
