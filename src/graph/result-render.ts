@@ -311,10 +311,3 @@ export function grepBlock(header: string, excerpts: readonly string[] | undefine
   if (excerpts === undefined || excerpts.length === 0) return header;
   return `${header}\n${excerpts.join("\n")}`;
 }
-
-/** Render a header-only observation when its verbatim source is unavailable
- *  (source_unavailable — e.g. cross-branch drill, or entries gone). The
- *  one-line summary in the header still shows; only the verbatim body is gone. */
-export function contentUnavailable(header: string): string {
-  return `${header}\n  (verbatim source unavailable)`;
-}

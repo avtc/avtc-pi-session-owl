@@ -782,6 +782,36 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       // both carry the parent (flat search)
       expect(terse).toContain("in n1");
     });
+
+    it("fullDetails degrades to a source-unavailable note when the verbatim source can't render (no resolver)", async () => {
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(g, {
+        id: "n1",
+        summary: "Node one",
+        importance: "high",
+        parentNode: null,
+        state: "active",
+      });
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "oX" as ObsId,
+          summary: "One-line summary only.",
+          importance: "high",
+          sourceEntryIds: ["e1"],
+          timestamp: T1,
+          parentNode: "n1",
+        }),
+      });
+      setClock(null);
+      getGraphStore().graph = g;
+      // NO resolver wired -> details render returns null -> the one-line summary
+      // still shows in the header, with a source-unavailable note instead of a body.
+      const out = text(await recall(tool(), { ids: ["oX"], fullDetails: true }));
+      expect(out).toContain("One-line summary only.");
+      expect(out).toContain("verbatim source unavailable");
+    });
   });
 
   // --- result token budget + targeted extraction (contentPattern / lines) --

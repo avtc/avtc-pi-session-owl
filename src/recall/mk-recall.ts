@@ -42,13 +42,7 @@ import {
   intersectRegexFilters,
   runGrepExcerpts,
 } from "../graph/result-budget.js";
-import {
-  type ContentMode,
-  contentBlock,
-  contentUnavailable,
-  grepBlock,
-  resolveContentMode,
-} from "../graph/result-render.js";
+import { type ContentMode, contentBlock, grepBlock, resolveContentMode } from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, type ObsId } from "../types.js";
@@ -473,7 +467,12 @@ function renderObservationBlock(
   const header = observationHeader(obs, showParent);
   if (mode.kind === "grep") return grepBlock(header, excerpts);
   const body = details(obs.id);
-  if (body === null) return contentUnavailable(header);
+  // source_unavailable: the one-line summary is the best fallback body (the
+  // verbatim source can't render) — flag it so the agent knows the full source
+  // is gone, not just absent from this render.
+  if (body === null) {
+    return `${header}\n${singleLine(obs.summary)}\n  (verbatim source unavailable)`;
+  }
   return contentBlock(header, body, mode);
 }
 
