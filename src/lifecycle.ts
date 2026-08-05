@@ -26,10 +26,12 @@ import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
 import {
   appendGraphDelta,
   appendObservation,
+  clearEntryResolver,
   getGraphStore,
   load,
   type StoreContext,
   type StoreEntry,
+  setEntryResolver,
 } from "./store/graph-store.js";
 import { makeObservation, N_GOAL, O_INITIAL_PROMPT } from "./types.js";
 import type { WidgetController } from "./widget/tracker.js";
@@ -50,6 +52,23 @@ export function toStoreContext(pi: ExtensionAPI, ctx: ExtensionContext): StoreCo
     appendEntry: (customType: string, data: unknown) => pi.appendEntry(customType, data),
     getLeafId: () => ctx.sessionManager.getLeafId(),
     getBranch: (leafId) => ctx.sessionManager.getBranch(leafId ?? undefined) as unknown as StoreEntry[],
+  };
+}
+
+/**
+ * Build the session-entry resolver from the active session's manager. Resolves
+ * source-entry ids to their entries (for verbatim-source details re-rendering);
+ * missing ids are dropped (graceful cross-branch drill — the summary still
+ * renders, only the verbatim source is gone). `null` outside an active session.
+ */
+export function buildEntryResolver(ctx: ExtensionContext): (ids: readonly string[]) => readonly unknown[] {
+  return (ids) => {
+    const out: unknown[] = [];
+    for (const id of ids) {
+      const entry = ctx.sessionManager.getEntry(id);
+      if (entry !== undefined) out.push(entry);
+    }
+    return out;
   };
 }
 
@@ -124,6 +143,11 @@ export async function onSessionStart(
 ): Promise<void> {
   widget.setCtx(ctx);
   const store = toStoreContext(pi, ctx);
+  // Refresh the session-entry resolver on every session_start — a ctx captured
+  // once goes stale across session changes (new/resume/fork), and entry ids are
+  // per-session (NOT globally unique), so a stale resolver would resolve wrong
+  // entries. Cleared on session_shutdown.
+  setEntryResolver(buildEntryResolver(ctx));
   await load(store);
   // Fresh-session seed: if the graph is empty (no snapshot/deltas), nGoal must
   // exist before any observation arrives. oInitialPrompt is NOT captured here
@@ -196,6 +220,8 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
 export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetController): void {
   abortInFlight();
   terminateRegexWorker();
+  // Clear the resolver so recall never reads a dead session's manager.
+  clearEntryResolver();
   widget.endStage();
   widget.clearCtx();
 }

@@ -65,7 +65,9 @@ interface FakePiWithHandlers extends ExtensionAPI {
 }
 
 function makeCtx(): ExtensionContext {
-  return { sessionManager: { getLeafId: () => null, getBranch: () => [] } } as unknown as ExtensionContext;
+  return {
+    sessionManager: { getLeafId: () => null, getBranch: () => [], getEntry: () => undefined },
+  } as unknown as ExtensionContext;
 }
 
 describe("memkeeperExtension (activate wiring)", () => {

@@ -53,6 +53,14 @@ export interface StoreCustomEntry {
 export type StoreEntry = StoreCompactionEntry | StoreCustomEntry;
 
 /**
+ * Resolves source-entry ids to their session entries (for verbatim-source
+ * details re-rendering). Loosely typed (`unknown`) so the store stays decoupled
+ * from the pi `SessionEntry` shape; the details renderer narrows. Returns the
+ * entries that exist (missing ids are dropped — graceful cross-branch drill).
+ */
+export type EntryResolver = (ids: readonly string[]) => readonly unknown[];
+
+/**
  * Narrow port over the pi ExtensionContext the store needs. Injected (not the
  * full context) so tests pass a fake. `getBranch` returns the active branch
  * path only (NOT `getEntries`, which mixes all branches).
@@ -79,6 +87,10 @@ export interface GraphStore {
   lastCompactionLedger: UsageLedger | null;
   /** coversUpToId of the latest replayed observation delta; null when none. */
   observerFrontier: string | null;
+  /** Resolves source-entry ids to session entries for verbatim-source details
+   *  re-rendering. `null` outside an active session (set at activate, refreshed
+   *  on session_start, cleared on session_shutdown). */
+  resolveEntries: EntryResolver | null;
 }
 
 let store: GraphStore | null = null;
@@ -97,6 +109,7 @@ export function getGraphStore(): GraphStore {
       usageLedger: cloneLedger(EMPTY_LEDGER),
       lastCompactionLedger: null,
       observerFrontier: null,
+      resolveEntries: null,
     };
   }
   return store;
@@ -105,6 +118,19 @@ export function getGraphStore(): GraphStore {
 /** Drop all in-memory state (`/new` starts a fresh graph). */
 export function resetForNewSession(): void {
   store = null;
+}
+
+/** Install the session-entry resolver. Refreshed on every session_start (a
+ *  ctx captured once goes stale across session changes) so recall always reads
+ *  the active session's entries. */
+export function setEntryResolver(resolver: EntryResolver): void {
+  getGraphStore().resolveEntries = resolver;
+}
+
+/** Clear the session-entry resolver (session_shutdown) so recall never reads a
+ *  dead session's manager. */
+export function clearEntryResolver(): void {
+  getGraphStore().resolveEntries = null;
 }
 
 // --- persist (PERSIST-ONLY) ------------------------------------------------

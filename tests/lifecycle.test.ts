@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
 import { runRegexTests } from "../src/graph/regex-runner.js";
 import {
+  buildEntryResolver,
   captureInitialPromptIfAbsent,
   extractMessageText,
   isUnstuckAutoContinue,
@@ -79,6 +80,7 @@ function makeCtx(branch: FakeEntry[]): {
     sessionManager: {
       getLeafId: () => "leaf-1",
       getBranch: () => branch,
+      getEntry: (id: string) => branch.find((e) => e.id === id),
     },
   };
   return { ctx: ctx as unknown as ExtensionContext, appended, pi: pi as unknown as ExtensionAPI };
@@ -322,5 +324,39 @@ describe("onSessionShutdown", () => {
     // the worker was discarded; a subsequent call must respawn cleanly
     const res = await runRegexTests(/foo/, ["foobar"], 5000);
     expect("results" in res).toBe(true);
+  });
+});
+
+describe("session-entry resolver (buildEntryResolver + lifecycle wiring)", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    _resetGetMemkeeperSettings();
+  });
+  afterEach(() => _resetGetMemkeeperSettings());
+
+  it("buildEntryResolver resolves known ids and drops missing ones", () => {
+    const { ctx } = makeCtx([userEntry("u1", "first"), userEntry("u2", "second")]);
+    const resolve = buildEntryResolver(ctx);
+    // both known ids resolve; an unknown id is silently dropped
+    const out = resolve(["u2", "missing", "u1"]) as { id: string }[];
+    expect(out.map((e) => e.id)).toEqual(["u2", "u1"]);
+  });
+
+  it("onSessionStart installs the resolver (refresh on every session_start)", async () => {
+    const { ctx, pi } = makeCtx([userEntry("u1", "first")]);
+    expect(getGraphStore().resolveEntries).toBeNull();
+    await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
+    const resolver = getGraphStore().resolveEntries;
+    expect(resolver).not.toBeNull();
+    const out = resolver !== null ? resolver(["u1", "nope"]) : [];
+    expect((out as { id: string }[]).map((e) => e.id)).toEqual(["u1"]);
+  });
+
+  it("onSessionShutdown clears the resolver (no dead-session reads)", async () => {
+    const { ctx, pi } = makeCtx([userEntry("u1", "first")]);
+    await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
+    expect(getGraphStore().resolveEntries).not.toBeNull();
+    onSessionShutdown({ type: "session_shutdown", reason: "quit" }, noopWidget);
+    expect(getGraphStore().resolveEntries).toBeNull();
   });
 });

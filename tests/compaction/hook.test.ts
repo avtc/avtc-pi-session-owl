@@ -66,7 +66,11 @@ const TODO_ABSENT = { context: null, bridge: null } as const;
 function makeFakeCtx(branch: unknown[], notify: (msg: string, level: "warning" | "info") => void): ExtensionContext {
   const fakeModel = { provider: "test", id: "m" } as unknown as ExtensionContext["model"];
   return {
-    sessionManager: { getLeafId: () => "leaf-1", getBranch: () => branch },
+    sessionManager: {
+      getLeafId: () => "leaf-1",
+      getBranch: () => branch,
+      getEntry: (id: string) => branch.find((e) => (e as { id: string }).id === id),
+    },
     modelRegistry: {
       find: () => fakeModel,
       getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }),

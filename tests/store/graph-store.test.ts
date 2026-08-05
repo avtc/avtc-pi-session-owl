@@ -25,10 +25,12 @@ import {
   appendGraphDelta,
   appendObservation,
   appendUsage,
+  clearEntryResolver,
   getGraphStore,
   load,
   persistSelectedTree,
   resetForNewSession,
+  setEntryResolver,
 } from "../../src/store/graph-store.js";
 import type { Importance, NodeId } from "../../src/types.js";
 import { MemkeeperGraph, makeNode, N_GOAL } from "../../src/types.js";
@@ -115,6 +117,45 @@ describe("GraphStore singleton", () => {
     const after = getGraphStore();
     expect(after.graph.nodes.size).toBe(0);
     expect(after.observerFrontier).toBeNull();
+  });
+
+  it("resolveEntries is null until setEntryResolver installs a resolver", () => {
+    freshStore();
+    expect(getGraphStore().resolveEntries).toBeNull();
+  });
+
+  it("setEntryResolver installs a resolver that resolves ids to entries", () => {
+    freshStore();
+    const entries = new Map<string, unknown>([
+      ["12", { id: "12", type: "message" }],
+      ["13", { id: "13", type: "message" }],
+    ]);
+    setEntryResolver((ids) =>
+      ids.map((id) => entries.get(id)).filter((e): e is NonNullable<typeof e> => e !== undefined),
+    );
+    const resolver = getGraphStore().resolveEntries;
+    expect(resolver).not.toBeNull();
+    // resolves known ids, drops missing ones (graceful for cross-branch drills)
+    expect(resolver?.(["12", "99", "13"])).toEqual([
+      { id: "12", type: "message" },
+      { id: "13", type: "message" },
+    ]);
+    clearEntryResolver();
+  });
+
+  it("clearEntryResolver clears the resolver", () => {
+    freshStore();
+    setEntryResolver(() => []);
+    expect(getGraphStore().resolveEntries).not.toBeNull();
+    clearEntryResolver();
+    expect(getGraphStore().resolveEntries).toBeNull();
+  });
+
+  it("resetForNewSession clears the resolver (stale ctx must not survive a new session)", () => {
+    freshStore();
+    setEntryResolver(() => [{ id: "1", type: "message" }]);
+    resetForNewSession();
+    expect(getGraphStore().resolveEntries).toBeNull();
   });
 });
 
