@@ -176,7 +176,7 @@ async function runFind(
     return;
   }
   const graph = getGraphStore().graph;
-  const collected = await collectFindMatches(graph, compiled.regex, includeSuperseded, VIEWER);
+  const collected = await collectFindMatches(graph, [compiled.regex], includeSuperseded, VIEWER);
   if ("error" in collected) {
     await notifyError(ctx, collected.error);
     return;

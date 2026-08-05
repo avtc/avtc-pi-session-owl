@@ -151,7 +151,7 @@ describe("renderBudgeted — grep", () => {
     // tight budget: header(a) + excerpt(a) fits, then header(b) overflows.
     const out = await renderBudgeted(items, { budget: 3, mode: makeGrep("hit", 0), findTimeoutMs: 5000 });
     expect(out.note).toContain("budget reached");
-    expect(out.note).toMatch(/more observation/);
+    expect(out.note).toMatch(/more result/);
   });
   it("stops mid-observation noting more matches in this observation", async () => {
     // one observation with many matches; budget fits a few excerpts then overflows.
@@ -175,14 +175,18 @@ describe("renderBudgeted — grep", () => {
     expect(out.text).toContain("1: ");
     expect(out.note).toContain("more matches in this observation");
   });
-  it("skips observations with no matches", async () => {
+  it("keeps every header; appends excerpts only where contentPattern matches (Option C — no drop)", async () => {
     const items: RenderItem[] = [
       { id: "a", header: "h-a", content: "nomatch" },
       { id: "b", header: "h-b", content: "hitme" },
     ];
     const out = await renderBudgeted(items, { budget: 100, mode: makeGrep("hit", 0), findTimeoutMs: 5000 });
-    expect(out.text).not.toContain("h-a");
+    // Option C: every header shows (contentPattern is an extractor, not a
+    // filter, over the result set); the no-match item 'a' stays as a bare
+    // header, the matching item 'b' gets its excerpt appended.
+    expect(out.text).toContain("h-a");
     expect(out.text).toContain("h-b");
+    expect(out.text).toContain("1: hitme");
   });
 });
 

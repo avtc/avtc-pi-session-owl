@@ -8,6 +8,7 @@
 // `estimateContentTokens` (chars/4, types.ts) is the token estimate used for the
 // budget — the same heuristic Pi's own compaction applies.
 
+import { getMemkeeperSettings } from "../config/schema.js";
 import { pluralize } from "../format/render.js";
 import { estimateContentTokens } from "../types.js";
 import { runRegexTests } from "./regex-runner.js";
@@ -133,6 +134,31 @@ export function budgetReachedFooter(
 export function searchTimeoutNote(timedOutMs: number, testedCount: number, total: number): string {
   const seconds = Math.floor(timedOutMs / 1000);
   return `Search timed out after ${seconds}s — tested ${testedCount} of ${total} items before the kill. These are partial results; refine or narrow the query.`;
+}
+
+/** Intersect multiple regex filters over a batch of texts (worker-bounded by
+ *  `findTimeoutMs`). An item passes only if it matches EVERY regex. A timed-out
+ *  regex marks untested items false (conservative — partial matches + note).
+ *  Used by `find`/`mk_recall` search to intersect `query` + `contentPattern` over
+ *  node summaries + observation text. Returns the per-text pass flags + an
+ *  optional timeout note, or an error string the caller surfaces verbatim. */
+export async function intersectRegexFilters(
+  texts: readonly string[],
+  regexes: readonly RegExp[],
+): Promise<{ passes: boolean[]; note?: string } | { error: string }> {
+  const passes = new Array<boolean>(texts.length).fill(true);
+  let note: string | undefined;
+  for (const re of regexes) {
+    const outcome = await runRegexTests(re, texts, getMemkeeperSettings().findTimeoutMs);
+    if ("error" in outcome) return { error: outcome.error };
+    for (let i = 0; i < texts.length; i += 1) {
+      if (!outcome.results[i]) passes[i] = false;
+    }
+    if ("testedCount" in outcome) {
+      note = searchTimeoutNote(outcome.timedOutMs, outcome.testedCount, texts.length);
+    }
+  }
+  return { passes, note };
 }
 
 /** The note surfaced when a contentPattern-grep over observation content lines

@@ -225,29 +225,32 @@ async function renderGrepBudgeted(items: RenderItem[], opts: BudgetedOptions): P
   let total = 0;
   const parts: string[] = [];
   let lastEmittedId: string | null = null;
-  let overflow: { moreMatches: boolean; remainingObs: number } | null = null;
+  // Option C: emit EVERY item's header (no drop — over a query/ids result set
+  // contentPattern is an extractor, not a filter); append excerpts only where the
+  // item's content has contentPattern hits. (A contentPattern-alone search
+  // pre-filters its items, so nothing here is dropped there either.)
+  let overflow: { moreMatches: boolean; remaining: number } | null = null;
 
   for (let i = 0; i < items.length && overflow === null; i += 1) {
-    const matches = matchesPerItem[i];
-    if (matches.length === 0) continue; // no matches in this obs → skip entirely
     const header = items[i].header;
     const headerTokens = estimateContentTokens(header);
-    const excerpts = perObsExcerpts.get(items[i].id) ?? [];
-    // emit header (atomic with its first excerpt? emit header, then excerpts).
     if (total + headerTokens > budget && parts.length > 0) {
-      // header won't fit → stop before this observation.
-      overflow = { moreMatches: false, remainingObs: countRemainingObs(matchesPerItem, i) };
+      // header won't fit → stop before this result.
+      overflow = { moreMatches: false, remaining: items.length - i };
       break;
     }
     parts.push(header);
     total += headerTokens;
     lastEmittedId = items[i].id;
+    const matches = matchesPerItem[i];
+    if (matches.length === 0) continue; // no excerpts (node, or obs without hits) → header only
+    const excerpts = perObsExcerpts.get(items[i].id) ?? [];
     let emittedExcerpt = false;
     for (const line of excerpts) {
       const lineTokens = estimateContentTokens(line);
       if (total + lineTokens > budget && emittedExcerpt) {
         // more matches in THIS observation.
-        overflow = { moreMatches: true, remainingObs: countRemainingObs(matchesPerItem, i + 1) };
+        overflow = { moreMatches: true, remaining: items.length - (i + 1) };
         break;
       }
       parts.push(line);
@@ -259,18 +262,11 @@ async function renderGrepBudgeted(items: RenderItem[], opts: BudgetedOptions): P
   const notes: string[] = [];
   if (overflow !== null) {
     if (overflow.moreMatches) notes.push("more matches in this observation");
-    if (overflow.remainingObs > 0)
-      notes.push(`${overflow.remainingObs} more observation${overflow.remainingObs === 1 ? "" : "s"}`);
+    if (overflow.remaining > 0) notes.push(`${overflow.remaining} more result${overflow.remaining === 1 ? "" : "s"}`);
     notes.unshift("budget reached");
   }
   if (timedOutNote !== null) notes.push(timedOutNote);
   return { text: parts.join("\n"), note: notes.length > 0 ? notes.join(" · ") : null, lastId: lastEmittedId };
-}
-
-function countRemainingObs(matchesPerItem: number[][], fromIdx: number): number {
-  let n = 0;
-  for (let i = fromIdx; i < matchesPerItem.length; i += 1) if (matchesPerItem[i].length > 0) n += 1;
-  return n;
 }
 
 // --- per-item expansion (full / lines) --------------------------------------

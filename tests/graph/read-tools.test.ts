@@ -632,6 +632,25 @@ describe("result token budget + extraction", () => {
     expect(out).toContain("o5");
   });
 
+  it("cat contentPattern on a node keeps it as a structural header when a child obs matches", async () => {
+    // #51: n7's summary has no 'secret', but its child o5 content does → n7 is
+    // kept as the structural parent header and o5 shows its excerpt.
+    const out = textOf(
+      await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["n7"], contentPattern: "secret" }),
+    );
+    expect(out).toContain("n7"); // structural header kept (descendant matches)
+    expect(out).toContain("2: the token is secret"); // o5 excerpt
+  });
+
+  it("cat contentPattern drops a node with no summary or child match", async () => {
+    // #51: nothing under n7 matches 'XYZ' → the whole node is dropped → empty.
+    const out = textOf(
+      await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["n7"], contentPattern: "XYZ" }),
+    );
+    expect(out).not.toContain("n7");
+    expect(out).not.toContain("o5");
+  });
+
   it("cat contentPattern timeout surfaces the partial-excerpts note", async () => {
     // a catastrophic contentPattern over a large observation must surface the
     // grep-timeout note (renderGrepBudgeted), not a silent partial result.
@@ -683,6 +702,56 @@ describe("result token budget + extraction", () => {
     );
     expect(out.toLowerCase()).toContain("invalid regex");
     expect(out).toContain("a(");
+  });
+
+  it("find with no query and no contentPattern returns a prompt error", async () => {
+    const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "find", {}));
+    expect(out.toLowerCase()).toContain("query");
+    expect(out.toLowerCase()).toContain("contentpattern");
+  });
+
+  it("find contentPattern-alone matches node summaries too (not obs-only)", async () => {
+    // #51: contentPattern filters over node summaries + observation content.
+    // 'JWT|token' matches n7's summary (JWT) AND o5's content (token) → both
+    // appear (n7 as a header, o5 with grep excerpts).
+    const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "find", { contentPattern: "JWT|token" }));
+    expect(out).toContain("n7"); // node summary match → header
+    expect(out).toContain("o5"); // obs content match → excerpts
+  });
+
+  it("find contentPattern-alone drops non-matching items (filter, not browse)", async () => {
+    // add a second observation whose content does NOT contain 'secret' and a
+    // node whose summary doesn't — both must be filtered out.
+    const g = grepGraph();
+    applyRecordObservation(g, {
+      obs: makeObservation({
+        id: "o99" as ObsId,
+        content: "nothing relevant here",
+        importance: "med",
+        timestamp: NOW,
+        sourceEntryIds: ["e99"],
+        parentNode: "n7" as NodeId,
+      }),
+    });
+    const out = textOf(await callTool(makeBuilderReadTools(g), "find", { contentPattern: "secret" }));
+    expect(out).toContain("o5"); // matches 'secret'
+    expect(out).not.toContain("o99"); // filtered out (no 'secret')
+    expect(out).not.toContain("nGoal"); // summary 'the public API...' has no 'secret'
+  });
+
+  it("find query + contentPattern intersects (both filter — non-matches dropped)", async () => {
+    // #51: both query and contentPattern filter over summaries+content. n7 matches
+    // query 'JWT|token' (summary) but NOT contentPattern 'secret' → DROPPED.
+    // o5 matches BOTH (content has 'token' AND 'secret') → kept with excerpts.
+    // (o5's line carries 'in n7' as parent context — that's expected; n7 itself
+    // is not a result.)
+    const out = textOf(
+      await callTool(makeBuilderReadTools(grepGraph()), "find", { query: "JWT|token", contentPattern: "secret" }),
+    );
+    // no result line is a node header (n7 dropped — query match but no contentPattern hit)
+    expect(out.split("\n").some((l) => /^n7\b/.test(l))).toBe(false);
+    expect(out).toContain("o5"); // matches both → kept
+    expect(out).toContain("secret");
   });
 
   it("ls budget truncates the root list with a footer", async () => {

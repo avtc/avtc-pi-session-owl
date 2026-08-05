@@ -837,6 +837,34 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       expect(out).toContain("1: Chose JWT for stateless auth");
     });
 
+    it("contentPattern ids grep-tree pruning keeps a node as structural header when a child matches", async () => {
+      // #51: n7's summary has no 'stateless', and n8 (child node) has no match,
+      // but o5 (child obs) content does → n7 is kept as the structural parent
+      // header, o5 shows its excerpt, n8 is dropped.
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["n7"], contentPattern: "stateless" }));
+      expect(out).toContain("n7"); // structural header kept (descendant matches)
+      expect(out).toContain("o5"); // child obs match → excerpt
+      expect(out).toContain("stateless");
+      // n8 (child node summary has no 'stateless') is dropped.
+      expect(out).not.toContain("Pick a JWT library");
+    });
+
+    it("contentPattern ids grep-tree pruning drops a node with no summary or descendant match", async () => {
+      // #51: nothing under n7 matches 'XYZ' → the whole node is dropped → empty.
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["n7"], contentPattern: "XYZ" }));
+      expect(out).not.toContain("n7");
+      expect(out).not.toContain("o5");
+    });
+
+    it("contentPattern ids drops a non-matching standalone observation", async () => {
+      // #51: a requested obs whose content lacks the contentPattern is dropped.
+      seedSource();
+      const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "XYZ" }));
+      expect(out).not.toContain("o5");
+    });
+
     it("lines returns a 1-indexed range", async () => {
       seedSource();
       const out = text(await recall(tool(), { ids: ["o5"], lines: "1-1" }));
@@ -854,19 +882,16 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       _setGetMemkeeperSettings(null);
     });
 
-    it("search-path contentPattern timeout surfaces the grep-timeout note", async () => {
-      // The search path (query, not ids) has its OWN note plumbing
-      // (mk-recall.ts:761). A contentPattern grep timeout over a large
-      // observation found via search must surface the note too — not just the
-      // ids path (covered above).
+    it("search-path contentPattern timeout surfaces a timeout note", async () => {
+      // The search path has its own note plumbing. With contentPattern-alone now
+      // a filtered search, the catastrophic contentPattern runs as the obs filter
+      // (runRegexTests) during candidate-building and times out there — surfacing
+      // the search-timeout note (not the ids-path grep note).
       _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       seedSource();
       slowGrepTarget();
-      // A time bound (from) makes this the search path (noFilters=false) with
-      // no query (regex===null → every observation is a candidate); the
-      // contentPattern then runs the catastrophic grep over o1's content.
       const out = text(await recall(tool(), { from: "2020-01-01 00:00", contentPattern: "(.+a)(.+a)b" }));
-      expect(out.toLowerCase()).toContain("grep timed out");
+      expect(out.toLowerCase()).toContain("timed out");
       _setGetMemkeeperSettings(null);
     });
 
@@ -887,17 +912,33 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       expect(out).toContain("Invalid line range");
     });
 
-    // --- contentPattern-alone greps every observation (not a root-browse no-op) ---
+    // --- contentPattern-alone filters to matching observations (not a root-browse no-op) ---
 
-    it("contentPattern alone greps every observation (not root browse)", async () => {
-      // No ids, no query, no bounds: contentPattern must grep all observations,
-      // not silently fall back to the root-node browse view.
+    it("contentPattern alone matches node summaries + obs content (not root browse)", async () => {
+      // #51: No ids, no query, no bounds — contentPattern FILTERS over node
+      // summaries + observation content. 'JWT' matches n7's summary AND o5's
+      // content → both appear (n7 as a header, o5 with grep excerpts).
+      // Non-matching items are filtered out (not a root-browse fallback).
       seedSource();
       const out = text(await recall(tool(), { contentPattern: "JWT" }));
-      expect(out).toContain("Chose JWT for stateless auth");
+      expect(out).toContain("n7"); // node summary match → header
+      expect(out).toContain("o5"); // obs content match → excerpts
+      expect(out).toContain("Chose JWT for stateless auth"); // o5 excerpt
+      // non-matching items are filtered out.
+      expect(out).not.toContain("the public API must stay stable"); // nGoal
+      expect(out).not.toContain("oInitialPrompt");
+    });
+
+    it("contentPattern alone excludes non-matching observations entirely", async () => {
+      // Every observation whose content lacks the contentPattern is absent from
+      // the result (filter, not browse-with-highlights): no bare header lines
+      // for non-matching observations.
+      seedSource();
+      const out = text(await recall(tool(), { contentPattern: "JWT" }));
+      // only o5 (whose content contains 'JWT') appears; oInitialPrompt + o9 do not.
       expect(out).toContain("o5");
-      // root-browse would show node one-liners (summaries), not a grep excerpt.
-      expect(out).not.toContain("the public API must stay stable");
+      expect(out).not.toContain("oInitialPrompt");
+      expect(out).not.toContain("o9");
     });
 
     // --- lines is a single-observation slice ---

@@ -38,8 +38,8 @@ import {
   budgetReachedFooter,
   budgetWindow,
   grepTimeoutNote,
+  intersectRegexFilters,
   runGrepExcerpts,
-  searchTimeoutNote,
 } from "../graph/result-budget.js";
 import { type ContentMode, contentBlock, grepBlock, resolveContentMode } from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
@@ -386,6 +386,42 @@ function renderNodePayload(
   return lines.join("\n");
 }
 
+/** Render a node payload under a contentPattern filter (grep-tree pruning,
+ *  #51): the node header shows only if its summary matches OR a descendant
+ *  matches; child nodes are kept when their summaries match; child observations
+ *  are kept when they have contentPattern excerpts. Returns null when the whole
+ *  node (header + every child) is filtered out. */
+function renderNodePayloadGrep(
+  node: RenderableNode,
+  target: RecallTarget,
+  mode: Extract<ContentMode, { kind: "grep" }>,
+  excerpts: ReadonlyMap<string, string[]>,
+  summaryMatch: ReadonlySet<string>,
+): string | null {
+  const observationContent = targetObservationContent(target);
+  const keptChildNodes = node.childNodeIds.filter((id) => target.nodes.has(id) && summaryMatch.has(id));
+  const keptChildObs = node.observationIds.filter((id) => {
+    const o = target.observations.get(id);
+    return o !== undefined && (excerpts.get(id)?.length ?? 0) > 0;
+  });
+  // keep the node header only if its summary matches, or it is the structural
+  // parent of a kept descendant.
+  if (!summaryMatch.has(node.id) && keptChildNodes.length === 0 && keptChildObs.length === 0) {
+    return null;
+  }
+  const lines: string[] = [formatNodeLine(node, { viewer: VIEWER, observationContent })];
+  for (const cid of keptChildNodes) {
+    const child = target.nodes.get(cid);
+    if (child !== undefined)
+      lines.push(indent(formatNodeLine(child, { viewer: VIEWER, observationContent }), CHILD_DEPTH));
+  }
+  for (const oid of keptChildObs) {
+    const o = target.observations.get(oid);
+    if (o !== undefined) lines.push(indent(renderObservationBlock(o, mode, NO_PARENT, excerpts.get(oid)), CHILD_DEPTH));
+  }
+  return lines.join("\n");
+}
+
 /** Render an observation per the active content mode: terse one-line, full
  *  content block, a line range, or grep excerpts. Delegates the full/lines body
  *  to the shared contentBlock and the grep body to the shared grepBlock, so the
@@ -443,21 +479,28 @@ function resolveBounds(from: string | undefined, to: string | undefined): Resolv
 
 /** Build the ranked candidate list for the search/list path. Async because the
  *  regex tests run in a worker thread bounded by `findTimeoutMs`. Returns the
- *  candidates, or an error string the caller surfaces verbatim. */
+ *  candidates, or an error string the caller surfaces verbatim.
+ *
+ *  `filters` are intersected over node summaries + observation content (an item
+ *  passes only if it matches EVERY filter) — used to intersect `query` and
+ *  `contentPattern`, both of which filter the same text scope (#51). An empty
+ *  filter list is the time-range browse (every node/obs passes the text gate). */
 async function buildSearchCandidates(
   target: RecallTarget,
-  regex: RegExp | null,
+  filters: readonly RegExp[],
   bounds: ResolvedBounds,
   includeSuperseded: boolean,
 ): Promise<{ candidates: SearchCandidate[]; note?: string } | { error: string }> {
-  // gather node + observation jobs (and the text each is tested against), then
-  // batch-test every text in ONE worker round-trip.
+  // gather node + observation jobs, then batch-test every text against every
+  // filter (intersection — an item passes only if it matches all filters).
+  // Nodes only surface when a text filter can match their summary; a pure
+  // time-range browse (no text filter) returns observations only.
+  const includeNodes = filters.length > 0;
   const observationContent = targetObservationContent(target);
   const nodeJobs: { node: RenderableNode }[] = [];
   const obsJobs: { obs: RecallObservation; parent: RenderableNode | null }[] = [];
   for (const node of target.nodes.values()) {
-    if (!isVisible(node.state, includeSuperseded)) continue;
-    if (regex === null) continue; // nodes are query-only
+    if (!includeNodes || !isVisible(node.state, includeSuperseded)) continue;
     nodeJobs.push({ node });
   }
   for (const obs of target.observations.values()) {
@@ -467,26 +510,22 @@ async function buildSearchCandidates(
     obsJobs.push({ obs, parent });
   }
 
-  let nodeHits: boolean[];
-  let obsHits: boolean[];
-  let testedCount: number | null = null;
-  let timedOutMs: number | null = null;
-  if (regex === null) {
-    nodeHits = [];
-    obsHits = obsJobs.map(() => true); // no query → every obs is a text match
-  } else {
+  const nodeCount = nodeJobs.length;
+  // every job passes the text gate until a filter marks it false (intersection —
+  // worker-bounded). An empty filter list is the time-range browse (all pass).
+  let passes = new Array<boolean>(nodeCount + obsJobs.length).fill(true);
+  let note: string | undefined;
+  if (filters.length > 0) {
     const texts = [...nodeJobs.map((j) => j.node.summary), ...obsJobs.map((j) => j.obs.content)];
-    const outcome = await runRegexTests(regex, texts, getMemkeeperSettings().findTimeoutMs);
-    if ("error" in outcome) return { error: outcome.error };
-    nodeHits = outcome.results.slice(0, nodeJobs.length);
-    obsHits = outcome.results.slice(nodeJobs.length);
-    testedCount = "testedCount" in outcome ? outcome.testedCount : texts.length;
-    timedOutMs = "testedCount" in outcome ? outcome.timedOutMs : null;
+    const filtered = await intersectRegexFilters(texts, filters);
+    if ("error" in filtered) return { error: filtered.error };
+    passes = filtered.passes;
+    note = filtered.note;
   }
 
   const candidates: SearchCandidate[] = [];
   for (let i = 0; i < nodeJobs.length; i += 1) {
-    if (nodeHits[i]) {
+    if (passes[i]) {
       const { node } = nodeJobs[i];
       candidates.push({
         id: node.id,
@@ -496,7 +535,7 @@ async function buildSearchCandidates(
     }
   }
   for (let i = 0; i < obsJobs.length; i += 1) {
-    if (!obsHits[i]) continue;
+    if (!passes[nodeCount + i]) continue;
     const { obs, parent } = obsJobs[i];
     // time range applies to observations only (nodes are never time-filtered)
     if (bounds.from !== null && obs.timestamp < bounds.from) continue;
@@ -510,14 +549,7 @@ async function buildSearchCandidates(
   }
 
   candidates.sort(compareCandidates);
-  if (timedOutMs !== null && testedCount !== null) {
-    const total = nodeJobs.length + obsJobs.length;
-    return {
-      candidates,
-      note: searchTimeoutNote(timedOutMs, testedCount, total),
-    };
-  }
-  return { candidates };
+  return { candidates, note };
 }
 
 /** Non-obsolete root nodes for the default browse (no filters) path. When
@@ -751,7 +783,13 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   if (noFilters) {
     list = rootBrowseCandidates(target, includeSuperseded);
   } else {
-    const result = await buildSearchCandidates(target, regex, bounds, includeSuperseded);
+    // intersect query + contentPattern over summaries + content (#51: both are
+    // filters, never obs-only). contentPattern-alone is the degenerate single-filter
+    // case (filters = [contentPattern] → nodes + obs matching it).
+    const filters: RegExp[] = [];
+    if (regex !== null) filters.push(regex);
+    if (mode.kind === "grep") filters.push(mode.pattern);
+    const result = await buildSearchCandidates(target, filters, bounds, includeSuperseded);
     if ("error" in result) return err(result.error);
     list = result.candidates;
     note = result.note;
@@ -795,6 +833,7 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
 }
 
 const EMPTY_EXCERPTS: ReadonlyMap<string, string[]> = new Map();
+const EMPTY_MATCH: ReadonlySet<string> = new Set();
 
 /** Apply the result token budget to rendered units (per-item atomic): emit whole
  *  units while the budget holds, then a footer. A null budget is uncapped (only
@@ -840,54 +879,94 @@ async function executeIds(
       "`lines` reads a range of a single observation — pass one observation id, or a node id with one observation.",
     );
   }
-  // Build a flat list of payload blocks (one per requested id), then paginate
-  // over the requested ids (each id is one paginatable unit).
-  const units: { id: string; text: string }[] = [];
+  // Resolve each requested id to a node or observation up front so the grep
+  // path can prune (and the non-grep path renders in one pass).
+  const resolved = ids.map((id) => ({ id, node: target.nodes.get(id), obs: target.observations.get(id) }));
   // track the observations referenced (for grep excerpt pre-computation).
   const obsById = new Map<string, RenderableObservation>();
-  for (const id of ids) {
-    const node = target.nodes.get(id);
-    if (node !== undefined) {
-      for (const oid of node.observationIds) {
+  for (const r of resolved) {
+    if (r.node !== undefined) {
+      for (const oid of r.node.observationIds) {
         const o = target.observations.get(oid);
         if (o !== undefined) obsById.set(oid, o);
       }
-      units.push({ id, text: renderNodePayload(node, target, mode, EMPTY_EXCERPTS) });
+    } else if (r.obs !== undefined) {
+      obsById.set(r.id, r.obs);
+    }
+  }
+
+  // grep mode: contentPattern filters the ids target (grep-tree pruning, #51).
+  // A node is kept if its summary matches OR a descendant obs matches (header
+  // kept as the structural parent); a non-matching standalone obs is dropped;
+  // non-matching child obs are dropped. Non-grep modes keep every requested id.
+  let excerpts: ReadonlyMap<string, string[]> = EMPTY_EXCERPTS;
+  let summaryMatch: ReadonlySet<string> = EMPTY_MATCH;
+  let grepNote: string | null = null;
+  if (mode.kind === "grep") {
+    const result = await computeGrepExcerpts([...obsById.values()], mode.pattern, mode.context);
+    if ("error" in result) return err(result.error);
+    excerpts = result.excerpts;
+    grepNote = result.note;
+    // summaries: requested nodes + their child nodes. A node header is kept when
+    // its summary matches contentPattern (run through the worker for ReDoS safety).
+    const summaryNodes: RenderableNode[] = [];
+    for (const r of resolved) {
+      if (r.node !== undefined) {
+        summaryNodes.push(r.node);
+        for (const cid of r.node.childNodeIds) {
+          const child = target.nodes.get(cid);
+          if (child !== undefined) summaryNodes.push(child);
+        }
+      }
+    }
+    const summaryTexts = summaryNodes.map((n) => n.summary);
+    const outcome = await runRegexTests(mode.pattern, summaryTexts, getMemkeeperSettings().findTimeoutMs);
+    if ("error" in outcome) return err(outcome.error);
+    const matchSet = new Set<string>();
+    for (let i = 0; i < summaryNodes.length; i += 1) {
+      if (outcome.results[i]) matchSet.add(summaryNodes[i].id);
+    }
+    summaryMatch = matchSet;
+  }
+
+  // Build the unit list: a requested obs is dropped when grep has no excerpt;
+  // a requested node is pruned to matching children (or dropped entirely).
+  const units: { id: string; text: string }[] = [];
+  for (const r of resolved) {
+    if (r.node !== undefined) {
+      if (mode.kind === "grep") {
+        const payload = renderNodePayloadGrep(r.node, target, mode, excerpts, summaryMatch);
+        if (payload !== null) units.push({ id: r.id, text: payload });
+      } else {
+        units.push({ id: r.id, text: renderNodePayload(r.node, target, mode, EMPTY_EXCERPTS) });
+      }
       continue;
     }
-    const obs = target.observations.get(id);
-    if (obs !== undefined) {
-      obsById.set(id, obs);
-      units.push({ id, text: renderObservationBlock(obs, mode, NO_PARENT, NO_EXCERPTS) });
+    if (r.obs !== undefined) {
+      if (mode.kind === "grep") {
+        // a standalone obs is kept only when its content matches contentPattern.
+        if ((excerpts.get(r.id)?.length ?? 0) > 0) {
+          units.push({ id: r.id, text: renderObservationBlock(r.obs, mode, NO_PARENT, excerpts.get(r.id)) });
+        }
+      } else {
+        units.push({ id: r.id, text: renderObservationBlock(r.obs, mode, NO_PARENT, NO_EXCERPTS) });
+      }
       continue;
     }
-    units.push({ id, text: missingIdMessage(id) });
+    if (mode.kind !== "grep") {
+      // missing id: convey via its not-found text (grep mode drops it silently —
+      // nothing matched). ids lookups never flag a whole-result error.
+      units.push({ id: r.id, text: missingIdMessage(r.id) });
+    }
+  }
+
+  if (units.length === 0) {
+    return ok(grepNote ?? "No matches.");
   }
 
   const page = pageOf(take, afterId);
   const { window, more, stale } = paginate(units, page);
   if (stale) return err(staleCursorMessage(page.afterId));
-
-  // grep mode: pre-compute excerpts for the observations in the window, then
-  // re-render the referencing units so their obs blocks carry the excerpts.
-  let renderedUnits = window;
-  let grepNote: string | null = null;
-  if (mode.kind === "grep") {
-    const result = await computeGrepExcerpts([...obsById.values()], mode.pattern, mode.context);
-    if ("error" in result) return err(result.error);
-    grepNote = result.note;
-    renderedUnits = window.map((u) => {
-      const obs = obsById.get(u.id);
-      if (obs === undefined) return u;
-      return { id: u.id, text: renderObservationBlock(obs, mode, NO_PARENT, result.excerpts.get(obs.id)) };
-    });
-    // also refresh node-payload units whose child obs now have excerpts.
-    renderedUnits = renderedUnits.map((u) => {
-      const node = target.nodes.get(u.id as NodeId);
-      if (node !== undefined) return { id: u.id, text: renderNodePayload(node, target, mode, result.excerpts) };
-      return u;
-    });
-  }
 
   // A single-observation target is unbudgeted in any mode (full / lines / grep):
   // the cap lifts, but the mode still applies. This covers both a direct
@@ -896,7 +975,7 @@ async function executeIds(
     ids.length === 1 && countConnectedObservations(target.nodes, target.observations, ids[0]) === 1
       ? null
       : getMemkeeperSettings().toolResultTokenBudget;
-  const { text, footer } = budgetUnits(renderedUnits, budget, more, units.length, window[window.length - 1].id);
+  const { text, footer } = budgetUnits(window, budget, more, units.length, window[window.length - 1].id);
   const parts = [text];
   if (footer !== null) parts.push(footer);
   if (grepNote !== null) parts.push(grepNote);

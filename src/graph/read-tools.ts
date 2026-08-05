@@ -35,7 +35,7 @@ import {
   ROOT_PARENT,
 } from "../types.js";
 import { runRegexTests } from "./regex-runner.js";
-import { budgetReachedFooter, budgetWindow, searchTimeoutNote } from "./result-budget.js";
+import { budgetReachedFooter, budgetWindow, grepTimeoutNote, intersectRegexFilters } from "./result-budget.js";
 import {
   type ContentMode,
   type GrepSpec,
@@ -439,15 +439,6 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
     parameters: CAT_PARAMS,
     async execute(_toolCallId, params) {
       const page = resolvePage(params.page);
-      // Build the aggregated observation full-text units (a node expands to its
-      // direct observations; the node header rides the first as a preamble),
-      // then paginate over those units (page paginates the aggregated observation
-      // full-texts, not the requested ids).
-      const units = buildCatUnits(graph, params.ids, viewer);
-      const { window, more, remaining, stale } = paginate(units, page);
-      if (stale) {
-        return staleResult(page);
-      }
       // resolve content mode + budget. cat is a full read, so the default mode
       // is `full`; grep/lines override it. `lines` and `contentPattern` are
       // mutually exclusive (resolveContentMode errors if both are set). A
@@ -469,14 +460,42 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
           details: { error: true },
         };
       }
-      const items = window.map(catUnitToItem);
+
       // A single-observation target is unbudgeted in ANY mode (full / lines /
       // grep): the cap lifts, but the mode still applies. Counts the TARGET's
       // connected observations (not the paginated window), so a small `take`
       // on a multi-observation node is not wrongly uncapped.
       const singleObs = singleObsTargetCount(graph, params.ids) === 1;
       const budget = singleObs ? null : resultTokenBudget();
-      const rendered = await renderBudgeted(items, {
+
+      // grep mode: contentPattern filters the ids target (grep-tree pruning,
+      // #51) — a node is kept when its summary matches OR a child observation
+      // matches; a non-matching standalone observation is dropped. The surviving
+      // items then go through the shared budgeted grep renderer (every survivor
+      // carries excerpts). Non-grep modes render every requested id.
+      let items: RenderItem[];
+      let grepNote: string | undefined;
+      if (modeRes.kind === "grep") {
+        const pruned = await buildCatGrepItemsWithMatches(graph, params.ids, viewer, modeRes);
+        if ("error" in pruned) {
+          return { content: [{ type: "text", text: pruned.error }], details: { error: true } };
+        }
+        items = pruned.items;
+        grepNote = pruned.note;
+      } else {
+        const units = buildCatUnits(graph, params.ids, viewer);
+        items = units.map(catUnitToItem);
+      }
+
+      const { window, more, remaining, stale } = paginate(items, page);
+      if (stale) {
+        return staleResult(page);
+      }
+      if (window.length === 0) {
+        const empty = modeRes.kind === "grep" ? "No matches." : "No observations.";
+        return { content: [{ type: "text", text: grepNote ?? empty }], details: { count: 0, more: false } };
+      }
+      const rendered = await renderBudgeted(window, {
         budget,
         mode: modeRes,
         findTimeoutMs: getMemkeeperSettings().findTimeoutMs,
@@ -484,6 +503,8 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
       const lines: string[] = [rendered.text];
       if (rendered.note !== null) {
         lines.push(rendered.note);
+      } else if (grepNote !== undefined) {
+        lines.push(grepNote);
       } else if (more && window.length > 0) {
         lines.push(footer(window[window.length - 1].id, remaining));
       }
@@ -587,6 +608,106 @@ function catUnitToItem(unit: CatUnit): RenderItem {
   return { id: unit.id, header, content: unit.content };
 }
 
+/** Build the cat render items for a contentPattern (grep) read with grep-tree
+ *  pruning (#51): a requested node is kept when its summary matches OR a child
+ *  observation matches (its header rides the first surviving observation, or is
+ *  a header-only item on a summary-only match); a non-matching standalone
+ *  observation is dropped. Pre-filtered items then go through the shared
+ *  budgeted grep renderer (every surviving observation carries excerpts). */
+function buildCatGrepItems(
+  graph: MemkeeperGraph,
+  ids: readonly string[],
+  viewer: RenderViewer,
+  summaryMatch: ReadonlySet<string>,
+  obsMatch: ReadonlySet<string>,
+): RenderItem[] {
+  const items: RenderItem[] = [];
+  for (const id of ids) {
+    const node = graph.nodes.get(id as NodeId);
+    if (node !== undefined) {
+      const nodeHeader = formatNodeLine(node, nodeLineOptions(graph, viewer));
+      const matchingObs = node.observationIds
+        .map((oid) => graph.observations.get(oid))
+        .filter((o): o is Observation => o !== undefined && obsMatch.has(o.id))
+        .sort(compareObservationOrder);
+      // drop the node entirely when neither its summary nor any child matches.
+      if (!summaryMatch.has(node.id) && matchingObs.length === 0) continue;
+      if (matchingObs.length === 0) {
+        // summary-only match → header-only item (no content to grep).
+        items.push({ id: node.id, header: nodeHeader });
+        continue;
+      }
+      matchingObs.forEach((o, index) => {
+        const header = index === 0 ? `${nodeHeader}\n${catObsHeader(o)}` : catObsHeader(o);
+        items.push({ id: o.id, header, content: o.content });
+      });
+      continue;
+    }
+    const obs = graph.observations.get(id as ObsId);
+    if (obs !== undefined) {
+      if (obsMatch.has(obs.id)) {
+        items.push({ id: obs.id, header: catObsHeader(obs), content: obs.content });
+      }
+    }
+    // missing id: silently dropped in grep mode (nothing matched).
+  }
+  return items;
+}
+
+/** Compute contentPattern matches (node summaries + observation content) in
+ *  ONE worker round-trip, then build the pruned cat grep items. */
+async function buildCatGrepItemsWithMatches(
+  graph: MemkeeperGraph,
+  ids: readonly string[],
+  viewer: RenderViewer,
+  grep: Extract<ContentMode, { kind: "grep" }>,
+): Promise<{ items: RenderItem[]; note?: string } | { error: string }> {
+  // gather summary nodes (requested nodes + their direct child nodes) + all
+  // referenced observations in one batch so a single worker run covers both.
+  const summaryNodes: Node[] = [];
+  const obsList: Observation[] = [];
+  const seenObs = new Set<string>();
+  for (const id of ids) {
+    const node = graph.nodes.get(id as NodeId);
+    if (node !== undefined) {
+      summaryNodes.push(node);
+      for (const cid of node.childNodeIds) {
+        const child = graph.nodes.get(cid);
+        if (child !== undefined) summaryNodes.push(child);
+      }
+      for (const oid of node.observationIds) {
+        const o = graph.observations.get(oid);
+        if (o !== undefined && !seenObs.has(o.id)) {
+          seenObs.add(o.id);
+          obsList.push(o);
+        }
+      }
+    } else {
+      const o = graph.observations.get(id as ObsId);
+      if (o !== undefined && !seenObs.has(o.id)) {
+        seenObs.add(o.id);
+        obsList.push(o);
+      }
+    }
+  }
+  const texts = [...summaryNodes.map((n) => n.summary), ...obsList.map((o) => o.content)];
+  const outcome = await runRegexTests(grep.pattern, texts, getMemkeeperSettings().findTimeoutMs);
+  if ("error" in outcome) return { error: outcome.error };
+  const summaryMatch = new Set<string>();
+  for (let i = 0; i < summaryNodes.length; i += 1) {
+    if (outcome.results[i]) summaryMatch.add(summaryNodes[i].id);
+  }
+  const obsMatch = new Set<string>();
+  for (let i = 0; i < obsList.length; i += 1) {
+    if (outcome.results[summaryNodes.length + i]) obsMatch.add(obsList[i].id);
+  }
+  const items = buildCatGrepItems(graph, ids, viewer, summaryMatch, obsMatch);
+  if ("testedCount" in outcome) {
+    return { items, note: grepTimeoutNote(outcome.timedOutMs) };
+  }
+  return { items };
+}
+
 /** Render one cat unit (preamble + header + content). */
 export function renderCatUnit(unit: CatUnit): string {
   const parts: string[] = [];
@@ -599,10 +720,12 @@ export function renderCatUnit(unit: CatUnit): string {
 // --- find ------------------------------------------------------------------
 
 const FIND_PARAMS = Type.Object({
-  query: Type.String({
-    description:
-      "Find items by regex (JS) over node summaries and observation content. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
-  }),
+  query: Type.Optional(
+    Type.String({
+      description:
+        "Find items by regex (JS) over node summaries and observation content. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
+    }),
+  ),
   includeSuperseded: Type.Optional(
     Type.Boolean({ description: "Include superseded and obsolete items (default false — current memory only)." }),
   ),
@@ -648,12 +771,13 @@ export function tryCompileFindRegex(query: string): { regex: RegExp } | { error:
  *  Returns the matches, or an error string the caller surfaces verbatim. */
 export async function collectFindMatches(
   graph: MemkeeperGraph,
-  regex: RegExp,
+  regexes: readonly RegExp[],
   includeSuperseded: IncludeSuperseded,
   viewer: RenderViewer,
 ): Promise<{ matches: FindMatch[]; note?: string } | { error: string }> {
   // gather candidates first (preserving node-then-obs grouping), then batch-test
-  // every text in ONE worker round-trip rather than per entity.
+  // every text against EVERY regex (intersection: an item passes only if it
+  // matches all regexes — used by find to intersect query + contentPattern).
   const nodeJobs: { node: Node; text: string }[] = [];
   const obsJobs: { obs: Observation; parent: NodeId }[] = [];
   for (const node of graph.nodes.values()) {
@@ -668,15 +792,16 @@ export async function collectFindMatches(
     }
   }
   const texts: string[] = [...nodeJobs.map((j) => j.text), ...obsJobs.map((j) => j.obs.content)];
-  const outcome = await runRegexTests(regex, texts, getMemkeeperSettings().findTimeoutMs);
-  if ("error" in outcome) return { error: outcome.error };
+  const nodeCount = nodeJobs.length;
+  // an item passes the intersection only if it matches EVERY regex (worker-bounded).
+  const filtered = await intersectRegexFilters(texts, regexes);
+  if ("error" in filtered) return { error: filtered.error };
+  const passes = filtered.passes;
 
-  const nodeHits = outcome.results.slice(0, nodeJobs.length);
-  const obsHits = outcome.results.slice(nodeJobs.length);
   const nodeMatches: NodeMatch[] = [];
   const obsMatches: ObsMatch[] = [];
   for (let i = 0; i < nodeJobs.length; i += 1) {
-    if (nodeHits[i]) {
+    if (passes[i]) {
       const { node } = nodeJobs[i];
       nodeMatches.push({
         id: node.id,
@@ -686,7 +811,7 @@ export async function collectFindMatches(
     }
   }
   for (let i = 0; i < obsJobs.length; i += 1) {
-    if (obsHits[i]) {
+    if (passes[nodeCount + i]) {
       const { obs, parent } = obsJobs[i];
       obsMatches.push({
         id: obs.id,
@@ -699,16 +824,7 @@ export async function collectFindMatches(
   // consistent with `ls`.
   nodeMatches.sort((a, b) => compareNodeOrder(a.node, b.node));
   obsMatches.sort((a, b) => compareObservationOrder(a.obs, b.obs));
-  const matches = [...nodeMatches, ...obsMatches];
-  // a timeout returns the PARTIAL matches found so far + a note surfacing that
-  // the search was stopped (so the caller can tell the agent/user).
-  if ("testedCount" in outcome) {
-    return {
-      matches,
-      note: searchTimeoutNote(outcome.timedOutMs, outcome.testedCount, texts.length),
-    };
-  }
-  return { matches };
+  return { matches: [...nodeMatches, ...obsMatches], note: filtered.note };
 }
 
 /** A sortable wrapper carrying the entity for ordering. */
@@ -730,12 +846,36 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
     parameters: FIND_PARAMS,
     async execute(_toolCallId, params) {
       const includeSuperseded = params.includeSuperseded ?? INCLUDE_DEFAULT;
-      const compiled = tryCompileFindRegex(params.query);
-      if ("error" in compiled) {
-        return { content: [{ type: "text", text: compiled.error }], details: { error: true } };
+      const hasContentPattern = params.contentPattern !== undefined && params.contentPattern !== "";
+      const hasQuery = params.query !== undefined && params.query !== "";
+      if (!hasQuery && !hasContentPattern) {
+        return {
+          content: [{ type: "text", text: "Pass `query` or `contentPattern` to search the graph." }],
+          details: { error: true },
+        };
+      }
+      // resolve content mode first (compiles contentPattern; find has no `lines`).
+      const modeRes = resolveToolMode(MODE_DEFAULT_TERSE, params.contentPattern, params.contextLines, NO_LINES);
+      if ("error" in modeRes) {
+        return { content: [{ type: "text", text: modeRes.error }], details: { error: true } };
       }
 
-      const collected = await collectFindMatches(graph, compiled.regex, includeSuperseded, viewer);
+      // contentPattern is a FILTER over node summaries + observation content
+      // (same scope as `query`) — not obs-only (#51). When both are given they
+      // intersect (an item must match both). contentPattern also switches the
+      // render to grep excerpts for matching observations.
+      const filterRegexes: RegExp[] = [];
+      if (params.query !== undefined && params.query !== "") {
+        const compiled = tryCompileFindRegex(params.query);
+        if ("error" in compiled) {
+          return { content: [{ type: "text", text: compiled.error }], details: { error: true } };
+        }
+        filterRegexes.push(compiled.regex);
+      }
+      if (modeRes.kind === "grep") {
+        filterRegexes.push(modeRes.pattern);
+      }
+      const collected = await collectFindMatches(graph, filterRegexes, includeSuperseded, viewer);
       if ("error" in collected) {
         return { content: [{ type: "text", text: collected.error }], details: { error: true } };
       }
@@ -750,14 +890,6 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
         return { content: [{ type: "text", text: empty }], details: { count: 0, more: false } };
       }
 
-      // resolve content mode (find has no fullDetails param → terse or grep;
-      // find has no `lines` param — lines is a single-observation slice that
-      // needs an `ids` target, incompatible with find's required `query`).
-      const modeRes = resolveToolMode(MODE_DEFAULT_TERSE, params.contentPattern, params.contextLines, NO_LINES);
-      if ("error" in modeRes) {
-        return { content: [{ type: "text", text: modeRes.error }], details: { error: true } };
-      }
-
       const budget = resultTokenBudget();
       if (modeRes.kind === "terse") {
         // terse: one-line matches, budgeted independently of `take`.
@@ -767,8 +899,8 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
         return { content: [{ type: "text", text }], details: { count: out.count, more: out.more } };
       }
 
-      // grep: expand the matched OBSERVATIONS' content; node matches stay
-      // header-only (they have no observation content).
+      // grep: matching observations render contentPattern excerpts; matching
+      // nodes render headers (candidates are pre-filtered by contentPattern).
       const items: RenderItem[] = window.map((m) => {
         const match = m as FindMatch & { obs?: Observation };
         return { id: m.id, header: m.render, content: match.obs?.content };

@@ -148,7 +148,11 @@ const MIN_TIMEOUT_MS = 1000;
  *  spawned (a restricted runtime), the batch is REFUSED with an error — running
  *  unprotected on the main thread (where a backtracking pattern cannot be
  *  interrupted) would risk freezing the host process. */
-export async function runRegexTests(regex: RegExp, strings: string[], timeoutMs: number): Promise<RegexTestOutcome> {
+export async function runRegexTests(
+  regex: RegExp,
+  strings: readonly string[],
+  timeoutMs: number,
+): Promise<RegexTestOutcome> {
   if (strings.length === 0) return { results: [] };
   try {
     return await runInWorker(regex, strings, timeoutMs);
@@ -164,7 +168,7 @@ const UNAVAILABLE_MESSAGE =
 
 const WORKER_SHUTDOWN_MESSAGE = "Regex search was stopped (the session shut down). Re-run the query after reload.";
 
-async function runInWorker(regex: RegExp, strings: string[], timeoutMs: number): Promise<RegexTestOutcome> {
+async function runInWorker(regex: RegExp, strings: readonly string[], timeoutMs: number): Promise<RegexTestOutcome> {
   const id = nextRequestId;
   nextRequestId += 1;
   const w = getWorker();
