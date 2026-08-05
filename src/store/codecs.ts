@@ -86,6 +86,11 @@ export function cloneLedger(ledger: UsageLedger): UsageLedger {
 export interface SerializedObservation {
   id: string;
   summary: string;
+  /** Verbatim-source size hint, frozen at capture (additive — legacy snapshots
+   *  predate this; decodeObservation falls back to a summary-derived estimate).
+   *  summaryTokens is NOT stored (recomputed on decode). */
+  detailsLines?: number;
+  detailsTokens?: number;
   importance: Importance;
   sourceEntryIds: string[];
   timestamp: string;
@@ -211,6 +216,9 @@ export function decodeObservation(raw: unknown): Observation | null {
   ) {
     return null;
   }
+  // detailsLines/detailsTokens/summaryTokens are additive (tolerant reader):
+  // legacy snapshots lack them; makeObservation's summary-derived fallback fills
+  // the details hints and recomputes summaryTokens when they are absent.
   return makeObservation({
     id: id as ObsId,
     summary: text,
@@ -218,6 +226,8 @@ export function decodeObservation(raw: unknown): Observation | null {
     sourceEntryIds: sourceEntryIds as string[],
     timestamp,
     parentNode: parentNode as NodeId,
+    detailsLines: typeof raw.detailsLines === "number" ? raw.detailsLines : undefined,
+    detailsTokens: typeof raw.detailsTokens === "number" ? raw.detailsTokens : undefined,
   });
 }
 
@@ -419,6 +429,12 @@ export function encodeObservation(obs: Observation): SerializedObservation {
   return {
     id: obs.id,
     summary: obs.summary,
+    // summaryTokens is recomputed on decode (cheap, summary-derived) — NOT stored.
+    // detailsLines/detailsTokens CAN'T be recomputed on decode (they need the
+    // verbatim source render over session entries the snapshot doesn't carry),
+    // so they ARE stored for faithful snapshot size hints.
+    detailsLines: obs.detailsLines,
+    detailsTokens: obs.detailsTokens,
     importance: obs.importance,
     sourceEntryIds: [...obs.sourceEntryIds],
     timestamp: obs.timestamp,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { SessionEntry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   _resetGetMemkeeperSettings,
@@ -19,12 +19,48 @@ import {
 } from "../../src/graph/mutations.js";
 import { makeMkRecallTool } from "../../src/recall/mk-recall.js";
 import { encodeSelection } from "../../src/store/codecs.js";
-import { getGraphStore, persistSelectedTree, resetForNewSession } from "../../src/store/graph-store.js";
+import {
+  getGraphStore,
+  persistSelectedTree,
+  resetForNewSession,
+  setEntryResolver,
+} from "../../src/store/graph-store.js";
 import { MemkeeperGraph, makeObservation, N_GOAL, type Node, type ObsId } from "../../src/types.js";
 
 const T0 = "2026-07-17T09:00:00.000Z";
 const T1 = "2026-07-17T14:30:00.000Z";
 const T3 = "2026-07-19T10:00:00.000Z";
+
+/** Build a fake user-message entry (the chunk renderer emits its text as
+ *  <USER>text</USER>). */
+function userTextEntry(id: string, text: string): SessionEntry {
+  return {
+    id,
+    type: "message",
+    parentId: null,
+    timestamp: 0,
+    message: { role: "user", content: text },
+  } as unknown as SessionEntry;
+}
+
+/** Wire the GraphStore resolver to return user entries for the given id->text
+ *  map, so renderDetails (verbatim source) re-renders the bodies. */
+function wireResolver(textById: Record<string, string>): void {
+  const entries = new Map(Object.entries(textById).map(([id, text]) => [id, userTextEntry(id, text)]));
+  setEntryResolver((ids) => ids.map((id) => entries.get(id)).filter((e): e is SessionEntry => e !== undefined));
+}
+
+/** Wire a resolver so each observation's verbatim source renders its own summary
+ *  (the test fixtures carry the body in the summary; the resolver maps each
+ *  cited sourceEntryId to that text). Lets fullDetails/lines/grep re-render a
+ *  real body instead of degrading to 'source unavailable'. */
+function wireResolverForGraph(graph: MemkeeperGraph): void {
+  const textById: Record<string, string> = {};
+  for (const obs of graph.observations.values()) {
+    for (const id of obs.sourceEntryIds) textById[id] = obs.summary;
+  }
+  wireResolver(textById);
+}
 
 const NO_OP_CTX = {
   appendEntry: () => {},
@@ -133,6 +169,7 @@ function seedSource(): MemkeeperGraph {
   const store = getGraphStore();
   store.graph = graph;
   store.selectedTree = null;
+  wireResolverForGraph(graph);
   return graph;
 }
 
@@ -472,15 +509,18 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       applyRecordObservation(g, {
         obs: makeObservation({
           id: "oLong" as ObsId,
-          summary: longBody,
+          summary: "Long multi-line observation captured from the source.",
           importance: "high",
-          sourceEntryIds: ["e1", "e2"],
+          sourceEntryIds: ["e1"],
           timestamp: T1,
           parentNode: "n1",
         }),
       });
       setClock(null);
       getGraphStore().graph = g;
+      // wire the resolver so the verbatim source (details) re-renders the long
+      // body; fullDetails shows it, terse shows the one-line summary.
+      wireResolver({ e1: longBody });
 
       const terse = text(await recall(tool(), { ids: ["oLong"] }));
       const full = text(await recall(tool(), { ids: ["oLong"], fullDetails: true }));
@@ -727,13 +767,16 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       });
       setClock(null);
       getGraphStore().graph = g;
+      // wire the resolver so the verbatim source (details) re-renders the
+      // multi-line body; fullDetails preserves its raw newlines.
+      wireResolver({ e1: "alpha first.\nbeta second line.\ngamma third." });
 
       const terse = text(await recall(tool(), { query: "alpha" }));
       const full = text(await recall(tool(), { query: "alpha", fullDetails: true }));
       // terse collapses the content to a single line (space-joined, no raw newline)
       expect(terse).toContain("alpha first. beta");
       expect(terse).not.toContain("alpha first.\nbeta");
-      // fullDetails preserves the raw multi-line content (newline before beta)
+      // fullDetails preserves the raw multi-line verbatim source (newline before beta)
       expect(full).toContain("alpha first.\nbeta second line");
       expect(full).toContain("gamma third.");
       // both carry the parent (flat search)
@@ -761,7 +804,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
       try {
         const out = text(await recall(tool(), { ids: ["o5"], lines: "1-1" }));
-        expect(out).toContain("1: Chose JWT for stateless auth");
+        expect(out).toContain("1: <USER>Chose JWT for stateless auth</USER>");
         expect(out).not.toContain("budget reached");
       } finally {
         _setGetMemkeeperSettings(null);
@@ -802,7 +845,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
       try {
         const out = text(await recall(tool(), { ids: ["n7"], lines: "1-1" }));
-        expect(out).toContain("1: Chose JWT for stateless auth");
+        expect(out).toContain("1: <USER>Chose JWT for stateless auth</USER>");
         expect(out).not.toContain("budget reached");
       } finally {
         _setGetMemkeeperSettings(null);
@@ -834,7 +877,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       // the node header is present.
       expect(out).toContain("n7");
       // the child observation o5 shows its grep excerpt line under the node.
-      expect(out).toContain("1: Chose JWT for stateless auth");
+      expect(out).toContain("1: <USER>Chose JWT for stateless auth</USER>");
     });
 
     it("contentPattern ids grep-tree pruning keeps a node as structural header when a child matches", async () => {
@@ -868,7 +911,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     it("lines returns a 1-indexed range", async () => {
       seedSource();
       const out = text(await recall(tool(), { ids: ["o5"], lines: "1-1" }));
-      expect(out).toContain("1: Chose JWT for stateless auth");
+      expect(out).toContain("1: <USER>Chose JWT for stateless auth</USER>");
     });
 
     it("contentPattern grep timeout surfaces a partial-excerpts note (not silent)", async () => {

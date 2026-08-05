@@ -10,6 +10,7 @@
 // mutators (apply-then-persist), then call the store to record the delta. The
 // store applies mutations ONLY during load() reconstruction (event-sourcing).
 
+import { clearDetailsCache } from "../format/details.js";
 import { type GraphDelta, recomputeRange } from "../graph/mutations.js";
 import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
@@ -115,9 +116,11 @@ export function getGraphStore(): GraphStore {
   return store;
 }
 
-/** Drop all in-memory state (`/new` starts a fresh graph). */
+/** Drop all in-memory state (`/new` starts a fresh graph). Also clears the
+ *  per-observation details cache (entry ids + renders are per-session). */
 export function resetForNewSession(): void {
   store = null;
+  clearDetailsCache();
 }
 
 /** Install the session-entry resolver. Refreshed on every session_start (a

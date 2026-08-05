@@ -13,6 +13,7 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { getMemkeeperSettings } from "../config/schema.js";
+import { renderDetails } from "../format/details.js";
 import {
   formatNodeLine,
   formatObservationLine,
@@ -22,6 +23,7 @@ import {
 } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
 import { PageSchema } from "../schema.js";
+import { getGraphStore } from "../store/graph-store.js";
 import {
   estimateContentTokens,
   IMPORTANCE_RANK,
@@ -536,6 +538,17 @@ export interface CatUnit {
   content?: string;
 }
 
+/** Resolve an observation's verbatim-source details text (full render, no
+ *  entry=id) for the cat/find body. Uses the GraphStore session resolver; returns
+ *  the one-line summary when the verbatim source is unavailable (source_unavailable)
+ *  so the body still has something to show. Returns undefined for an unknown id. */
+function detailsTextFor(obs: Observation): string {
+  const resolver = getGraphStore().resolveEntries;
+  if (resolver === null) return obs.summary;
+  const render = renderDetails(obs.id, [...obs.sourceEntryIds], resolver);
+  return render === null ? obs.summary : render.text;
+}
+
 /** Count the observations a single id resolves to: 1 if the id is an
  *  observation, the node's connected-observation count if the id is a node, 0
  *  otherwise. Shared by the agent find/cat path and mk_recall to detect a
@@ -585,14 +598,14 @@ export function buildCatUnits(graph: MemkeeperGraph, ids: string[], viewer: Rend
           id: o.id,
           preamble: index === 0 ? nodeHeader : undefined,
           header: catObsHeader(o),
-          content: o.summary,
+          content: detailsTextFor(o),
         });
       });
       continue;
     }
     const obs = graph.observations.get(id as ObsId);
     if (obs !== undefined) {
-      units.push({ id: obs.id, header: catObsHeader(obs), content: obs.summary });
+      units.push({ id: obs.id, header: catObsHeader(obs), content: detailsTextFor(obs) });
       continue;
     }
     units.push({ id, header: `No node or observation with id ${id}.` });
@@ -639,14 +652,14 @@ function buildCatGrepItems(
       }
       matchingObs.forEach((o, index) => {
         const header = index === 0 ? `${nodeHeader}\n${catObsHeader(o)}` : catObsHeader(o);
-        items.push({ id: o.id, header, content: o.summary });
+        items.push({ id: o.id, header, content: detailsTextFor(o) });
       });
       continue;
     }
     const obs = graph.observations.get(id as ObsId);
     if (obs !== undefined) {
       if (obsMatch.has(obs.id)) {
-        items.push({ id: obs.id, header: catObsHeader(obs), content: obs.summary });
+        items.push({ id: obs.id, header: catObsHeader(obs), content: detailsTextFor(obs) });
       }
     }
     // missing id: silently dropped in grep mode (nothing matched).
@@ -690,7 +703,13 @@ async function buildCatGrepItemsWithMatches(
       }
     }
   }
-  const texts = [...summaryNodes.map((n) => n.summary), ...obsList.map((o) => o.summary)];
+  const texts = [
+    ...summaryNodes.map((n) => n.summary),
+    ...obsList.map((o) => {
+      const d = detailsTextFor(o);
+      return d === o.summary ? o.summary : `${o.summary}\n${d}`;
+    }),
+  ];
   const outcome = await runRegexTests(grep.pattern, texts, getMemkeeperSettings().findTimeoutMs);
   if ("error" in outcome) return { error: outcome.error };
   const summaryMatch = new Set<string>();
@@ -791,7 +810,16 @@ export async function collectFindMatches(
       obsJobs.push({ obs, parent: node.id });
     }
   }
-  const texts: string[] = [...nodeJobs.map((j) => j.text), ...obsJobs.map((j) => j.obs.summary)];
+  // observations match over summary + DETAILS (verbatim source) so a
+  // query/contentPattern finds obs whose verbatim source hits; nodes match over
+  // summary only.
+  const texts: string[] = [
+    ...nodeJobs.map((j) => j.text),
+    ...obsJobs.map((j) => {
+      const d = detailsTextFor(j.obs);
+      return d === j.obs.summary ? j.obs.summary : `${j.obs.summary}\n${d}`;
+    }),
+  ];
   const nodeCount = nodeJobs.length;
   // an item passes the intersection only if it matches EVERY regex (worker-bounded).
   const filtered = await intersectRegexFilters(texts, regexes);
@@ -903,7 +931,7 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
       // nodes render headers (candidates are pre-filtered by contentPattern).
       const items: RenderItem[] = window.map((m) => {
         const match = m as FindMatch & { obs?: Observation };
-        return { id: m.id, header: m.render, content: match.obs?.summary };
+        return { id: m.id, header: m.render, content: match.obs !== undefined ? detailsTextFor(match.obs) : undefined };
       });
       const rendered = await renderBudgeted(items, {
         budget,

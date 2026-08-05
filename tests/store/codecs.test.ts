@@ -69,8 +69,12 @@ describe("customType constants", () => {
 describe("observation codec", () => {
   it("round-trips an observation", () => {
     const wire = encodeObservation(sampleObs());
-    // summaryTokens is NOT on the wire (recomputed on decode)
+    // summaryTokens is NOT on the wire (recomputed on decode); details counts ARE
+    // (they can't be recomputed — they need a verbatim source render over
+    // session entries the snapshot doesn't carry).
     expect(wire).not.toHaveProperty("summaryTokens");
+    expect(wire.detailsLines).toBe(sampleObs().detailsLines);
+    expect(wire.detailsTokens).toBe(sampleObs().detailsTokens);
     expect(wire.id).toBe("o1");
     expect(wire.summary).toBe("abcdefgh");
     expect(wire.importance).toBe("high");
@@ -81,6 +85,8 @@ describe("observation codec", () => {
     const decoded = decodeObservation(wire);
     expect(decoded).not.toBeNull();
     expect(decoded?.summaryTokens).toBe(2); // recomputed
+    expect(decoded?.detailsLines).toBe(sampleObs().detailsLines); // round-tripped
+    expect(decoded?.detailsTokens).toBe(sampleObs().detailsTokens);
     expect(decoded?.parentNode).toBe(N_GOAL);
   });
 

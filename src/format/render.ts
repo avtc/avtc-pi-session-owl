@@ -167,15 +167,16 @@ function childCounts(node: RenderableNode): string {
   return nodes > 0 ? `${pluralize(nodes, "node", "nodes")} ${obs}` : obs;
 }
 
-/** The size fragment for an observation: line count + estimated token count of
- *  its full content (chars/4). Always shown — lets the agent gauge the cost of
- *  expanding (fullDetails) before drilling, and pick a `lines` window. */
-function observationSize(content: string): string {
-  // Lines of content: a trailing newline is a terminator, not an extra line;
-  // empty content is 0 lines.
-  const lineCount = content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
-  const tokenCount = estimateContentTokens(content);
-  return `${pluralize(lineCount, "line", "lines")} ${pluralize(tokenCount, "token", "tokens")}`;
+/** The size fragment for an observation: the verbatim-source line count +
+ *  estimated token count (detailsLines/detailsTokens, computed at capture from
+ *  the record's sourceEntryIds). Always shown — lets the agent gauge the cost
+ *  of expanding (fullDetails) before drilling, and pick a `lines` window.
+ *  Falls back to a summary-derived estimate when the counts are null (legacy
+ *  snapshots predating SD-4). */
+function observationSize(summary: string, detailsLines: number | null, detailsTokens: number | null): string {
+  const lines = detailsLines ?? (summary === "" ? 0 : summary.split("\n").length - (summary.endsWith("\n") ? 1 : 0));
+  const tokens = detailsTokens ?? estimateContentTokens(summary);
+  return `${pluralize(lines, "line", "lines")} ${pluralize(tokens, "token", "tokens")}`;
 }
 
 interface LineOptions {
@@ -211,6 +212,14 @@ export interface RenderableObservation {
   summary: string;
   importance: Observation["importance"];
   timestamp: string;
+  /** Verbatim-source size hint (frozen at capture) — the drill cost. Optional:
+   *  legacy snapshots (pre-SD-4) lack it; the render falls back to a
+   *  summary-derived estimate. */
+  detailsLines?: number;
+  detailsTokens?: number;
+  /** Source entry ids — the verbatim-source provenance, used to re-render the
+   *  details (full/lines/grep body) on demand. */
+  sourceEntryIds: readonly string[];
 }
 
 /** Render one node as a line (no indent — callers apply depth indentation). */
@@ -242,7 +251,7 @@ export function formatObservationLine(obs: RenderableObservation, options: LineO
   const content = formatContent(obs.summary);
   if (content !== "") parts.push(content);
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
-  parts.push(observationSize(obs.summary));
+  parts.push(observationSize(obs.summary, obs.detailsLines ?? null, obs.detailsTokens ?? null));
   parts.push(formatTimestamp(obs.timestamp));
   return parts.join(" · ");
 }
