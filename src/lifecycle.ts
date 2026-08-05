@@ -17,6 +17,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings } from "./config/schema.js";
+import { clearDetailsCache } from "./format/details.js";
 import { toStoredTimestamp } from "./format/render.js";
 import { stripAnsi } from "./format/sanitize.js";
 import { applyCreateNode, applyRecordObservation, applySetMeta, MUTATE_SOURCE } from "./graph/mutations.js";
@@ -148,6 +149,9 @@ export async function onSessionStart(
   // per-session (NOT globally unique), so a stale resolver would resolve wrong
   // entries. Cleared on session_shutdown.
   setEntryResolver(buildEntryResolver(ctx));
+  // Clear the per-observation details cache (entry ids are per-session — a
+  // stale render must not survive a new/resume/fork).
+  clearDetailsCache();
   await load(store);
   // Fresh-session seed: if the graph is empty (no snapshot/deltas), nGoal must
   // exist before any observation arrives. oInitialPrompt is NOT captured here
@@ -222,6 +226,7 @@ export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetCo
   terminateRegexWorker();
   // Clear the resolver so recall never reads a dead session's manager.
   clearEntryResolver();
+  clearDetailsCache();
   widget.endStage();
   widget.clearCtx();
 }
