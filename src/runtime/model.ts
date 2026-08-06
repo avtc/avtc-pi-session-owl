@@ -12,6 +12,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { log } from "../log.js";
 import { notify } from "../notify.js";
 
 export type ResolvedStageModel =
@@ -65,9 +66,18 @@ export async function resolveStageModelOrNotify(
   stageLabel: "Observer" | "Builder" | "Selector",
   modelSetting: string | null,
 ): Promise<ResolvedStageModel> {
+  log.info(`resolving ${stageLabel} model (${modelDescription(modelSetting)})`);
   const resolved = await resolveStageModel(ctx, modelSetting);
   if (!resolved.ok) {
+    log.warn(`${stageLabel} model resolve failed: ${resolved.error}`);
     notify(ctx, `${stageLabel} skipped a run: ${resolved.error}`, "warning");
+  } else {
+    log.info(`${stageLabel} model resolved`);
   }
   return resolved;
+}
+
+/** Render the model setting for a log line (null → "session default"). */
+function modelDescription(modelSetting: string | null): string {
+  return modelSetting ?? "session default";
 }

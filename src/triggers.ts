@@ -316,12 +316,19 @@ export function onTurnEnd(input: TriggerInput): void {
   const observer = observerTriggerDecision({ ...input, unobserved });
   const builder = builderTriggerDecision(withCtx);
   const selector = selectorTriggerDecision(withCtx);
+  log.debug(
+    `turn_end triggers: observer=${observer.shouldFire} (${observer.reason}); builder=${builder.shouldFire} (${builder.reason}); selector=${selector.shouldFire} (${selector.reason})`,
+  );
 
   // Acquire the lock ONCE if ANY stage fires; SKIP if busy (no queue — colliding
   // triggers batch on the next one).
   if (!observer.shouldFire && !builder.shouldFire && !selector.shouldFire) return;
   const handle = acquireOrSkip(firstFiringStage(observer.shouldFire, builder.shouldFire));
-  if (handle === null) return; // SKIP — a run is in flight; the gap batches on the next trigger
+  if (handle === null) {
+    log.debug("turn_end: run already in flight — SKIP (gap batches on next trigger)");
+    return;
+  }
+  log.info("turn_end: lock acquired, starting chained background run");
 
   const { ctx, settings } = input;
   const signal = handle.abortController.signal;
@@ -329,23 +336,36 @@ export function onTurnEnd(input: TriggerInput): void {
     try {
       if (observer.shouldFire) {
         handle.setStage("observe");
+        log.info("background run: observer start");
         await stageRuns.runObserver({ ctx, settings, signal, scope: null, unobserved });
+        log.info("background run: observer end");
       }
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        log.info("background run: aborted after observer — stopping");
+        return;
+      }
       // Re-evaluate Builder/Selector AFTER the Observer (fresh `new` nodes).
       if (builderTriggerDecision(withCtx).shouldFire) {
         handle.setStage("build");
+        log.info("background run: builder start");
         await stageRuns.runBuilder({ ctx, settings, signal, scope: null, unobserved: null });
+        log.info("background run: builder end");
       }
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        log.info("background run: aborted after builder — stopping");
+        return;
+      }
       if (selectorTriggerDecision(withCtx).shouldFire) {
         handle.setStage("select");
+        log.info("background run: selector start");
         await stageRuns.runSelector({ ctx, settings, signal, scope: null, unobserved: null });
+        log.info("background run: selector end");
       }
     } catch (err) {
       log.error("background chained run failed", err);
     } finally {
       handle.release();
+      log.info("turn_end: lock released (chained background run done)");
     }
   })();
 }

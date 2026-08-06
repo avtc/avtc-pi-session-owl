@@ -118,7 +118,9 @@ export async function compactionHook(
   // Acquire the run-lock for the whole ensure-ready gate (aborts + awaits any
   // in-flight background run via its OWN controller). Held across
   // all three sequential stages; released in the finally.
+  log.info(`compaction: acquiring lock (firstKeptEntryId=${firstKeptEntryId})`);
   const handle = await acquireForCompaction();
+  log.info("compaction: lock acquired");
   // Link Pi's compaction signal into the compaction's own controller so the
   // stages die if Pi abandons the compaction (never abort event.signal itself).
   linkAbort(event.signal, handle.abortController);
@@ -131,19 +133,24 @@ export async function compactionHook(
     // safety net the ensure-ready gate provides.
     const gap = observerCatchUpGap(ctx, firstKeptEntryId);
     if (gap.length > EMPTY_GAP) {
+      log.info(`compaction: observer catch-up start (${gap.length} entries)`);
       await stageRuns.runObserver({ ctx, pi, settings, unobserved: gap, signal, widget });
+      log.info("compaction: observer catch-up end");
     }
     if (signal.aborted) return cancelAborted(ctx);
 
     // (b) Builder — always called; it owns the internal fast-path (root view
     // under threshold → flush `new` nodes and skip LLM passes). Processing all
     // `new` nodes across the whole graph (no firstKeptEntryId filtering).
+    log.info("compaction: builder start");
     await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget });
+    log.info("compaction: builder end");
     if (signal.aborted) return cancelAborted(ctx);
 
     // (c) Selector — only selected-root; always called (the Selector owns the internal
     // fast-path; the hook does NOT gate on threshold alone).
     if (settings.renderMode === "selected-root") {
+      log.info("compaction: selector start");
       await stageRuns.runSelector({
         ctx,
         pi,
@@ -154,10 +161,12 @@ export async function compactionHook(
         todo: todo.context,
         todoBridge: todo.bridge,
       });
+      log.info("compaction: selector end");
     }
     if (signal.aborted) return cancelAborted(ctx);
 
     // Render + snapshot. The summary IS the injection.
+    log.info("compaction: rendering summary + encoding snapshot");
     const store = getGraphStore();
     const touchedFiles = extractTouchedFiles(ctx.sessionManager, firstKeptEntryId);
     const oInitialPromptObs = store.graph.observations.get(O_INITIAL_PROMPT) ?? null;
@@ -189,6 +198,7 @@ export async function compactionHook(
     return CANCEL_RESULT;
   } finally {
     handle.release();
+    log.info("compaction: lock released (hook done)");
   }
 }
 

@@ -76,7 +76,14 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
     }
     // Fire-and-forget the background trigger evaluation (Observer + Builder +
     // Selector); the handler returns immediately and never blocks the agent.
-    void onTurnEnd({ ctx, settings });
+    // Wrapped so a throw from the synchronous trigger evaluation is logged via
+    // memkeeper's own logger (Pi's emit() also catches it, but this surfaces it
+    // in the memkeeper log alongside the stage traces).
+    try {
+      onTurnEnd({ ctx, settings });
+    } catch (err) {
+      log.error("turn_end: trigger evaluation failed", err);
+    }
   });
 
   pi.on("session_before_compact", (event, ctx) => {

@@ -16,6 +16,7 @@
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { agentLoop } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import { log } from "../log.js";
 import { deltaTextOf, deltaTokens, messageEndUsage } from "./streaming-tokens.js";
 
 // --- named sentinels (no bare literals at call sites) ----------------------
@@ -131,6 +132,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     };
 
     const loop = input.loopFn ?? agentLoop;
+    log.debug("runStage: starting agentLoop stream");
     const stream = loop(input.messages, context, config, input.signal);
 
     for await (const event of stream) {
@@ -161,6 +163,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     }
 
     const messages = await stream.result();
+    log.debug(`runStage: agentLoop stream done (${usage.turns} turns)`);
     // Two-tier: the authoritative output-token count is the SUM of
     // every message_end usage.output (usage.output — per-message, correct across
     // multi-turn runs since partial.usage.output resets each message). The chars/4
