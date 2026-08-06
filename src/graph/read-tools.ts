@@ -760,7 +760,7 @@ const FIND_PARAMS = Type.Object({
   query: Type.Optional(
     Type.String({
       description:
-        "Find items by regex (JS) over node summaries and the full text of observations. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
+        "Find items by regex (JS) over node summaries and observation content. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
     }),
   ),
   includeSuperseded: Type.Optional(
@@ -884,7 +884,7 @@ interface ObsMatch extends FindMatch {
 function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof FIND_PARAMS> {
   return {
     name: FIND_TOOL,
-    description: "Search the whole memory graph by regex through node summaries and the full text of observations.",
+    description: "Search the whole memory graph by regex through node summaries and observation content.",
     label: "Find",
     parameters: FIND_PARAMS,
     async execute(_toolCallId, params) {

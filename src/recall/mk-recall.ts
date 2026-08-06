@@ -652,7 +652,7 @@ const MK_RECALL_PARAMS = Type.Object({
   query: Type.Optional(
     Type.String({
       description:
-        "Find items by regex (JS) over node summaries and the full text of observations. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
+        "Find items by regex (JS) over node summaries and observation content. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
     }),
   ),
   from: Type.Optional(
