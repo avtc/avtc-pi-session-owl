@@ -191,6 +191,37 @@ describe("Builder read tools", () => {
       expect(out).not.toContain("Pick a JWT library");
     });
 
+    it("renders the verbatim source (details) when a resolver is wired — not just the one-line summary", async () => {
+      // o5's summary 'Chose JWT for stateless auth' is one line; the verbatim
+      // source (resolved from sourceEntryId '2') is richer multi-line text.
+      const userEntry = (body: string): unknown => ({
+        id: "2",
+        type: "message",
+        parentId: null,
+        timestamp: 0,
+        message: { role: "user", content: body },
+      });
+      setEntryResolver((ids) =>
+        ids.filter((id) => id === "2").map(() => userEntry("we picked jsonwebtoken for HS256 support across the API")),
+      );
+      try {
+        const out = textOf(await callTool(tools(), "cat", { ids: ["o5"] }));
+        // the verbatim-source-only phrase surfaces — proving cat re-renders
+        // details, not the one-line summary fallback.
+        expect(out).toContain("HS256 support across the API");
+      } finally {
+        clearEntryResolver();
+      }
+    });
+
+    it("flags a source-unavailable note when the verbatim source can't render (no resolver)", async () => {
+      // no resolver wired → renderDetails returns null → the body shows the
+      // one-line summary + a source-unavailable note (not bare summary).
+      const out = textOf(await callTool(tools(), "cat", { ids: ["o5"] }));
+      expect(out).toContain("Chose JWT for stateless auth"); // summary fallback body
+      expect(out).toContain("(verbatim source unavailable)");
+    });
+
     it("shows an observation's full content + header WITHOUT sourceEntryIds", async () => {
       const out = textOf(await callTool(tools(), "cat", { ids: ["o5"] }));
       expect(out).toContain("Chose JWT for stateless auth");

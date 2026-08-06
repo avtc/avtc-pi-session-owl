@@ -14,13 +14,12 @@ import { stripAnsi } from "./sanitize.js";
 /**
  * One rendered tag-block in the Observer's XML-tagged chunk format. A block is
  * the atomic citation unit (carries entry=entryId). Within an entry's group, a
- * tool-call block (tag "C") is always immediately followed by its result block
- * (tag "R") so the pair reads as one adjacency unit.
+ * tool-call block is always immediately followed by its result block so the
+ * pair reads as one adjacency unit.
  */
 export interface RenderBlock {
   readonly text: string;
   readonly entryId: string;
-  readonly tag: "U" | "A" | "T" | "C" | "R";
 }
 
 /**
@@ -100,28 +99,28 @@ function cleanText(content: string | readonly (TextContent | { readonly type: st
 
 function uBlock(id: string, inner: string, includeEntryId: boolean): RenderBlock {
   const attr = includeEntryId ? ` entry=${id}` : "";
-  return { tag: "U", entryId: id, text: `<USER${attr}>${inner}</USER>` };
+  return { entryId: id, text: `<USER${attr}>${inner}</USER>` };
 }
 
 function aBlock(id: string, inner: string, includeEntryId: boolean): RenderBlock {
   const attr = includeEntryId ? ` entry=${id}` : "";
-  return { tag: "A", entryId: id, text: `<ASSISTANT${attr}>${inner}</ASSISTANT>` };
+  return { entryId: id, text: `<ASSISTANT${attr}>${inner}</ASSISTANT>` };
 }
 
 function tBlock(id: string, inner: string, includeEntryId: boolean): RenderBlock {
   const attr = includeEntryId ? ` entry=${id}` : "";
-  return { tag: "T", entryId: id, text: `<THINKING${attr}>${inner}</THINKING>` };
+  return { entryId: id, text: `<THINKING${attr}>${inner}</THINKING>` };
 }
 
 function cBlock(id: string, toolName: string, inner: string, includeEntryId: boolean): RenderBlock {
   const attr = includeEntryId ? ` entry=${id}` : "";
-  return { tag: "C", entryId: id, text: `<TOOLCALL:${toolName}${attr}>${inner}</TOOLCALL>` };
+  return { entryId: id, text: `<TOOLCALL:${toolName}${attr}>${inner}</TOOLCALL>` };
 }
 
 function rBlock(id: string, inner: string, isError: boolean, includeEntryId: boolean): RenderBlock {
   const entryAttr = includeEntryId ? ` entry=${id}` : "";
   const attr = isError ? `${entryAttr} ${ATTR_ERROR}` : entryAttr;
-  return { tag: "R", entryId: id, text: `<TOOLRESULT${attr}>${inner}</TOOLRESULT>` };
+  return { entryId: id, text: `<TOOLRESULT${attr}>${inner}</TOOLRESULT>` };
 }
 
 // --- per-entry group rendering ----------------------------------------------

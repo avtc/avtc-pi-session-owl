@@ -5,7 +5,7 @@
 // Builder ls/find, the Selector, mk_recall, the user /mk:* commands, and the
 // compaction summary.
 
-import { estimateContentTokens, type Node, type Observation } from "../types.js";
+import { countLines, estimateContentTokens, type Node, type Observation } from "../types.js";
 
 export type RenderViewer = "builder" | "nonBuilder";
 
@@ -174,7 +174,7 @@ function childCounts(node: RenderableNode): string {
  *  Falls back to a summary-derived estimate when the counts are null (legacy
  *  snapshots predating SD-4). */
 function observationSize(summary: string, detailsLines: number | null, detailsTokens: number | null): string {
-  const lines = detailsLines ?? (summary === "" ? 0 : summary.split("\n").length - (summary.endsWith("\n") ? 1 : 0));
+  const lines = detailsLines ?? countLines(summary);
   const tokens = detailsTokens ?? estimateContentTokens(summary);
   return `${pluralize(lines, "line", "lines")} ${pluralize(tokens, "token", "tokens")}`;
 }

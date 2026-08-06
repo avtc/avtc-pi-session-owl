@@ -230,7 +230,7 @@ export function buildTodo(ctx: TodoContext): string {
 
 /** The tail legend — the self-documenting uppercase tag forms (no entry=id:
  *  the Selector is a recall consumer, not a citator). */
-const TAIL_LEGEND_NO_E = "<USER> · <ASSISTANT> · <THINKING> · <TOOLCALL:name> · <TOOLRESULT>";
+const TAIL_LEGEND_NO_ENTRY = "<USER> · <ASSISTANT> · <THINKING> · <TOOLCALL:name> · <TOOLRESULT>";
 
 /** Full args for assembling the Selector's agentLoop-start input view. */
 export interface SelectorInputViewArgs {
@@ -287,7 +287,7 @@ export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInp
   // C. Legends.
   contextSections.push("Legend");
   contextSections.push(RENDER_LEGEND);
-  contextSections.push(TAIL_LEGEND_NO_E);
+  contextSections.push(TAIL_LEGEND_NO_ENTRY);
 
   const contextView = contextSections.join("\n\n");
 

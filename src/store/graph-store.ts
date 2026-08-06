@@ -10,7 +10,7 @@
 // mutators (apply-then-persist), then call the store to record the delta. The
 // store applies mutations ONLY during load() reconstruction (event-sourcing).
 
-import { clearDetailsCache } from "../format/details.js";
+import { clearDetailsCache, type EntryResolver } from "../format/details.js";
 import { type GraphDelta, recomputeRange } from "../graph/mutations.js";
 import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
@@ -59,7 +59,6 @@ export type StoreEntry = StoreCompactionEntry | StoreCustomEntry;
  * from the pi `SessionEntry` shape; the details renderer narrows. Returns the
  * entries that exist (missing ids are dropped — graceful cross-branch drill).
  */
-export type EntryResolver = (ids: readonly string[]) => readonly unknown[];
 
 /**
  * Narrow port over the pi ExtensionContext the store needs. Injected (not the

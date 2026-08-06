@@ -7,7 +7,7 @@
 // Tolerant-reader contract: decoders return `null` on any
 // malformed input rather than throwing — a single bad entry/details is skipped,
 // never poisoning the session. Unknown additive fields are ignored (forward-
-// compatible). `summaryTokens`/`summaryTokens` are recomputed on decode (never
+// compatible). `detailsTokens`/`summaryTokens` are recomputed on decode (never
 // trusted from the wire).
 
 import type { GraphDelta } from "../graph/mutations.js";

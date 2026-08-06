@@ -65,10 +65,10 @@ function renderDetailsText(sourceEntryIds: readonly string[], resolveEntries: En
 /**
  * Compute the verbatim-source line + token counts for an observation's
  * sourceEntryIds (the "Nlines Mtokens" drill-cost hint, frozen at capture).
- * NO cache — capture wants only the counts, and caching every observation's full
- * text at capture would hold the whole session's verbatim source in memory.
- * Recall uses renderDetails (caching, lazily). Returns null when the source is
- * unavailable (callers fall back to a summary-derived estimate).
+ * NO cache write — returns only the counts. Recall uses renderDetails
+ * (caching, lazily). Use `computeDetailsAndCache` at capture to ALSO warm the
+ * per-observation cache so the first recall is hot. Returns null when the
+ * source is unavailable (callers fall back to a summary-derived estimate).
  */
 export function computeDetailsCounts(
   sourceEntryIds: readonly string[],
@@ -76,6 +76,26 @@ export function computeDetailsCounts(
 ): { lines: number; tokens: number } | null {
   const render = renderDetailsText(sourceEntryIds, resolveEntries);
   if (render === null) return null;
+  return { lines: render.lines, tokens: render.tokens };
+}
+
+/**
+ * Compute the verbatim-source counts AND cache the rendered text keyed by the
+ * observation id — so the capture-time render (already needed for the counts) is
+ * reused at recall instead of being discarded and re-rendered lazily. Warming
+ * the cache at observation (a background stage) means the first find/cat of a
+ * session hits a hot cache (no cold-cache latency). The capture resolver
+ * resolves the same source entries the recall-time ctx resolver returns, so the
+ * cached render is identical to a recall-time render.
+ */
+export function computeDetailsAndCache(
+  obsId: string,
+  sourceEntryIds: readonly string[],
+  resolveEntries: EntryResolver,
+): { lines: number; tokens: number } | null {
+  const render = renderDetailsText(sourceEntryIds, resolveEntries);
+  if (render === null) return null;
+  detailsCache.set(obsId, render);
   return { lines: render.lines, tokens: render.tokens };
 }
 

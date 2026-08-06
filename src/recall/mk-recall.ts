@@ -41,6 +41,7 @@ import {
   grepTimeoutNote,
   intersectRegexFilters,
   runGrepExcerpts,
+  searchableText,
 } from "../graph/result-budget.js";
 import { type ContentMode, contentBlock, grepBlock, resolveContentMode } from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
@@ -412,8 +413,8 @@ function renderNodePayload(
   return lines.join("\n");
 }
 
-/** Render a node payload under a contentPattern filter (grep-tree pruning,
- *  #51): the node header shows only if its summary matches OR a descendant
+/** Render a node payload under a contentPattern filter (grep-tree pruning):
+ * the node header shows only if its summary matches OR a descendant
  *  matches; child nodes are kept when their summaries match; child observations
  *  are kept when they have contentPattern excerpts. Returns null when the whole
  *  node (header + every child) is filtered out. */
@@ -521,7 +522,7 @@ function resolveBounds(from: string | undefined, to: string | undefined): Resolv
  *
  *  `filters` are intersected over node summaries + observation content (an item
  *  passes only if it matches EVERY filter) — used to intersect `query` and
- *  `contentPattern`, both of which filter the same text scope (#51). An empty
+ *  `contentPattern`, both of which filter the same text scope. An empty
  *  filter list is the time-range browse (every node/obs passes the text gate). */
 async function buildSearchCandidates(
   target: RecallTarget,
@@ -561,7 +562,7 @@ async function buildSearchCandidates(
       ...nodeJobs.map((j) => j.node.summary),
       ...obsJobs.map((j) => {
         const d = details(j.obs.id);
-        return d === null ? j.obs.summary : `${j.obs.summary}\n${d}`;
+        return d === null ? j.obs.summary : searchableText(j.obs.summary, d);
       }),
     ];
     const filtered = await intersectRegexFilters(texts, filters);
@@ -651,7 +652,7 @@ const MK_RECALL_PARAMS = Type.Object({
   query: Type.Optional(
     Type.String({
       description:
-        "Find items by regex (JS) over node summaries and observation content. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
+        "Find items by regex (JS) over node summaries and the full text of observations. A pattern that runs too long is stopped; partial matches come back with a note to narrow the query.",
     }),
   ),
   from: Type.Optional(
@@ -835,7 +836,7 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   if (noFilters) {
     list = rootBrowseCandidates(target, includeSuperseded);
   } else {
-    // intersect query + contentPattern over summaries + content (#51: both are
+    // intersect query + contentPattern over summaries + content (both are
     // filters, never obs-only). contentPattern-alone is the degenerate single-filter
     // case (filters = [contentPattern] → nodes + obs matching it).
     const filters: RegExp[] = [];
@@ -948,7 +949,7 @@ async function executeIds(
     }
   }
 
-  // grep mode: contentPattern filters the ids target (grep-tree pruning, #51).
+  // grep mode: contentPattern filters the ids target (grep-tree pruning.
   // A node is kept if its summary matches OR a descendant obs matches (header
   // kept as the structural parent); a non-matching standalone obs is dropped;
   // non-matching child obs are dropped. Non-grep modes keep every requested id.

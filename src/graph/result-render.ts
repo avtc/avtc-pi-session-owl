@@ -225,7 +225,7 @@ async function renderGrepBudgeted(items: RenderItem[], opts: BudgetedOptions): P
   let total = 0;
   const parts: string[] = [];
   let lastEmittedId: string | null = null;
-  // Option C: emit EVERY item's header (no drop — over a query/ids result set
+  // emit EVERY item's header (no drop — over a query/ids result set
   // contentPattern is an extractor, not a filter); append excerpts only where the
   // item's content has contentPattern hits. (A contentPattern-alone search
   // pre-filters its items, so nothing here is dropped there either.)

@@ -3,7 +3,12 @@
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearDetailsCache, computeDetailsCounts, renderDetails } from "../../src/format/details.js";
+import {
+  clearDetailsCache,
+  computeDetailsAndCache,
+  computeDetailsCounts,
+  renderDetails,
+} from "../../src/format/details.js";
 import { estimateContentTokens } from "../../src/types.js";
 
 // --- fake session entries (SessionEntry-shaped) ----------------------------
@@ -150,7 +155,7 @@ describe("computeDetailsCounts", () => {
     expect(counts).not.toHaveProperty("text");
   });
 
-  it("does NOT populate the details cache (capture counts must not cache every obs)", () => {
+  it("does NOT populate the details cache (the no-cache variant)", () => {
     const e = userEntry("u1", "hello");
     const resolve = resolverFor([e]);
     computeDetailsCounts(["u1"], resolve);
@@ -159,6 +164,22 @@ describe("computeDetailsCounts", () => {
       throw new Error("cache should not have been populated by computeDetailsCounts");
     };
     expect(() => renderDetails("o8", ["u1"], throwingResolve)).toThrow();
+  });
+
+  it("computeDetailsAndCache warms the cache (capture-time pre-warm)", () => {
+    const e = userEntry("u1", "hello world");
+    const resolve = resolverFor([e]);
+    const counts = computeDetailsAndCache("oWarm", ["u1"], resolve);
+    expect(counts).not.toBeNull();
+    expect(counts).not.toHaveProperty("text");
+    // the cache is warm: renderDetails returns the text WITHOUT re-resolving
+    // (a throwing resolver would fail if it re-resolved).
+    const throwingResolve = (): readonly unknown[] => {
+      throw new Error("cache should be warm — resolver should not be called");
+    };
+    const render = renderDetails("oWarm", ["u1"], throwingResolve);
+    expect(render).not.toBeNull();
+    expect(render?.text).toContain("hello world");
   });
 
   it("returns null when no source entries resolve (source_unavailable)", () => {

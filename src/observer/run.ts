@@ -17,7 +17,7 @@ import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-wor
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
 import { buildChunks, type ChunkOptions, type RenderedChunk } from "../format/chunk.js";
-import { computeDetailsCounts, type EntryResolver } from "../format/details.js";
+import { computeDetailsAndCache, type EntryResolver } from "../format/details.js";
 import { toStoredTimestamp } from "../format/render.js";
 import { applyCreateNode, applyRecordObservation, type GraphDelta } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
@@ -288,7 +288,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         .map((id) => entryById.get(id))
         .find((entry) => entry !== NO_SOURCE_ENTRY);
       const timestamp = firstSource !== undefined ? toStoredTimestamp(firstSource.timestamp) : nowStoredTimestamp();
-      const counts = computeDetailsCounts(record.sourceEntryIds, localResolver);
+      const counts = computeDetailsAndCache(obsId, record.sourceEntryIds, localResolver);
       applyRecordObservation(graph, {
         obs: makeObservation({
           id: obsId,

@@ -13,6 +13,14 @@ import { pluralize } from "../format/render.js";
 import { estimateContentTokens } from "../types.js";
 import { runRegexTests } from "./regex-runner.js";
 
+/** Build the searchable text for an observation: its one-line summary plus the
+ *  verbatim details (so a query/contentPattern finds hits in either). When the
+ *  details render equals the summary (the source-unavailable fallback returns
+ *  the summary), the summary is emitted once — no doubled text. */
+export function searchableText(summary: string, details: string): string {
+  return details === summary ? summary : `${summary}\n${details}`;
+}
+
 /** A rendered item with an id (for the continuation cursor) and its text. */
 export interface BudgetItem {
   id: string;
