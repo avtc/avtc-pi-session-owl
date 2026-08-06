@@ -26,7 +26,30 @@ memkeeper runs three maintenance stages:
 2. **Builder** — maintains the graph: groups, merges, supersedes, and re-rates nodes so the structure stays coherent and bounded.
 3. **Selector** — curates a task-relative view (the active set) from the maintained graph.
 
-At compaction, the active set is rendered into the compaction summary that pi injects afterward — the agent's post-compaction memory. After compaction the agent continues with this summary alongside pi's own recent-context tail, which memkeeper leaves untouched.
+At compaction, the active set is rendered into the compaction summary that pi injects afterward — the agent's post-compaction memory:
+
+```
+# Memory
+Your session memory. Each item cites an id — use mk_recall for detail.
+Legend: n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete
+
+## Initial prompt
+Redesign the auth flow: move JWT validation to middleware and drop the legacy login form.
+
+## Active set
+nGoal · crit · Redesign auth flow (JWT middleware, drop legacy login) · 3nodes 1obs · Jul 28 14:30 — Jul 29 09:15
+n12 · high · Auth flow redesign · 1obs · Jul 28 14:30 — Jul 29 09:15
+n8 · high · Decisions · 5obs · Jul 28 14:30 — Jul 29 09:15
+n6 · 📦low · Old login form · 2obs · Jul 27 09:00 — Jul 27 18:00
+nIrrelevant · med · Irrelevant · 4obs · Jul 28 14:30 — Jul 29 09:15
+
+## Recently touched
+Jul 29 09:10 read src/auth/middleware.ts:1-40,120-180
+Jul 29 09:12 edit src/auth/jwt.ts
+Jul 29 09:15 write src/auth/index.ts
+```
+
+After compaction the agent continues with this summary alongside pi's own recent-context tail, which memkeeper leaves untouched.
 
 ## The memory graph
 
