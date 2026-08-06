@@ -520,6 +520,49 @@ describe("onTurnEnd chained launch", () => {
     expect(runLockInFlight()).toBe(false); // released by the chain's finally
   });
 
+  it("re-evaluates the Builder AFTER the Observer — fires only because the Observer created new nodes (starvation fix)", async () => {
+    // Pre-eval: NO new nodes → Builder's each-N-observations (N=3) does NOT fire.
+    // The stubbed Observer then adds 3 `new` nodes (as a real Observer would),
+    // and the re-eval AFTER the Observer sees them → Builder fires.
+    let builderRan = false;
+    setStageRuns({
+      runObserver: async () => {
+        addRootNode("n1", "new");
+        addRootNode("n2", "new");
+        addRootNode("n3", "new");
+      },
+      runBuilder: async () => {
+        builderRan = true;
+      },
+      runSelector: async () => {},
+    });
+    const entries: FakeEntry[] = [
+      userEntry("u1", "initial prompt"),
+      ...Array.from({ length: 20 }, (_, i) => assistantEntry(`a${i}`, "x".repeat(200))),
+    ];
+    const ctx = {
+      getContextUsage: () => ({ tokens: 0, contextWindow: 200000, percent: 0 }),
+      sessionManager: { getLeafId: () => "leaf-1", getBranch: () => entries },
+    } as unknown as ExtensionContext;
+    onTurnEnd(
+      makeInput({
+        ctx,
+        settings: {
+          ...DEFAULT_CONFIG,
+          observerThresholdTokens: 1,
+          builderMode: "each-N-observations",
+          builderEveryNObservations: 3,
+          selectorMode: "on-compaction",
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    // The Builder ran ONLY because the re-eval saw the Observer's new nodes —
+    // the pre-eval (0 new nodes) would have skipped it (the starvation bug).
+    expect(builderRan).toBe(true);
+    expect(runLockInFlight()).toBe(false);
+  });
+
   it("runs only the firing stages (e.g. Observer alone when Builder/Selector are on-compaction)", async () => {
     const order: string[] = [];
     setStageRuns({

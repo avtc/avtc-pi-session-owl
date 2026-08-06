@@ -26,12 +26,27 @@ const LOGGER_OPTIONS: Parameters<typeof createLogger>[1] = { debug: true };
 
 const baseLogger = createLogger("avtc-pi-memkeeper", LOGGER_OPTIONS);
 
+/** The methods memkeeper's logger wrapper actually uses. */
+type LogSink = Pick<typeof baseLogger, "info" | "warn" | "error" | "debug">;
+
+// `current` lets a test seam redirect calls (observe `.debug` without writing to
+// the real log file); defaults to the real baseLogger.
+let current: LogSink = baseLogger;
+
+/** Test-only: swap the underlying logger sink (pass `null` to restore the real
+ *  one). Returns the previous sink so a test can restore it. */
+export function _setBaseLoggerForTest(replacement: LogSink | null): LogSink {
+  const prev = current;
+  current = replacement ?? baseLogger;
+  return prev;
+}
+
 /** Root memkeeper logger. `debug` honors the live `debugLog` setting. */
 export const log = {
-  info: (msg: string) => baseLogger.info(msg),
-  warn: (msg: string) => baseLogger.warn(msg),
-  error: (msg: string, err?: unknown) => baseLogger.error(msg, err),
+  info: (msg: string) => current.info(msg),
+  warn: (msg: string) => current.warn(msg),
+  error: (msg: string, err?: unknown) => current.error(msg, err),
   debug: (msg: string) => {
-    if (getMemkeeperSettings().debugLog) baseLogger.debug(msg);
+    if (getMemkeeperSettings().debugLog) current.debug(msg);
   },
 };

@@ -205,6 +205,21 @@ describe("memkeeperExtension (activate wiring)", () => {
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
   });
 
+  it("turn_end does not crash when onTurnEnd itself throws (trigger-eval isolation)", () => {
+    vi.mocked(onTurnEnd).mockImplementationOnce(() => {
+      throw new Error("trigger boom");
+    });
+    const pi = makeFakePi() as FakePiWithHandlers;
+    memkeeperExtension(pi);
+    const handler = pi._handlers.get("turn_end")?.[0];
+    // The turn_end handler must not propagate the throw — Pi's emit() catches it,
+    // but the index.ts try/catch surfaces it in the memkeeper log and keeps the
+    // handler returning normally.
+    expect(() => handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx())).not.toThrow();
+    expect(captureInitialPromptIfAbsent).toHaveBeenCalledTimes(1);
+    expect(onTurnEnd).toHaveBeenCalledTimes(1);
+  });
+
   it("session_before_compact delegates to compactionHook", async () => {
     const pi = makeFakePi() as FakePiWithHandlers;
     memkeeperExtension(pi);

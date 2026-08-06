@@ -218,6 +218,33 @@ describe("runBuilder", () => {
     expect(widget.calls).toEqual([]);
   });
 
+  it("fast-path ON + over-budget: does NOT skip — runs passes (carried R21-1)", async () => {
+    seedGraph([{ id: "n3", summary: "fresh arrival" }]);
+    const cap = makeFakePi();
+    const widget = recordingWidget();
+    let passCount = 0;
+    const scripted = scriptRunStage({
+      passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }],
+    });
+    await runBuilder({
+      pi: cap.pi,
+      ctx: makeFakeCtx(),
+      // threshold 1 → the seeded root ("fresh arrival") is already over budget,
+      // so the fast-path must NOT skip even though builderSkipWithinBudget is on.
+      settings: settings({ builderRootViewThreshold: 1, builderSkipWithinBudget: true }),
+      signal: new AbortController().signal,
+      widget,
+      scope: null,
+      runStageFn: (input) => {
+        passCount += 1;
+        return scripted(input);
+      },
+    });
+    // fast-path NOT taken — the root view is over budget, so a pass ran.
+    expect(passCount).toBe(1);
+    expect(widget.calls[0]).toBe("start:build:1");
+  });
+
   it("default (builderSkipWithinBudget off): runs at least one pass even when under threshold", async () => {
     seedGraph([{ id: "n3", summary: "fresh arrival" }]);
     const cap = makeFakePi();
