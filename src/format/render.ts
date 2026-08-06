@@ -38,7 +38,6 @@ const MONTH_ABBREVIATIONS = [
 const MONTH_PART = 1;
 const DAY_PART = 2;
 const MONTH_INDEX_OFFSET = 1;
-const DATE_DAY_INDEX = 1; // local.date "<Mon> <DD>" → day is the 2nd space-part
 
 /** Collapse internal whitespace + trim so a multi-line summary/content/path
  *  cannot break the one-line render layout. */
@@ -107,14 +106,13 @@ export function formatTimestamp(stored: string): string {
 export function formatDayTime(stored: string): string {
   const local = parseLocalParts(stored);
   if (local !== null) {
-    // local.date is "<Mon> <DD>" (e.g. "Jul 28") — day is the 2nd space-part
-    const day = local.date.split(" ")[DATE_DAY_INDEX] ?? "??";
-    return `${day} ${local.time}`;
+    // local.date is "<Mon> <DD>" (e.g. "Jul 28") — month + day, no year, so the
+    // date is unambiguous without a legend (matching the node-tree format).
+    return `${local.date} ${local.time}`;
   }
   const { date, time } = parseTimestamp(stored);
-  // legacy "YYYY-MM-DD" — day is the 3rd dash-part
-  const day = date.split("-")[DAY_PART] ?? "??";
-  return `${day} ${time}`;
+  // legacy "YYYY-MM-DD" — emit as-is (no month abbreviation available)
+  return `${date} ${time}`;
 }
 
 /** Convert a raw session-entry timestamp (pi stores ISO 8601, e.g.

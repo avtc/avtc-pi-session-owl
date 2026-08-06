@@ -3,7 +3,7 @@
 
 // extractTouchedFiles + renderTouchedFiles: scans the active branch for
 // read/write/edit toolCall entries since a cut entry, excludes bash, dedups by
-// path (write dominates), and renders <DD> <HH:MM> ✎|👁 <path> oldest-first.
+// path (write dominates), and renders <Mon> <DD> <HH:MM> ✎|👁 <path> oldest-first.
 
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
@@ -41,6 +41,19 @@ function toolCallEntry(id: string, ts: string, name: string, args: Record<string
 
 function userEntry(id: string, ts: string): SessionMessageEntry {
   return msg(id, ts, { role: "user", content: "hi", timestamp: 0 });
+}
+
+function compactionEntry(id: string, ts: string): SessionEntry {
+  return {
+    type: "compaction",
+    id,
+    parentId: null,
+    timestamp: ts,
+    summary: "prior compaction",
+    firstKeptEntryId: "prior-cut",
+    tokensBefore: 0,
+    details: null,
+  };
 }
 
 function ctxWith(entries: SessionEntry[]) {
@@ -97,26 +110,39 @@ describe("extractTouchedFiles", () => {
     expect(files).toEqual([{ path: "/a.ts", timestamp: "2026-07-28T10:06:00.000Z", op: "write" }]);
   });
 
-  it("starts strictly after sinceEntryId (the cut entry excluded)", () => {
+  it("scans the compacted block BEFORE the cut (entries strictly before cutEntryId)", () => {
     const entries: SessionEntry[] = [
       toolCallEntry("e1", "2026-07-28T10:00:00Z", "write", { path: "/old.ts" }),
       toolCallEntry("e2", "2026-07-28T11:00:00Z", "write", { path: "/cut.ts" }),
       toolCallEntry("e3", "2026-07-28T12:00:00Z", "write", { path: "/new.ts" }),
     ];
+    // cutEntryId = e2 → the compacted block is entries before e2 = [e1] → /old.ts.
+    // The retained tail (e2 onward) is NOT scanned.
     const files = extractTouchedFiles(ctxWith(entries), "e2");
-    expect(files.map((f) => f.path)).toEqual(["/new.ts"]);
+    expect(files.map((f) => f.path)).toEqual(["/old.ts"]);
   });
 
-  it("scans the whole branch when sinceEntryId is not on the branch", () => {
-    // The cut id is absent (e.g. it belonged to a compacted-away block not in
-    // this active branch) → fall back to scanning from the first entry, so no
-    // file is missed. The PATH_NOT_FOUND → FIRST_ENTRY fallback.
+  it("bounds the block below at the previous compaction on the path", () => {
+    const entries: SessionEntry[] = [
+      toolCallEntry("e1", "2026-07-28T10:00:00Z", "write", { path: "/pre-compaction.ts" }),
+      compactionEntry("c1", "2026-07-28T10:30:00Z"),
+      toolCallEntry("e2", "2026-07-28T11:00:00Z", "write", { path: "/after-compaction.ts" }),
+      toolCallEntry("e3", "2026-07-28T12:00:00Z", "write", { path: "/cut.ts" }),
+    ];
+    // cutEntryId = e3 → block before e3, bounded below by compaction c1 → [e2].
+    // e1 (before the compaction) is excluded; the compaction entry itself is skipped.
+    const files = extractTouchedFiles(ctxWith(entries), "e3");
+    expect(files.map((f) => f.path)).toEqual(["/after-compaction.ts"]);
+  });
+
+  it("scans the whole block (to the current leaf) when cutEntryId is null (background)", () => {
     const entries: SessionEntry[] = [
       toolCallEntry("e1", "2026-07-28T10:00:00Z", "write", { path: "/old.ts" }),
       toolCallEntry("e2", "2026-07-28T11:00:00Z", "write", { path: "/cut.ts" }),
       toolCallEntry("e3", "2026-07-28T12:00:00Z", "write", { path: "/new.ts" }),
     ];
-    const files = extractTouchedFiles(ctxWith(entries), "gone-entry");
+    // null cut → end = branch length; no previous compaction → start = 0 → all.
+    const files = extractTouchedFiles(ctxWith(entries), NO_CUT);
     expect(files.map((f) => f.path)).toEqual(["/old.ts", "/cut.ts", "/new.ts"]);
   });
 
@@ -138,12 +164,12 @@ describe("extractTouchedFiles", () => {
 });
 
 describe("renderTouchedFiles", () => {
-  it("renders <DD> <HH:MM> ✎|👁 <path> lines", () => {
+  it("renders <Mon> <DD> <HH:MM> ✎|👁 <path> lines", () => {
     const files: TouchedFile[] = [
       { path: "/a.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "write" },
       { path: "/b.ts", timestamp: "2026-07-28T14:28:00.000Z", op: "read" },
     ];
-    expect(renderTouchedFiles(files)).toEqual(["28 14:30 ✎ /a.ts", "28 14:28 👁 /b.ts"]);
+    expect(renderTouchedFiles(files)).toEqual(["Jul 28 14:30 ✎ /a.ts", "Jul 28 14:28 👁 /b.ts"]);
   });
 
   it("renders nothing for empty input", () => {
@@ -154,7 +180,7 @@ describe("renderTouchedFiles", () => {
     const files: TouchedFile[] = [
       { path: "path/with\nnewline\tand tabs.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "write" },
     ];
-    expect(renderTouchedFiles(files)).toEqual(["28 14:30 ✎ path/with newline and tabs.ts"]);
+    expect(renderTouchedFiles(files)).toEqual(["Jul 28 14:30 ✎ path/with newline and tabs.ts"]);
   });
 
   it("renders the stored UTC instant as LOCAL time (not UTC)", () => {
@@ -165,7 +191,7 @@ describe("renderTouchedFiles", () => {
     try {
       process.env.TZ = "America/New_York"; // UTC-4 (EDT) in July
       const files: TouchedFile[] = [{ path: "/a.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "write" }];
-      expect(renderTouchedFiles(files)).toEqual(["28 10:30 ✎ /a.ts"]);
+      expect(renderTouchedFiles(files)).toEqual(["Jul 28 10:30 ✎ /a.ts"]);
     } finally {
       process.env.TZ = prevTz;
     }

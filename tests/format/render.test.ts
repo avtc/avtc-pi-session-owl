@@ -32,17 +32,17 @@ describe("formatTimestamp", () => {
 });
 
 describe("formatDayTime", () => {
-  it("renders a stored instant as <DD> <HH:MM> (day-number + time, no month)", () => {
-    expect(formatDayTime("2026-07-28T14:30:00.000Z")).toBe("28 14:30");
+  it("renders a stored instant as <Mon> <DD> <HH:MM> (month + day + time)", () => {
+    expect(formatDayTime("2026-07-28T14:30:00.000Z")).toBe("Jul 28 14:30");
   });
 
-  it("maps day + time without month (locale-independent)", () => {
-    expect(formatDayTime("2026-01-05T08:00:00.000Z")).toBe("05 08:00");
-    expect(formatDayTime("2026-12-31T23:59:00.000Z")).toBe("31 23:59");
+  it("maps month + day + time (locale-independent English abbreviations)", () => {
+    expect(formatDayTime("2026-01-05T08:00:00.000Z")).toBe("Jan 05 08:00");
+    expect(formatDayTime("2026-12-31T23:59:00.000Z")).toBe("Dec 31 23:59");
   });
 
   it("falls back for a legacy non-ISO value", () => {
-    expect(formatDayTime("2026-07-28 14:30")).toBe("28 14:30");
+    expect(formatDayTime("2026-07-28 14:30")).toBe("2026-07-28 14:30");
   });
 });
 
