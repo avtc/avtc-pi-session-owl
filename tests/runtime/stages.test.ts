@@ -3,6 +3,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { makeObserverRun, makeSelectorRun } from "../../src/runtime/stages.js";
 import type { SelectorRunInput } from "../../src/selector/run.js";
 import { onTurnEnd, setStageRuns } from "../../src/triggers.js";
@@ -50,29 +51,10 @@ describe("makeObserverRun (Observer stage wiring)", () => {
     onTurnEnd({
       ctx,
       settings: {
+        ...DEFAULT_CONFIG,
         enabled: true,
-        defaultModel: null,
-        observerModel: null,
         observerMode: "on-threshold",
         observerThresholdTokens: 1,
-        observerIncludeThinking: false,
-        observerToolBlockCapTokens: null,
-        builderModel: null,
-        builderMode: "on-compaction",
-        builderEveryNObservations: 40,
-        builderSessionContextThresholdTokens: 200000,
-        builderRootViewThreshold: 8000,
-        builderSkipWithinBudget: false,
-        maxBuilderPasses: 5,
-        selectorModel: null,
-        selectorMode: "on-compaction",
-        selectorSessionContextThresholdTokens: 200000,
-        selectorRootViewThreshold: 4000,
-        maxSelectorPasses: 5,
-        renderMode: "selected-root",
-        commandResultCap: 50,
-        findTimeoutMs: 5000,
-        toolResultTokenBudget: 6000,
       },
     });
 

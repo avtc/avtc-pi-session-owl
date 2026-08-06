@@ -5,6 +5,7 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { setClock } from "../../src/graph/mutations.js";
 import { type ObserverRunInput, runObserver } from "../../src/observer/run.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
@@ -120,29 +121,10 @@ function makeArgs(opts: {
     ctx: opts.ctx,
     pi: opts.pi,
     settings: {
+      ...DEFAULT_CONFIG,
       enabled: true,
-      defaultModel: null,
-      observerModel: null,
       observerMode: "on-threshold",
       observerThresholdTokens: opts.thresholdTokens ?? 100000,
-      observerIncludeThinking: false,
-      observerToolBlockCapTokens: null,
-      builderModel: null,
-      builderMode: "on-compaction",
-      builderEveryNObservations: 40,
-      builderSessionContextThresholdTokens: 200000,
-      builderRootViewThreshold: 8000,
-      builderSkipWithinBudget: false,
-      maxBuilderPasses: 5,
-      selectorModel: null,
-      selectorMode: "on-compaction",
-      selectorSessionContextThresholdTokens: 200000,
-      selectorRootViewThreshold: 4000,
-      maxSelectorPasses: 5,
-      renderMode: "selected-root",
-      commandResultCap: 50,
-      findTimeoutMs: 5000,
-      toolResultTokenBudget: 6000,
     },
     unobserved: opts.unobserved,
     signal: new AbortController().signal,

@@ -46,6 +46,9 @@ export interface MemkeeperConfig {
    *  text. Overflow pages with afterId (terse list) or stops expansion
    *  (fullDetails/grep); a single-observation target is unbudgeted in any mode.*/
   toolResultTokenBudget: number;
+  /** Write debug-level trace logs (trigger decisions, per-stage stream start/end)
+   *  to the log file. Off by default — enable to diagnose a stall. */
+  debugLog: boolean;
   // Observer
   observerModel: string | null;
   observerThresholdTokens: number;
@@ -84,6 +87,7 @@ const DEFAULT_FIND_TIMEOUT_MS = 30_000;
 const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
 const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
 const DEFAULT_FAST_PATH = false;
+const DEBUG_LOG_DEFAULT = false;
 
 export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   // General
@@ -96,6 +100,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   commandResultCap: 50,
   findTimeoutMs: DEFAULT_FIND_TIMEOUT_MS,
   toolResultTokenBudget: DEFAULT_TOOL_RESULT_TOKEN_BUDGET,
+  debugLog: DEBUG_LOG_DEFAULT,
   // Observer
   observerModel: NO_MODEL,
   observerThresholdTokens: 4000,
@@ -251,6 +256,12 @@ const SETTINGS: readonly SettingSchema[] = [
     min: MIN_TOOL_RESULT_TOKEN_BUDGET,
     presets: TOOL_RESULT_TOKEN_BUDGET_PRESETS,
   }),
+  setting("debugLog", {
+    label: "Debug log",
+    description: "Write detailed trace logs to the log file.",
+    type: "boolean",
+    defaultValue: DEFAULT_CONFIG.debugLog,
+  }),
 
   // ── Observer ───────────────────────────────────────────────────────────────
   setting("observerModel", {
@@ -378,6 +389,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "commandResultCap",
       "findTimeoutMs",
       "toolResultTokenBudget",
+      "debugLog",
     ],
   },
   {

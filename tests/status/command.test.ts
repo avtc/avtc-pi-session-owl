@@ -7,7 +7,7 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import type { MemkeeperConfig } from "../../src/config/schema.js";
+import { DEFAULT_CONFIG, type MemkeeperConfig } from "../../src/config/schema.js";
 import { NO_OBSERVATION_CONTENT, renderRootViewFromRoots } from "../../src/graph/read-tools.js";
 import { buildStatusReport, gatherStatusInput, runMkStatus, type StatusInput } from "../../src/status/command.js";
 import type { UsageLedger } from "../../src/store/codecs.js";
@@ -17,32 +17,7 @@ import type { Node, Observation, ObsId } from "../../src/types.js";
 import { estimateContentTokens } from "../../src/types.js";
 
 function settings(over: Partial<MemkeeperConfig>): MemkeeperConfig {
-  return {
-    enabled: true,
-    defaultModel: null,
-    observerModel: null,
-    observerMode: "on-threshold",
-    observerThresholdTokens: 4000,
-    observerIncludeThinking: false,
-    observerToolBlockCapTokens: null,
-    builderModel: null,
-    builderMode: "on-compaction",
-    builderEveryNObservations: 40,
-    builderSessionContextThresholdTokens: 200000,
-    builderRootViewThreshold: 8000,
-    builderSkipWithinBudget: false,
-    maxBuilderPasses: 5,
-    selectorModel: null,
-    selectorMode: "on-compaction",
-    selectorSessionContextThresholdTokens: 200000,
-    selectorRootViewThreshold: 4000,
-    maxSelectorPasses: 5,
-    renderMode: "selected-root",
-    commandResultCap: 50,
-    findTimeoutMs: 5000,
-    toolResultTokenBudget: 6000,
-    ...over,
-  };
+  return { ...DEFAULT_CONFIG, ...over };
 }
 
 function node(over: Partial<Node>): Node {
