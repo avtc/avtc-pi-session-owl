@@ -8,7 +8,13 @@ import {
   renderTouchedFiles,
   type TouchedFilesContext,
 } from "../compaction/touched-files.js";
-import { buildChunks, type ChunkOptions, hasAssistantText, renderAssistantTextBlock } from "../format/chunk.js";
+import {
+  BLOCK_SEP,
+  buildChunks,
+  type ChunkOptions,
+  hasAssistantText,
+  renderAssistantTextBlock,
+} from "../format/chunk.js";
 import { formatNodeLine, NON_BUILDER, RENDER_LEGEND } from "../format/render.js";
 import { cloneNode, cloneObservation } from "../graph/clone.js";
 import { nodeLineOptions, orderedNonObsoleteRoots } from "../graph/read-tools.js";
@@ -159,7 +165,7 @@ export function buildTail(ctx: TailContext, boundary: TailBoundary, options: Chu
 /** Join a slice of entries' rendered XML-tag chunks into one text block. */
 function renderTail(entries: readonly SessionEntry[], options: ChunkOptions): string {
   const chunks = buildChunks(entries, options);
-  return chunks.map((chunk) => chunk.text).join("");
+  return chunks.map((chunk) => chunk.text).join(BLOCK_SEP);
 }
 
 /** Index of the last user message that is NOT an avtc-pi-unstuck auto-injection. */

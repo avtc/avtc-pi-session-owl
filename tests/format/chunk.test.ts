@@ -341,7 +341,7 @@ describe("buildChunks", () => {
     });
     expect(chunks).toHaveLength(1);
     const only = chunks[0];
-    expect(only.text).toBe("<USER entry=u1>hello world</USER><USER entry=u2>bye now</USER>");
+    expect(only.text).toBe("<USER entry=u1>hello world</USER>\n<USER entry=u2>bye now</USER>");
     expect(only.allowedIds).toEqual(new Set(["u1", "u2"]));
     // lastEntryId = the highest-branch-position entry in the chunk (blocks in entry order)
     expect(only.lastEntryId).toBe("u2");
@@ -406,7 +406,7 @@ describe("buildChunks", () => {
       includeEntryId: true,
     });
     expect(chunks[0].text).toBe(
-      "<ASSISTANT entry=a1>step 1</ASSISTANT><THINKING entry=a1>plan</THINKING><TOOLCALL:ls entry=a1>{}</TOOLCALL><TOOLRESULT entry=r1>out</TOOLRESULT><USER entry=u2>next</USER>",
+      "<ASSISTANT entry=a1>step 1</ASSISTANT>\n<THINKING entry=a1>plan</THINKING>\n<TOOLCALL:ls entry=a1>{}</TOOLCALL>\n<TOOLRESULT entry=r1>out</TOOLRESULT>\n<USER entry=u2>next</USER>",
     );
   });
 
@@ -520,7 +520,7 @@ describe("buildChunks: entry-bounded (whole entry never split)", () => {
       includeEntryId: true,
     });
     expect(chunks[0].text).toBe(
-      "<TOOLCALL:ls entry=a1>{}</TOOLCALL><TOOLRESULT entry=r1>ls-out</TOOLRESULT><TOOLCALL:read entry=a1>{}</TOOLCALL><TOOLRESULT entry=r2>read-out</TOOLRESULT>",
+      "<TOOLCALL:ls entry=a1>{}</TOOLCALL>\n<TOOLRESULT entry=r1>ls-out</TOOLRESULT>\n<TOOLCALL:read entry=a1>{}</TOOLCALL>\n<TOOLRESULT entry=r2>read-out</TOOLRESULT>",
     );
   });
 

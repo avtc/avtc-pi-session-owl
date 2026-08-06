@@ -9,7 +9,7 @@
 // ctx.ui.setWidget (event-driven, NO timer).
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
-import type { ContextUsage, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
 import { BUILDER } from "../format/render.js";
@@ -87,6 +87,8 @@ interface TrackerState {
   selectedCount: number | null;
   selectedViewTokens: number | null;
   selectedBaseline: { count: number; viewTokens: number } | null;
+  agentContextTokens: number | null;
+  agentModelId: string | null;
 }
 
 /**
@@ -100,12 +102,14 @@ export interface ProgressTracker extends StageController, TrackerState {
    *  tool_execution_end, so this reuses the cache across message_update deltas
    *  (invalidated on startStage and tool_execution_end). */
   rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number };
-  /** Cached context-usage read for the widget render. `getContextUsage()`
-   *  re-tokenizes the whole message history (expensive), but the context only
-   *  changes at message/turn boundaries — not per streaming token — so this
-   *  reuses the cache across message_update deltas (invalidated on startStage,
-   *  message_start, tool_execution_end, turn_end). */
-  contextUsage(ctx: ExtensionContext): ContextUsage | undefined;
+  /** The background agent's latest context-window consumption (its last
+   *  `message_end` usage.totalTokens) — the per-agent context-usage figure the
+   *  widget surfaces (NOT the main session's usage). Null until the first
+   *  message_end of the stage. */
+  agentContextTokens: number | null;
+  /** The background agent's model id (`message.model` from its last message_end)
+   *  — used to resolve the context-window denominator via the model registry. */
+  agentModelId: string | null;
 }
 
 // --- streaming-token helpers (two-tier) -------------------------------------
@@ -120,7 +124,6 @@ export function createTracker(): ProgressTracker {
     fallbackTokens: number;
     primaryTokens: number;
     cachedRoots: { count: number; viewTokens: number } | null;
-    cachedContext: ContextUsage | undefined | null; // null = not yet read; undefined = ctx returned undefined
   } = {
     stage: null,
     pass: 1,
@@ -131,10 +134,11 @@ export function createTracker(): ProgressTracker {
     selectedCount: null,
     selectedViewTokens: null,
     selectedBaseline: null,
+    agentContextTokens: null,
+    agentModelId: null,
     fallbackTokens: 0,
     primaryTokens: 0,
     cachedRoots: null,
-    cachedContext: null,
   };
 
   return {
@@ -165,6 +169,12 @@ export function createTracker(): ProgressTracker {
     get selectedBaseline() {
       return state.selectedBaseline;
     },
+    get agentContextTokens() {
+      return state.agentContextTokens;
+    },
+    get agentModelId() {
+      return state.agentModelId;
+    },
     startStage(stage, init) {
       state.stage = stage;
       state.pass = init?.pass ?? 1;
@@ -179,8 +189,9 @@ export function createTracker(): ProgressTracker {
       state.selectedCount = null;
       state.selectedViewTokens = null;
       state.selectedBaseline = null;
+      state.agentContextTokens = null;
+      state.agentModelId = null;
       state.cachedRoots = null;
-      state.cachedContext = null;
     },
     setPass(pass) {
       state.pass = pass;
@@ -203,14 +214,6 @@ export function createTracker(): ProgressTracker {
       if (state.cachedRoots === null) state.cachedRoots = rootViewCounts(graph);
       return state.cachedRoots;
     },
-    contextUsage(ctx) {
-      // null = not yet read this turn; read once then reuse across message_update
-      // deltas (getContextUsage re-tokenizes the whole message history). The cache
-      // is invalidated on message boundaries (message_start/turn_end),
-      // tool_execution_end, and startStage — never on message_update.
-      if (state.cachedContext === null) state.cachedContext = ctx.getContextUsage();
-      return state.cachedContext;
-    },
     onEvent(event) {
       if (event.type === "message_end") {
         const u = messageEndUsage(event.message);
@@ -219,12 +222,15 @@ export function createTracker(): ProgressTracker {
           state.usage.output += u.output;
           state.usage.cacheRead += u.cacheRead;
           state.usage.cost += u.cost;
+          // the agent's context-window consumption for this message (the per-agent
+          // context-usage figure the widget surfaces — NOT the main session's).
+          state.agentContextTokens = u.totalTokens;
         }
-        // a message finalized → context tokens changed; invalidate the cache.
-        state.cachedContext = null;
+        // the model id (provider/id) to resolve the context-window denominator.
+        const model = (event.message as { model?: string }).model;
+        if (typeof model === "string" && model.length > 0) state.agentModelId = model;
       } else if (event.type === "turn_end") {
         state.usage.turns += 1;
-        state.cachedContext = null;
       } else if (event.type === "message_update") {
         // primary tier (provider streams usage): guard > tokensSoFar so a smaller
         // per-message value (usage.output resets each message) never moves it back.
@@ -241,10 +247,6 @@ export function createTracker(): ProgressTracker {
       } else if (event.type === "tool_execution_end") {
         // a mutate happened → the cached root view is stale; rebuild on next snapshot.
         state.cachedRoots = null;
-        state.cachedContext = null;
-      } else if (event.type === "message_start") {
-        // a new message added → context tokens changed; invalidate the cache.
-        state.cachedContext = null;
       }
     },
   };
@@ -274,6 +276,19 @@ function currentRootBaseline(): Baseline {
   return { obsCount: graph.observations.size, rootsCount: roots.count, rootsViewTokens: roots.viewTokens };
 }
 
+/** Resolve the context-window denominator for the background agent's model id
+ *  (a `provider/id` string) via the model registry. Returns null when the model
+ *  id is absent or the registry has no contextWindow for it. */
+function resolveContextWindow(ctx: ExtensionContext, modelId: string | null): number | null {
+  if (modelId === null) return null;
+  const slash = modelId.indexOf("/");
+  if (slash <= 0) return null;
+  const provider = modelId.slice(0, slash);
+  const id = modelId.slice(slash + 1);
+  const model = ctx.modelRegistry.find(provider, id);
+  return model?.contextWindow ?? null;
+}
+
 /** Build the render snapshot from the tracker + live store/ctx. */
 export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): WidgetSnapshot {
   const settings = getMemkeeperSettings();
@@ -284,11 +299,13 @@ export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): 
   const roots = tracker.rootViewCounts(graph);
   const baseline = tracker.baseline ?? { obsCount: 0, rootsCount: 0, rootsViewTokens: 0 };
   const obsCount = graph.observations.size;
-  const ctxUsage = tracker.contextUsage(ctx);
-  // both context fields are null when getContextUsage() is undefined (the window
-  // is unknown too); render shows `?` alone rather than `?/0` (never 0/NaN).
-  const contextTokens = ctxUsage === undefined ? null : ctxUsage.tokens;
-  const contextWindow = ctxUsage === undefined ? null : ctxUsage.contextWindow;
+  // Context usage = the BACKGROUND agent's consumption (its last message_end
+  // usage.totalTokens), NOT the main session's getContextUsage() — so the widget
+  // reflects the current stage's progress, not the ever-growing main session.
+  // The window denominator resolves from the model registry via the agent's
+  // model id; both are null until the first message_end of the stage.
+  const contextTokens = tracker.agentContextTokens;
+  const contextWindow = resolveContextWindow(ctx, tracker.agentModelId);
 
   // selected section: shown only in selected-root renderMode AND during Select.
   // deltas measured from the working-copy baseline (first push of the stage),
@@ -392,6 +409,11 @@ export function initWidget(): WidgetController {
     },
     endStage() {
       tracker.endStage();
+      // Re-publish so the line hides when the stage dropped to null — a run
+      // ends with no further events, so without this the last stage's line
+      // (e.g. the Selector's final `N selected`) would persist forever. The
+      // onEvent path coalesces its own renders; endStage is one-shot.
+      renderWidget(tracker, ctxRef);
     },
     onEvent(event) {
       tracker.onEvent(event);

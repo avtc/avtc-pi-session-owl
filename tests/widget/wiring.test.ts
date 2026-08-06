@@ -72,14 +72,32 @@ describe("initWidget wiring", () => {
     const widget = initWidget();
     const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
-    // show first, then endStage → render hides
+    // show first, then endStage → render hides (endStage itself republishes a
+    // hide, so the subsequent render() is a redundant re-hide)
     widget.startStage("observe");
     widget.render();
     widget.endStage();
     widget.render();
-    expect(calls).toHaveLength(2);
-    expect(calls[1]?.key).toBe(WIDGET_KEY);
-    expect(calls[1]?.content).toBeUndefined();
+    // every call after endStage hides (content undefined)
+    const hideCalls = calls.filter((c) => c.content === undefined);
+    expect(hideCalls.length).toBeGreaterThanOrEqual(1);
+    expect(hideCalls.every((c) => c.key === WIDGET_KEY)).toBe(true);
+  });
+
+  it("endStage() republishes so the line hides when the stage drops to null (no follow-up render needed)", () => {
+    // A run ends with no further events; without endStage republishing, the
+    // last stage's line (e.g. the Selector's final `N selected`) persists.
+    const widget = initWidget();
+    const { ctx, calls } = makeCtx(null);
+    widget.setCtx(ctx);
+    widget.startStage("select");
+    widget.render(); // shown (stage active)
+    const shownCount = calls.length;
+    widget.endStage(); // must itself hide — no explicit render() follows
+    expect(calls.length).toBeGreaterThan(shownCount);
+    const hideCall = calls[calls.length - 1];
+    expect(hideCall?.key).toBe(WIDGET_KEY);
+    expect(hideCall?.content).toBeUndefined();
   });
 
   it("render() is a no-op in non-TUI modes (rpc/json/print)", () => {

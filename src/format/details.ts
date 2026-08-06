@@ -18,7 +18,7 @@
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { countLines, estimateContentTokens } from "../types.js";
-import { type ChunkOptions, renderBlocks } from "./chunk.js";
+import { BLOCK_SEP, type ChunkOptions, renderBlocks } from "./chunk.js";
 
 /** A resolved details render: the verbatim source text + its size hints. */
 export interface DetailsRender {
@@ -58,7 +58,7 @@ function renderDetailsText(sourceEntryIds: readonly string[], resolveEntries: En
   if (entries.length === 0) return null; // source_unavailable
   const text = renderBlocks(entries, DETAILS_OPTIONS)
     .map((block) => block.text)
-    .join("");
+    .join(BLOCK_SEP);
   if (text.length === 0) return null; // resolved but nothing renderable
   return { text, lines: countLines(text), tokens: estimateContentTokens(text) };
 }

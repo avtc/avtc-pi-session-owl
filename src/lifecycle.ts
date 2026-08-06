@@ -56,20 +56,86 @@ export function toStoreContext(pi: ExtensionAPI, ctx: ExtensionContext): StoreCo
   };
 }
 
+/** A lazily-built branch index for the entry resolver: entry id → branch
+ *  position (for ordering) and toolCallId → entry-id maps for both call and
+ *  result entries (so a details render that cites only one side of a tool pair
+ *  pulls in its sibling — the verbatim source reads as complete call+result
+ *  units, never an orphan). */
+interface BranchToolIndex {
+  position: Map<string, number>;
+  callEntryIdByToolCallId: Map<string, string>;
+  resultEntryIdByToolCallId: Map<string, string>;
+}
+
 /**
  * Build the session-entry resolver from the active session's manager. Resolves
  * source-entry ids to their entries (for verbatim-source details re-rendering);
  * missing ids are dropped (graceful cross-branch drill — the summary still
  * renders, only the verbatim source is gone). `null` outside an active session.
  */
-export function buildEntryResolver(ctx: ExtensionContext): (ids: readonly string[]) => readonly unknown[] {
+export function buildEntryResolver(ctx: ExtensionContext): EntryResolver {
+  // Lazily-built branch index: entry id → branch position (for ordering) and a
+  // toolCallId → entry-id map for both call and result entries (so a details
+  // render that cites only one side of a tool pair pulls in its sibling — the
+  // verbatim source must read as complete call+result units, never an orphan).
+  // Built once per resolver (per session); the branch is fixed for a session.
+  let index: BranchToolIndex | null = null;
+  const buildIndex = (): BranchToolIndex => {
+    if (index !== null) return index;
+    const branch = ctx.sessionManager.getBranch(ctx.sessionManager.getLeafId() ?? undefined);
+    const position = new Map<string, number>();
+    const callEntryIdByToolCallId = new Map<string, string>();
+    const resultEntryIdByToolCallId = new Map<string, string>();
+    branch.forEach((entry, pos) => {
+      if (entry.id !== undefined) position.set(entry.id, pos);
+      if (entry.type !== "message") return;
+      const message = entry.message;
+      if (typeof message !== "object" || message === null) return;
+      if (message.role === "assistant" && Array.isArray(message.content)) {
+        for (const part of message.content) {
+          if (typeof part !== "object" || part === null) continue;
+          const typed = part as { type?: string; id?: string };
+          if (typed.type === "toolCall" && typeof typed.id === "string") {
+            callEntryIdByToolCallId.set(typed.id, entry.id);
+          }
+        }
+      } else if (message.role === "toolResult" && typeof message.toolCallId === "string") {
+        resultEntryIdByToolCallId.set(message.toolCallId, entry.id);
+      }
+    });
+    index = { position, callEntryIdByToolCallId, resultEntryIdByToolCallId };
+    return index;
+  };
   return (ids) => {
-    const out: unknown[] = [];
+    const { position, callEntryIdByToolCallId, resultEntryIdByToolCallId } = buildIndex();
+    // Start from the cited ids, then augment with paired tool siblings so a
+    // details render never shows an orphan call/result.
+    const wanted = new Set<string>(ids);
     for (const id of ids) {
       const entry = ctx.sessionManager.getEntry(id);
-      if (entry !== undefined) out.push(entry);
+      if (entry === undefined || entry.type !== "message") continue;
+      const message = entry.message;
+      if (typeof message !== "object" || message === null) continue;
+      if (message.role === "assistant" && Array.isArray(message.content)) {
+        for (const part of message.content) {
+          if (typeof part !== "object" || part === null) continue;
+          const typed = part as { type?: string; id?: string };
+          if (typed.type === "toolCall" && typeof typed.id === "string") {
+            const resultId = resultEntryIdByToolCallId.get(typed.id);
+            if (resultId !== undefined) wanted.add(resultId);
+          }
+        }
+      } else if (message.role === "toolResult" && typeof message.toolCallId === "string") {
+        const callId = callEntryIdByToolCallId.get(message.toolCallId);
+        if (callId !== undefined) wanted.add(callId);
+      }
     }
-    return out;
+    // Resolve + dedupe in branch order (renderGroups pairs correctly only when
+    // the entry list is in branch order).
+    return [...wanted]
+      .sort((a, b) => (position.get(a) ?? Number.POSITIVE_INFINITY) - (position.get(b) ?? Number.POSITIVE_INFINITY))
+      .map((id) => ctx.sessionManager.getEntry(id))
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
   };
 }
 

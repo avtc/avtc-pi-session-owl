@@ -15,9 +15,14 @@ import { buildSnapshot, createTracker, type ProgressTracker } from "../../src/wi
 
 type CtxUsage = { tokens: number | null; contextWindow: number } | undefined;
 
-function makeCtx(usage: CtxUsage): ExtensionContext {
+function makeCtx(_usage: CtxUsage): ExtensionContext {
+  // contextTokens/window now come from the background agent's message_end usage
+  // + model registry (NOT the main session's getContextUsage); the usage arg is
+  // retained for call-site symmetry but unused.
   return {
-    getContextUsage: () => usage,
+    modelRegistry: {
+      find: (_provider: string, _id: string) => ({ contextWindow: 262_000 }),
+    },
   } as unknown as ExtensionContext;
 }
 
@@ -67,10 +72,24 @@ describe("buildSnapshot", () => {
     expect(snap.roots.threshold).toBe(40_000); // DEFAULT_CONFIG.builderRootViewThreshold
   });
 
-  it("contextTokens null (right after compaction) → contextTokens null, window present", () => {
+  it("contextTokens + window track the BACKGROUND agent's message_end usage (not the main session)", () => {
     tracker.startStage("observe");
-    const snap = buildSnapshot(tracker, makeCtx({ tokens: null, contextWindow: 262_000 }));
+    // before any message_end → both null (no context figure yet)
+    let snap = buildSnapshot(tracker, makeCtx(undefined));
     expect(snap.contextTokens).toBeNull();
+    expect(snap.contextWindow).toBeNull();
+    // a message_end carries the agent's totalTokens + model id → both surface
+    tracker.onEvent({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        model: "anthropic/claude",
+        usage: { input: 0, output: 0, cacheRead: 0, totalTokens: 66_000, cost: 0 },
+      },
+    } as unknown as AgentEvent);
+    snap = buildSnapshot(tracker, makeCtx(undefined));
+    expect(snap.contextTokens).toBe(66_000);
     expect(snap.contextWindow).toBe(262_000);
   });
 
@@ -147,21 +166,20 @@ describe("buildSnapshot", () => {
     expect(refreshed.roots.count).toBe(1);
   });
 
-  it("caches getContextUsage across message_update deltas (re-read only on message boundaries)", () => {
-    // Perf: getContextUsage() re-tokenizes the whole message history, but the
-    // context only changes at message/turn boundaries — not per streaming token.
-    // So buildSnapshot must reuse the cached read for message_update deltas.
+  it("getContextUsage() is never read (context tracks the background agent, not the main session)", () => {
+    // The widget's context figure is the background agent's message_end
+    // usage.totalTokens, NOT the main session's getContextUsage(). So
+    // message_update deltas + message_end do NOT call getContextUsage at all.
     let reads = 0;
     const countingCtx = {
       getContextUsage: () => {
         reads += 1;
         return { tokens: 1234, contextWindow: 262_000 };
       },
+      modelRegistry: { find: () => ({ contextWindow: 262_000 }) },
     } as unknown as ExtensionContext;
     tracker.startStage("build");
-    buildSnapshot(tracker, countingCtx); // first read
-    expect(reads).toBe(1);
-    // several streaming deltas must NOT re-read context usage
+    buildSnapshot(tracker, countingCtx);
     for (let i = 0; i < 5; i += 1) {
       tracker.onEvent({
         type: "message_update",
@@ -169,17 +187,16 @@ describe("buildSnapshot", () => {
       } as unknown as AgentEvent);
       buildSnapshot(tracker, countingCtx);
     }
-    expect(reads).toBe(1); // still cached — no re-read across message_update
-    // a message_end (message finalized) invalidates → next build re-reads
     tracker.onEvent({
       type: "message_end",
-      message: { role: "assistant", content: [], usage: { input: 0, output: 0, cacheRead: 0, cost: 0 } },
+      message: {
+        role: "assistant",
+        content: [],
+        model: "anthropic/claude",
+        usage: { input: 0, output: 0, cacheRead: 0, totalTokens: 5000, cost: 0 },
+      },
     } as unknown as AgentEvent);
     buildSnapshot(tracker, countingCtx);
-    expect(reads).toBe(2);
-    // a message_start (new message) also invalidates
-    tracker.onEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as AgentEvent);
-    buildSnapshot(tracker, countingCtx);
-    expect(reads).toBe(3);
+    expect(reads).toBe(0); // the main session's getContextUsage is never consulted
   });
 });

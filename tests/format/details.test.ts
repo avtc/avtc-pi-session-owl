@@ -77,7 +77,7 @@ describe("renderDetails", () => {
     const out = renderDetails("o1", ["c1", "r1"], resolve);
     expect(out).not.toBeNull();
     // toolcall+result paired (interleaved), full verbatim, NO entry= attribute (recall consumer)
-    expect(out?.text).toBe('<TOOLCALL:bash>{"command":"npm test"}</TOOLCALL><TOOLRESULT>all passing</TOOLRESULT>');
+    expect(out?.text).toBe('<TOOLCALL:bash>{"command":"npm test"}</TOOLCALL>\n<TOOLRESULT>all passing</TOOLRESULT>');
   });
 
   it("includes thinking and never truncates (full verbatim, independent of observer config)", () => {
@@ -142,9 +142,9 @@ describe("computeDetailsAndCache (capture-time pre-warm)", () => {
     const resolve = resolverFor([call, result]);
     const counts = computeDetailsAndCache("oCounts", ["c1", "r1"], resolve);
     expect(counts).not.toBeNull();
-    // text is '<TOOLCALL:bash>{...}</TOOLCALL><TOOLRESULT>line a\nline b</TOOLRESULT>'
-    const expectedText = '<TOOLCALL:bash>{"command":"npm test"}</TOOLCALL><TOOLRESULT>line a\nline b</TOOLRESULT>';
-    expect(counts?.lines).toBe(2); // two lines in the result text
+    // text is '<TOOLCALL:bash>{...}</TOOLCALL>\n<TOOLRESULT>line a\nline b</TOOLRESULT>' (blocks newline-separated)
+    const expectedText = '<TOOLCALL:bash>{"command":"npm test"}</TOOLCALL>\n<TOOLRESULT>line a\nline b</TOOLRESULT>';
+    expect(counts?.lines).toBe(3); // TOOLCALL line + TOOLRESULT's two lines
     expect(counts?.tokens).toBe(estimateContentTokens(expectedText));
     // computeDetailsAndCache returns only counts (no text field)
     expect(counts).not.toHaveProperty("text");

@@ -65,6 +65,9 @@ export function isRenderableEntry(entry: SessionEntry): boolean {
 const TRUNCATION_MARKER = "[…truncated…]";
 const THINKING_PREFIX_PATTERN = /^Thinking:\s*/;
 const ATTR_ERROR = "error";
+/** Separator between rendered blocks (each tag on its own line — readability for
+ *  the Observer LLM and recall consumers; the inner text is already cleaned). */
+export const BLOCK_SEP = "\n";
 
 // --- sanitization & truncation ---------------------------------------------
 
@@ -310,7 +313,7 @@ export function buildChunks(entries: readonly SessionEntry[], options: ChunkOpti
 
   const flush = (): void => {
     if (current.length === 0) return;
-    const text = current.map((block) => block.text).join("");
+    const text = current.map((block) => block.text).join(BLOCK_SEP);
     const allowedIds = new Set(current.map((block) => block.entryId));
     const lastEntryId = current[current.length - 1]?.entryId ?? "";
     chunks.push({ text, allowedIds, lastEntryId });

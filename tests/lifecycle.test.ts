@@ -65,6 +65,49 @@ function assistantEntry(id: string, text: string): FakeEntry {
   };
 }
 
+function toolCallEntry(id: string, toolCallId: string, name: string, args: Record<string, unknown>): FakeEntry {
+  return {
+    id,
+    type: "message",
+    parentId: null,
+    timestamp: "2026-07-28T14:31:00.000Z",
+    message: {
+      role: "assistant",
+      content: [{ type: "toolCall", id: toolCallId, name, arguments: args }],
+      api: "anthropic",
+      provider: "anthropic",
+      model: "m",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    } as AgentMessage,
+  };
+}
+
+function toolResultEntry(id: string, toolCallId: string, content: string): FakeEntry {
+  return {
+    id,
+    type: "message",
+    parentId: null,
+    timestamp: "2026-07-28T14:32:00.000Z",
+    message: {
+      role: "toolResult",
+      toolCallId,
+      toolName: "bash",
+      content,
+      isError: false,
+      timestamp: Date.now(),
+    } as unknown as AgentMessage,
+  };
+}
+
 function makeCtx(branch: FakeEntry[]): {
   ctx: ExtensionContext;
   appended: [string, unknown][];
@@ -334,12 +377,40 @@ describe("session-entry resolver (buildEntryResolver + lifecycle wiring)", () =>
   });
   afterEach(() => _resetGetMemkeeperSettings());
 
-  it("buildEntryResolver resolves known ids and drops missing ones", () => {
+  it("buildEntryResolver resolves known ids and drops missing ones (branch order)", () => {
     const { ctx } = makeCtx([userEntry("u1", "first"), userEntry("u2", "second")]);
     const resolve = buildEntryResolver(ctx);
-    // both known ids resolve; an unknown id is silently dropped
+    // both known ids resolve; an unknown id is silently dropped; output is in
+    // BRANCH order (not input order) so tool call/result pairing works.
     const out = resolve(["u2", "missing", "u1"]) as { id: string }[];
-    expect(out.map((e) => e.id)).toEqual(["u2", "u1"]);
+    expect(out.map((e) => e.id)).toEqual(["u1", "u2"]);
+  });
+
+  it("augments a lone toolResult with its matching toolCall (no orphan result)", () => {
+    const branch = [
+      userEntry("u1", "do it"),
+      toolCallEntry("a1", "call1", "bash", { cmd: "ls" }),
+      toolResultEntry("r1", "call1", "output"),
+    ];
+    const { ctx } = makeCtx(branch);
+    const resolve = buildEntryResolver(ctx);
+    // citing ONLY the result → the call is pulled in so the pair renders whole.
+    const out = resolve(["r1"]) as { id: string }[];
+    expect(out.map((e) => e.id)).toEqual(["a1", "r1"]);
+  });
+
+  it("augments a lone toolCall with its matching toolResult (no orphan call)", () => {
+    const branch = [
+      userEntry("u1", "do it"),
+      toolCallEntry("a1", "call1", "bash", { cmd: "ls" }),
+      toolResultEntry("r1", "call1", "output"),
+    ];
+    const { ctx } = makeCtx(branch);
+    const resolve = buildEntryResolver(ctx);
+    // citing ONLY the assistant call → the result is pulled in so the pair
+    // renders whole (call immediately followed by its result).
+    const out = resolve(["a1"]) as { id: string }[];
+    expect(out.map((e) => e.id)).toEqual(["a1", "r1"]);
   });
 
   it("onSessionStart installs the resolver (refresh on every session_start)", async () => {

@@ -17,12 +17,15 @@ import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { estimateContentTokens } from "../types.js";
 
 /** Per-message-end usage slice (only assistant messages carry usage; prompt /
- *  steering messages have none — callers treat absence as zero). */
+ *  steering messages have none — callers treat absence as zero). `totalTokens`
+ *  is the agent's context-window consumption for that message (the per-agent
+ *  context-usage figure the widget surfaces). */
 export interface MessageUsage {
   input: number;
   output: number;
   cacheRead: number;
   cost: number;
+  totalTokens: number;
 }
 
 /** Read cumulative usage off a `message_end` message. Returns null when the
@@ -31,7 +34,7 @@ export interface MessageUsage {
 export function messageEndUsage(message: AgentMessage): MessageUsage | null {
   const u = (
     message as {
-      usage?: { input?: number; output?: number; cacheRead?: number; cost?: { total?: number } };
+      usage?: { input?: number; output?: number; cacheRead?: number; cost?: { total?: number }; totalTokens?: number };
     }
   ).usage;
   if (u === undefined) return null;
@@ -40,6 +43,7 @@ export function messageEndUsage(message: AgentMessage): MessageUsage | null {
     output: u.output ?? 0,
     cacheRead: u.cacheRead ?? 0,
     cost: u.cost?.total ?? 0,
+    totalTokens: u.totalTokens ?? 0,
   };
 }
 
