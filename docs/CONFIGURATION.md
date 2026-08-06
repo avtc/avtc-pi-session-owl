@@ -16,7 +16,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 |---|---|---|---|
 | `enabled` | boolean | `true` | Master switch for memkeeper. Off = memkeeper stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected). |
 | `defaultModel` | model | `null` | One model for all components. `null`/unset uses the current session model. Per-component models override this. |
-| `renderMode` | string | `selected-root` | What memkeeper injects after compaction (and what `/mk:*` recall reads). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the full top level of the memory (no Selector). |
+| `renderMode` | string | `selected-root` | What memkeeper injects after compaction (and what `/mk:*` recall reads). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the root view of the memory graph. |
 | `observerMode` | string | `on-threshold` | When the Observer captures memory. `on-threshold` = throughout the session, after a turn once enough new text accumulates; `on-compaction` = all at once, at compaction time only. |
 | `builderMode` | string | `on-compaction` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
 | `selectorMode` | string | `on-compaction` | When the Selector runs (only if `renderMode=selected-root`): `on-compaction` or `on-session-context-threshold`. |

@@ -92,7 +92,7 @@ describe("run-lock (single run-lock — at most one stage active at a time)", ()
     handle.release();
   });
 
-  it("acquireForCompaction awaits the in-flight run's release BEFORE resolving (Issue 10)", async () => {
+  it("acquireForCompaction awaits the in-flight run's release BEFORE resolving", async () => {
     // A background run is in flight.
     const bg = acquireOrSkip("observe") as RunHandle;
     let released = false;

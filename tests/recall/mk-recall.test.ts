@@ -736,9 +736,9 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     });
 
     it("selected-root skips a tree obsRef absent from the source store (defense-in-depth, no crash)", async () => {
-      // fork#3 makes a dangling obsRef impossible by construction (the snapshot
-      // is self-contained), but the guard exists as defense-in-depth — pin it:
-      // a tree referencing an obs id NOT in the source graph is skipped gracefully.
+      // The selected-tree snapshot is self-contained, so a dangling obsRef is
+      // impossible by construction — but the guard exists as defense-in-depth:
+      // pin that a tree referencing an obs id NOT in the source graph is skipped gracefully.
       resetForNewSession();
       const source = buildGraph();
       setClock(() => T0);

@@ -71,6 +71,16 @@ const TOKEN_RES = [
   // and prose-form user-decision citations (`decision #20`, `decision #2`).
   /\bT\d{1,2}\b/g,
   /\bdecision[\s*]+#\d+\b/gi,
+  // task-plan issue refs ("Issue 6", "Issue 10") — capitalized "Issue" + digits;
+  // none of the patterns above catch this shape.
+  /\bIssue \d+\b/g,
+  // design fork refs ("fork#3", "fork #2") — distinctive enough for case-insensitive.
+  /\bfork\s*#\d+\b/gi,
+  // bare user-decision number citations ("#51", "#40") that escape the worded
+  // `decision #N` pattern above. 2+ digits (not starting with 0) avoids the
+  // single-digit line/step false positives ("line #5", "step #2"); recall/commit
+  // hex ids are already caught by the 10+hex pattern.
+  /(?<!\w)#[1-9]\d+\b/g,
   /\biter-\d+\b/gi,
   /\bPhase [AB]\b/g,
 ];

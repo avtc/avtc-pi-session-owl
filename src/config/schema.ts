@@ -194,7 +194,7 @@ const SETTINGS: readonly SettingSchema[] = [
     description:
       "What memkeeper injects after compaction (and what /mk:* recall reads). " +
       "Selected root = a focused, task-relevant view the Selector builds; " +
-      "Observations root = the full top level of the memory (no Selector).",
+      "Observations root = the root view of the memory graph.",
     type: "string",
     defaultValue: DEFAULT_CONFIG.renderMode,
     presets: RENDER_MODE_PRESETS,

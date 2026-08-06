@@ -222,7 +222,7 @@ describe("persist methods (PERSIST-ONLY)", () => {
 });
 
 describe("load reconstruction", () => {
-  it("reconstructs from a snapshot + replayed deltas (flush_new inside a graph_delta, Issue 6)", async () => {
+  it("reconstructs from a snapshot + replayed deltas (flush_new inside a graph_delta)", async () => {
     freshStore();
     const fake = new FakeStore();
     // base snapshot at e5: nGoal + n1(active) with o1
@@ -293,7 +293,7 @@ describe("load reconstruction", () => {
         state: "new",
       },
     } satisfies GraphDeltaEntry);
-    // e10: graph_delta carrying a flush_new (flush_new replays via graph_delta, Issue 6)
+    // e10: graph_delta carrying a flush_new (flush_new replays via graph_delta)
     fake.addCustomAt("e10", GRAPH_DELTA_TYPE, {
       kind: "graph_delta",
       delta: { type: "flush_new", nodeIds: ["n2"] },
