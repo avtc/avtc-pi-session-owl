@@ -353,6 +353,40 @@ describe("runObserver", () => {
     expect(getGraphStore().observerFrontier).toBeNull();
   });
 
+  it("aborts during model resolution: post-await guard fires, nothing persisted (carried R23-2)", async () => {
+    const { pi, appended } = makeFakePi();
+    const controller = new AbortController();
+    const fakeModel = { provider: "test", id: "observer-model" } as unknown as ExtensionContext["model"];
+    // abort DURING the model-resolution await — resolution succeeds, but the
+    // signal is aborted by the time the post-await guard runs.
+    const ctx = {
+      ...makeFakeCtx(),
+      modelRegistry: {
+        find: () => fakeModel,
+        getApiKeyAndHeaders: async () => {
+          controller.abort();
+          return { ok: true as const, apiKey: "key" };
+        },
+      } as unknown as ExtensionContext["modelRegistry"],
+    } as unknown as ExtensionContext;
+    let calls = 0;
+    const fn = async () => {
+      calls += 1;
+      return {
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+        outputTokens: 0,
+        aborted: false,
+      };
+    };
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    await runObserver({ ...makeArgs({ pi, ctx, unobserved, runStageFn: fn }), signal: controller.signal });
+    expect(calls).toBe(0);
+    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "memkeeper.observation")).toHaveLength(0);
+    expect(getGraphStore().observerFrontier).toBeNull();
+  });
+
   it("discards accumulated records when abort fires BETWEEN chunks (chunk 1 done, chunk 2 aborted)", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();

@@ -100,20 +100,19 @@ function cleanText(content: string | readonly (TextContent | { readonly type: st
 
 // --- block constructors (final inner text already cleaned/capped) -----------
 
-function uBlock(id: string, inner: string, includeEntryId: boolean): RenderBlock {
+/** A simple-tag block: <TAG [entry=id]>inner</TAG>. Shared by the plain text/
+ *  thinking tags (they differ only in the tag name). */
+function tagBlock(tag: string, id: string, inner: string, includeEntryId: boolean): RenderBlock {
   const attr = includeEntryId ? ` entry=${id}` : "";
-  return { entryId: id, text: `<USER${attr}>${inner}</USER>` };
+  return { entryId: id, text: `<${tag}${attr}>${inner}</${tag}>` };
 }
 
-function aBlock(id: string, inner: string, includeEntryId: boolean): RenderBlock {
-  const attr = includeEntryId ? ` entry=${id}` : "";
-  return { entryId: id, text: `<ASSISTANT${attr}>${inner}</ASSISTANT>` };
-}
-
-function tBlock(id: string, inner: string, includeEntryId: boolean): RenderBlock {
-  const attr = includeEntryId ? ` entry=${id}` : "";
-  return { entryId: id, text: `<THINKING${attr}>${inner}</THINKING>` };
-}
+const uBlock = (id: string, inner: string, includeEntryId: boolean): RenderBlock =>
+  tagBlock("USER", id, inner, includeEntryId);
+const aBlock = (id: string, inner: string, includeEntryId: boolean): RenderBlock =>
+  tagBlock("ASSISTANT", id, inner, includeEntryId);
+const tBlock = (id: string, inner: string, includeEntryId: boolean): RenderBlock =>
+  tagBlock("THINKING", id, inner, includeEntryId);
 
 function cBlock(id: string, toolName: string, inner: string, includeEntryId: boolean): RenderBlock {
   const attr = includeEntryId ? ` entry=${id}` : "";

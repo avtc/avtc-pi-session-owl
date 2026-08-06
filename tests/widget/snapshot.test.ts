@@ -13,15 +13,12 @@ import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.j
 import type { NodeId } from "../../src/types.js";
 import { buildSnapshot, createTracker, type ProgressTracker } from "../../src/widget/tracker.js";
 
-type CtxUsage = { tokens: number | null; contextWindow: number } | undefined;
-
-function makeCtx(_usage: CtxUsage): ExtensionContext {
+function makeCtx(): ExtensionContext {
   // contextTokens/window now come from the background agent's message_end usage
-  // + model registry (NOT the main session's getContextUsage); the usage arg is
-  // retained for call-site symmetry but unused.
+  // + model registry (NOT the main session's getContextUsage).
   return {
     modelRegistry: {
-      find: (_provider: string, _id: string) => ({ contextWindow: 262_000 }),
+      find: () => ({ contextWindow: 262_000 }),
     },
   } as unknown as ExtensionContext;
 }
@@ -49,7 +46,7 @@ describe("buildSnapshot", () => {
       parentNode: null,
       state: "active",
     });
-    const snap = buildSnapshot(tracker, makeCtx({ tokens: 1000, contextWindow: 262_000 }));
+    const snap = buildSnapshot(tracker, makeCtx());
     expect(snap.obs.count).toBe(0);
     expect(snap.obs.delta).toBe(0);
     expect(snap.roots.count).toBe(1);
@@ -65,7 +62,7 @@ describe("buildSnapshot", () => {
       state: "active",
     });
     tracker.startStage("build", { pass: 1 });
-    const snap = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
+    const snap = buildSnapshot(tracker, makeCtx());
     // viewTokens = the full rendered root-view line (icon/id/importance/datetime…),
     // NOT just the summary's ceil(40/4)=10 — strictly larger than the summary alone.
     expect(snap.roots.viewTokens).toBeGreaterThan(10);
@@ -75,7 +72,7 @@ describe("buildSnapshot", () => {
   it("contextTokens + window track the BACKGROUND agent's message_end usage (not the main session)", () => {
     tracker.startStage("observe");
     // before any message_end → both null (no context figure yet)
-    let snap = buildSnapshot(tracker, makeCtx(undefined));
+    let snap = buildSnapshot(tracker, makeCtx());
     expect(snap.contextTokens).toBeNull();
     expect(snap.contextWindow).toBeNull();
     // a message_end carries the agent's totalTokens + model id → both surface
@@ -88,23 +85,57 @@ describe("buildSnapshot", () => {
         usage: { input: 0, output: 0, cacheRead: 0, totalTokens: 66_000, cost: 0 },
       },
     } as unknown as AgentEvent);
-    snap = buildSnapshot(tracker, makeCtx(undefined));
+    snap = buildSnapshot(tracker, makeCtx());
     expect(snap.contextTokens).toBe(66_000);
     expect(snap.contextWindow).toBe(262_000);
   });
 
   it("getContextUsage() undefined → both contextTokens and contextWindow null", () => {
     tracker.startStage("observe");
-    const snap = buildSnapshot(tracker, makeCtx(undefined));
+    const snap = buildSnapshot(tracker, makeCtx());
     expect(snap.contextTokens).toBeNull();
     expect(snap.contextWindow).toBeNull(); // never 0
+  });
+
+  it("contextWindow is null when the agent model id has no slash (carried R23-7)", () => {
+    tracker.startStage("observe");
+    const ctxMiss = { modelRegistry: { find: () => undefined } } as unknown as ExtensionContext;
+    tracker.onEvent({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        model: "bare-model-name", // no provider/id slash
+        usage: { input: 0, output: 0, cacheRead: 0, totalTokens: 5000, cost: 0 },
+      },
+    } as unknown as AgentEvent);
+    const snap = buildSnapshot(tracker, ctxMiss);
+    expect(snap.contextTokens).toBe(5000); // tokens still surface
+    expect(snap.contextWindow).toBeNull(); // no slash → can't resolve the window
+  });
+
+  it("contextWindow is null when the model registry has no entry (carried R23-7)", () => {
+    tracker.startStage("observe");
+    const ctxMiss = { modelRegistry: { find: () => undefined } } as unknown as ExtensionContext;
+    tracker.onEvent({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        model: "anthropic/unknown-model",
+        usage: { input: 0, output: 0, cacheRead: 0, totalTokens: 5000, cost: 0 },
+      },
+    } as unknown as AgentEvent);
+    const snap = buildSnapshot(tracker, ctxMiss);
+    expect(snap.contextTokens).toBe(5000);
+    expect(snap.contextWindow).toBeNull(); // registry miss → null, never 0
   });
 
   it("selected section deltas measured from the working-copy baseline (first push)", () => {
     tracker.startStage("select");
     tracker.setSelectedCounts(95, 35_000); // first push → baseline
     tracker.setSelectedCounts(20, 15_000); // current
-    const snap = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
+    const snap = buildSnapshot(tracker, makeCtx());
     expect(snap.selected).not.toBeNull();
     expect(snap.selected?.count).toBe(20);
     expect(snap.selected?.countDelta).toBe(-75); // 20 − 95 baseline
@@ -116,7 +147,7 @@ describe("buildSnapshot", () => {
   it("selected section is null outside a Select stage", () => {
     tracker.startStage("build", { pass: 1 });
     tracker.setSelectedCounts(20, 15_000);
-    const snap = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
+    const snap = buildSnapshot(tracker, makeCtx());
     expect(snap.selected).toBeNull();
   });
 
@@ -127,7 +158,7 @@ describe("buildSnapshot", () => {
     _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, renderMode: "observations-root" }));
     tracker.startStage("select");
     tracker.setSelectedCounts(20, 15_000);
-    const snap = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
+    const snap = buildSnapshot(tracker, makeCtx());
     expect(snap.selected).toBeNull();
   });
 
@@ -136,7 +167,7 @@ describe("buildSnapshot", () => {
     // on tool_execution_end, so buildSnapshot must reuse cached root counts for
     // message_update deltas rather than re-rendering the whole root view per token.
     tracker.startStage("build");
-    buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 })); // computes + caches
+    buildSnapshot(tracker, makeCtx()); // computes + caches
     // add a root AFTER the snapshot, with no tool_execution_end reaching the widget
     applyCreateNode(getGraphStore().graph, {
       id: "n1" as NodeId,
@@ -152,7 +183,7 @@ describe("buildSnapshot", () => {
         assistantMessageEvent: { type: "text_delta", delta: `delta${i} ` },
       } as unknown as AgentEvent);
     }
-    const cached = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
+    const cached = buildSnapshot(tracker, makeCtx());
     expect(cached.roots.count).toBe(0); // cached pre-arrival value
     // a tool_execution_end event invalidates → next build sees the new root
     tracker.onEvent({
@@ -162,7 +193,7 @@ describe("buildSnapshot", () => {
       result: {},
       isError: false,
     } as unknown as AgentEvent);
-    const refreshed = buildSnapshot(tracker, makeCtx({ tokens: 0, contextWindow: 262_000 }));
+    const refreshed = buildSnapshot(tracker, makeCtx());
     expect(refreshed.roots.count).toBe(1);
   });
 

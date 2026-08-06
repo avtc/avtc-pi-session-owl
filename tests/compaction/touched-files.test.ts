@@ -155,6 +155,32 @@ describe("extractTouchedFiles", () => {
     ]);
   });
 
+  it("merges an open-ended range over later ones (offset-only read absorbs everything after it)", () => {
+    const entries: SessionEntry[] = [
+      // 50- (open) comes first by start, then 100-120 and 200-210 are absorbed.
+      toolCallEntry("e1", "2026-07-28T10:00:00Z", "read", { path: "/a.ts", offset: 50 }), // 50-
+      toolCallEntry("e2", "2026-07-28T10:05:00Z", "read", { path: "/a.ts", offset: 100, limit: 21 }), // 100-120
+      toolCallEntry("e3", "2026-07-28T10:06:00Z", "read", { path: "/a.ts", offset: 200, limit: 11 }), // 200-210
+    ];
+    // sorted by start: 50-, 100-120, 200-210 → the open end absorbs 100-120 and
+    // 200-210 (both fall under the infinite tail).
+    expect(extractTouchedFiles(ctxWith(entries), NO_CUT)).toEqual([
+      { path: "/a.ts", timestamp: "2026-07-28T10:06:00.000Z", op: "read", lineRanges: [{ start: 50, end: null }] },
+    ]);
+  });
+
+  it("merges a finite range into an open end when the open end is adjacent", () => {
+    const entries: SessionEntry[] = [
+      toolCallEntry("e1", "2026-07-28T10:00:00Z", "read", { path: "/a.ts", offset: 10, limit: 20 }), // 10-29
+      toolCallEntry("e2", "2026-07-28T10:05:00Z", "read", { path: "/a.ts", offset: 30 }), // 30- (open, adjacent to 29)
+    ];
+    // sorted: 10-29, 30- → 30 is adjacent to 29 (30 <= 29+1) so the finite last
+    // end extends to the open end → 10- (open).
+    expect(extractTouchedFiles(ctxWith(entries), NO_CUT)).toEqual([
+      { path: "/a.ts", timestamp: "2026-07-28T10:05:00.000Z", op: "read", lineRanges: [{ start: 10, end: null }] },
+    ]);
+  });
+
   it("renders an open end for an offset-only read (no limit)", () => {
     const entries: SessionEntry[] = [
       toolCallEntry("e1", "2026-07-28T10:00:00Z", "read", { path: "/a.ts", offset: 50 }),

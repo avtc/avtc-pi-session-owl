@@ -45,7 +45,7 @@ const FILE_TOOLS = new Set(["read", "write", "edit"]);
 
 const NO_CUT: string | null = null;
 const NO_PATH_LENGTH = 0;
-const PATH_NOT_FOUND = -1;
+const INDEX_NOT_FOUND = -1;
 const FIRST_ENTRY = 0;
 
 /** Extract deduped touched files from the active branch's compacted block:
@@ -128,8 +128,6 @@ function mergeRanges(ranges: readonly LineRange[]): LineRange[] {
       // adjacent or overlapping, finite last end — extend it
       last.end = r.end === null ? null : Math.max(last.end, r.end);
     } else if (last !== undefined && last.end === null) {
-      // last is open-ended (extends to infinity) — r is already absorbed
-      continue;
     } else {
       merged.push({ start: r.start, end: r.end });
     }
@@ -145,7 +143,7 @@ function mergeRanges(ranges: readonly LineRange[]): LineRange[] {
  *  compaction is found. */
 function compactedRange(entries: SessionEntry[], cutEntryId: string | null): [number, number] {
   const cutIndex = cutEntryId === NO_CUT ? entries.length : entries.findIndex((e) => e.id === cutEntryId);
-  const end = cutIndex === PATH_NOT_FOUND ? entries.length : cutIndex; // exclusive of the cut entry
+  const end = cutIndex === INDEX_NOT_FOUND ? entries.length : cutIndex; // exclusive of the cut entry
   // the previous compaction on the path bounds the block below (its summary
   // entry carries no file touches; start strictly after it).
   let start = FIRST_ENTRY;

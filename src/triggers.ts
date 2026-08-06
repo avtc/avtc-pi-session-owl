@@ -128,6 +128,10 @@ function observerTriggerDecision(input: TriggerInput & { unobserved: SessionEntr
   return { shouldFire: true, unobserved, reason: `unobserved ${tokens} tokens ≥ ${settings.observerThresholdTokens}` };
 }
 
+/** Public trigger evaluation: the decision + the run-lock guard. The chained
+ *  `onTurnEnd` path calls the bare `observerTriggerDecision` helper directly (it
+ *  holds the lock itself and re-evaluates mid-run); this wrapper is the
+ *  external/standalone entry (the in-flight skip a caller would see). */
 export function evaluateObserverTrigger(input: TriggerInput & { unobserved: SessionEntry[] }): ObserverTriggerResult {
   if (inFlight()) return { ...observerTriggerDecision(input), reason: SKIP_INFLIGHT, shouldFire: false };
   return observerTriggerDecision(input);
@@ -205,7 +209,9 @@ function builderTriggerDecision(input: TriggerInput): StageTriggerResult {
   }
 }
 
-/** The Builder trigger (the non-default builderModes at turn_end). */
+/** The Builder trigger (the non-default builderModes at turn_end). Public entry:
+ *  the decision + the run-lock guard (the chained `onTurnEnd` path uses the bare
+ *  `builderTriggerDecision` helper to re-evaluate mid-run). */
 export function evaluateBuilderTrigger(input: TriggerInput): StageTriggerResult {
   if (inFlight()) return { shouldFire: false, reason: SKIP_INFLIGHT };
   return builderTriggerDecision(input);
@@ -232,7 +238,9 @@ function selectorTriggerDecision(input: TriggerInput): StageTriggerResult {
   };
 }
 
-/** The Selector trigger (only when renderMode is selected-root). */
+/** The Selector trigger (only when renderMode is selected-root). Public entry:
+ *  the decision + the run-lock guard (the chained `onTurnEnd` path uses the bare
+ *  `selectorTriggerDecision` helper to re-evaluate mid-run). */
 export function evaluateSelectorTrigger(input: TriggerInput): StageTriggerResult {
   if (inFlight()) return { shouldFire: false, reason: SKIP_INFLIGHT };
   return selectorTriggerDecision(input);

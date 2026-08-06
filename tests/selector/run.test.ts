@@ -659,6 +659,47 @@ describe("runSelector", () => {
     expect(selectionEntries(cap.appended).length).toBe(0);
   });
 
+  it("aborts during model resolution: post-await guard fires, no pass runs (carried R23-2)", async () => {
+    seedGraph([{ id: "n3", summary: "a" }]);
+    const ac = new AbortController();
+    const fakeModel = { provider: "test", id: "selector-model" } as unknown as ExtensionContext["model"];
+    // abort DURING the model-resolution await — resolution succeeds, but the
+    // signal is aborted by the time the post-await guard runs.
+    const ctx: ExtensionContext = {
+      ...makeFakeCtx(),
+      modelRegistry: {
+        find: () => fakeModel,
+        getApiKeyAndHeaders: async () => {
+          ac.abort();
+          return { ok: true as const, apiKey: "key" };
+        },
+      } as unknown as ExtensionContext["modelRegistry"],
+    };
+    let runStageCalls = 0;
+    const cap = recordingPi();
+    await runSelector({
+      ctx,
+      pi: cap.pi,
+      settings: settings({ selectorRootViewThreshold: 0 }),
+      signal: ac.signal,
+      widget: NO_OP_WIDGET,
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: () => {
+        runStageCalls += 1;
+        return Promise.resolve({
+          messages: [],
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          outputTokens: 0,
+          aborted: false,
+        });
+      },
+    });
+    expect(runStageCalls).toBe(0);
+    expect(selectionEntries(cap.appended).length).toBe(0);
+  });
+
   it("aborts during run: applied mutates kept (partial tree persisted), ledger persist skipped", async () => {
     // Distinguishes from abort-before-start: a stage opened + a working copy
     // exists, so the finally commits the partial tree. Mirrors the Builder's
