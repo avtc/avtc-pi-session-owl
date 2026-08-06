@@ -352,16 +352,11 @@ function renderTerseWindow(
 /** Build the node-line render options for a graph-backed viewer, wiring the
  *  observation-content resolver so a bare `new` node renders its first obs's
  *  first line. */
-export function nodeLineOptions(
-  graph: MemkeeperGraph,
-  viewer: RenderViewer,
-): {
+export function nodeLineOptions(viewer: RenderViewer): {
   viewer: RenderViewer;
-  observationContent: (obsId: string) => string | undefined;
 } {
   return {
     viewer,
-    observationContent: (obsId: string): string | undefined => graph.observations.get(obsId as ObsId)?.summary,
   };
 }
 
@@ -396,7 +391,7 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
         }
         const rendered = window.map((node) => ({
           id: node.id,
-          render: formatNodeLine(node, nodeLineOptions(graph, viewer)),
+          render: formatNodeLine(node, nodeLineOptions(viewer)),
         }));
         const out = renderTerseWindow(rendered, budget, more, remaining);
         return { content: [{ type: "text", text: out.text }], details: { count: out.count, more: out.more } };
@@ -407,10 +402,10 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
         return { content: [{ type: "text", text: `No node with id ${params.nodeId}.` }], details: { error: true } };
       }
       // header is the parent itself at depth 0; children indented at depth 1.
-      const headerLine = indent(formatNodeLine(parent, nodeLineOptions(graph, viewer)), ROOT_DEPTH);
+      const headerLine = indent(formatNodeLine(parent, nodeLineOptions(viewer)), ROOT_DEPTH);
       const { nodes, observations } = directChildren(graph, parent);
       const combined = [
-        ...nodes.map((n) => ({ id: n.id, depth: 1, render: formatNodeLine(n, nodeLineOptions(graph, viewer)) })),
+        ...nodes.map((n) => ({ id: n.id, depth: 1, render: formatNodeLine(n, nodeLineOptions(viewer)) })),
         ...observations.map((o) => ({ id: o.id, depth: 1, render: formatObservationLine(o, { viewer }) })),
       ];
       const { window, more, remaining, stale } = paginate(combined, page);
@@ -609,7 +604,7 @@ export function buildCatUnits(graph: MemkeeperGraph, ids: string[], viewer: Rend
   for (const id of ids) {
     const node = graph.nodes.get(id as NodeId);
     if (node !== undefined) {
-      const nodeHeader = formatNodeLine(node, nodeLineOptions(graph, viewer));
+      const nodeHeader = formatNodeLine(node, nodeLineOptions(viewer));
       const obs = node.observationIds
         .map((oid) => graph.observations.get(oid))
         .filter((o): o is Observation => o !== undefined)
@@ -664,7 +659,7 @@ function buildCatGrepItems(
   for (const id of ids) {
     const node = graph.nodes.get(id as NodeId);
     if (node !== undefined) {
-      const nodeHeader = formatNodeLine(node, nodeLineOptions(graph, viewer));
+      const nodeHeader = formatNodeLine(node, nodeLineOptions(viewer));
       const matchingObs = node.observationIds
         .map((oid) => graph.observations.get(oid))
         .filter((o): o is Observation => o !== undefined && obsMatch.has(o.id))
@@ -853,7 +848,7 @@ export async function collectFindMatches(
       nodeMatches.push({
         id: node.id,
         node,
-        render: formatNodeLine(node, { ...nodeLineOptions(graph, viewer), showParent: node.parentNode ?? undefined }),
+        render: formatNodeLine(node, { ...nodeLineOptions(viewer), showParent: node.parentNode ?? undefined }),
       });
     }
   }
@@ -975,26 +970,15 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
  *  `viewer`. Shared by try_finish (budget gate), the run's fast-path, and the
  *  per-pass user-message state snapshot. */
 export function renderRootView(graph: MemkeeperGraph, viewer: RenderViewer): string {
-  return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer, nodeLineOptions(graph, viewer).observationContent);
+  return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer);
 }
-
-/** Resolver that yields no observation content (for callers without
- *  observation-content access — e.g. measuring a detached selected tree). */
-export const NO_OBSERVATION_CONTENT = (_obsId: string): undefined => undefined;
 
 /** Render an already-collected set of non-obsolete roots for `viewer`. Lets a
  *  caller that already needs the roots list (e.g. the widget, which reads both
- *  the count and the view tokens) avoid recomputing `nonObsoleteRoots`. The
- *  observation-content resolver wires the bare-`new`-node first-obs-line
- *  fallback so token measurement matches the displayed render; pass
- *  NO_OBSERVATION_CONTENT when the caller has no observation access. */
-export function renderRootViewFromRoots(
-  roots: Node[],
-  viewer: RenderViewer,
-  observationContent: (obsId: string) => string | undefined,
-): string {
+ *  the count and the view tokens) avoid recomputing `nonObsoleteRoots`. */
+export function renderRootViewFromRoots(roots: Node[], viewer: RenderViewer): string {
   if (roots.length === 0) return "";
-  return roots.map((n) => formatNodeLine(n, { viewer, observationContent })).join("\n");
+  return roots.map((n) => formatNodeLine(n, { viewer })).join("\n");
 }
 
 /** Token-estimate of the non-obsolete root view (chars/4), rendered for

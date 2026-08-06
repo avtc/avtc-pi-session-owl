@@ -8,7 +8,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, type MemkeeperConfig } from "../../src/config/schema.js";
-import { NO_OBSERVATION_CONTENT, renderRootViewFromRoots } from "../../src/graph/read-tools.js";
+import { renderRootViewFromRoots } from "../../src/graph/read-tools.js";
 import { buildStatusReport, gatherStatusInput, runMkStatus, type StatusInput } from "../../src/status/command.js";
 import type { UsageLedger } from "../../src/store/codecs.js";
 import { cloneLedger, EMPTY_LEDGER, encodeSelection } from "../../src/store/codecs.js";
@@ -292,7 +292,6 @@ describe("gatherStatusInput", () => {
           node({ id: "n2", summary: "obsolete root", summaryTokens: 40 }),
         ],
         "nonBuilder",
-        NO_OBSERVATION_CONTENT,
       ),
     );
     expect(gathered.selectedViewTokens).toBeLessThan(withObsolete);

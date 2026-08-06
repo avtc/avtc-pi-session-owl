@@ -183,26 +183,9 @@ describe("formatNodeLine", () => {
     );
   });
 
-  it("renders a bare new node (empty summary) as its first observation's first line", () => {
-    // a freshly-captured wrapper node has an empty summary until the Builder
-    // writes one; the render surfaces the first observation's first line so the
-    // Builder can judge what the arrival is about.
-    const node = makeNode({
-      id: "n15",
-      summary: "",
-      importance: "med",
-      state: "new",
-      observationIds: repeatObs(1),
-    });
-    const resolveObs = (obsId: string): string | undefined =>
-      obsId === node.observationIds[0] ? "User hit a TS2322 in auth module\nmore detail here" : undefined;
-    expect(formatNodeLine(node, { viewer: "builder", observationContent: resolveObs })).toBe(
-      "n15 · 🆕med · User hit a TS2322 in auth module · 1obs · Jul 29 09:00",
-    );
-  });
-
-  it("renders a bare node with no resolver as before (no summary segment)", () => {
-    // without observation-content access the summary segment is omitted.
+  it("renders an empty summary with no summary segment (no fallback)", () => {
+    // wrappers are seeded with their observation's summary at capture, so an
+    // empty summary is not a normal state; the render simply omits the segment.
     const node = makeNode({
       id: "n15",
       summary: "",

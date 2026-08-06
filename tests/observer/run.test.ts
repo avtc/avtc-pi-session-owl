@@ -179,7 +179,9 @@ describe("runObserver", () => {
     expect(wrapper).toBeDefined();
     expect(wrapper?.parentNode).toBeNull();
     expect(wrapper?.importance).toBe("high");
-    expect(wrapper?.summary).toBe("");
+    // the wrapper is seeded with the observation's summary at birth (every
+    // node always reads with a summary); the Builder refines it later.
+    expect(wrapper?.summary).toBe("Chose vitest for all new tests.");
     expect(wrapper?.observationIds).toHaveLength(1);
     const obsId = wrapper !== undefined ? wrapper.observationIds[0] : undefined;
     const obs = obsId !== undefined ? graph.observations.get(obsId) : undefined;

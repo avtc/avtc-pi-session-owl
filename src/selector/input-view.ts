@@ -306,5 +306,5 @@ export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInp
 export function renderWorkingRoots(workingCopy: SelectorWorkingCopy): string {
   const graph = workingCopy.graph;
   const ordered = orderedNonObsoleteRoots(graph.nodes.values());
-  return ordered.map((node) => formatNodeLine(node, nodeLineOptions(graph, NON_BUILDER))).join("\n");
+  return ordered.map((node) => formatNodeLine(node, nodeLineOptions(NON_BUILDER))).join("\n");
 }

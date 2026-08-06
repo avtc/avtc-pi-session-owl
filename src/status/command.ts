@@ -9,7 +9,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
 import { BUILDER, NON_BUILDER } from "../format/render.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
-import { nodeLineOptions, nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
+import { nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { notify } from "../notify.js";
 import { cloneLedger, decodeNode, EMPTY_LEDGER, type SerializedNode, type UsageLedger } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -151,14 +151,8 @@ export function gatherStatusInput(
   const nodes = [...graph.nodes.values()];
   const observations = [...graph.observations.values()];
   const nonObsoleteRoots = nonObsoleteRootsOf(nodes);
-  const rootsViewTokens = estimateContentTokens(
-    renderRootViewFromRoots(nonObsoleteRoots, BUILDER, nodeLineOptions(graph, BUILDER).observationContent),
-  );
-  const selectedViewTokens = measureSelectedViewTokens(
-    config.renderMode,
-    store.selectedTree?.nodes ?? null,
-    nodeLineOptions(graph, NON_BUILDER).observationContent,
-  );
+  const rootsViewTokens = estimateContentTokens(renderRootViewFromRoots(nonObsoleteRoots, BUILDER));
+  const selectedViewTokens = measureSelectedViewTokens(config.renderMode, store.selectedTree?.nodes ?? null);
   return {
     enabled: config.enabled,
     settings: {
@@ -178,18 +172,15 @@ export function gatherStatusInput(
 }
 
 /** Decode a persisted selected tree's roots + measure the rendered view tokens.
- *  Returns null when there is no tree or renderMode is observations-root. The
- *  observation-content resolver (from the source store) wires the bare-`new`-node
- *  first-obs-line fallback so the measurement matches the displayed render. */
+ *  Returns null when there is no tree or renderMode is observations-root. */
 function measureSelectedViewTokens(
   renderMode: "selected-root" | "observations-root",
   serializedNodes: SerializedNode[] | null,
-  observationContent: (obsId: string) => string | undefined,
 ): number | null {
   if (renderMode !== "selected-root" || serializedNodes === null) return null;
   const decoded = nonObsoleteRootsOf(serializedNodes.map(decodeNode).filter((n): n is Node => n !== null));
   if (decoded.length === 0) return null;
-  return estimateContentTokens(renderRootViewFromRoots(decoded, NON_BUILDER, observationContent));
+  return estimateContentTokens(renderRootViewFromRoots(decoded, NON_BUILDER));
 }
 
 // --- registration ----------------------------------------------------------

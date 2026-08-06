@@ -49,7 +49,6 @@ const NO_TOUCHED_PLACEHOLDER = "(none)";
 
 const TOUCHED_HEADING = "## Recently touched";
 const NO_INITIAL_PROMPT = "(none captured yet)";
-const EMPTY_OBS_MAP: ReadonlyMap<string, { readonly summary: string }> = new Map();
 
 /**
  * Render the compaction summary text. Mechanical, never truncated. The
@@ -69,13 +68,8 @@ export function renderSummary(args: RenderSummaryArgs): string {
   lines.push("");
 
   lines.push(ACTIVE_SET_HEADING);
-  // resolve a bare `new` node's first-observation line. Observations are
-  // immutable + shared (the selected tree carries only obs-id refs), so the
-  // source graph's observation store is authoritative in both modes.
-  const obsContent = args.graph.observations ?? EMPTY_OBS_MAP;
-  const resolveObs = (id: string): string | undefined => obsContent.get(id)?.summary;
   for (const root of activeSetRoots(args)) {
-    lines.push(formatNodeLine(root, { viewer: NON_BUILDER, observationContent: resolveObs }));
+    lines.push(formatNodeLine(root, { viewer: NON_BUILDER }));
   }
   lines.push("");
 

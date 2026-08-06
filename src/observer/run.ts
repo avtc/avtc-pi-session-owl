@@ -278,7 +278,9 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       const nodeId = `n${graph.nextNodeId}` as NodeId;
       applyCreateNode(graph, {
         id: nodeId,
-        summary: "",
+        // the wrapper carries the observation's one-line summary at birth so
+        // every node always reads with a summary; the Builder refines it later.
+        summary: record.summary,
         importance: record.importance,
         parentNode: null,
         state: "new",

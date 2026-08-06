@@ -54,12 +54,6 @@ import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, typ
 
 export const MK_RECALL_TOOL = "mk_recall";
 const VIEWER: RenderViewer = NON_BUILDER;
-/** Resolve a bare `new` node's first-observation line from a recall target's
- *  observations (mirrors the graph-backed render so mk_recall matches the
- *  displayed tree). */
-function targetObservationContent(target: RecallTarget): (obsId: string) => string | undefined {
-  return (obsId: string): string | undefined => target.observations.get(obsId)?.summary;
-}
 /** Single-line content cap for terse results (full content shows in fullDetails). */
 const TERSE_CONTENT_MAX = 120;
 const TRUNCATION_ELLIPSIS = "…";
@@ -398,8 +392,7 @@ function renderNodePayload(
   excerpts: ReadonlyMap<string, string[]>,
   details: DetailsProvider,
 ): string {
-  const observationContent = targetObservationContent(target);
-  const lines: string[] = [formatNodeLine(node, { viewer: VIEWER, observationContent })];
+  const lines: string[] = [formatNodeLine(node, { viewer: VIEWER })];
   const childNodes = node.childNodeIds
     .map((id) => target.nodes.get(id))
     .filter((n): n is RenderableNode => n !== undefined);
@@ -407,7 +400,7 @@ function renderNodePayload(
     .map((id) => target.observations.get(id))
     .filter((o): o is RecallObservation => o !== undefined);
   for (const child of childNodes) {
-    lines.push(indent(formatNodeLine(child, { viewer: VIEWER, observationContent }), CHILD_DEPTH));
+    lines.push(indent(formatNodeLine(child, { viewer: VIEWER }), CHILD_DEPTH));
   }
   for (const obs of childObs) {
     lines.push(indent(renderObservationBlock(obs, mode, NO_PARENT, excerpts.get(obs.id), details), CHILD_DEPTH));
@@ -428,7 +421,6 @@ function renderNodePayloadGrep(
   summaryMatch: ReadonlySet<string>,
   details: DetailsProvider,
 ): string | null {
-  const observationContent = targetObservationContent(target);
   const keptChildNodes = node.childNodeIds.filter((id) => target.nodes.has(id) && summaryMatch.has(id));
   const keptChildObs = node.observationIds.filter((id) => {
     const o = target.observations.get(id);
@@ -439,11 +431,10 @@ function renderNodePayloadGrep(
   if (!summaryMatch.has(node.id) && keptChildNodes.length === 0 && keptChildObs.length === 0) {
     return null;
   }
-  const lines: string[] = [formatNodeLine(node, { viewer: VIEWER, observationContent })];
+  const lines: string[] = [formatNodeLine(node, { viewer: VIEWER })];
   for (const cid of keptChildNodes) {
     const child = target.nodes.get(cid);
-    if (child !== undefined)
-      lines.push(indent(formatNodeLine(child, { viewer: VIEWER, observationContent }), CHILD_DEPTH));
+    if (child !== undefined) lines.push(indent(formatNodeLine(child, { viewer: VIEWER }), CHILD_DEPTH));
   }
   for (const oid of keptChildObs) {
     const o = target.observations.get(oid);
@@ -538,7 +529,6 @@ async function buildSearchCandidates(
   // Nodes only surface when a text filter can match their summary; a pure
   // time-range browse (no text filter) returns observations only.
   const includeNodes = filters.length > 0;
-  const observationContent = targetObservationContent(target);
   const nodeJobs: { node: RenderableNode }[] = [];
   const obsJobs: { obs: RecallObservation; parent: RenderableNode | null }[] = [];
   for (const node of target.nodes.values()) {
@@ -580,7 +570,7 @@ async function buildSearchCandidates(
       candidates.push({
         id: node.id,
         key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
-        line: formatNodeLine(node, { viewer: VIEWER, observationContent, showParent: node.parentNode ?? undefined }),
+        line: formatNodeLine(node, { viewer: VIEWER, showParent: node.parentNode ?? undefined }),
       });
     }
   }
@@ -606,7 +596,6 @@ async function buildSearchCandidates(
  *  `includeSuperseded` is true, obsolete roots are included too (shown with 🪦
  *  + → supersededBy) so the modifier is never silently dropped. */
 function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean): SearchCandidate[] {
-  const observationContent = targetObservationContent(target);
   const roots: RenderableNode[] = [];
   for (const node of target.nodes.values()) {
     if (node.parentNode !== null) continue;
@@ -620,7 +609,7 @@ function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean):
   return ordered.map((node) => ({
     id: node.id,
     key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
-    line: formatNodeLine(node, { viewer: VIEWER, observationContent }),
+    line: formatNodeLine(node, { viewer: VIEWER }),
   }));
 }
 
