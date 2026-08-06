@@ -30,17 +30,11 @@ import { ImportanceSchema } from "../schema.js";
 import { appendGraphDelta, type StoreContext } from "../store/graph-store.js";
 import type { Importance, MemkeeperGraph, NodeId } from "../types.js";
 
-export {
-  MERGE_PARAMS,
-  MERGE_TOOL,
-  MKDIR_PARAMS,
-  MKDIR_TOOL,
-  MV_TOOL,
-} from "../graph/mutate-tools.js";
 // Re-export the Builder toolset names + param schemas so callers (the run, the
 // compaction hook, tests) can name the full Builder surface through the module
 // that assembles it. The canonical definitions live in graph/read-tools +
 // graph/mutate-tools.
+export { MERGE_TOOL, MKDIR_TOOL, MV_TOOL } from "../graph/mutate-tools.js";
 export {
   CAT_TOOL,
   FIND_TOOL,

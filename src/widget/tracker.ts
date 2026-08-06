@@ -87,7 +87,13 @@ interface TrackerState {
   selectedCount: number | null;
   selectedViewTokens: number | null;
   selectedBaseline: { count: number; viewTokens: number } | null;
+  /** The background agent's latest context-window consumption (its last
+   *  `message_end` usage.totalTokens) — the per-agent context-usage figure the
+   *  widget surfaces (NOT the main session's usage). Null until the first
+   *  message_end of the stage. */
   agentContextTokens: number | null;
+  /** The background agent's model id (`message.model` from its last message_end)
+   *  — used to resolve the context-window denominator via the model registry. */
   agentModelId: string | null;
 }
 
@@ -102,14 +108,6 @@ export interface ProgressTracker extends StageController, TrackerState {
    *  tool_execution_end, so this reuses the cache across message_update deltas
    *  (invalidated on startStage and tool_execution_end). */
   rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number };
-  /** The background agent's latest context-window consumption (its last
-   *  `message_end` usage.totalTokens) — the per-agent context-usage figure the
-   *  widget surfaces (NOT the main session's usage). Null until the first
-   *  message_end of the stage. */
-  agentContextTokens: number | null;
-  /** The background agent's model id (`message.model` from its last message_end)
-   *  — used to resolve the context-window denominator via the model registry. */
-  agentModelId: string | null;
 }
 
 // --- streaming-token helpers (two-tier) -------------------------------------

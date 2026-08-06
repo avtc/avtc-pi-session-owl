@@ -106,6 +106,10 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   const graphStore = getGraphStore();
   const runStageFn = input.runStageFn ?? runStage;
 
+  // Re-check abort after the model-resolution await: compaction may have
+  // signalled during it (mirrors the Builder guard).
+  if (input.signal.aborted) return;
+
   // Ensure-ready fast-path: a cached tree that still covers the
   // compacted-away block (compaction) or the current frontier (background) is
   // reused — no pass runs. No stage is opened (no startStage).

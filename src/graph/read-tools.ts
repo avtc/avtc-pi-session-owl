@@ -244,13 +244,8 @@ function compareObservationOrder(a: Observation, b: Observation): number {
   return b.timestamp.localeCompare(a.timestamp);
 }
 
-/** A node is obsolete when its state is "obsolete". */
-function isObsolete(node: Node): boolean {
-  return isObsoleteState(node.state);
-}
-
 /** A raw state is obsolete when it is "obsolete" (the visible-by-default gate;
- *  the operand form of `isObsolete` for sites that hold a `NodeState`, not a node). */
+ *  the operand form used by sites that hold a `NodeState`, not a node). */
 function isObsoleteState(state: Node["state"]): boolean {
   return state === "obsolete";
 }
@@ -264,18 +259,11 @@ export function isVisible(state: Node["state"], includeSuperseded: boolean): boo
 
 // --- root view + children --------------------------------------------------
 
-/** The roots of the graph: nodes whose parentNode is null. */
-function rootNodes(graph: MemkeeperGraph): Node[] {
-  return [...graph.nodes.values()].filter((n) => n.parentNode === ROOT_PARENT);
-}
-
 /** Non-obsolete roots, importance desc then recency — the view `ls` renders at
  *  the root and `try_finish` measures. Obsolete roots are hidden by default
  *  (findable via find with includeSuperseded). */
 export function nonObsoleteRoots(graph: MemkeeperGraph): Node[] {
-  return rootNodes(graph)
-    .filter((n) => !isObsolete(n))
-    .sort(compareNodeOrder);
+  return nonObsoleteRootsOf(graph.nodes.values()).sort(compareNodeOrder);
 }
 
 /** Non-obsolete roots drawn from an arbitrary node collection (the persisted
@@ -349,9 +337,8 @@ function renderTerseWindow(
   return { text: renderLines(lines), count: window.length, more: paginateMore };
 }
 
-/** Build the node-line render options for a graph-backed viewer, wiring the
- *  observation-content resolver so a bare `new` node renders its first obs's
- *  first line. */
+/** The node-line render options for a given viewer (Builder sees the `new`
+ *  glyph; every other consumer renders `new` as `active`). */
 export function nodeLineOptions(viewer: RenderViewer): {
   viewer: RenderViewer;
 } {
@@ -557,17 +544,14 @@ function detailsTextFor(obs: Observation): string {
   return render === null ? obs.summary : render.text;
 }
 
-/** The source-unavailable marker appended to a cat/full body when the verbatim
- *  source can't render, so the consumer knows the full source is gone (the
- *  one-line summary is the fallback body). Mirrors mk_recall's degradation. */
 /** Cat display body for an observation: the verbatim source when available,
  *  else the one-line summary + a source-unavailable note. (The match/grep-text
  *  path uses `detailsTextFor` directly — no note, so the marker isn't
- *  searchable.) */
+ *  searchable.) Renders the details ONCE (not per check). */
 function catBody(obs: Observation): string {
   const resolver = getGraphStore().resolveEntries;
-  const available = resolver !== null && renderDetails(obs.id, [...obs.sourceEntryIds], resolver) !== null;
-  return available ? detailsTextFor(obs) : `${detailsTextFor(obs)}\n${SOURCE_UNAVAILABLE_NOTE}`;
+  const render = resolver === null ? null : renderDetails(obs.id, [...obs.sourceEntryIds], resolver);
+  return render === null ? `${obs.summary}\n${SOURCE_UNAVAILABLE_NOTE}` : render.text;
 }
 
 /** Count the observations a single id resolves to: 1 if the id is an

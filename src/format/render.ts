@@ -87,10 +87,11 @@ export function formatTimestamp(stored: string): string {
   return `${monthDay(date)} ${time}`;
 }
 
-/** Render a stored UTC ISO instant as a LOCAL "<DD> <HH:MM>" (2-digit day-number +
- *  24h time, no month) — the locale-independent day+time form used by the
- *  touched-files list. Shares the same UTC→local conversion as `formatTimestamp`
- *  (hardcoded English, never locale-dependent) so the format never drifts. */
+/** Render a stored UTC ISO instant as a LOCAL "<Mon> <DD> <HH:MM>" (3-letter
+ *  English month + 2-digit day-number + 24h time) — the locale-independent
+ *  day+time form used by the touched-files list. Shares the same UTC→local
+ *  conversion as `formatTimestamp` (hardcoded English, never locale-dependent)
+ *  so the format never drifts. */
 export function formatDayTime(stored: string): string {
   const local = parseLocalParts(stored);
   if (local !== null) {
@@ -163,7 +164,7 @@ function childCounts(node: RenderableNode): string {
  *  the record's sourceEntryIds). Always shown — lets the agent gauge the cost
  *  of expanding (fullDetails) before drilling, and pick a `lines` window.
  *  Falls back to a summary-derived estimate when the counts are null (legacy
- *  snapshots predating SD-4). */
+ *  snapshots predating the cached size hint). */
 function observationSize(summary: string, detailsLines: number | null, detailsTokens: number | null): string {
   const lines = detailsLines ?? countLines(summary);
   const tokens = detailsTokens ?? estimateContentTokens(summary);
@@ -200,8 +201,8 @@ export interface RenderableObservation {
   importance: Observation["importance"];
   timestamp: string;
   /** Verbatim-source size hint (frozen at capture) — the drill cost. Optional:
-   *  legacy snapshots (pre-SD-4) lack it; the render falls back to a
-   *  summary-derived estimate. */
+   *  legacy snapshots lack it; the render falls back to a summary-derived
+   *  estimate. */
   detailsLines?: number;
   detailsTokens?: number;
   /** Source entry ids — the verbatim-source provenance, used to re-render the

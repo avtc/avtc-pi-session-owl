@@ -177,6 +177,10 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   const store = toStoreContext(input.pi, input.ctx);
   const graph = getGraphStore().graph;
 
+  // Re-check abort after the model-resolution await: compaction may have
+  // signalled during it (mirrors the Builder/Selector guard).
+  if (input.signal.aborted) return;
+
   const chunkOptions: ChunkOptions = {
     tokenThreshold: input.settings.observerThresholdTokens,
     toolBlockCapTokens: input.settings.observerToolBlockCapTokens,

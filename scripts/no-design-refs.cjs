@@ -54,6 +54,9 @@ const TOKEN_RES = [
   // architectural-decision refs (AD1-AD16+): the `\bD\d` pattern above misses
   // these because A→D has no word boundary.
   /\bAD\d{1,2}\b/g,
+  // summary-details decision refs (SD-1..SD-8): same A→D gap — S→D has no word
+  // boundary, so `\bD\d` misses `SD-4`.
+  /\bSD-?\d{1,2}\b/g,
   /\bR\d{1,2}-\d{1,3}\b/g,
   /\bAC\d+\w?\b/g,
   /\bTask \d+\.\d+\b/g,
