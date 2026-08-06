@@ -3,7 +3,9 @@
 
 // extractTouchedFiles + renderTouchedFiles: scans the active branch for
 // read/write/edit toolCall entries since a cut entry, excludes bash, dedups by
-// path (write dominates), and renders <Mon> <DD> <HH:MM> ✎|👁 <path> oldest-first.
+// path (write > edit > read dominance; a read-only file keeps every merged
+// range), and renders <Mon> <DD> <HH:MM> read|write|edit <path>[:ranges]
+// oldest-first.
 
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
@@ -75,9 +77,10 @@ describe("extractTouchedFiles", () => {
       toolCallEntry("e4", "2026-07-28T10:07:00Z", "read", { path: "/c.ts" }),
     ];
     const files = extractTouchedFiles(ctxWith(entries), NO_CUT);
+    // the tool name IS the op — edit is distinct from write (today both were "write").
     expect(files).toEqual([
       { path: "/a.ts", timestamp: "2026-07-28T10:05:00.000Z", op: "write" },
-      { path: "/b.ts", timestamp: "2026-07-28T10:06:00.000Z", op: "write" },
+      { path: "/b.ts", timestamp: "2026-07-28T10:06:00.000Z", op: "edit" },
       { path: "/c.ts", timestamp: "2026-07-28T10:07:00.000Z", op: "read" },
     ]);
   });
@@ -100,14 +103,65 @@ describe("extractTouchedFiles", () => {
     expect(files.map((f) => f.path)).toEqual(["/a.ts"]);
   });
 
-  it("dedups by path (write dominates, latest timestamp kept)", () => {
+  it("dedups by path (write > edit > read dominance, latest timestamp kept)", () => {
     const entries: SessionEntry[] = [
       toolCallEntry("e1", "2026-07-28T10:00:00Z", "read", { path: "/a.ts" }),
       toolCallEntry("e2", "2026-07-28T10:05:00Z", "write", { path: "/a.ts" }),
       toolCallEntry("e3", "2026-07-28T10:06:00Z", "read", { path: "/a.ts" }),
     ];
     const files = extractTouchedFiles(ctxWith(entries), NO_CUT);
+    // write dominates read → op stays write; no range (write supersedes the reads).
     expect(files).toEqual([{ path: "/a.ts", timestamp: "2026-07-28T10:06:00.000Z", op: "write" }]);
+  });
+
+  it("edit dominates read (but not write)", () => {
+    const entries: SessionEntry[] = [
+      toolCallEntry("e1", "2026-07-28T10:00:00Z", "read", { path: "/a.ts", offset: 10, limit: 20 }),
+      toolCallEntry("e2", "2026-07-28T10:05:00Z", "edit", { path: "/a.ts" }),
+    ];
+    // edit dominates the read → op=edit, no range (the edit supersedes the read).
+    expect(extractTouchedFiles(ctxWith(entries), NO_CUT)).toEqual([
+      { path: "/a.ts", timestamp: "2026-07-28T10:05:00.000Z", op: "edit" },
+    ]);
+  });
+
+  it("keeps a ranged read's line range (offset+limit → start-end)", () => {
+    const entries: SessionEntry[] = [
+      toolCallEntry("e1", "2026-07-28T10:00:00Z", "read", { path: "/a.ts", offset: 100, limit: 50 }),
+    ];
+    expect(extractTouchedFiles(ctxWith(entries), NO_CUT)).toEqual([
+      { path: "/a.ts", timestamp: "2026-07-28T10:00:00.000Z", op: "read", lineRanges: [{ start: 100, end: 149 }] },
+    ]);
+  });
+
+  it("merges overlapping and adjacent read ranges of the same file", () => {
+    const entries: SessionEntry[] = [
+      toolCallEntry("e1", "2026-07-28T10:00:00Z", "read", { path: "/a.ts", offset: 40, limit: 41 }), // 40-80
+      toolCallEntry("e2", "2026-07-28T10:05:00Z", "read", { path: "/a.ts", offset: 81, limit: 20 }), // 81-100 (adjacent)
+      toolCallEntry("e3", "2026-07-28T10:06:00Z", "read", { path: "/a.ts", offset: 90, limit: 30 }), // 90-119 (overlaps)
+      toolCallEntry("e4", "2026-07-28T10:07:00Z", "read", { path: "/a.ts", offset: 200, limit: 10 }), // 200-209 (disjoint)
+    ];
+    // 40-80 + 81-100 → 40-100 (adjacent); +90-119 → 40-119 (overlap); 200-209 stays.
+    expect(extractTouchedFiles(ctxWith(entries), NO_CUT)).toEqual([
+      {
+        path: "/a.ts",
+        timestamp: "2026-07-28T10:07:00.000Z",
+        op: "read",
+        lineRanges: [
+          { start: 40, end: 119 },
+          { start: 200, end: 209 },
+        ],
+      },
+    ]);
+  });
+
+  it("renders an open end for an offset-only read (no limit)", () => {
+    const entries: SessionEntry[] = [
+      toolCallEntry("e1", "2026-07-28T10:00:00Z", "read", { path: "/a.ts", offset: 50 }),
+    ];
+    expect(extractTouchedFiles(ctxWith(entries), NO_CUT)).toEqual([
+      { path: "/a.ts", timestamp: "2026-07-28T10:00:00.000Z", op: "read", lineRanges: [{ start: 50, end: null }] },
+    ]);
   });
 
   it("scans the compacted block BEFORE the cut (entries strictly before cutEntryId)", () => {
@@ -164,12 +218,51 @@ describe("extractTouchedFiles", () => {
 });
 
 describe("renderTouchedFiles", () => {
-  it("renders <Mon> <DD> <HH:MM> ✎|👁 <path> lines", () => {
+  it("renders <Mon> <DD> <HH:MM> read|write|edit <path> lines", () => {
     const files: TouchedFile[] = [
       { path: "/a.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "write" },
-      { path: "/b.ts", timestamp: "2026-07-28T14:28:00.000Z", op: "read" },
+      { path: "/b.ts", timestamp: "2026-07-28T14:28:00.000Z", op: "edit" },
+      { path: "/c.ts", timestamp: "2026-07-28T14:25:00.000Z", op: "read" },
     ];
-    expect(renderTouchedFiles(files)).toEqual(["Jul 28 14:30 ✎ /a.ts", "Jul 28 14:28 👁 /b.ts"]);
+    expect(renderTouchedFiles(files)).toEqual([
+      "Jul 28 14:30 write /a.ts",
+      "Jul 28 14:28 edit /b.ts",
+      "Jul 28 14:25 read /c.ts",
+    ]);
+  });
+
+  it("appends merged read ranges as a :start-end,... suffix on the path", () => {
+    const files: TouchedFile[] = [
+      {
+        path: "/a.ts",
+        timestamp: "2026-07-28T14:30:00.000Z",
+        op: "read",
+        lineRanges: [
+          { start: 1, end: 50 },
+          { start: 100, end: 200 },
+        ],
+      },
+      { path: "/b.ts", timestamp: "2026-07-28T14:28:00.000Z", op: "read", lineRanges: [{ start: 40, end: 40 }] },
+      { path: "/c.ts", timestamp: "2026-07-28T14:25:00.000Z", op: "read", lineRanges: [{ start: 60, end: null }] },
+    ];
+    expect(renderTouchedFiles(files)).toEqual([
+      "Jul 28 14:30 read /a.ts:1-50,100-200",
+      "Jul 28 14:28 read /b.ts:40",
+      "Jul 28 14:25 read /c.ts:60-",
+    ]);
+  });
+
+  it("renders no range suffix for a full read (no ranges) or a write/edit", () => {
+    const files: TouchedFile[] = [
+      { path: "/a.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "read" },
+      { path: "/b.ts", timestamp: "2026-07-28T14:28:00.000Z", op: "write" },
+      { path: "/c.ts", timestamp: "2026-07-28T14:25:00.000Z", op: "edit" },
+    ];
+    expect(renderTouchedFiles(files)).toEqual([
+      "Jul 28 14:30 read /a.ts",
+      "Jul 28 14:28 write /b.ts",
+      "Jul 28 14:25 edit /c.ts",
+    ]);
   });
 
   it("renders nothing for empty input", () => {
@@ -180,7 +273,7 @@ describe("renderTouchedFiles", () => {
     const files: TouchedFile[] = [
       { path: "path/with\nnewline\tand tabs.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "write" },
     ];
-    expect(renderTouchedFiles(files)).toEqual(["Jul 28 14:30 ✎ path/with newline and tabs.ts"]);
+    expect(renderTouchedFiles(files)).toEqual(["Jul 28 14:30 write path/with newline and tabs.ts"]);
   });
 
   it("renders the stored UTC instant as LOCAL time (not UTC)", () => {
@@ -191,7 +284,7 @@ describe("renderTouchedFiles", () => {
     try {
       process.env.TZ = "America/New_York"; // UTC-4 (EDT) in July
       const files: TouchedFile[] = [{ path: "/a.ts", timestamp: "2026-07-28T14:30:00.000Z", op: "write" }];
-      expect(renderTouchedFiles(files)).toEqual(["Jul 28 10:30 ✎ /a.ts"]);
+      expect(renderTouchedFiles(files)).toEqual(["Jul 28 10:30 write /a.ts"]);
     } finally {
       process.env.TZ = prevTz;
     }

@@ -54,7 +54,8 @@ function selection(nodes: SerializedNode[], oInitialPrompt: SerializedObservatio
 
 const TOUCHED: TouchedFile[] = [
   { path: "designs/x.md", timestamp: "2026-07-28T14:30:00.000Z", op: "write" },
-  { path: "src/y.ts", timestamp: "2026-07-28T14:28:00.000Z", op: "read" },
+  { path: "src/y.ts", timestamp: "2026-07-28T14:28:00.000Z", op: "edit" },
+  { path: "src/z.ts", timestamp: "2026-07-28T14:25:00.000Z", op: "read", lineRanges: [{ start: 10, end: 40 }] },
 ];
 
 const PROMPT = sObs("oInitialPrompt", "Design the memkeeper extension. Brand-new; no 3rd-party reuse.", {});
@@ -116,8 +117,9 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
       touchedFiles: TOUCHED,
     });
     expect(out).toContain("## Recently touched");
-    expect(out).toContain("28 14:30 ✎ designs/x.md");
-    expect(out).toContain("28 14:28 👁 src/y.ts");
+    expect(out).toContain("28 14:30 write designs/x.md");
+    expect(out).toContain("28 14:28 edit src/y.ts");
+    expect(out).toContain("28 14:25 read src/z.ts:10-40");
   });
 
   it("orders sections: header → initial prompt → active set → recently touched", () => {

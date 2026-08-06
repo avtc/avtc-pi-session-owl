@@ -796,7 +796,8 @@ describe("buildSelectorInputView", () => {
       }),
     );
     expect(view).toContain("src/a.ts");
-    expect(view).toContain("✎");
+    expect(view).toContain("write src/a.ts");
+    expect(view).toContain("read README.md");
   });
 });
 

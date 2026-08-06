@@ -3,9 +3,10 @@
 
 // Touched-files extraction: scans the active branch (getBranch — NOT getEntries,
 // which mixes all branches) for read/write/edit toolCall entries since a cut
-// entry, excludes bash-mediated ops, dedups by path (write dominates, latest
-// timestamp kept), and renders <Mon> <DD> <HH:MM> ✎|👁 <path> oldest-first. Surfaces
-// to the Selector input AND the rendered compaction summary.
+// entry, excludes bash-mediated ops, dedups by path (write > edit > read
+// dominance, latest timestamp kept), and renders <Mon> <DD> <HH:MM>
+// read|write|edit <path>[:line-range] oldest-first. Surfaces to the Selector
+// input AND the rendered compaction summary.
 
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { formatDayTime, singleLine, toStoredTimestamp } from "../format/render.js";
@@ -21,19 +22,26 @@ export interface TouchedFilesContext {
   getBranch: (leafId?: string) => SessionEntry[];
 }
 
-/** One touched file: its path, the last-touch timestamp (stored contract), and op. */
+/** One touched file: its path, the last-touch timestamp (stored contract), op,
+ *  and (for read-only files) the merged line ranges read. */
 export interface TouchedFile {
   path: string;
   timestamp: string;
-  op: "write" | "read";
+  op: "write" | "edit" | "read";
+  /** The merged read ranges (overlapping/adjacent unioned), present only when
+   *  the file was only ever read (no write/edit dominated). `end: null` = open. */
+  lineRanges?: readonly LineRange[];
 }
 
-/** Tool names that count as a file WRITE (the agent changed the file). */
-const WRITE_TOOLS = new Set(["write", "edit"]);
-/** Tool names that count as a file READ. */
-const READ_TOOLS = new Set(["read"]);
-/** All file-touching tool names (bash is deliberately excluded — unbounded). */
-const FILE_TOOLS = new Set<string>([...WRITE_TOOLS, ...READ_TOOLS]);
+/** A line range read from a `read` tool's offset/limit args (1-indexed). */
+export interface LineRange {
+  start: number;
+  end: number | null;
+}
+
+/** All file-touching tool names (bash is deliberately excluded — unbounded).
+ *  The tool name IS the op (read/write/edit map 1:1). */
+const FILE_TOOLS = new Set(["read", "write", "edit"]);
 
 const NO_CUT: string | null = null;
 const NO_PATH_LENGTH = 0;
@@ -46,27 +54,87 @@ const FIRST_ENTRY = 0;
  *  mid-session list reflects activity since the last compaction, not the whole
  *  history). `cutEntryId === null` (background, no compaction cut) scans from
  *  the previous compaction to the current leaf. Bash ops are excluded; paths
- *  are deduped (write dominates, the latest timestamp is kept). Oldest-first. */
+ *  are deduped (write > edit > read dominance; the latest timestamp wins for
+ *  ordering). A file read at several ranges keeps every range — overlapping /
+ *  adjacent ones merged — so the list shows all inspected sections. Oldest-first. */
 export function extractTouchedFiles(ctx: TouchedFilesContext, cutEntryId: string | null): TouchedFile[] {
   const entries = ctx.getBranch(ctx.getLeafId() ?? undefined);
   const [start, end] = compactedRange(entries, cutEntryId);
 
-  const latest = new Map<string, TouchedFile>();
+  // Accumulate per path: the dominant op, the latest timestamp (for ordering),
+  // and every read range (so a file read at several sections keeps them all).
+  const accums = new Map<string, PathAccum>();
   for (let i = start; i < end; i += 1) {
     const entry = entries[i];
     if (entry === undefined) continue;
-    const touches = fileTouches(entry);
-    for (const touch of touches) {
-      const existing = latest.get(touch.path);
-      // write dominates; the latest timestamp wins for both op and ordering.
-      if (existing === undefined || touch.timestamp >= existing.timestamp) {
-        const op = existing?.op === "write" || touch.op === "write" ? "write" : "read";
-        latest.set(touch.path, { path: touch.path, timestamp: touch.timestamp, op });
+    for (const touch of fileTouches(entry)) {
+      const existing = accums.get(touch.path);
+      if (existing === undefined) {
+        accums.set(touch.path, {
+          path: touch.path,
+          latestTimestamp: touch.timestamp,
+          op: touch.op,
+          readRanges: touch.lineRange !== undefined ? [touch.lineRange] : [],
+        });
+      } else {
+        existing.op = dominantOp(existing.op, touch.op);
+        if (touch.timestamp >= existing.latestTimestamp) existing.latestTimestamp = touch.timestamp;
+        if (touch.lineRange !== undefined) existing.readRanges.push(touch.lineRange);
       }
     }
   }
 
-  return [...latest.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  // Resolve each path: write/edit dominate (no range); read-only files merge
+  // their accumulated ranges into the final entry (undefined when none).
+  const files: TouchedFile[] = [];
+  for (const a of accums.values()) {
+    files.push({
+      path: a.path,
+      timestamp: a.latestTimestamp,
+      op: a.op,
+      lineRanges: a.op === "read" && a.readRanges.length > 0 ? mergeRanges(a.readRanges) : undefined,
+    });
+  }
+  return files.sort((x, y) => x.timestamp.localeCompare(y.timestamp));
+}
+
+/** Per-path accumulator: the dominant op, latest timestamp, and every read range. */
+interface PathAccum {
+  path: string;
+  latestTimestamp: string;
+  op: TouchedFile["op"];
+  readRanges: LineRange[];
+}
+
+/** The stronger action wins (write > edit > read): a file created/overwritten
+ *  is more significant than one merely edited, which is more significant than
+ *  one merely read. */
+function dominantOp(a: TouchedFile["op"], b: TouchedFile["op"]): TouchedFile["op"] {
+  if (a === "write" || b === "write") return "write";
+  if (a === "edit" || b === "edit") return "edit";
+  return "read";
+}
+
+/** Union overlapping or adjacent ranges (start ≤ prev.end + 1) into a compact
+ *  set. An open end (null) absorbs everything after it and stays open. The
+ *  result is sorted by start with no overlaps. */
+function mergeRanges(ranges: readonly LineRange[]): LineRange[] {
+  if (ranges.length <= 1) return [...ranges];
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const merged: LineRange[] = [];
+  for (const r of sorted) {
+    const last = merged[merged.length - 1];
+    if (last !== undefined && last.end !== null && r.start <= last.end + 1) {
+      // adjacent or overlapping, finite last end — extend it
+      last.end = r.end === null ? null : Math.max(last.end, r.end);
+    } else if (last !== undefined && last.end === null) {
+      // last is open-ended (extends to infinity) — r is already absorbed
+      continue;
+    } else {
+      merged.push({ start: r.start, end: r.end });
+    }
+  }
+  return merged;
 }
 
 /** The [start, end) range of the compacted block: entries strictly before the
@@ -112,35 +180,77 @@ function isPartedMessage(message: unknown): message is PartedMessage {
   );
 }
 
-/** Extract the file touches (path + op + timestamp) from one entry's toolCalls. */
-function fileTouches(entry: SessionEntry): TouchedFile[] {
+/** A raw touch from one tool call: path + op + timestamp + (for reads) the
+ *  single range that call covered. Accumulated + resolved into a TouchedFile. */
+interface FileTouch {
+  path: string;
+  timestamp: string;
+  op: TouchedFile["op"];
+  lineRange?: LineRange;
+}
+
+/** Extract the file touches (path + op + timestamp + optional read range) from
+ *  one entry's toolCalls. The tool name IS the op (read/write/edit). */
+function fileTouches(entry: SessionEntry): FileTouch[] {
   if (!isMessageEntry(entry)) return [];
   const message = entry.message;
   if (!isPartedMessage(message)) return [];
   const timestamp = toStoredTimestamp(entry.timestamp);
-  const touches: TouchedFile[] = [];
+  const touches: FileTouch[] = [];
   for (const part of message.content) {
     if (typeof part !== "object" || part === null) continue;
     const typed = part as { type?: string; name?: string; arguments?: Record<string, unknown> };
     if (typed.type !== "toolCall") continue;
     const name = typed.name;
     if (name === undefined || !FILE_TOOLS.has(name)) continue;
-    const path = typed.arguments?.path;
+    const args = typed.arguments ?? {};
+    const path = args.path;
     if (typeof path !== "string" || path.length === NO_PATH_LENGTH) continue;
-    touches.push({ path, timestamp, op: WRITE_TOOLS.has(name) ? "write" : "read" });
+    const op = name as TouchedFile["op"];
+    touches.push({ path, timestamp, op, lineRange: op === "read" ? readLineRange(args) : undefined });
   }
   return touches;
 }
 
-/** Render touched files as `<Mon> <DD> <HH:MM> ✎|👁 <path>` lines (one per file). */
+/** The line range a `read` covered, from its offset/limit args (1-indexed).
+ *  Returns undefined when the read had no offset (a from-the-top read, full or
+ *  limit-bounded — no meaningful section to cite). offset+limit → start-end;
+ *  offset only → start- (open). */
+function readLineRange(args: Record<string, unknown>): LineRange | undefined {
+  const offset = args.offset;
+  if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 1) return undefined;
+  const start = Math.floor(offset);
+  const limit = args.limit;
+  if (typeof limit !== "number" || !Number.isFinite(limit) || limit < 1) {
+    return { start, end: null };
+  }
+  return { start, end: start + Math.floor(limit) - 1 };
+}
+
+/** Render touched files as `<Mon> <DD> <HH:MM> read|write|edit <path>[:ranges]`
+ *  lines (one per file). */
 export function renderTouchedFiles(files: readonly TouchedFile[]): string[] {
   return files.map(renderTouchedFile);
 }
 
-const WRITE_GLYPH = "✎";
-const READ_GLYPH = "👁";
-
-/** Render a touched-file line as "<Mon> <DD> <HH:MM> <glyph> <path>". */
+/** Render a touched-file line as "<Mon> <DD> <HH:MM> <op> <path>[:ranges]". The op
+ *  is the word (read/write/edit); a read-only file appends its merged ranges
+ *  (e.g. ":1-50,100-200") to the path. */
 function renderTouchedFile(f: TouchedFile): string {
-  return `${formatDayTime(f.timestamp)} ${f.op === "write" ? WRITE_GLYPH : READ_GLYPH} ${singleLine(f.path)}`;
+  const rangeSuffix = f.op === "read" ? formatRangesSuffix(f.lineRanges) : "";
+  return `${formatDayTime(f.timestamp)} ${f.op} ${singleLine(f.path)}${rangeSuffix}`;
+}
+
+/** ":1-50,100-200" for merged ranges (comma-joined), "" when there are none.
+ *  A single-line range renders as ":N"; an open end as ":N-". */
+function formatRangesSuffix(ranges: readonly LineRange[] | undefined): string {
+  if (ranges === undefined || ranges.length === 0) return "";
+  return `:${ranges.map(formatRange).join(",")}`;
+}
+
+/** "start-end", "start" (single line), or "start-" (open end). */
+function formatRange(range: LineRange): string {
+  if (range.end === null) return `${range.start}-`;
+  if (range.end === range.start) return `${range.start}`;
+  return `${range.start}-${range.end}`;
 }
