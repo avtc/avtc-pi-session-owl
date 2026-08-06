@@ -51,7 +51,7 @@ function render(s: WidgetSnapshot): { line: string; text: string } {
 }
 
 describe("formatWidgetLine", () => {
-  it("OBSERVE: obs+delta → roots+delta/threshold → ctx/window → tok", () => {
+  it("OBSERVE: obs+delta → roots+delta/threshold · ctx/window · tok", () => {
     const { text } = render(
       snap({
         stage: "observe",
@@ -70,6 +70,26 @@ describe("formatWidgetLine", () => {
     expect(text).toContain("45k(+5.0k)/40k");
     expect(text).toContain("12k/262k");
     expect(text).toContain("1.1k tok");
+  });
+
+  it("separators: → between structural sections, · into + within the trailing runtime cluster", () => {
+    const { text } = render(
+      snap({
+        stage: "observe",
+        obs: { count: 33, delta: 0 },
+        roots: { count: 33, countDelta: 0, viewTokens: 2500, tokenDelta: 0, threshold: 40_000 },
+        contextTokens: 87_000,
+        contextWindow: 262_000,
+        streamingOutputTokens: 0,
+      }),
+    );
+    // structural break obs→roots uses → ; the trailing runtime cluster (roots
+    // view-budget · ctx/window · tok) uses ·
+    expect(text).toContain("33 obs → 33 roots");
+    expect(text).toContain("2.5k/40k · 87k/262k · 0 tok");
+    // the trailing cluster must NOT use → between its parts
+    expect(text).not.toContain("/40k → ");
+    expect(text).not.toContain("/262k → ");
   });
 
   it("OBSERVE shows inline N/M batch only when total > 1", () => {

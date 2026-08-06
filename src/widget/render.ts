@@ -4,11 +4,12 @@
 // The widget line render. Pure over a WidgetSnapshot + Theme:
 // builds the colored one-line string the factory wraps in a pi-tui Text.
 //
-// Format: 🦉 {obs} → {roots} [#N] [→ {selected} #N] → {ctx/window} → {tok} tok
+// Format: 🦉 {obs} → {roots} [#N] [→ {selected} #N] · {ctx/window} · {tok} tok
 // - obs section:   {count}{(+Δ)} obs   (+ inline N/M batch on observe when total>1)
 // - roots section: {count}{(+Δ)} roots {viewTokens}{(+Δ)}/{threshold}   (#N pass on build)
 // - selected sect: {count}{(+Δ)} selected {viewTokens}{(+Δ)}/{threshold}  (#N pass on select; selected-root only)
-// - trailing:      {ctxUsed}/{contextWindow} → {tok} tok   (active only)
+// - trailing:      {ctxUsed}/{contextWindow} · {tok} tok   (active only; joined to
+//                   the structural sections by ·, internally by ·)
 // Colors: counts=text (accent on the active stage's section); budgets/labels/→
 // separators/spaces=dim; deltas follow their parent count; trailing ctx/tok=muted.
 
@@ -25,6 +26,7 @@ type Color = "text" | "accent" | "dim" | "muted";
 
 const OWL = "🦉";
 const SEP = " → ";
+const MID = " · ";
 const PASS_PREFIX = " #";
 
 /** Format a signed integer delta as (+N) / (-N), or "" when zero. */
@@ -91,7 +93,10 @@ function selectedSection(snap: WidgetSnapshot, theme: ThemeSeam): string | null 
   return `${count}${countDeltaColored}${label}${viewTokens}${tokenDeltaColored}${threshold}${pass}`;
 }
 
-/** The trailing runtime segments: {ctx/window} → {tok} tok (active only).
+/** The trailing runtime segments: {ctx/window} · {tok} tok (active only).
+ *  Joined to the structural sections by `MID` (·) and internally by `MID` —
+ *  the runtime metrics read as one grouped cluster, distinct from the `→`
+ *  structural breaks (obs → roots → selected).
  *  When contextWindow is null (getContextUsage() undefined) the whole context
  *  segment collapses to `?` (never `?/0`). */
 function trailingSection(snap: WidgetSnapshot, theme: ThemeSeam): string {
@@ -99,19 +104,21 @@ function trailingSection(snap: WidgetSnapshot, theme: ThemeSeam): string {
   const windowPart = snap.contextWindow === null ? "" : `/${formatTokens(snap.contextWindow)}`;
   const ctx = paint(theme, "muted", `${ctxPart}${windowPart}`);
   const tok = paint(theme, "muted", `${formatTokens(snap.streamingOutputTokens)} tok`);
-  return `${ctx}${paint(theme, "dim", SEP)}${tok}`;
+  return `${ctx}${paint(theme, "dim", MID)}${tok}`;
 }
 
 /**
  * Format the widget line. Pure: takes a snapshot + theme, returns
- * the colored one-line string. Sections joined by a dim ` → ` separator.
+ * the colored one-line string. Structural sections (obs → roots → selected)
+ * join with a dim ` → `; the trailing runtime cluster (context + streaming)
+ * appends with a dim ` · ` and is internally ` · `-joined.
  */
 export function formatWidgetLine(snap: WidgetSnapshot, theme: ThemeSeam): string {
-  const sep = paint(theme, "dim", SEP);
   const owl = paint(theme, "text", `${OWL} `);
-  const sections: string[] = [obsSection(snap, theme), rootsSection(snap, theme)];
+  const structuralParts: string[] = [obsSection(snap, theme), rootsSection(snap, theme)];
   const selected = selectedSection(snap, theme);
-  if (selected !== null) sections.push(selected);
-  sections.push(trailingSection(snap, theme));
-  return `${owl}${sections.join(sep)}`;
+  if (selected !== null) structuralParts.push(selected);
+  const structural = structuralParts.join(paint(theme, "dim", SEP));
+  const trailing = trailingSection(snap, theme);
+  return `${owl}${structural}${paint(theme, "dim", MID)}${trailing}`;
 }
