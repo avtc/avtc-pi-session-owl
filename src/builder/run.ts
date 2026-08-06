@@ -101,14 +101,19 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   const graph = getGraphStore().graph;
   const runStageFn = input.runStageFn ?? runStage;
 
-  // Ensure-ready fast-path: a root view already under the threshold is
-  // render-ready — skip the LLM passes entirely, just flush `new` arrivals so
-  // they never linger as stale glyphs. A deliberate skip IS a normal stage-end
-  // for flush purposes. No stage is opened (no startStage). Re-check abort
-  // after the model-resolution await: compaction may have signalled during it,
-  // and abort must preserve `new` (mirrors the convergence-loop guard).
+  // Ensure-ready fast-path (opt-in via builderSkipWithinBudget): when the
+  // root view is already under the threshold it is render-ready — skip the
+  // LLM passes entirely, just flush `new` arrivals so they never linger as
+  // stale glyphs. A deliberate skip IS a normal stage-end for flush purposes.
+  // No stage is opened (no startStage). Default off — the Builder always runs
+  // at least one pass. Re-check abort after the model-resolution await:
+  // compaction may have signalled during it, and abort must preserve `new`
+  // (mirrors the convergence-loop guard).
   if (input.signal.aborted) return;
-  if (measureRootViewTokens(graph, "builder") < input.settings.builderRootViewThreshold) {
+  if (
+    input.settings.builderSkipWithinBudget &&
+    measureRootViewTokens(graph, "builder") < input.settings.builderRootViewThreshold
+  ) {
     flushNew(input.widget, store);
     return;
   }

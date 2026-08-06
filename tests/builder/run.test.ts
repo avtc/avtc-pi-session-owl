@@ -205,7 +205,7 @@ describe("runBuilder", () => {
     await runBuilder({
       pi: cap.pi,
       ctx: makeFakeCtx(),
-      settings: settings({ builderRootViewThreshold: 1_000_000 }),
+      settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: true }),
       signal: new AbortController().signal,
       widget,
       scope: null,
@@ -216,6 +216,32 @@ describe("runBuilder", () => {
     expect(flushNewCount(cap.appended)).toBeGreaterThanOrEqual(1);
     // fast-path opens NO stage (no startStage/endStage) — balanced widget contract
     expect(widget.calls).toEqual([]);
+  });
+
+  it("default (builderSkipWithinBudget off): runs at least one pass even when under threshold", async () => {
+    const g = seedGraph([{ id: "n3", summary: "fresh arrival" }]);
+    const cap = makeFakePi();
+    const widget = recordingWidget();
+    let passCount = 0;
+    const scripted = scriptRunStage({
+      passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }],
+    });
+    await runBuilder({
+      pi: cap.pi,
+      ctx: makeFakeCtx(),
+      // builderSkipWithinBudget defaults false; root view under threshold.
+      settings: settings({ builderRootViewThreshold: 1_000_000 }),
+      signal: new AbortController().signal,
+      widget,
+      scope: null,
+      runStageFn: (input) => {
+        passCount += 1;
+        return scripted(input);
+      },
+    });
+    // fast-path NOT taken — a pass ran and the stage was opened.
+    expect(passCount).toBe(1);
+    expect(widget.calls[0]).toBe("start:build:1");
   });
 
   it("runs multiple passes until try_finish succeeds (convergence)", async () => {
@@ -413,7 +439,7 @@ describe("runBuilder", () => {
     await runBuilder({
       pi: cap.pi,
       ctx,
-      settings: settings({ builderRootViewThreshold: 1_000_000 }),
+      settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: true }),
       signal: ac.signal,
       widget: recordingWidget(),
       scope: null,

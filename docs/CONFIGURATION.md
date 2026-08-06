@@ -14,15 +14,15 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | boolean | `true` | Master switch. `false` turns memkeeper fully off (no hooks, no work). |
+| `enabled` | boolean | `true` | Master switch for memkeeper. Off = memkeeper stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected). |
 | `defaultModel` | model | `null` | One model for all components. `null`/unset uses the current session model. Per-component models override this. |
-| `renderMode` | string | `selected-root` | What's injected at compaction and what `mk_recall` drills. `selected-root` = the Selector's curated tree; `observations-root` = the Builder's root view (no Selector). |
-| `observerMode` | string | `on-threshold` | `on-threshold` fires at `turn_end` when ≥1 unobserved event and tokens ≥ `observerThresholdTokens`. `on-compaction` catches up at compaction only. |
+| `renderMode` | string | `selected-root` | What memkeeper injects after compaction (and what `/mk:*` recall reads). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the full top level of the memory (no Selector). |
+| `observerMode` | string | `on-threshold` | When the Observer captures memory. `on-threshold` = throughout the session, after a turn once enough new text accumulates; `on-compaction` = all at once, at compaction time only. |
 | `builderMode` | string | `on-compaction` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
 | `selectorMode` | string | `on-compaction` | When the Selector runs (only if `renderMode=selected-root`): `on-compaction` or `on-session-context-threshold`. |
-| `commandResultCap` | number | `50` | Max result items a `/mk:*` command renders before a `... +N more` footer. `null` = no limit. (User commands only; the agent's `mk_recall` paginates separately.) |
+| `commandResultCap` | number | `50` | Max items a `/mk:*` command shows before a `... +N more` footer. `null` = show all. |
 | `findTimeoutMs` | duration | `30000` | Max duration a `find`/`mk_recall` search may run before it is stopped. |
-| `toolResultTokenBudget` | number | `6000` | Max estimated tokens in any `cat`/`find`/`ls`/`mk_recall` result; overflow pages with `afterId` or stops expansion. A single-observation read is uncapped. |
+| `toolResultTokenBudget` | number | `6000` | Max size (in tokens) of a single `cat`/`find`/`ls`/`mk_recall` result. A larger result shows fewer items or less detail (each item stays whole); reading one observation in full is never cut off. |
 
 ## Observer
 
@@ -31,7 +31,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `observerModel` | model | `null` | Overrides `defaultModel` for the Observer. |
 | `observerThresholdTokens` | number | `4000` | `on-threshold` gate: emit a batch when accumulated unobserved tokens reach this. |
 | `observerIncludeThinking` | boolean | `false` | Include non-redacted thinking blocks in the chunks the Observer reads. |
-| `observerToolBlockCapTokens` | number | `400` | Per tool-arg/result block cap (head N/2 + tail N/2 + marker). `null` = no truncation. |
+| `observerToolBlockCapTokens` | number | `400` | When capturing tool calls and results, trim each block to this many tokens (keeping the start and end). `null` = keep the whole block. |
 
 ## Builder
 
@@ -40,8 +40,9 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `builderModel` | model | `null` | Overrides `defaultModel` for the Builder. |
 | `builderEveryNObservations` | number | `40` | N for the `each-N-observations` `builderMode`. |
 | `builderSessionContextThresholdTokens` | number | `200000` | Threshold for the `on-session-context-threshold` `builderMode`. |
-| `builderRootViewThreshold` | number | `40000` | Triple-use: the `on-root-view-threshold` trigger, the Builder's convergence target (`try_finish` gates on it), and the compaction fast-path (root view below it = ready). |
-| `maxBuilderPasses` | number | `3` | Max convergence passes in one Builder run. |
+| `builderRootViewThreshold` | number | `40000` | Target size (in tokens) for the root view of the memory graph. Also: the trigger for `on-root-view-threshold` mode, and the budget `builderSkipWithinBudget` checks. |
+| `builderSkipWithinBudget` | boolean | `false` | Skip the Builder when the root view is already within budget. Off = the Builder always runs at least once. |
+| `maxBuilderPasses` | number | `3` | Max passes per Builder run. |
 
 ## Selector
 
@@ -51,8 +52,8 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 |---|---|---|---|
 | `selectorModel` | model | `null` | Overrides `defaultModel` for the Selector. |
 | `selectorSessionContextThresholdTokens` | number | `200000` | Threshold for the `on-session-context-threshold` `selectorMode`. |
-| `selectorRootViewThreshold` | number | `20000` | The Selector's convergence target (`try_finish` gates on it) + compaction fast-path. |
-| `maxSelectorPasses` | number | `3` | Max convergence passes in one Selector run. |
+| `selectorRootViewThreshold` | number | `20000` | Target size (in tokens) for the root view of the selected tree. |
+| `maxSelectorPasses` | number | `3` | Max passes per Selector run. |
 
 ## Models
 

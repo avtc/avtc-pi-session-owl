@@ -375,6 +375,48 @@ describe("runSelector", () => {
     expect(runStageCalls).toBe(0); // fast-path: no pass ran
   });
 
+  it("fast-path: reuses an over-threshold cached tree when it still covers the block (budget gate dropped)", async () => {
+    // The budget fast-path is gone: a cached tree that covers the compacted-away
+    // block is reused even if its root view exceeds selectorRootViewThreshold.
+    const branch = [
+      { id: "e0", type: "message" },
+      { id: "e1", type: "message" },
+      { id: "e2", type: "message" },
+      { id: "e3", type: "message" },
+    ] as unknown as StoreEntry[];
+    seedGraph([{ id: "n3", summary: "a" }]);
+    const store = getGraphStore();
+    store.observerFrontier = "e1";
+    const cached = encodeSelection(store.graph, "oInitialPrompt", "e1");
+    persistSelectedTree({ appendEntry: () => {}, getLeafId: () => "leaf-1", getBranch: () => branch }, cached);
+    let runStageCalls = 0;
+    await runSelector({
+      ctx: {
+        ...makeFakeCtx(),
+        sessionManager: { getLeafId: () => "leaf-1", getBranch: () => branch },
+      } as unknown as ExtensionContext,
+      pi: recordingPi().pi,
+      // threshold deliberately LOW — the cached tree exceeds it, yet it covers
+      // the block, so it must be reused (the budget gate no longer rebuilds).
+      settings: settings({ selectorRootViewThreshold: 1 }),
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: () => {
+        runStageCalls += 1;
+        return Promise.resolve({
+          messages: [],
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          outputTokens: 0,
+          aborted: false,
+        });
+      },
+    });
+    expect(runStageCalls).toBe(0); // covers block → reused despite being over threshold
+  });
+
   it("stale cached tree (frontier mismatch) rebuilds", async () => {
     seedGraph([{ id: "n3", summary: "a" }]);
     const store = getGraphStore();

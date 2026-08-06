@@ -56,6 +56,10 @@ export interface MemkeeperConfig {
   builderEveryNObservations: number;
   builderSessionContextThresholdTokens: number;
   builderRootViewThreshold: number;
+  /** Skip the Builder's compaction fast-path: when the root view is already
+   *  under builderRootViewThreshold, skip the Builder run entirely. Default
+   *  false — the Builder always runs at least one pass. */
+  builderSkipWithinBudget: boolean;
   maxBuilderPasses: number;
   // Selector
   selectorModel: string | null;
@@ -79,6 +83,7 @@ const NO_LIMIT: number | null = null;
 const DEFAULT_FIND_TIMEOUT_MS = 30_000;
 const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
 const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
+const DEFAULT_FAST_PATH = false;
 
 export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   // General
@@ -101,6 +106,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   builderEveryNObservations: 40,
   builderSessionContextThresholdTokens: 200000,
   builderRootViewThreshold: 40000,
+  builderSkipWithinBudget: DEFAULT_FAST_PATH,
   maxBuilderPasses: 3,
   // Selector
   selectorModel: NO_MODEL,
@@ -172,7 +178,8 @@ const SETTINGS: readonly SettingSchema[] = [
   // ── General ────────────────────────────────────────────────────────────────
   setting("enabled", {
     label: "Enabled",
-    description: "Master switch. Off = memkeeper fully idle (no hooks, no work).",
+    description:
+      "Master switch for memkeeper. Off = memkeeper stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected).",
     type: "boolean",
     defaultValue: DEFAULT_CONFIG.enabled,
   }),
@@ -185,8 +192,9 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("renderMode", {
     label: "Render mode",
     description:
-      "What is injected after compaction AND what mk_recall drills. " +
-      "Selected root = the Selector's curated tree; Observations root = the source graph top level.",
+      "What memkeeper injects after compaction (and what /mk:* recall reads). " +
+      "Selected root = a focused, task-relevant view the Selector builds; " +
+      "Observations root = the full top level of the memory (no Selector).",
     type: "string",
     defaultValue: DEFAULT_CONFIG.renderMode,
     presets: RENDER_MODE_PRESETS,
@@ -194,8 +202,8 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("observerMode", {
     label: "Observer mode",
     description:
-      "Observer trigger. On threshold = fires at turn_end when unobserved tokens reach the gate; " +
-      "On compaction = catch-up at compaction only.",
+      "When the Observer captures memory. On threshold = throughout the session, after a turn " +
+      "once enough new text accumulates; On compaction = all at once, at compaction time only.",
     type: "string",
     defaultValue: DEFAULT_CONFIG.observerMode,
     presets: OBSERVER_MODE_PRESETS,
@@ -220,9 +228,7 @@ const SETTINGS: readonly SettingSchema[] = [
   }),
   setting("commandResultCap", {
     label: "Command result cap",
-    description:
-      "Max result items the user /mk:* commands render before a footer. No limit = unbounded. " +
-      "User commands only (the agent's tools use cursor pagination).",
+    description: "Max items a /mk:* command shows before a '... +N more' footer. No limit = show all.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.commandResultCap,
     min: 0,
@@ -239,7 +245,7 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("toolResultTokenBudget", {
     label: "Tool result token budget",
     description:
-      "Max estimated tokens in any cat/find/ls/mk_recall result; overflow pages with afterId or stops expansion (a single-observation read is uncapped).",
+      "Max size (in tokens) of a single cat/find/ls/mk_recall result. A larger result shows fewer items or less detail (each item stays whole); reading one observation in full is never cut off.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.toolResultTokenBudget,
     min: MIN_TOOL_RESULT_TOKEN_BUDGET,
@@ -269,7 +275,8 @@ const SETTINGS: readonly SettingSchema[] = [
   }),
   setting("observerToolBlockCapTokens", {
     label: "Observer tool block cap tokens",
-    description: "Per tool-arg/result block cap: head N/2 + tail N/2 + marker. No limit = no truncation.",
+    description:
+      "When capturing tool calls and results, trim each block to this many tokens (keeping the start and end). No limit = keep the whole block.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.observerToolBlockCapTokens,
     min: 0,
@@ -302,16 +309,23 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("builderRootViewThreshold", {
     label: "Builder root view threshold",
     description:
-      "Triple-use: On root view threshold trigger; multi-pass convergence target (try_finish); " +
-      "compaction fast-path skip. Bounds all non-obsolete roots (new + active + archived).",
+      "Target size (in tokens) for the root view of the memory graph. " +
+      "Also: the trigger for On root view threshold mode, and the budget builderSkipWithinBudget checks.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.builderRootViewThreshold,
     min: 1,
     presets: ROOT_VIEW_PRESETS,
   }),
+  setting("builderSkipWithinBudget", {
+    label: "Skip when within budget",
+    description:
+      "Skip the Builder when the root view is already within budget. Off = the Builder always runs at least once.",
+    type: "boolean",
+    defaultValue: DEFAULT_CONFIG.builderSkipWithinBudget,
+  }),
   setting("maxBuilderPasses", {
     label: "Max builder passes",
-    description: "Max passes in one Builder run (multi-pass convergence).",
+    description: "Max passes per Builder run.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.maxBuilderPasses,
     min: 1,
@@ -335,7 +349,7 @@ const SETTINGS: readonly SettingSchema[] = [
   }),
   setting("selectorRootViewThreshold", {
     label: "Selector root view threshold",
-    description: "The Selector's multi-pass convergence target (try_finish) and compaction fast-path skip.",
+    description: "Target size (in tokens) for the root view of the selected tree.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.selectorRootViewThreshold,
     min: 1,
@@ -343,7 +357,7 @@ const SETTINGS: readonly SettingSchema[] = [
   }),
   setting("maxSelectorPasses", {
     label: "Max selector passes",
-    description: "Max passes in one Selector run.",
+    description: "Max passes per Selector run.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.maxSelectorPasses,
     min: 1,
@@ -377,6 +391,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "builderEveryNObservations",
       "builderSessionContextThresholdTokens",
       "builderRootViewThreshold",
+      "builderSkipWithinBudget",
       "maxBuilderPasses",
     ],
   },

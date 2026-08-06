@@ -57,6 +57,7 @@ const EXPECTED_IDS = [
   "builderEveryNObservations",
   "builderSessionContextThresholdTokens",
   "builderRootViewThreshold",
+  "builderSkipWithinBudget",
   "maxBuilderPasses",
   // Selector
   "selectorModel",
@@ -149,6 +150,7 @@ describe("MEMKEEPER_SCHEMA", () => {
       builderEveryNObservations: "number",
       builderSessionContextThresholdTokens: "number",
       builderRootViewThreshold: "number",
+      builderSkipWithinBudget: "boolean",
       maxBuilderPasses: "number",
       selectorModel: "model",
       selectorSessionContextThresholdTokens: "number",

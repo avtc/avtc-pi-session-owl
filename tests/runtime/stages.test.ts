@@ -62,6 +62,7 @@ describe("makeObserverRun (Observer stage wiring)", () => {
         builderEveryNObservations: 40,
         builderSessionContextThresholdTokens: 200000,
         builderRootViewThreshold: 8000,
+        builderSkipWithinBudget: false,
         maxBuilderPasses: 5,
         selectorModel: null,
         selectorMode: "on-compaction",

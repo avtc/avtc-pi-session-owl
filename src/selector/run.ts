@@ -18,12 +18,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
-import {
-  measureRootViewTokens,
-  nodeLineOptions,
-  nonObsoleteRoots,
-  renderRootViewFromRoots,
-} from "../graph/read-tools.js";
+import { nodeLineOptions, nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
@@ -32,19 +27,10 @@ import type { ConvergenceOutcome } from "../runtime/convergence.js";
 import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify } from "../runtime/model.js";
-import { decodeNode, encodeSelection, type SerializedSelection } from "../store/codecs.js";
+import { encodeSelection } from "../store/codecs.js";
 import { type GraphStore, getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
 import type { TodoBridge, TodoContext } from "../todo/types.js";
-import {
-  estimateContentTokens,
-  type MemkeeperGraph as Graph,
-  MemkeeperGraph,
-  type Node,
-  type NodeId,
-  O_INITIAL_PROMPT,
-  type Observation,
-  type ObsId,
-} from "../types.js";
+import { estimateContentTokens, type MemkeeperGraph as Graph, O_INITIAL_PROMPT } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 import { buildSelectorInputView, renderWorkingRoots, type SelectorInputView, type TailBoundary } from "./input-view.js";
 import { makeSelectorTools, SELECTOR_MUTATE_TOOL_NAMES } from "./tools.js";
@@ -120,19 +106,10 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   const graphStore = getGraphStore();
   const runStageFn = input.runStageFn ?? runStage;
 
-  // Ensure-ready fast-path: a cached tree whose root view
-  // is under threshold AND still covers the compacted-away block (compaction)
-  // or the current frontier (background) is reused — no pass runs. No stage is
-  // opened (no startStage).
-  if (
-    canReuseCachedTree(
-      graphStore,
-      input.settings.selectorRootViewThreshold,
-      input.ctx,
-      input.scope?.firstKeptEntryId ?? null,
-    )
-  )
-    return;
+  // Ensure-ready fast-path: a cached tree that still covers the
+  // compacted-away block (compaction) or the current frontier (background) is
+  // reused — no pass runs. No stage is opened (no startStage).
+  if (canReuseCachedTree(graphStore, input.ctx, input.scope?.firstKeptEntryId ?? null)) return;
 
   // Build the input-view once (the working copy + task context). The working
   // copy persists across passes within this run; the context (tail/todo/touched/
@@ -250,18 +227,11 @@ function passMessages(working: SelectorInputView["workingCopy"], contextView: st
 
 // --- fast-path -------------------------------------------------------------
 
-/** Reuse the cached tree when it exists, fits the threshold, and still covers
- *  the current observation frontier (not stale). */
-function canReuseCachedTree(
-  store: GraphStore,
-  threshold: number,
-  ctx: ExtensionContext,
-  firstKeptEntryId: string | null,
-): boolean {
+/** Reuse the cached tree when it exists and still covers the current
+ *  observation frontier (not stale). */
+function canReuseCachedTree(store: GraphStore, ctx: ExtensionContext, firstKeptEntryId: string | null): boolean {
   const cached = store.selectedTree;
   if (cached === null) return false; // nothing cached → build
-  const rootViewTokens = measureRootViewTokens(materializeSnapshot(cached, store.graph.observations), NON_BUILDER);
-  if (rootViewTokens >= threshold) return false; // over budget → rebuild
   // Staleness = the cached tree must COVER the compacted-away block.
   // Compaction path (firstKeptEntryId non-null): the compacted block is
   //   branch[0..cutIndex), whose last entry is prev(firstKeptEntryId) at
@@ -283,35 +253,6 @@ function canReuseCachedTree(
   if (coveredIndex === INDEX_NOT_FOUND) return false; // coveredFrontier stale → rebuild
   return coveredIndex >= lastCompactedIndex;
 }
-
-/** Materialize the cached tree into a throwaway graph so the shared
- *  `renderRootView` measures it exactly as `try_finish` would — bounded by the
- *  cached tree size (≤ selectorRootViewThreshold); cheap for a fast-path that
- *  skips an LLM run. Resolves observation content from the source store so a
- *  bare-`new` root (which falls back to its first observation's first line at
- *  render) is measured with no under-count. */
-function materializeSnapshot(cached: SerializedSelection, sourceObservations: Map<ObsId, Observation>): Graph {
-  const nodes = new Map<NodeId, Node>();
-  for (const sn of cached.nodes) {
-    const node = decodeNode(sn);
-    if (node !== null) nodes.set(node.id, node);
-  }
-  // resolve the observation ids the cached nodes reference from the source store
-  const observations = new Map<ObsId, Observation>();
-  for (const node of nodes.values()) {
-    for (const obsId of node.observationIds) {
-      const obs = sourceObservations.get(obsId);
-      if (obs !== undefined) observations.set(obsId, obs);
-    }
-  }
-  return new MemkeeperGraph({
-    nodes,
-    observations,
-    nextObsId: cached.nextObsId,
-    nextNodeId: cached.nextNodeId,
-  });
-}
-
 // --- input-view wiring -----------------------------------------------------
 
 /** Build the Selector input-view from the source graph + task context. */
