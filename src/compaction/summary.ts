@@ -8,8 +8,8 @@
 // files. Non-Builder viewer (new→active, no 🆕); obsolete roots excluded; never
 // truncated (bounded by the Selector/Builder try_finish, not here).
 
-import { formatNodeLine, RENDER_LEGEND, type RenderableNode } from "../format/render.js";
-import { nonObsoleteRootsOf, orderActiveSetRoots } from "../graph/read-tools.js";
+import { formatNodeLine, NON_BUILDER, RENDER_LEGEND, type RenderableNode } from "../format/render.js";
+import { orderedNonObsoleteRoots } from "../graph/read-tools.js";
 import type { SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { renderTouchedFiles, type TouchedFile } from "./touched-files.js";
 
@@ -75,7 +75,7 @@ export function renderSummary(args: RenderSummaryArgs): string {
   const obsContent = args.graph.observations ?? EMPTY_OBS_MAP;
   const resolveObs = (id: string): string | undefined => obsContent.get(id)?.summary;
   for (const root of activeSetRoots(args)) {
-    lines.push(formatNodeLine(root, { viewer: "nonBuilder", observationContent: resolveObs }));
+    lines.push(formatNodeLine(root, { viewer: NON_BUILDER, observationContent: resolveObs }));
   }
   lines.push("");
 
@@ -104,11 +104,11 @@ function activeSetRoots(args: RenderSummaryArgs): RenderableNode[] {
 /** Non-obsolete source roots, nGoal first then importance/recency. */
 function sourceRoots(graph: SummaryGraph): RenderableNode[] {
   // nGoal first, the rest by importance/recency (nIrrelevant is source-absent).
-  return orderActiveSetRoots(nonObsoleteRootsOf(graph.nodes.values()));
+  return orderedNonObsoleteRoots(graph.nodes.values());
 }
 
 /** Non-obsolete selected-tree roots, nGoal first, nIrrelevant last. */
 function selectedRoots(tree: SerializedSelection): RenderableNode[] {
   // nGoal first, nIrrelevant last, the rest by importance/recency.
-  return orderActiveSetRoots(nonObsoleteRootsOf(tree.nodes));
+  return orderedNonObsoleteRoots(tree.nodes);
 }

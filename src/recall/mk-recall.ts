@@ -16,6 +16,7 @@ import {
   formatNodeLine,
   formatObservationLine,
   indent,
+  NON_BUILDER,
   type RenderableNode,
   type RenderableObservation,
   type RenderViewer,
@@ -41,6 +42,7 @@ import {
   grepTimeoutNote,
   intersectRegexFilters,
   runGrepExcerpts,
+  SOURCE_UNAVAILABLE_NOTE,
   searchableText,
 } from "../graph/result-budget.js";
 import { type ContentMode, contentBlock, grepBlock, resolveContentMode } from "../graph/result-render.js";
@@ -51,7 +53,7 @@ import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, typ
 // --- named constants (no bare literals at call sites) ----------------------
 
 export const MK_RECALL_TOOL = "mk_recall";
-const VIEWER: RenderViewer = "nonBuilder";
+const VIEWER: RenderViewer = NON_BUILDER;
 /** Resolve a bare `new` node's first-observation line from a recall target's
  *  observations (mirrors the graph-backed render so mk_recall matches the
  *  displayed tree). */
@@ -472,7 +474,7 @@ function renderObservationBlock(
   // verbatim source can't render) — flag it so the agent knows the full source
   // is gone, not just absent from this render.
   if (body === null) {
-    return `${header}\n${singleLine(obs.summary)}\n  (verbatim source unavailable)`;
+    return `${header}\n${singleLine(obs.summary)}\n${SOURCE_UNAVAILABLE_NOTE}`;
   }
   return contentBlock(header, body, mode);
 }

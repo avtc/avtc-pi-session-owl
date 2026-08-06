@@ -7,6 +7,7 @@ import {
   buildGrepExcerpt,
   grepTimeoutNote,
   parseLineRange,
+  searchableText,
   searchTimeoutNote,
   sliceLineRange,
 } from "../../src/graph/result-budget.js";
@@ -147,5 +148,17 @@ describe("grepTimeoutNote", () => {
 
   it("floors fractional seconds to a whole number", () => {
     expect(grepTimeoutNote(300)).toContain("after 0s —");
+  });
+});
+
+describe("searchableText", () => {
+  it("concatenates summary + details with a newline when they differ", () => {
+    expect(searchableText("the goal", "<USER>do the thing</USER>")).toBe("the goal\n<USER>do the thing</USER>");
+  });
+
+  it("emits the summary ONCE when details equal the summary (source-unavailable fallback)", () => {
+    // the source-unavailable fallback renders the summary as the details; the
+    // dedup contract is that the summary is NOT doubled.
+    expect(searchableText("same line", "same line")).toBe("same line");
   });
 });

@@ -222,6 +222,23 @@ describe("Builder read tools", () => {
       expect(out).toContain("(verbatim source unavailable)");
     });
 
+    it("lines mode slices the source-unavailable note (catBody carries it)", async () => {
+      // no resolver → catBody(o5) = summary + note (2 lines). lines range covers
+      // both → the note is surfaced in the sliced window too, not just FULL.
+      const out = textOf(await callTool(tools(), "cat", { ids: ["o5"], lines: "1-5" }));
+      expect(out).toContain("Chose JWT for stateless auth");
+      expect(out).toContain("(verbatim source unavailable)");
+    });
+
+    it("grep mode renders the summary excerpt for a source-unavailable obs (note not searchable)", async () => {
+      // no resolver → grep filters over summary + details (details falls back to
+      // summary). A contentPattern matching the summary surfaces the summary
+      // line as an excerpt; the source-unavailable note is a display hint, not
+      // searchable content, so it is not excerpted.
+      const out = textOf(await callTool(tools(), "cat", { ids: ["o5"], contentPattern: "JWT" }));
+      expect(out).toContain("Chose JWT for stateless auth");
+    });
+
     it("shows an observation's full content + header WITHOUT sourceEntryIds", async () => {
       const out = textOf(await callTool(tools(), "cat", { ids: ["o5"] }));
       expect(out).toContain("Chose JWT for stateless auth");
@@ -706,9 +723,10 @@ describe("result token budget + extraction", () => {
     expect(out).not.toContain("o5");
   });
 
-  it("cat contentPattern timeout surfaces the partial-excerpts note", async () => {
-    // a catastrophic contentPattern over a large observation must surface the
-    // grep-timeout note (renderGrepBudgeted), not a silent partial result.
+  it("cat contentPattern timeout surfaces the partial-results note", async () => {
+    // a catastrophic contentPattern over a large observation must surface a
+    // timeout note (the filter regex batch, worker-bounded by findTimeoutMs),
+    // not a silent partial result. Wording-agnostic — matches the find test.
     _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
     const g = buildGraph();
     applyRecordObservation(g, {
@@ -723,7 +741,7 @@ describe("result token budget + extraction", () => {
     });
     const localTools = makeBuilderReadTools(g);
     const out = textOf(await callTool(localTools, "cat", { ids: ["o100"], contentPattern: "(.+a)(.+a)b" }));
-    expect(out.toLowerCase()).toContain("grep timed out");
+    expect(out.toLowerCase()).toContain("timed out");
     _resetGetMemkeeperSettings();
   });
 

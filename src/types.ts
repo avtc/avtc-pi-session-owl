@@ -127,7 +127,7 @@ export function nowStoredTimestamp(): string {
 
 /** Construct an observation, freezing `summaryTokens` from `summary`. The
  *  `detailsLines`/`detailsTokens` are the verbatim-source size hint, normally
- *  computed at capture from the record's sourceEntryIds (computeDetailsCounts)
+ *  computed at capture from the record's sourceEntryIds (computeDetailsAndCache)
  *  and passed in; when omitted (test fixtures / source-unavailable) they fall
  *  back to a summary-derived estimate so the size hint stays non-zero. */
 export function makeObservation(args: {

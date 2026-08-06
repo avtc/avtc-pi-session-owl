@@ -13,6 +13,12 @@ import { pluralize } from "../format/render.js";
 import { estimateContentTokens } from "../types.js";
 import { runRegexTests } from "./regex-runner.js";
 
+/** Note surfaced when an observation's verbatim source can't be re-rendered
+ *  (source entries gone — e.g. cross-branch drill). The one-line summary is
+ *  the fallback body; this flags that the full source is gone, not just absent
+ *  from the current render. Shared by cat (read-tools) and mk_recall. */
+export const SOURCE_UNAVAILABLE_NOTE = "  (verbatim source unavailable)";
+
 /** Build the searchable text for an observation: its one-line summary plus the
  *  verbatim details (so a query/contentPattern finds hits in either). When the
  *  details render equals the summary (the source-unavailable fallback returns

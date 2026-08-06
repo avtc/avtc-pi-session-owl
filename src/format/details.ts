@@ -38,8 +38,9 @@ export type EntryResolver = (ids: readonly string[]) => readonly unknown[];
 // The details render is deterministic given immutable source entries (full
 // verbatim, no observer-config dependence), so the cache is STABLE per
 // observation — no flag, no bust logic. Cleared per-session (entry ids are
-// per-session). Populated lazily by recall only (capture uses the no-cache
-// computeDetailsCounts to avoid holding every observation's verbatim text).
+// per-session). Pre-warmed at capture (computeDetailsAndCache renders the
+// verbatim source once for the size counts AND caches the text, so the first
+// recall of a session hits a hot cache) and re-warmed on demand by recall.
 const detailsCache = new Map<string, DetailsRender>();
 
 /** Render options for the verbatim-source details render: full, no entry=id. */
@@ -60,23 +61,6 @@ function renderDetailsText(sourceEntryIds: readonly string[], resolveEntries: En
     .join("");
   if (text.length === 0) return null; // resolved but nothing renderable
   return { text, lines: countLines(text), tokens: estimateContentTokens(text) };
-}
-
-/**
- * Compute the verbatim-source line + token counts for an observation's
- * sourceEntryIds (the "Nlines Mtokens" drill-cost hint, frozen at capture).
- * NO cache write — returns only the counts. Recall uses renderDetails
- * (caching, lazily). Use `computeDetailsAndCache` at capture to ALSO warm the
- * per-observation cache so the first recall is hot. Returns null when the
- * source is unavailable (callers fall back to a summary-derived estimate).
- */
-export function computeDetailsCounts(
-  sourceEntryIds: readonly string[],
-  resolveEntries: EntryResolver,
-): { lines: number; tokens: number } | null {
-  const render = renderDetailsText(sourceEntryIds, resolveEntries);
-  if (render === null) return null;
-  return { lines: render.lines, tokens: render.tokens };
 }
 
 /**

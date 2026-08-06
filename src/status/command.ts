@@ -7,6 +7,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
+import { BUILDER, NON_BUILDER } from "../format/render.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
 import { nodeLineOptions, nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { notify } from "../notify.js";
@@ -151,12 +152,12 @@ export function gatherStatusInput(
   const observations = [...graph.observations.values()];
   const nonObsoleteRoots = nonObsoleteRootsOf(nodes);
   const rootsViewTokens = estimateContentTokens(
-    renderRootViewFromRoots(nonObsoleteRoots, "builder", nodeLineOptions(graph, "builder").observationContent),
+    renderRootViewFromRoots(nonObsoleteRoots, BUILDER, nodeLineOptions(graph, BUILDER).observationContent),
   );
   const selectedViewTokens = measureSelectedViewTokens(
     config.renderMode,
     store.selectedTree?.nodes ?? null,
-    nodeLineOptions(graph, "nonBuilder").observationContent,
+    nodeLineOptions(graph, NON_BUILDER).observationContent,
   );
   return {
     enabled: config.enabled,
@@ -188,7 +189,7 @@ function measureSelectedViewTokens(
   if (renderMode !== "selected-root" || serializedNodes === null) return null;
   const decoded = nonObsoleteRootsOf(serializedNodes.map(decodeNode).filter((n): n is Node => n !== null));
   if (decoded.length === 0) return null;
-  return estimateContentTokens(renderRootViewFromRoots(decoded, "nonBuilder", observationContent));
+  return estimateContentTokens(renderRootViewFromRoots(decoded, NON_BUILDER, observationContent));
 }
 
 // --- registration ----------------------------------------------------------

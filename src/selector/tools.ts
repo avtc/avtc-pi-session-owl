@@ -27,6 +27,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
+import { NON_BUILDER } from "../format/render.js";
 import {
   MERGE_TOOL,
   MKDIR_TOOL,
@@ -38,7 +39,6 @@ import {
   makeSelectorSetMetaTool,
   SELECTOR_SET_META_TOOL,
 } from "../graph/mutate-tools.js";
-
 import { MUTATE_WORKING_COPY } from "../graph/mutations.js";
 import { makeReadTools, makeTryFinishTool } from "../graph/read-tools.js";
 import type { TodoBridge, TodoItem } from "../todo/types.js";
@@ -149,12 +149,12 @@ function makeTodoListTool(bridge: TodoBridge): AgentTool<typeof TODO_LIST_PARAMS
 export function makeSelectorGraphTools(working: SelectorWorkingCopy, settings: MemkeeperConfig): AgentTool[] {
   const ctx = workingCopyMutateContext();
   return [
-    ...makeReadTools(working.graph, "nonBuilder"),
+    ...makeReadTools(working.graph, NON_BUILDER),
     makeMkdirTool(working.graph, ctx),
     makeMvTool(working.graph, ctx),
     makeMergeTool(working.graph, ctx),
     makeSelectorSetMetaTool(working.graph, ctx),
-    makeTryFinishTool(working.graph, { rootViewThreshold: settings.selectorRootViewThreshold }, "nonBuilder"),
+    makeTryFinishTool(working.graph, { rootViewThreshold: settings.selectorRootViewThreshold }, NON_BUILDER),
   ];
 }
 

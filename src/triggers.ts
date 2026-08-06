@@ -15,6 +15,7 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "./config/schema.js";
 import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./format/chunk.js";
+import { BUILDER } from "./format/render.js";
 import { measureRootViewTokens } from "./graph/read-tools.js";
 import { log } from "./log.js";
 import { acquireOrSkip, inFlight, type StageName } from "./runtime/run-lock.js";
@@ -146,7 +147,7 @@ function countNewNodes(): number {
  *  would under-count: it omits every line's framing, so the trigger and the
  *  gate could disagree on whether the root view is over budget.) */
 function computeRootViewTokens(): number {
-  return measureRootViewTokens(getGraphStore().graph, "builder");
+  return measureRootViewTokens(getGraphStore().graph, BUILDER);
 }
 
 /** Read the live session context tokens (null when pi reports unknown).

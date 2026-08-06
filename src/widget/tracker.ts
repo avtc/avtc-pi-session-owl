@@ -12,6 +12,7 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ContextUsage, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
+import { BUILDER } from "../format/render.js";
 import { nodeLineOptions, nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import type { StageUsage } from "../runtime/agent-loop.js";
 import { deltaTextOf, deltaTokens, messageEndUsage, streamedOutputUsage } from "../runtime/streaming-tokens.js";
@@ -253,7 +254,7 @@ export function createTracker(): ProgressTracker {
 
 /** The viewer the widget's roots section reflects: the Builder's budget view
  *  (the builderRootViewThreshold gate uses the same render). */
-const WIDGET_ROOTS_VIEWER = "builder" as const;
+const WIDGET_ROOTS_VIEWER = BUILDER;
 
 /** Non-obsolete root count + view tokens from a SINGLE `nonObsoleteRoots` pass
  *  (the widget renders per streaming event, so the count + the rendered view must

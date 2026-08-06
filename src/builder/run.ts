@@ -16,6 +16,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
+import { BUILDER } from "../format/render.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
@@ -112,7 +113,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   if (input.signal.aborted) return;
   if (
     input.settings.builderSkipWithinBudget &&
-    measureRootViewTokens(graph, "builder") < input.settings.builderRootViewThreshold
+    measureRootViewTokens(graph, BUILDER) < input.settings.builderRootViewThreshold
   ) {
     flushNew(input.widget, store);
     return;
@@ -154,13 +155,26 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
     normalEnd = false;
     log.error("builder run failed", cause);
   } finally {
-    // Flush `new`→`active` only on a normal stage-end; abort/error preserve it.
-    if (normalEnd) flushNew(input.widget, store);
-    // Persist the cumulative usage ledger ONCE at run end (fold-per-pass,
-    // persist-once — mirroring the Observer). Skipped on abort/error (matching
-    // the Observer's no-usage-on-abort) and when no pass reported usage.
-    if (normalEnd && ledger.hasUsage()) persistLedger(store);
-    if (stageOpened) input.widget.endStage();
+    // Best-effort teardown: a throw in one cleanup must not skip the others or
+    // escape (the never-throws teardown contract). `endStage` always runs when a
+    // stage opened so the widget never gets stuck showing a stage.
+    try {
+      // Flush `new`→`active` only on a normal stage-end; abort/error preserve it.
+      if (normalEnd) flushNew(input.widget, store);
+      // Persist the cumulative usage ledger ONCE at run end (fold-per-pass,
+      // persist-once — mirroring the Observer). Skipped on abort/error (matching
+      // the Observer's no-usage-on-abort) and when no pass reported usage.
+      if (normalEnd && ledger.hasUsage()) persistLedger(store);
+    } catch (cleanupErr) {
+      log.error("builder stage teardown cleanup failed", cleanupErr);
+    }
+    if (stageOpened) {
+      try {
+        input.widget.endStage();
+      } catch (endErr) {
+        log.error("builder endStage failed", endErr);
+      }
+    }
   }
 }
 
@@ -198,7 +212,7 @@ async function runPass(
 
 /** Build the per-pass user message: the task + the current root view snapshot. */
 function passMessages(graph: MemkeeperGraph, pass: number): AgentMessage[] {
-  const rootView = renderRootView(graph, "builder") || EMPTY_ROOT_VIEW;
+  const rootView = renderRootView(graph, BUILDER) || EMPTY_ROOT_VIEW;
   const text =
     "Organize the memory graph. Process the new arrivals and consolidate the root view to fit the budget.\n\n" +
     `Current root view (pass ${pass}):\n${rootView}`;

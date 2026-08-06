@@ -18,6 +18,7 @@ import {
   formatNodeLine,
   formatObservationLine,
   indent,
+  NON_BUILDER,
   type RenderableNode,
   type RenderViewer,
 } from "../format/render.js";
@@ -36,12 +37,11 @@ import {
   type ObsId,
   ROOT_PARENT,
 } from "../types.js";
-import { runRegexTests } from "./regex-runner.js";
 import {
   budgetReachedFooter,
   budgetWindow,
-  grepTimeoutNote,
   intersectRegexFilters,
+  SOURCE_UNAVAILABLE_NOTE,
   searchableText,
 } from "./result-budget.js";
 import {
@@ -293,6 +293,13 @@ export function nonObsoleteRootsOf<T extends RenderableNode>(nodes: Iterable<T>)
   return out;
 }
 
+/** Non-obsolete root nodes, ordered (nGoal first, then the rest by importance
+ *  + recency, nIrrelevant last) — the canonical "active-set roots" query used
+ *  by the compaction summary, the Selector working roots, and render sites. */
+export function orderedNonObsoleteRoots<T extends RenderableNode>(nodes: Iterable<T>): T[] {
+  return orderActiveSetRoots(nonObsoleteRootsOf(nodes));
+}
+
 /** Direct child nodes + direct observations of a parent node, ordered
  *  nodes-first (importance desc, then recency) then observations (recency). */
 export function directChildren(graph: MemkeeperGraph, parent: Node): { nodes: Node[]; observations: Observation[] } {
@@ -530,7 +537,7 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
  *  Delegates to the shared formatObservationLine with content omitted, so the
  *  header stays byte-identical to every other observation line prefix. */
 function catObsHeader(obs: Observation): string {
-  return formatObservationLine(obs, { viewer: "nonBuilder", formatContent: () => "" });
+  return formatObservationLine(obs, { viewer: NON_BUILDER, formatContent: () => "" });
 }
 
 /** A paginated cat unit: one observation full-text (header + content), with an
@@ -558,8 +565,6 @@ function detailsTextFor(obs: Observation): string {
 /** The source-unavailable marker appended to a cat/full body when the verbatim
  *  source can't render, so the consumer knows the full source is gone (the
  *  one-line summary is the fallback body). Mirrors mk_recall's degradation. */
-const SOURCE_UNAVAILABLE_NOTE = "  (verbatim source unavailable)";
-
 /** Cat display body for an observation: the verbatim source when available,
  *  else the one-line summary + a source-unavailable note. (The match/grep-text
  *  path uses `detailsTextFor` directly — no note, so the marker isn't
@@ -728,21 +733,20 @@ async function buildCatGrepItemsWithMatches(
     ...summaryNodes.map((n) => n.summary),
     ...obsList.map((o) => searchableText(o.summary, detailsTextFor(o))),
   ];
-  const outcome = await runRegexTests(grep.pattern, texts, getMemkeeperSettings().findTimeoutMs);
-  if ("error" in outcome) return { error: outcome.error };
+  // Reuse the shared regex-batch helper (worker-bounded, findTimeoutMs) so the
+  // timeout note matches find/mk_recall exactly instead of a hand-rolled variant.
+  const result = await intersectRegexFilters(texts, [grep.pattern]);
+  if ("error" in result) return { error: result.error };
   const summaryMatch = new Set<string>();
   for (let i = 0; i < summaryNodes.length; i += 1) {
-    if (outcome.results[i]) summaryMatch.add(summaryNodes[i].id);
+    if (result.passes[i]) summaryMatch.add(summaryNodes[i].id);
   }
   const obsMatch = new Set<string>();
   for (let i = 0; i < obsList.length; i += 1) {
-    if (outcome.results[summaryNodes.length + i]) obsMatch.add(obsList[i].id);
+    if (result.passes[summaryNodes.length + i]) obsMatch.add(obsList[i].id);
   }
   const items = buildCatGrepItems(graph, ids, viewer, summaryMatch, obsMatch);
-  if ("testedCount" in outcome) {
-    return { items, note: grepTimeoutNote(outcome.timedOutMs) };
-  }
-  return { items };
+  return { items, note: result.note };
 }
 
 /** Render one cat unit (preamble + header + content). */

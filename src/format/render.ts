@@ -9,6 +9,11 @@ import { countLines, estimateContentTokens, type Node, type Observation } from "
 
 export type RenderViewer = "builder" | "nonBuilder";
 
+/** Shared named values for the RenderViewer union, so call sites pass a named
+ *  constant instead of a bare string (consistency + one definition point). */
+export const BUILDER: RenderViewer = "builder";
+export const NON_BUILDER: RenderViewer = "nonBuilder";
+
 /** The canonical one-line legend for the shared render format (non-Builder
  *  consumers — compaction summary, commands; the Builder's own prompt carries
  *  its own legend including the Builder-only 🆕new glyph). */

@@ -3,12 +3,7 @@
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  clearDetailsCache,
-  computeDetailsAndCache,
-  computeDetailsCounts,
-  renderDetails,
-} from "../../src/format/details.js";
+import { clearDetailsCache, computeDetailsAndCache, renderDetails } from "../../src/format/details.js";
 import { estimateContentTokens } from "../../src/types.js";
 
 // --- fake session entries (SessionEntry-shaped) ----------------------------
@@ -139,31 +134,20 @@ describe("renderDetails", () => {
   });
 });
 
-describe("computeDetailsCounts", () => {
+describe("computeDetailsAndCache (capture-time pre-warm)", () => {
   beforeEach(() => clearDetailsCache());
 
-  it("returns the verbatim-source line + token counts (no text, no cache)", () => {
+  it("returns the verbatim-source line + token counts (no text, warmed cache)", () => {
     const { call, result } = toolPair("c1", "bash", { command: "npm test" }, "r1", "line a\nline b", false);
     const resolve = resolverFor([call, result]);
-    const counts = computeDetailsCounts(["c1", "r1"], resolve);
+    const counts = computeDetailsAndCache("oCounts", ["c1", "r1"], resolve);
     expect(counts).not.toBeNull();
     // text is '<TOOLCALL:bash>{...}</TOOLCALL><TOOLRESULT>line a\nline b</TOOLRESULT>'
     const expectedText = '<TOOLCALL:bash>{"command":"npm test"}</TOOLCALL><TOOLRESULT>line a\nline b</TOOLRESULT>';
     expect(counts?.lines).toBe(2); // two lines in the result text
     expect(counts?.tokens).toBe(estimateContentTokens(expectedText));
-    // computeDetailsCounts returns only counts (no text field)
+    // computeDetailsAndCache returns only counts (no text field)
     expect(counts).not.toHaveProperty("text");
-  });
-
-  it("does NOT populate the details cache (the no-cache variant)", () => {
-    const e = userEntry("u1", "hello");
-    const resolve = resolverFor([e]);
-    computeDetailsCounts(["u1"], resolve);
-    // a resolver that throws proves renderDetails did NOT hit a cache populated by computeDetailsCounts
-    const throwingResolve = (): readonly unknown[] => {
-      throw new Error("cache should not have been populated by computeDetailsCounts");
-    };
-    expect(() => renderDetails("o8", ["u1"], throwingResolve)).toThrow();
   });
 
   it("computeDetailsAndCache warms the cache (capture-time pre-warm)", () => {
@@ -182,8 +166,13 @@ describe("computeDetailsCounts", () => {
     expect(render?.text).toContain("hello world");
   });
 
-  it("returns null when no source entries resolve (source_unavailable)", () => {
+  it("returns null and leaves the cache cold when no source entries resolve (source_unavailable)", () => {
     const resolve = resolverFor([userEntry("u1", "hi")]);
-    expect(computeDetailsCounts(["9", "x"], resolve)).toBeNull();
+    const counts = computeDetailsAndCache("oMiss", ["9", "x"], resolve);
+    expect(counts).toBeNull();
+    // null return writes nothing to the cache: a later renderDetails for the
+    // same id must re-resolve (and re-return null), proving nothing was cached.
+    const cachedRender = renderDetails("oMiss", ["9", "x"], resolve);
+    expect(cachedRender).toBeNull();
   });
 });

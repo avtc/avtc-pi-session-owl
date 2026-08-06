@@ -18,6 +18,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
+import { NON_BUILDER } from "../format/render.js";
 import { nodeLineOptions, nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
@@ -39,7 +40,6 @@ import { makeSelectorTools, SELECTOR_MUTATE_TOOL_NAMES } from "./tools.js";
 
 const SELECT_STAGE = "select" as const;
 const NO_PROMPT_OBS = null;
-const NON_BUILDER = "nonBuilder" as const;
 const INDEX_NOT_FOUND = -1;
 const PREV_ENTRY = 1; // prev(firstKeptEntryId) = firstKeptEntryId position − 1
 
@@ -167,17 +167,30 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
     normalEnd = false;
     log.error("selector run failed", cause);
   } finally {
-    // Persist the resulting tree whenever a stage opened (a working copy exists)
-    // — on convergence / no-op / max, on a run-ending error, AND on an abort-
-    // during-run (committed partial work is kept): the working copy is the best
-    // available curation and committing it keeps mk_recall's target alive.
-    // (Aborted-before-start leaves no working copy; stageOpened is false.)
-    if (stageOpened) persistResult(store, graphStore, workingCopy.graph);
-    // Persist the cumulative usage ledger ONCE at run end (fold-per-pass,
-    // persist-once — mirroring the Observer + Builder). Skipped on abort/error
-    // and when no pass reported usage.
-    if (normalEnd && ledger.hasUsage()) persistLedger(store);
-    if (stageOpened) input.widget.endStage();
+    // Best-effort teardown: a throw in one cleanup must not skip the others or
+    // escape (the never-throws teardown contract). `endStage` always runs when a
+    // stage opened so the widget never gets stuck showing a stage.
+    try {
+      // Persist the resulting tree whenever a stage opened (a working copy exists)
+      // — on convergence / no-op / max, on a run-ending error, AND on an abort-
+      // during-run (committed partial work is kept): the working copy is the best
+      // available curation and committing it keeps mk_recall's target alive.
+      // (Aborted-before-start leaves no working copy; stageOpened is false.)
+      if (stageOpened) persistResult(store, graphStore, workingCopy.graph);
+      // Persist the cumulative usage ledger ONCE at run end (fold-per-pass,
+      // persist-once — mirroring the Observer + Builder). Skipped on abort/error
+      // and when no pass reported usage.
+      if (normalEnd && ledger.hasUsage()) persistLedger(store);
+    } catch (cleanupErr) {
+      log.error("selector stage teardown cleanup failed", cleanupErr);
+    }
+    if (stageOpened) {
+      try {
+        input.widget.endStage();
+      } catch (endErr) {
+        log.error("selector endStage failed", endErr);
+      }
+    }
   }
 }
 

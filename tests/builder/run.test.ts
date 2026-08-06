@@ -219,7 +219,7 @@ describe("runBuilder", () => {
   });
 
   it("default (builderSkipWithinBudget off): runs at least one pass even when under threshold", async () => {
-    const g = seedGraph([{ id: "n3", summary: "fresh arrival" }]);
+    seedGraph([{ id: "n3", summary: "fresh arrival" }]);
     const cap = makeFakePi();
     const widget = recordingWidget();
     let passCount = 0;

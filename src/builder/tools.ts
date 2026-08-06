@@ -13,6 +13,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import type { MemkeeperConfig } from "../config/schema.js";
+import { BUILDER } from "../format/render.js";
 import {
   MERGE_TOOL,
   MKDIR_TOOL,
@@ -161,7 +162,7 @@ function makeSetMetaTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<t
  *  (the 🆕 glyph is Builder-only — non-Builder consumers render `new` as
  *  `active`). Thin wrapper over the shared read-tool factories. */
 export function makeBuilderReadTools(graph: MemkeeperGraph): AgentTool[] {
-  return makeReadTools(graph, "builder");
+  return makeReadTools(graph, BUILDER);
 }
 
 /** Build the full Builder toolset (9 tools): ls/cat/find (read) +
@@ -178,6 +179,6 @@ export function makeBuilderTools(graph: MemkeeperGraph, store: StoreContext, set
     makeMergeTool(graph, ctx),
     makeSupersedeTool(graph, ctx),
     makeSetMetaTool(graph, ctx),
-    makeTryFinishTool(graph, { rootViewThreshold: settings.builderRootViewThreshold }, "builder"),
+    makeTryFinishTool(graph, { rootViewThreshold: settings.builderRootViewThreshold }, BUILDER),
   ];
 }

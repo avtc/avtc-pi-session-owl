@@ -14,7 +14,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings } from "../config/schema.js";
-import { formatNodeLine, formatObservationLine, indent, type RenderViewer } from "../format/render.js";
+import { formatNodeLine, formatObservationLine, indent, NON_BUILDER, type RenderViewer } from "../format/render.js";
 import {
   buildCatUnits,
   collectFindMatches,
@@ -32,7 +32,7 @@ import type { NodeId, ObsId } from "../types.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
-const VIEWER: RenderViewer = "nonBuilder";
+const VIEWER: RenderViewer = NON_BUILDER;
 const CHILD_DEPTH = 1;
 const EXCLUDE_SUPERSEDED: IncludeSuperseded = false;
 const INCLUDE_SUPERSEDED: IncludeSuperseded = true;
