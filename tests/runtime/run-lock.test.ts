@@ -85,6 +85,23 @@ describe("run-lock (single run-lock — at most one stage active at a time)", ()
     expect(inFlight()).toBe(false); // release frees it
   });
 
+  it("setStage relabels the active stage mid-run (a chained turn_end run)", () => {
+    const handle = acquireOrSkip("observe") as RunHandle;
+    expect(current()).toBe("observe");
+    handle.setStage("build");
+    expect(current()).toBe("build");
+    handle.setStage("select");
+    expect(current()).toBe("select");
+    handle.release();
+  });
+
+  it("setStage is a no-op once released", () => {
+    const handle = acquireOrSkip("observe") as RunHandle;
+    handle.release();
+    handle.setStage("build"); // already released — does not resurrect
+    expect(current()).toBeNull();
+  });
+
   it("acquireForCompaction acquires immediately when nothing is in flight", async () => {
     const handle = await acquireForCompaction();
     expect(handle).toBeDefined();

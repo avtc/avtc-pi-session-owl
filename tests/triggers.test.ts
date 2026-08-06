@@ -12,7 +12,6 @@ import {
   evaluateBuilderTrigger,
   evaluateObserverTrigger,
   evaluateSelectorTrigger,
-  launchBackgroundRun,
   onTurnEnd,
   type RunFn,
   resetStageRuns,
@@ -476,42 +475,129 @@ describe("evaluateSelectorTrigger", () => {
 });
 
 // ===========================================================================
-describe("launchBackgroundRun", () => {
-  it("calls the run function when the lock is acquired, with signal + captured ctx", async () => {
-    const seen: { signal: AbortSignal; ctx: ExtensionContext }[] = [];
-    const runFn: RunFn = async (args) => {
-      seen.push({ signal: args.signal, ctx: args.ctx });
-    };
-    const ctx = ctxWithTokens(1);
-    launchBackgroundRun(makeInput({ ctx }), "observe", runFn);
-    // fire-and-forget: the run is launched but onTurnEnd returned; let it settle.
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(seen).toHaveLength(1);
-    expect(seen[0].signal).toBeInstanceOf(AbortSignal);
-    expect(seen[0].ctx).toBe(ctx);
-    // the lock was released by the IIFE's finally
+describe("onTurnEnd chained launch", () => {
+  // A single turn_end acquires the lock ONCE and runs observe → build → select
+  // (each stage that fires) as one chained run, re-evaluating Builder/Selector
+  // AFTER the Observer completes so they see the Observer's new nodes. This fixes
+  // the starvation where a Builder/Selector that fired on the same turn as the
+  // Observer used to SKIP because the Observer held the lock.
+  it("runs observe → build → select in order when all three fire (one lock)", async () => {
+    const order: string[] = [];
+    setStageRuns({
+      runObserver: async () => {
+        order.push("observe");
+      },
+      runBuilder: async () => {
+        order.push("build");
+      },
+      runSelector: async () => {
+        order.push("select");
+      },
+    });
+    const entries: FakeEntry[] = [
+      userEntry("u1", "initial prompt"),
+      ...Array.from({ length: 20 }, (_, i) => assistantEntry(`a${i}`, "x".repeat(200))),
+    ];
+    const ctx = {
+      getContextUsage: () => ({ tokens: 100000, contextWindow: 200000, percent: 50 }),
+      sessionManager: { getLeafId: () => "leaf-1", getBranch: () => entries },
+    } as unknown as ExtensionContext;
+    onTurnEnd(
+      makeInput({
+        ctx,
+        settings: {
+          ...DEFAULT_CONFIG,
+          observerThresholdTokens: 1,
+          builderMode: "on-session-context-threshold",
+          builderSessionContextThresholdTokens: 1,
+          selectorMode: "on-session-context-threshold",
+          selectorSessionContextThresholdTokens: 1,
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual(["observe", "build", "select"]);
+    expect(runLockInFlight()).toBe(false); // released by the chain's finally
+  });
+
+  it("runs only the firing stages (e.g. Observer alone when Builder/Selector are on-compaction)", async () => {
+    const order: string[] = [];
+    setStageRuns({
+      runObserver: async () => {
+        order.push("observe");
+      },
+      runBuilder: async () => {
+        order.push("build");
+      },
+      runSelector: async () => {
+        order.push("select");
+      },
+    });
+    const entries: FakeEntry[] = [userEntry("u1", "initial prompt"), assistantEntry("a1", "x".repeat(2000))];
+    const ctx = {
+      getContextUsage: () => ({ tokens: 0, contextWindow: 200000, percent: 0 }),
+      sessionManager: { getLeafId: () => "leaf-1", getBranch: () => entries },
+    } as unknown as ExtensionContext;
+    // default profile: Observer on-threshold (fires), Builder + Selector on-compaction (skip).
+    onTurnEnd(makeInput({ ctx, settings: { ...DEFAULT_CONFIG, observerThresholdTokens: 1 } }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual(["observe"]);
     expect(runLockInFlight()).toBe(false);
   });
 
-  it("does NOT call the run function when the lock is not acquired (skipped)", () => {
+  it("SKIPs the whole turn when a run is already in flight (no queue)", async () => {
     const handle = acquireOrSkip("observe"); // occupy the lock
     if (handle === null) throw new Error("lock not acquired");
-    const seen: unknown[] = [];
-    const runFn: RunFn = async () => {
-      seen.push("ran");
-    };
-    launchBackgroundRun(makeInput(), "build", runFn);
-    expect(seen).toHaveLength(0);
+    const order: string[] = [];
+    setStageRuns({
+      runObserver: async () => {
+        order.push("observe");
+      },
+      runBuilder: async () => {
+        order.push("build");
+      },
+      runSelector: async () => {
+        order.push("select");
+      },
+    });
+    const entries: FakeEntry[] = [userEntry("u1", "initial prompt"), assistantEntry("a1", "x".repeat(2000))];
+    const ctx = {
+      getContextUsage: () => ({ tokens: 100000, contextWindow: 200000, percent: 50 }),
+      sessionManager: { getLeafId: () => "leaf-1", getBranch: () => entries },
+    } as unknown as ExtensionContext;
+    onTurnEnd(
+      makeInput({
+        ctx,
+        settings: {
+          ...DEFAULT_CONFIG,
+          observerThresholdTokens: 1,
+          builderMode: "on-session-context-threshold",
+          builderSessionContextThresholdTokens: 1,
+          selectorMode: "on-session-context-threshold",
+          selectorSessionContextThresholdTokens: 1,
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual([]); // skipped — nothing ran; the gap batches on the next trigger
     handle.release();
   });
 
-  it("releases the lock even when the run rejects", async () => {
-    const runFn: RunFn = async () => {
-      throw new Error("boom");
-    };
-    launchBackgroundRun(makeInput(), "observe", runFn);
-    await new Promise((r) => setTimeout(r, 5));
+  it("releases the lock even when a chained stage rejects", async () => {
+    setStageRuns({
+      runObserver: async () => {
+        throw new Error("boom");
+      },
+      runBuilder: async () => {},
+      runSelector: async () => {},
+    });
+    const entries: FakeEntry[] = [userEntry("u1", "initial prompt"), assistantEntry("a1", "x".repeat(2000))];
+    const ctx = {
+      getContextUsage: () => ({ tokens: 0, contextWindow: 200000, percent: 0 }),
+      sessionManager: { getLeafId: () => "leaf-1", getBranch: () => entries },
+    } as unknown as ExtensionContext;
+    onTurnEnd(makeInput({ ctx, settings: { ...DEFAULT_CONFIG, observerThresholdTokens: 1 } }));
+    await new Promise((r) => setTimeout(r, 10));
     expect(runLockInFlight()).toBe(false);
   });
 });
@@ -536,52 +622,6 @@ describe("onTurnEnd", () => {
     });
     onTurnEnd(input);
     expect(called).toBe(false);
-  });
-
-  it("fires the Observer first when on-threshold + threshold met, then Builder/Selector skip (in-flight)", async () => {
-    // branch with enough unobserved tokens to cross the (low) threshold.
-    const leaf = "leaf-1";
-    const entries: FakeEntry[] = [
-      userEntry("u1", "initial prompt captured mechanically"),
-      ...Array.from({ length: 20 }, (_, i) => assistantEntry(`a${i}`, "x".repeat(200))),
-    ];
-    const ctx = {
-      getContextUsage: () => ({ tokens: 100000, contextWindow: 200000, percent: 50 }),
-      sessionManager: { getLeafId: () => leaf, getBranch: () => entries },
-    } as unknown as ExtensionContext;
-
-    const order: string[] = [];
-    const observerRun: RunFn = async () => {
-      order.push("observer");
-    };
-    const builderRun: RunFn = async () => {
-      order.push("builder");
-    };
-    const selectorRun: RunFn = async () => {
-      order.push("selector");
-    };
-    setStageRuns({ runObserver: observerRun, runBuilder: builderRun, runSelector: selectorRun });
-
-    onTurnEnd(
-      makeInput({
-        ctx,
-        settings: {
-          ...DEFAULT_CONFIG,
-          observerThresholdTokens: 1,
-          builderMode: "on-session-context-threshold",
-          builderSessionContextThresholdTokens: 1,
-          selectorMode: "on-session-context-threshold",
-          selectorSessionContextThresholdTokens: 1,
-        },
-      }),
-    );
-
-    // Observer is launched first (acquires the lock synchronously); Builder +
-    // Selector pass their context-threshold gate but skip because the lock is
-    // in flight (held by the Observer run).
-    await new Promise((r) => setTimeout(r, 10));
-    expect(order).toEqual(["observer"]);
-    expect(runLockInFlight()).toBe(false); // released after the observer run resolves
   });
 
   it("returns synchronously (fire-and-forget): the run is not awaited", () => {

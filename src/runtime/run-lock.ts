@@ -25,6 +25,9 @@ export interface RunHandle {
   release: () => void;
   /** The run's own abort controller (compaction aborts `.abort()` on it). */
   abortController: AbortController;
+  /** Update the stage label mid-run (a chained turn_end run observes, then
+   *  builds, then selects under a single acquire). */
+  setStage: (stage: StageName) => void;
 }
 
 interface ActiveRun {
@@ -57,7 +60,13 @@ export function current(): StageName | null {
 function makeHandle(stage: StageName): RunHandle {
   const run: ActiveRun = {
     stage,
-    handle: { release: () => releaseActive(run), abortController: new AbortController() },
+    handle: {
+      release: () => releaseActive(run),
+      abortController: new AbortController(),
+      setStage: (next: StageName) => {
+        if (active === run) active.stage = next;
+      },
+    },
     released: false,
   };
   active = run;

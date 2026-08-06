@@ -107,16 +107,15 @@ const OBSERVER_SKIP_THRESHOLD = "unobserved tokens below observerThresholdTokens
  * unobserved tokens ≥ `observerThresholdTokens`. Skips when disabled/on-compaction or
  * when a run is in flight. No turn-count gate — a single token gate.
  */
-export function evaluateObserverTrigger(input: TriggerInput & { unobserved: SessionEntry[] }): ObserverTriggerResult {
+/** The Observer trigger decision (no in-flight guard — the chained turn_end
+ *  run re-evaluates each stage while holding the lock). Mode/empty/threshold only. */
+function observerTriggerDecision(input: TriggerInput & { unobserved: SessionEntry[] }): ObserverTriggerResult {
   const { settings, unobserved } = input;
   if (settings.observerMode === "on-compaction") {
     return { shouldFire: false, unobserved, reason: OBSERVER_SKIP_MODE };
   }
   if (unobserved.length === 0) {
     return { shouldFire: false, unobserved, reason: OBSERVER_SKIP_EMPTY };
-  }
-  if (inFlight()) {
-    return { shouldFire: false, unobserved, reason: SKIP_INFLIGHT };
   }
   const tokens = estimateUnobservedTokens(unobserved, settings);
   if (tokens < settings.observerThresholdTokens) {
@@ -127,6 +126,11 @@ export function evaluateObserverTrigger(input: TriggerInput & { unobserved: Sess
     };
   }
   return { shouldFire: true, unobserved, reason: `unobserved ${tokens} tokens ≥ ${settings.observerThresholdTokens}` };
+}
+
+export function evaluateObserverTrigger(input: TriggerInput & { unobserved: SessionEntry[] }): ObserverTriggerResult {
+  if (inFlight()) return { ...observerTriggerDecision(input), reason: SKIP_INFLIGHT, shouldFire: false };
+  return observerTriggerDecision(input);
 }
 
 // --- Builder trigger ------------------------------------------------------
@@ -165,14 +169,13 @@ export interface StageTriggerResult {
 
 const SKIP_MODE_COMPACTION = "mode is on-compaction (compaction owns it)";
 
-/** The Builder trigger (the non-default builderModes at turn_end). */
-export function evaluateBuilderTrigger(input: TriggerInput): StageTriggerResult {
+/** The Builder trigger decision (no in-flight guard — the chained turn_end run
+ *  re-evaluates Builder/Selector after the Observer completes, while holding the
+ *  lock, to see the Observer's freshly-created `new` nodes). */
+function builderTriggerDecision(input: TriggerInput): StageTriggerResult {
   const { settings } = input;
   if (settings.builderMode === "on-compaction") {
     return { shouldFire: false, reason: SKIP_MODE_COMPACTION };
-  }
-  if (inFlight()) {
-    return { shouldFire: false, reason: SKIP_INFLIGHT };
   }
   switch (settings.builderMode) {
     case "each-N-observations": {
@@ -202,19 +205,22 @@ export function evaluateBuilderTrigger(input: TriggerInput): StageTriggerResult 
   }
 }
 
+/** The Builder trigger (the non-default builderModes at turn_end). */
+export function evaluateBuilderTrigger(input: TriggerInput): StageTriggerResult {
+  if (inFlight()) return { shouldFire: false, reason: SKIP_INFLIGHT };
+  return builderTriggerDecision(input);
+}
+
 // --- Selector trigger ------------------------------------------------------
 
-/** The Selector trigger (only when renderMode is selected-root). */
-export function evaluateSelectorTrigger(input: TriggerInput): StageTriggerResult {
+/** The Selector trigger decision (no in-flight guard — see `builderTriggerDecision`). */
+function selectorTriggerDecision(input: TriggerInput): StageTriggerResult {
   const { settings } = input;
   if (settings.renderMode !== "selected-root") {
     return { shouldFire: false, reason: "renderMode is observations-root (Selector inactive)" };
   }
   if (settings.selectorMode === "on-compaction") {
     return { shouldFire: false, reason: SKIP_MODE_COMPACTION };
-  }
-  if (inFlight()) {
-    return { shouldFire: false, reason: SKIP_INFLIGHT };
   }
   // selectorMode is on-session-context-threshold (the only other variant)
   const tokens = contextTokens(input);
@@ -226,26 +232,21 @@ export function evaluateSelectorTrigger(input: TriggerInput): StageTriggerResult
   };
 }
 
+/** The Selector trigger (only when renderMode is selected-root). */
+export function evaluateSelectorTrigger(input: TriggerInput): StageTriggerResult {
+  if (inFlight()) return { shouldFire: false, reason: SKIP_INFLIGHT };
+  return selectorTriggerDecision(input);
+}
+
 // --- turn_end entry point ----------------------------------
 
-/** Fire-and-forget launch a stage run: acquire the lock or SKIP;
- *  on acquire, capture ctx synchronously and `void` an async IIFE whose `finally`
- *  releases the handle (the run owns its own AbortController via the handle). The
- *  run is NEVER awaited by the handler (it returns immediately). */
-export function launchBackgroundRun(input: TriggerInput, stage: StageName, runFn: RunFn): void {
-  const handle = acquireOrSkip(stage);
-  if (handle === null) return; // SKIP — a run is in flight; the gap batches on the next trigger
-  const { ctx, settings } = input;
-  const signal = handle.abortController.signal;
-  void (async () => {
-    try {
-      await runFn({ ctx, settings, signal, scope: null, unobserved: null });
-    } catch (err) {
-      log.error(`background run (${stage}) failed`, err);
-    } finally {
-      handle.release();
-    }
-  })();
+/** The first stage that fires (for the lock's initial label). The chain
+ *  re-evaluates Builder/Selector AFTER the Observer completes, so the order is
+ *  observe → build → select. */
+function firstFiringStage(observer: boolean, builder: boolean): StageName {
+  if (observer) return "observe";
+  if (builder) return "build";
+  return "select";
 }
 
 /** Per-stage run injection (each stage registers their real run functions at
@@ -282,10 +283,13 @@ export function resetStageRuns(): void {
 }
 
 /** The turn_end entry point the hook calls fire-and-forget. Evaluates Observer,
- *  Builder, Selector triggers and launches each that shouldFire, serialized by the
- *  run-lock (Observer first — it produces the `new` nodes Builder/Selector consume;
- *  a colliding later trigger SKIPS). Stage runs are read from the module registry
- *  (set via `setStageRuns`). */
+ *  Builder, Selector triggers and — when any fires — acquires the run-lock ONCE
+ *  and runs the firing stages as a single chained run (observe → build → select),
+ *  re-evaluating Builder/Selector AFTER the Observer completes so they see the
+ *  Observer's freshly-created `new` nodes. This avoids starving the Builder when
+ *  the Observer holds the lock (the old per-stage launch made a colliding
+ *  Builder/Selector SKIP). A turn_end that collides with a run already in flight
+ *  still SKIPS (the gap batches on the next trigger). */
 export function onTurnEnd(input: TriggerInput): void {
   if (!input.settings.enabled) return;
 
@@ -305,18 +309,43 @@ export function onTurnEnd(input: TriggerInput): void {
     ? { ...input, prefetchedContextTokens: input.ctx.getContextUsage()?.tokens ?? null }
     : input;
 
-  const observer = evaluateObserverTrigger({ ...input, unobserved });
-  if (observer.shouldFire) {
-    launchBackgroundRun(input, "observe", async (args) => stageRuns.runObserver({ ...args, unobserved }));
-  }
+  // Pre-evaluate all three decisions (no in-flight guard — the chain holds the
+  // lock itself). Builder/Selector are re-evaluated AFTER the Observer completes
+  // for an authoritative read (Builder's `each-N-observations` then sees the
+  // Observer's new nodes).
+  const observer = observerTriggerDecision({ ...input, unobserved });
+  const builder = builderTriggerDecision(withCtx);
+  const selector = selectorTriggerDecision(withCtx);
 
-  const builder = evaluateBuilderTrigger(withCtx);
-  if (builder.shouldFire) {
-    launchBackgroundRun(input, "build", stageRuns.runBuilder);
-  }
+  // Acquire the lock ONCE if ANY stage fires; SKIP if busy (no queue — colliding
+  // triggers batch on the next one).
+  if (!observer.shouldFire && !builder.shouldFire && !selector.shouldFire) return;
+  const handle = acquireOrSkip(firstFiringStage(observer.shouldFire, builder.shouldFire));
+  if (handle === null) return; // SKIP — a run is in flight; the gap batches on the next trigger
 
-  const selector = evaluateSelectorTrigger(withCtx);
-  if (selector.shouldFire) {
-    launchBackgroundRun(input, "select", stageRuns.runSelector);
-  }
+  const { ctx, settings } = input;
+  const signal = handle.abortController.signal;
+  void (async () => {
+    try {
+      if (observer.shouldFire) {
+        handle.setStage("observe");
+        await stageRuns.runObserver({ ctx, settings, signal, scope: null, unobserved });
+      }
+      if (signal.aborted) return;
+      // Re-evaluate Builder/Selector AFTER the Observer (fresh `new` nodes).
+      if (builderTriggerDecision(withCtx).shouldFire) {
+        handle.setStage("build");
+        await stageRuns.runBuilder({ ctx, settings, signal, scope: null, unobserved: null });
+      }
+      if (signal.aborted) return;
+      if (selectorTriggerDecision(withCtx).shouldFire) {
+        handle.setStage("select");
+        await stageRuns.runSelector({ ctx, settings, signal, scope: null, unobserved: null });
+      }
+    } catch (err) {
+      log.error("background chained run failed", err);
+    } finally {
+      handle.release();
+    }
+  })();
 }
