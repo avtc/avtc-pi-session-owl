@@ -13,7 +13,14 @@
  * provides those. This module is pure plumbing.
  */
 
-import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import type {
+  AgentContext,
+  AgentEvent,
+  AgentLoopConfig,
+  AgentMessage,
+  AgentTool,
+  StreamFn,
+} from "@earendil-works/pi-agent-core";
 import { agentLoop } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import { log } from "../log.js";
@@ -133,7 +140,12 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
 
     const loop = input.loopFn ?? agentLoop;
     log.debug("runStage: starting agentLoop stream");
-    const stream = loop(input.messages, context, config, input.signal);
+    // pi 0.84.1 made `streamFn` a required `agentLoop` arg. Pass `undefined` (cast to the
+    // required type) so pi-agent-core falls back to its process-global default streamFn,
+    // which pi-coding-agent installs at startup — that default dispatches through the
+    // coding-agent model runtime, preserving resolved auth and custom providers. A test
+    // overrides `loopFn` instead.
+    const stream = loop(input.messages, context, config, input.signal, undefined as unknown as StreamFn);
 
     for await (const event of stream) {
       if (input.onEvent !== null) input.onEvent(event);
