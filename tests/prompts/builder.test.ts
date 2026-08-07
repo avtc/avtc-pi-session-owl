@@ -36,7 +36,7 @@ describe("BUILDER_SYSTEM prompt", () => {
         "",
         "The graph is a containment tree: n.. nodes (concept folders) hold o.. observations",
         "(immutable leaves) and other nodes. `nGoal` is the predefined session-goal node at",
-        "the root — leave it there. Observations arrive continuously and land at the root",
+        "the root — leave it there, and keep its summary a clear, current statement of the goal (refine it with `set_meta`; it leads every root view). Observations arrive continuously and land at the root",
         "as 🆕 new nodes.",
         "",
         "Inspect with `ls`, `cat`, `find`; organize with `mkdir`, `mv`, `merge`,",
