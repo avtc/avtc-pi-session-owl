@@ -369,17 +369,29 @@ export const NO_OP_WIDGET: WidgetController = {
 export function initWidget(): WidgetController {
   const tracker = createTracker();
   let ctxRef: ExtensionContext | null = null;
-  // Coalesce renders: a fast stream emits many message_update events per tick,
-  // but the widget only needs one fresh line per tick. scheduleRender dedupes
-  // — N events in the same microtask produce a single formatWidgetLine call.
-  let renderScheduled = false;
+  // Throttle renders: a fast stream emits many message_update events, but the
+  // widget only needs a fresh line every so often — and rendering every chunk
+  // (microtask) can saturate pi's event loop on a runaway generation, freezing
+  // the UI (Ctrl+C unresponsive). Cap to one render per RENDER_INTERVAL_MS via
+  // a leading-and-trailing throttle: the first event renders immediately, a
+  // burst coalesces into one trailing render at the interval boundary.
+  const RENDER_INTERVAL_MS = 200;
+  let lastRenderMs = 0;
+  let trailingTimer: ReturnType<typeof setTimeout> | null = null;
   const scheduleRender = (): void => {
-    if (renderScheduled) return;
-    renderScheduled = true;
-    queueMicrotask(() => {
-      renderScheduled = false;
+    const now = Date.now();
+    const elapsed = now - lastRenderMs;
+    if (trailingTimer === null && elapsed >= RENDER_INTERVAL_MS) {
+      lastRenderMs = now;
       renderWidget(tracker, ctxRef);
-    });
+      return;
+    }
+    if (trailingTimer !== null) return; // a trailing render is already pending
+    trailingTimer = setTimeout(() => {
+      trailingTimer = null;
+      lastRenderMs = Date.now();
+      renderWidget(tracker, ctxRef);
+    }, RENDER_INTERVAL_MS - elapsed);
   };
   return {
     setCtx(ctx) {

@@ -22,6 +22,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `selectorMode` | string | `on-compaction` | When the Selector runs (only if `renderMode=selected-root`): `on-compaction` or `on-session-context-threshold`. |
 | `commandResultCap` | number | `50` | Max items a `/mk:*` command shows before a `... +N more` footer. `null` = show all. |
 | `findTimeoutMs` | duration | `30000` | Max duration a `find`/`mk_recall` search may run before it is stopped. |
+| `llmCallTimeoutMs` | duration | `180000` | Aborts any Observer, Builder, or Selector LLM call that runs longer than this. `null` = no limit. |
 | `toolResultTokenBudget` | number | `6000` | Max size (in tokens) of a single `cat`/`find`/`ls`/`mk_recall` result. A larger result shows fewer items or less detail (each item stays whole); reading one observation in full is never cut off. |
 | `debugLog` | boolean | `false` | Write detailed trace logs to the log file. |
 
@@ -33,6 +34,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `observerThresholdTokens` | number | `4000` | `on-threshold` gate: emit a batch when accumulated unobserved tokens reach this. |
 | `observerIncludeThinking` | boolean | `false` | Include non-redacted thinking blocks in the chunks the Observer reads. |
 | `observerToolBlockCapTokens` | number | `400` | When capturing tool calls and results, trim each block to this many tokens (keeping the start and end). `null` = keep the whole block. |
+| `observerMaxTokens` | number | `8192` | Maximum output tokens per Observer LLM call. |
 
 ## Builder
 
@@ -44,6 +46,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `builderRootViewThreshold` | number | `40000` | Target size (in tokens) for the root view of the memory graph. Also: the trigger for `on-root-view-threshold` mode, and the budget `builderSkipWithinBudget` checks. |
 | `builderSkipWithinBudget` | boolean | `false` | Skip the Builder when the root view is already within budget. Off = the Builder always runs at least once. |
 | `maxBuilderPasses` | number | `3` | Max passes per Builder run. |
+| `builderMaxTokens` | number | `8192` | Maximum output tokens per Builder LLM call. |
 
 ## Selector
 
@@ -55,6 +58,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `selectorSessionContextThresholdTokens` | number | `200000` | Threshold for the `on-session-context-threshold` `selectorMode`. |
 | `selectorRootViewThreshold` | number | `20000` | Target size (in tokens) for the root view of the selected tree. |
 | `maxSelectorPasses` | number | `3` | Max passes per Selector run. |
+| `selectorMaxTokens` | number | `8192` | Maximum output tokens per Selector LLM call. |
 
 ## Models
 

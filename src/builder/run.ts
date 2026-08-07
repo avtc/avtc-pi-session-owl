@@ -201,6 +201,8 @@ async function runPass(
     model: resolved.model,
     apiKey: resolved.apiKey,
     signal: input.signal,
+    maxTokens: input.settings.builderMaxTokens,
+    timeoutMs: input.settings.llmCallTimeoutMs,
     onEvent,
     onStageEnd,
     outcome,

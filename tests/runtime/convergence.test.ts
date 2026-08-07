@@ -93,6 +93,8 @@ describe("runConvergencePass", () => {
     model: { provider: "t", id: "m" } as StageRunInput["model"],
     apiKey: undefined,
     signal: new AbortController().signal,
+    maxTokens: 8192,
+    timeoutMs: null,
     onStageEnd: null as ((usage: StageUsage) => void) | null,
     stageLabel: "test",
   } as const;

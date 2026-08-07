@@ -42,6 +42,10 @@ export interface MemkeeperConfig {
   /** Find/mk_recall search execution timeout. Runs in a worker thread; a
    *  pattern still running past this is stopped. */
   findTimeoutMs: number;
+  /** Per-LLM-call timeout for the Observer/Builder/Selector stages. A single
+   *  response (one agentLoop turn) that runs longer is aborted. null = no
+   *  limit. Bounds runaway/stalled generation so it can't pin a background run. */
+  llmCallTimeoutMs: number | null;
   /** Max estimated tokens (chars/4) in any one cat/find/ls/mk_recall result
    *  text. Overflow pages with afterId (terse list) or stops expansion
    *  (fullDetails/grep); a single-observation target is unbudgeted in any mode.*/
@@ -54,6 +58,8 @@ export interface MemkeeperConfig {
   observerThresholdTokens: number;
   observerIncludeThinking: boolean;
   observerToolBlockCapTokens: number | null;
+  /** Maximum output tokens per Observer LLM call (per turn). */
+  observerMaxTokens: number;
   // Builder
   builderModel: string | null;
   builderEveryNObservations: number;
@@ -64,11 +70,15 @@ export interface MemkeeperConfig {
    *  false — the Builder always runs at least one pass. */
   builderSkipWithinBudget: boolean;
   maxBuilderPasses: number;
+  /** Maximum output tokens per Builder LLM call (per turn). */
+  builderMaxTokens: number;
   // Selector
   selectorModel: string | null;
   selectorSessionContextThresholdTokens: number;
   selectorRootViewThreshold: number;
   maxSelectorPasses: number;
+  /** Maximum output tokens per Selector LLM call (per turn). */
+  selectorMaxTokens: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +94,10 @@ const DEFAULT_SELECTOR_MODE = "on-compaction";
 const NO_MODEL: string | null = null;
 const NO_LIMIT: number | null = null;
 const DEFAULT_FIND_TIMEOUT_MS = 30_000;
+const DEFAULT_LLM_CALL_TIMEOUT_MS = 180_000;
+const MIN_LLM_CALL_TIMEOUT_MS = 1000;
+const DEFAULT_MAX_TOKENS = 8192;
+const MIN_MAX_TOKENS = 1;
 const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
 const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
 const DEFAULT_FAST_PATH = false;
@@ -99,6 +113,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   selectorMode: DEFAULT_SELECTOR_MODE,
   commandResultCap: 50,
   findTimeoutMs: DEFAULT_FIND_TIMEOUT_MS,
+  llmCallTimeoutMs: DEFAULT_LLM_CALL_TIMEOUT_MS,
   toolResultTokenBudget: DEFAULT_TOOL_RESULT_TOKEN_BUDGET,
   debugLog: DEBUG_LOG_DEFAULT,
   // Observer
@@ -106,6 +121,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   observerThresholdTokens: 4000,
   observerIncludeThinking: false,
   observerToolBlockCapTokens: 400,
+  observerMaxTokens: DEFAULT_MAX_TOKENS,
   // Builder
   builderModel: NO_MODEL,
   builderEveryNObservations: 40,
@@ -113,11 +129,13 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   builderRootViewThreshold: 40000,
   builderSkipWithinBudget: DEFAULT_FAST_PATH,
   maxBuilderPasses: 3,
+  builderMaxTokens: DEFAULT_MAX_TOKENS,
   // Selector
   selectorModel: NO_MODEL,
   selectorSessionContextThresholdTokens: 200000,
   selectorRootViewThreshold: 20000,
   maxSelectorPasses: 3,
+  selectorMaxTokens: DEFAULT_MAX_TOKENS,
 } satisfies MemkeeperConfig);
 
 // ---------------------------------------------------------------------------
@@ -150,6 +168,13 @@ const FIND_TIMEOUT_PRESETS: readonly PresetElement[] = [
   ["2m", 120_000],
   ["5m", 300_000],
 ];
+const LLM_CALL_TIMEOUT_PRESETS: readonly PresetElement[] = [
+  ["1m", 60_000],
+  ["3m", 180_000],
+  ["10m", 600_000],
+  ["Infinite", NO_LIMIT],
+];
+const MAX_TOKENS_PRESETS: readonly PresetElement[] = [2048, 4096, 8192, 16384];
 const TOOL_RESULT_TOKEN_BUDGET_PRESETS: readonly PresetElement[] = [2000, 4000, 6000, 8000, 12000];
 const OBSERVER_THRESHOLD_PRESETS: readonly PresetElement[] = [
   ["1K", 1000],
@@ -247,6 +272,14 @@ const SETTINGS: readonly SettingSchema[] = [
     min: 1000,
     presets: FIND_TIMEOUT_PRESETS,
   }),
+  setting("llmCallTimeoutMs", {
+    label: "LLM call timeout",
+    description: "Aborts any Observer, Builder, or Selector LLM call that runs longer than this. Infinite = no limit.",
+    type: "duration",
+    defaultValue: DEFAULT_CONFIG.llmCallTimeoutMs,
+    min: MIN_LLM_CALL_TIMEOUT_MS,
+    presets: LLM_CALL_TIMEOUT_PRESETS,
+  }),
   setting("toolResultTokenBudget", {
     label: "Tool result token budget",
     description:
@@ -292,6 +325,14 @@ const SETTINGS: readonly SettingSchema[] = [
     defaultValue: DEFAULT_CONFIG.observerToolBlockCapTokens,
     min: 0,
     presets: OBSERVER_TOOL_CAP_PRESETS,
+  }),
+  setting("observerMaxTokens", {
+    label: "Observer max tokens",
+    description: "Maximum output tokens per Observer LLM call.",
+    type: "number",
+    defaultValue: DEFAULT_CONFIG.observerMaxTokens,
+    min: MIN_MAX_TOKENS,
+    presets: MAX_TOKENS_PRESETS,
   }),
 
   // ── Builder ────────────────────────────────────────────────────────────────
@@ -342,6 +383,14 @@ const SETTINGS: readonly SettingSchema[] = [
     min: 1,
     presets: MAX_PASSES_PRESETS,
   }),
+  setting("builderMaxTokens", {
+    label: "Builder max tokens",
+    description: "Maximum output tokens per Builder LLM call.",
+    type: "number",
+    defaultValue: DEFAULT_CONFIG.builderMaxTokens,
+    min: MIN_MAX_TOKENS,
+    presets: MAX_TOKENS_PRESETS,
+  }),
 
   // ── Selector ───────────────────────────────────────────────────────────────
   setting("selectorModel", {
@@ -374,6 +423,14 @@ const SETTINGS: readonly SettingSchema[] = [
     min: 1,
     presets: MAX_PASSES_PRESETS,
   }),
+  setting("selectorMaxTokens", {
+    label: "Selector max tokens",
+    description: "Maximum output tokens per Selector LLM call.",
+    type: "number",
+    defaultValue: DEFAULT_CONFIG.selectorMaxTokens,
+    min: MIN_MAX_TOKENS,
+    presets: MAX_TOKENS_PRESETS,
+  }),
 ];
 
 const TABS: readonly SettingsTabSchema[] = [
@@ -388,13 +445,20 @@ const TABS: readonly SettingsTabSchema[] = [
       "selectorMode",
       "commandResultCap",
       "findTimeoutMs",
+      "llmCallTimeoutMs",
       "toolResultTokenBudget",
       "debugLog",
     ],
   },
   {
     label: "Observer",
-    settingIds: ["observerModel", "observerThresholdTokens", "observerIncludeThinking", "observerToolBlockCapTokens"],
+    settingIds: [
+      "observerModel",
+      "observerThresholdTokens",
+      "observerIncludeThinking",
+      "observerToolBlockCapTokens",
+      "observerMaxTokens",
+    ],
   },
   {
     label: "Builder",
@@ -405,6 +469,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "builderRootViewThreshold",
       "builderSkipWithinBudget",
       "maxBuilderPasses",
+      "builderMaxTokens",
     ],
   },
   {
@@ -414,6 +479,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "selectorSessionContextThresholdTokens",
       "selectorRootViewThreshold",
       "maxSelectorPasses",
+      "selectorMaxTokens",
     ],
   },
 ];

@@ -20,6 +20,9 @@ import {
 } from "../../src/runtime/agent-loop.js";
 import { estimateContentTokens } from "../../src/types.js";
 
+/** Per-LLM-call output cap used across tests (large enough not to bite). */
+const TEST_MAX_TOKENS = 8192;
+
 // --- scripted-event helpers ------------------------------------------------
 
 /** A bare-minimum assistant message with a usage block. */
@@ -191,6 +194,8 @@ function baseInput(over: Partial<StageRunInput>): StageRunInput {
     signal: new AbortController().signal,
     reasoning: NO_REASONING,
     maxTurns: NO_TURN_LIMIT,
+    maxTokens: TEST_MAX_TOKENS,
+    timeoutMs: null,
     onEvent: NO_EVENT_SINK,
     onStageEnd: NO_STAGE_END_HOOK,
     loopFn: NO_LOOP_OVERRIDE,
@@ -432,6 +437,57 @@ describe("runStage — abort", () => {
     expect(calls).toHaveLength(1);
     // at least the first message_end's usage was accumulated before the abort
     expect(calls[0]?.input).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe("runStage — per-LLM-call bounds (maxTokens + timeout)", () => {
+  it("forwards maxTokens into the agentLoop config", async () => {
+    let captured: AgentLoopConfig | undefined;
+    const capturingLoop: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _c, config, signal) => {
+      captured = config;
+      const stream = new EventStream<AgentEvent, AgentMessage[]>(
+        (e) => e.type === "agent_end",
+        () => [],
+      );
+      queueMicrotask(() => {
+        if (signal?.aborted) {
+          stream.end([]);
+          return;
+        }
+        stream.push(agentEnd([]));
+        stream.end([]);
+      });
+      return stream;
+    };
+    await runStage(baseInput({ loopFn: capturingLoop, maxTokens: 4096 }));
+    expect(captured?.maxTokens).toBe(4096);
+  });
+
+  it("aborts a stalled run when a single LLM call exceeds timeoutMs (per-turn)", async () => {
+    // A stream that never completes on its own — it only ends when the signal
+    // aborts (simulating a provider stall: connection open, no chunks).
+    const stallingLoop: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _c, _config, signal) => {
+      const stream = new EventStream<AgentEvent, AgentMessage[]>(
+        (e) => e.type === "agent_end",
+        () => [],
+      );
+      if (signal) {
+        const onAbort = (): void => {
+          stream.end([]);
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }
+      return stream;
+    };
+    const result = await runStage(baseInput({ loopFn: stallingLoop, timeoutMs: 50 }));
+    expect(result.aborted).toBe(true);
+  });
+
+  it("does not abort a clean run under timeoutMs (the timer is cleared on settle)", async () => {
+    const events: AgentEvent[] = [messageEnd(usageOf(1, 1, 0, 0)), agentEnd([])];
+    const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }), timeoutMs: 50 }));
+    expect(result.aborted).toBe(false);
   });
 });
 

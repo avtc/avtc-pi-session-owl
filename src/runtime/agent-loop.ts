@@ -69,6 +69,14 @@ export interface StageRunInput {
   reasoning: ThinkingLevel | null;
   /** Per-pass turn cap, or `NO_TURN_LIMIT` for unbounded. */
   maxTurns: number | null;
+  /** Maximum output tokens per LLM call (per agentLoop turn). Applied to every
+   *  provider request; a response hitting it is truncated and its tool calls
+   *  rejected. Bounds runaway generation. */
+  maxTokens: number;
+  /** Per-LLM-call wall-clock timeout (ms), or `null` = no limit. Re-armed each
+   *  turn via the transformContext seam; aborting the in-flight fetch ends the
+   *  run. Bounds stalled/slow generation. */
+  timeoutMs: number | null;
   /** Widget/ledger event sink, or `NO_EVENT_SINK`. */
   onEvent: ((event: AgentEvent) => void) | null;
   /** Fired once at stage end with the accumulated (possibly partial) usage, or `NO_STAGE_END_HOOK`. */
@@ -127,6 +135,31 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       tools: input.tools,
     };
 
+    // Per-LLM-call timeout: a dedicated controller whose signal is passed to
+    // the loop (so aborting it cancels the in-flight fetch and ends the run).
+    // `input.signal` (run/compaction abort) is forwarded into it. The timer is
+    // RE-ARMED each turn via transformContext (the only "before each LLM call"
+    // seam agentLoop exposes), so a normal multi-turn run never accumulates — a
+    // single runaway/stalled turn gets killed. null = no timeout.
+    const turnTimeout = new AbortController();
+    const forwardAbort = (): void => {
+      if (!turnTimeout.signal.aborted) turnTimeout.abort(input.signal.reason);
+    };
+    if (input.signal.aborted) {
+      turnTimeout.abort(input.signal.reason);
+    } else {
+      input.signal.addEventListener("abort", forwardAbort, { once: true });
+    }
+    let turnTimer: ReturnType<typeof setTimeout> | undefined;
+    const armTurnTimeout = (): void => {
+      if (turnTimer !== undefined) clearTimeout(turnTimer);
+      if (input.timeoutMs !== null) {
+        turnTimer = setTimeout(() => {
+          if (!turnTimeout.signal.aborted) turnTimeout.abort(new Error(`stage LLM call exceeded ${input.timeoutMs}ms`));
+        }, input.timeoutMs);
+      }
+    };
+
     const config: AgentLoopConfig = {
       model: input.model,
       // memkeeper stages use standard LLM messages only (no custom message kinds),
@@ -135,7 +168,18 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       toolExecution: SEQUENTIAL,
       shouldStopAfterTurn: makeTurnCap(input.maxTurns),
       getApiKey: () => input.apiKey,
+      // Per-turn output cap (applied to every provider request; a truncated
+      // response's tool calls are rejected by agentLoop).
+      maxTokens: input.maxTokens,
       ...(input.reasoning === null ? {} : { reasoning: input.reasoning }),
+      ...(input.timeoutMs === null
+        ? {}
+        : {
+            transformContext: async (msgs: AgentMessage[]) => {
+              armTurnTimeout();
+              return msgs;
+            },
+          }),
     };
 
     const loop = input.loopFn ?? agentLoop;
@@ -145,44 +189,52 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     // which pi-coding-agent installs at startup — that default dispatches through the
     // coding-agent model runtime, preserving resolved auth and custom providers. A test
     // overrides `loopFn` instead.
-    const stream = loop(input.messages, context, config, input.signal, undefined as unknown as StreamFn);
+    const signalForLoop = input.timeoutMs === null ? input.signal : turnTimeout.signal;
+    const stream = loop(input.messages, context, config, signalForLoop, undefined as unknown as StreamFn);
+    armTurnTimeout(); // arm for the first turn (transformContext arms subsequent ones)
 
-    for await (const event of stream) {
-      if (input.onEvent !== null) input.onEvent(event);
+    try {
+      for await (const event of stream) {
+        if (input.onEvent !== null) input.onEvent(event);
 
-      if (event.type === "message_end") {
-        // Only assistant messages carry usage; prompt/steering messages have none
-        // (messageEndUsage returns null) and contribute zero.
-        const u = messageEndUsage(event.message);
-        if (u !== null) {
-          usage.input += u.input;
-          usage.output += u.output;
-          usage.cacheRead += u.cacheRead;
-          usage.cost += u.cost;
-        }
-      } else if (event.type === "turn_end") {
-        usage.turns += 1;
-      } else if (event.type === "message_update") {
-        // Fallback tier: accumulate chars/4 over streamed deltas so
-        // a live counter (fed via onEvent) always has a value even when the
-        // provider never reports usage. The authoritative per-message output is
-        // read from each message_end below (usage.output).
-        const delta = deltaTextOf(event);
-        if (delta !== null) {
-          fallbackTokens += deltaTokens(delta);
+        if (event.type === "message_end") {
+          // Only assistant messages carry usage; prompt/steering messages have none
+          // (messageEndUsage returns null) and contribute zero.
+          const u = messageEndUsage(event.message);
+          if (u !== null) {
+            usage.input += u.input;
+            usage.output += u.output;
+            usage.cacheRead += u.cacheRead;
+            usage.cost += u.cost;
+          }
+        } else if (event.type === "turn_end") {
+          usage.turns += 1;
+        } else if (event.type === "message_update") {
+          // Fallback tier: accumulate chars/4 over streamed deltas so
+          // a live counter (fed via onEvent) always has a value even when the
+          // provider never reports usage. The authoritative per-message output is
+          // read from each message_end below (usage.output).
+          const delta = deltaTextOf(event);
+          if (delta !== null) {
+            fallbackTokens += deltaTokens(delta);
+          }
         }
       }
-    }
 
-    const messages = await stream.result();
-    log.debug(`runStage: agentLoop stream done (${usage.turns} turns)`);
-    // Two-tier: the authoritative output-token count is the SUM of
-    // every message_end usage.output (usage.output — per-message, correct across
-    // multi-turn runs since partial.usage.output resets each message). The chars/4
-    // fallback only applies when the provider reports no output at all. (A live
-    // widget counter is built separately from the raw onEvent stream.)
-    const outputTokens = usage.output > 0 ? usage.output : fallbackTokens;
-    return { messages, usage, outputTokens, aborted: input.signal.aborted };
+      const messages = await stream.result();
+      log.debug(`runStage: agentLoop stream done (${usage.turns} turns)`);
+      // Two-tier: the authoritative output-token count is the SUM of
+      // every message_end usage.output (usage.output — per-message, correct across
+      // multi-turn runs since partial.usage.output resets each message). The chars/4
+      // fallback only applies when the provider reports no output at all. (A live
+      // widget counter is built separately from the raw onEvent stream.)
+      const outputTokens = usage.output > 0 ? usage.output : fallbackTokens;
+      // aborted reflects either the run signal (compaction) or the per-turn timeout.
+      return { messages, usage, outputTokens, aborted: input.signal.aborted || turnTimeout.signal.aborted };
+    } finally {
+      if (turnTimer !== undefined) clearTimeout(turnTimer);
+      input.signal.removeEventListener("abort", forwardAbort);
+    }
   } catch (cause) {
     throw new StageRunError(cause);
   } finally {

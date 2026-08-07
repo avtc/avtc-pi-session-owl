@@ -46,6 +46,7 @@ const EXPECTED_IDS = [
   "selectorMode",
   "commandResultCap",
   "findTimeoutMs",
+  "llmCallTimeoutMs",
   "toolResultTokenBudget",
   "debugLog",
   // Observer
@@ -53,6 +54,7 @@ const EXPECTED_IDS = [
   "observerThresholdTokens",
   "observerIncludeThinking",
   "observerToolBlockCapTokens",
+  "observerMaxTokens",
   // Builder
   "builderModel",
   "builderEveryNObservations",
@@ -60,11 +62,13 @@ const EXPECTED_IDS = [
   "builderRootViewThreshold",
   "builderSkipWithinBudget",
   "maxBuilderPasses",
+  "builderMaxTokens",
   // Selector
   "selectorModel",
   "selectorSessionContextThresholdTokens",
   "selectorRootViewThreshold",
   "maxSelectorPasses",
+  "selectorMaxTokens",
 ] as const;
 
 // File-level teardown: clear the module handle (set by initMemkeeperSettings in the
@@ -142,22 +146,26 @@ describe("MEMKEEPER_SCHEMA", () => {
       selectorMode: "string",
       commandResultCap: "number",
       findTimeoutMs: "duration",
+      llmCallTimeoutMs: "duration",
       toolResultTokenBudget: "number",
       debugLog: "boolean",
       observerModel: "model",
       observerThresholdTokens: "number",
       observerIncludeThinking: "boolean",
       observerToolBlockCapTokens: "number",
+      observerMaxTokens: "number",
       builderModel: "model",
       builderEveryNObservations: "number",
       builderSessionContextThresholdTokens: "number",
       builderRootViewThreshold: "number",
       builderSkipWithinBudget: "boolean",
       maxBuilderPasses: "number",
+      builderMaxTokens: "number",
       selectorModel: "model",
       selectorSessionContextThresholdTokens: "number",
       selectorRootViewThreshold: "number",
       maxSelectorPasses: "number",
+      selectorMaxTokens: "number",
     };
     for (const s of MEMKEEPER_SCHEMA.settings) {
       expect(s.type, `${s.id} type`).toBe(expectedType[s.id]);

@@ -6,7 +6,7 @@
 // idle or non-TUI. The factory produces a renderable Text.
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetForNewSession } from "../../src/store/graph-store.js";
 import { initWidget, WIDGET_KEY } from "../../src/widget/tracker.js";
 
@@ -139,32 +139,38 @@ describe("initWidget wiring", () => {
     const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
     widget.startStage("build", { pass: 1 });
-    // a message_update with usage → streaming tokens + a coalesced re-render
-    // (onEvent schedules the render via queueMicrotask so a fast stream produces
-    // one render per tick)
+    // a message_update with usage → streaming tokens + a re-render. The first
+    // event after startStage renders immediately (the throttle's leading edge).
     widget.onEvent({ type: "message_update", message: { usage: { output: 250 } } } as unknown as Parameters<
       typeof widget.onEvent
     >[0]);
-    await Promise.resolve(); // flush the scheduled microtask render
     expect(calls.length).toBeGreaterThanOrEqual(1);
     expect(calls[0]?.key).toBe(WIDGET_KEY);
   });
 
-  it("onEvent coalesces a fast stream into one render per microtask tick", async () => {
-    const widget = initWidget();
-    const { ctx, calls } = makeCtx(null);
-    widget.setCtx(ctx);
-    widget.startStage("build", { pass: 1 });
-    // many message_update events in the same tick → ONE coalesced render
-    for (let i = 0; i < 50; i += 1) {
-      widget.onEvent({ type: "message_update", message: { usage: { output: i * 10 } } } as unknown as Parameters<
-        typeof widget.onEvent
-      >[0]);
+  it("onEvent throttles a fast stream to one render per 200ms (leading + trailing)", async () => {
+    vi.useFakeTimers();
+    try {
+      const widget = initWidget();
+      const { ctx, calls } = makeCtx(null);
+      widget.setCtx(ctx);
+      widget.startStage("build", { pass: 1 });
+      // The first event renders immediately (leading edge); a burst of 50 events
+      // in the same tick coalesces into ONE trailing render at the 200ms boundary.
+      for (let i = 0; i < 50; i += 1) {
+        widget.onEvent({ type: "message_update", message: { usage: { output: i * 10 } } } as unknown as Parameters<
+          typeof widget.onEvent
+        >[0]);
+      }
+      const afterBurst = calls.length; // leading render (+ startStage's own)
+      // no timer fired yet → no more renders mid-interval
+      await vi.advanceTimersByTimeAsync(199);
+      expect(calls.length).toBe(afterBurst);
+      // crossing the 200ms boundary fires the single coalesced trailing render
+      await vi.advanceTimersByTimeAsync(2);
+      expect(calls.length).toBe(afterBurst + 1);
+    } finally {
+      vi.useRealTimers();
     }
-    const beforeFlush = calls.length;
-    await Promise.resolve();
-    // the 50 events produced at most one additional render (the coalesced one)
-    expect(calls.length - beforeFlush).toBeLessThanOrEqual(1);
-    expect(calls.length).toBeGreaterThanOrEqual(1);
   });
 });

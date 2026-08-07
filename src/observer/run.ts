@@ -223,6 +223,8 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         signal: input.signal,
         reasoning: NO_REASONING,
         maxTurns: NO_TURN_LIMIT,
+        maxTokens: input.settings.observerMaxTokens,
+        timeoutMs: input.settings.llmCallTimeoutMs,
         onEvent: (event) => input.widget.onEvent(event),
         onStageEnd: ledger.onStageEnd,
         loopFn: NO_LOOP_OVERRIDE,

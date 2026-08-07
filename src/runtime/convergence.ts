@@ -67,6 +67,10 @@ export interface ConvergencePassArgs {
   model: StageRunInput["model"];
   apiKey: string | undefined;
   signal: AbortSignal;
+  /** Per-LLM-call output cap (forwarded to runStage). */
+  maxTokens: number;
+  /** Per-LLM-call timeout (forwarded to runStage; null = no limit). */
+  timeoutMs: number | null;
   onEvent: (event: AgentEvent) => void;
   /** Stage-end hook (fed the run's accumulated usage). The run wires this to the
    *  usage-ledger feed; `NO_STAGE_END_HOOK` when unused. */
@@ -93,6 +97,8 @@ export async function runConvergencePass(args: ConvergencePassArgs): Promise<voi
     signal: args.signal,
     reasoning: NO_REASONING,
     maxTurns: NO_TURN_LIMIT,
+    maxTokens: args.maxTokens,
+    timeoutMs: args.timeoutMs,
     onEvent: args.onEvent,
     onStageEnd: args.onStageEnd,
     loopFn: NO_LOOP_OVERRIDE,
