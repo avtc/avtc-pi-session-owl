@@ -32,6 +32,11 @@ export const OBSERVATION_TYPE = "memkeeper.observation";
 export const GRAPH_DELTA_TYPE = "memkeeper.graph_delta";
 export const SELECTION_TYPE = "memkeeper.selection";
 export const USAGE_TYPE = "memkeeper.usage";
+/** `/mk:rescan` marker: a void-everything-before point. On load, entries at or
+ *  before the latest rescan marker are ignored (the graph rebuilds from the
+ *  marker forward). Append-only/event-sourced, so the old entries stay in the
+ *  session file but no longer contribute. */
+export const RESCAN_TYPE = "memkeeper.rescan";
 
 /** Current snapshot schema version (additive fields don't bump). */
 export const DETAILS_VERSION = "v1";

@@ -16,6 +16,7 @@ import {
   type MemkeeperDetails,
   OBSERVATION_TYPE,
   type ObservationEntry,
+  RESCAN_TYPE,
   SELECTION_TYPE,
   type SelectionEntry,
   USAGE_TYPE,
@@ -583,6 +584,50 @@ describe("load reconstruction", () => {
     expect(store.graph.nextObsId).toBe(3);
     // nextNodeId advanced past the wrapper node n1 → the next create is n2.
     expect(store.graph.nextNodeId).toBe(2);
+  });
+
+  it("a /mk:rescan marker voids everything before it (reconstruct from the marker forward)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    // pre-rescan: n1 + o1
+    fake.addCustomAt("g1", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      delta: { type: "create_node", id: "n1", summary: "old", importance: "low", parentNode: null, state: "active" },
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("g2", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "g2",
+      records: [
+        { id: "o1", summary: "old", importance: "low", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    // the rescan marker voids g1/g2
+    fake.addCustomAt("g3", RESCAN_TYPE, { at: "2026-08-09T10:00:00.000Z" });
+    // post-rescan: n2 + o2
+    fake.addCustomAt("g4", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      delta: { type: "create_node", id: "n2", summary: "new", importance: "high", parentNode: null, state: "new" },
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("g5", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "g5",
+      records: [
+        { id: "o2", summary: "new", importance: "high", sourceEntryIds: ["2"], timestamp: "t", parentNode: "n2" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.leafId = "g5";
+
+    await load(fake);
+    const store = getGraphStore();
+    // pre-rescan n1/o1 are VOID; only post-rescan n2/o2 reconstruct.
+    expect(store.graph.nodes.has("n1" as NodeId)).toBe(false);
+    expect(store.graph.observations.has("o1")).toBe(false);
+    expect(store.graph.nodes.has("n2" as NodeId)).toBe(true);
+    expect(store.graph.observations.has("o2")).toBe(true);
+    // the frontier reflects only the post-rescan observation entry.
+    expect(store.observerFrontier).toBe("g5");
   });
 
   it("warns on a corrupt memkeeper snapshot (carries the memkeeper type marker but fails validation)", async () => {

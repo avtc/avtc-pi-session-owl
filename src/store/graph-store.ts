@@ -20,7 +20,15 @@ import {
 import { type GraphDelta, parseSeq, recomputeRange } from "../graph/mutations.js";
 import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
-import { MemkeeperGraph, makeNode, type Node, type NodeId, type Observation, type ObsId } from "../types.js";
+import {
+  MemkeeperGraph,
+  makeNode,
+  type Node,
+  type NodeId,
+  nowStoredTimestamp,
+  type Observation,
+  type ObsId,
+} from "../types.js";
 import {
   cloneLedger,
   DETAILS_TYPE,
@@ -34,6 +42,7 @@ import {
   type MemkeeperDetails,
   OBSERVATION_TYPE,
   type ObservationEntry,
+  RESCAN_TYPE,
   SELECTION_TYPE,
   type SerializedSelection,
   USAGE_TYPE,
@@ -179,6 +188,26 @@ export function appendUsage(ctx: StoreContext, ledger: UsageLedger): void {
   getGraphStore().usageLedger = ledger;
 }
 
+/** `/mk:rescan`: void everything before now (persist a rescan marker) and reset
+ *  the in-memory graph to empty (reseed nGoal on the next session_start /
+ *  Observer run). The Observer frontier is cleared so the next trigger observes
+ *  the entire branch from the first user message. The old entries stay in the
+ *  session file (append-only) but load ignores them past the marker. */
+export function resetGraphForRescan(ctx: StoreContext): void {
+  ctx.appendEntry(RESCAN_TYPE, { at: nowStoredTimestamp() });
+  const s = getGraphStore();
+  s.graph = new MemkeeperGraph({
+    nodes: new Map(),
+    observations: new Map(),
+    nextObsId: 1,
+    nextNodeId: 1,
+  });
+  s.selectedTree = null;
+  s.observerFrontier = null;
+  s.usageLedger = cloneLedger(EMPTY_LEDGER);
+  s.lastCompactionLedger = null;
+}
+
 // --- load (reconstruction) ------------------------------------------------
 
 function isCustomEntry(e: StoreEntry): e is StoreCustomEntry {
@@ -190,8 +219,11 @@ function isCompactionEntry(e: StoreEntry): e is StoreCompactionEntry {
 }
 
 /** Find the latest compaction entry whose details decode as MemkeeperDetails. */
-function findLatestSnapshot(entries: StoreEntry[]): { details: MemkeeperDetails; index: number } | null {
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
+function findLatestSnapshot(
+  entries: StoreEntry[],
+  rescanCutoff: number,
+): { details: MemkeeperDetails; index: number } | null {
+  for (let i = entries.length - 1; i > rescanCutoff; i -= 1) {
     const e = entries[i];
     if (e === undefined || !isCompactionEntry(e)) continue;
     const details = decodeDetails(e.details);
@@ -211,6 +243,17 @@ function findLatestSnapshot(entries: StoreEntry[]): { details: MemkeeperDetails;
     }
   }
   return null;
+}
+
+/** The index of the latest `/mk:rescan` marker, or -1 when none. On load,
+ *  everything at or before this index is void (the graph rebuilds from the
+ *  marker forward). */
+function findLatestRescanMarker(entries: StoreEntry[]): number {
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const e = entries[i];
+    if (e !== undefined && isCustomEntry(e) && e.customType === RESCAN_TYPE) return i;
+  }
+  return -1;
 }
 
 /** Materialize the node graph + id counters + oInitialPrompt from a snapshot. */
@@ -292,10 +335,14 @@ export async function load(ctx: StoreContext): Promise<void> {
   // reset the frontier — re-derived below from the replayed observation entries
   storeState.observerFrontier = null;
 
-  // 1. find the latest valid snapshot (or start empty)
-  const snapshot = findLatestSnapshot(entries);
+  // `/mk:rescan` voids everything at or before the latest marker — reconstruct
+  // from the marker forward (empty graph, reseed nGoal).
+  const rescanAt = findLatestRescanMarker(entries);
+
+  // 1. find the latest valid snapshot AFTER the rescan marker (or start empty)
+  const snapshot = findLatestSnapshot(entries, rescanAt);
   let graph: MemkeeperGraph;
-  let replayFrom = 0;
+  let replayFrom = rescanAt + 1;
   if (snapshot !== null) {
     graph = materializeBase(snapshot.details);
     storeState.selectedTree = snapshot.details.selectedTree;
@@ -311,13 +358,15 @@ export async function load(ctx: StoreContext): Promise<void> {
     });
   }
 
-  // 2. single pass over the branch: populate the observation content index
-  //    (from EVERY observation entry — they are immutable + never pruned, so
-  //    all contribute), replay nothing here, and pick up the latest-wins
-  //    selected tree + usage ledger. Folding the selection/usage latest-wins
-  //    into the observation pass avoids a second full-branch scan.
-  for (const e of entries) {
-    if (!isCustomEntry(e)) continue;
+  // 2. single pass over the branch (from the rescan marker forward): populate
+  //    the observation content index (from EVERY observation entry — they are
+  //    immutable + never pruned, so all contribute), replay nothing here, and
+  //    pick up the latest-wins selected tree + usage ledger. Folding the
+  //    selection/usage latest-wins into the observation pass avoids a second
+  //    full-branch scan.
+  for (let i = rescanAt + 1; i < entries.length; i += 1) {
+    const e = entries[i];
+    if (e === undefined || !isCustomEntry(e)) continue;
     if (e.customType === OBSERVATION_TYPE) {
       const payload = e.data as ObservationEntry | undefined;
       if (payload === undefined) continue;

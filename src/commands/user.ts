@@ -26,8 +26,11 @@ import {
   renderCatUnit,
   tryCompileFindRegex,
 } from "../graph/read-tools.js";
+import { toStoreContext } from "../lifecycle.js";
+import { log } from "../log.js";
 import { notify } from "../notify.js";
-import { getGraphStore } from "../store/graph-store.js";
+import { getGraphStore, resetGraphForRescan } from "../store/graph-store.js";
+import { onTurnEnd } from "../triggers.js";
 import type { NodeId, ObsId } from "../types.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
@@ -210,6 +213,7 @@ export const MK_LS_COMMAND = "mk:ls";
 export const MK_CAT_COMMAND = "mk:cat";
 export const MK_FIND_COMMAND = "mk:find";
 export const MK_FIND_ALL_COMMAND = "mk:find-all";
+export const MK_RESCAN_COMMAND = "mk:rescan";
 
 /** Register all four `/mk:*` user browse commands. */
 export function registerUserCommands(pi: ExtensionAPI): void {
@@ -228,5 +232,31 @@ export function registerUserCommands(pi: ExtensionAPI): void {
   pi.registerCommand(MK_FIND_ALL_COMMAND, {
     description: "Search memory by regex (incl. obsolete/superseded). Usage: /mk:find-all <query>",
     handler: runMkFindAll,
+  });
+  pi.registerCommand(MK_RESCAN_COMMAND, {
+    description: "Discard the current memory graph and re-observe the entire session from the start.",
+    handler: async (_args: string, ctx: ExtensionCommandContext): Promise<void> => {
+      const settings = getMemkeeperSettings();
+      if (!settings.enabled) {
+        notify(ctx, "memkeeper is disabled (enable it first).", "warning");
+        return;
+      }
+      const ok = await ctx.ui.confirm(
+        "Rescan memory",
+        "Discard the current memory graph (observations, nodes, selected tree) and re-observe the entire session from the start? This cannot be undone.",
+      );
+      if (!ok) return;
+      resetGraphForRescan(toStoreContext(pi, ctx));
+      notify(ctx, "Rescanning — observing the session from the start…", "info");
+      // fire-and-forget the Observer catch-up (frontier is now null → the whole
+      // branch is unobserved); the chained Builder/Selector fire after per mode.
+      void (async () => {
+        try {
+          await onTurnEnd({ ctx, settings: getMemkeeperSettings() });
+        } catch (err) {
+          log.error("rescan: observer catch-up failed", err);
+        }
+      })();
+    },
   });
 }
