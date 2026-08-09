@@ -16,6 +16,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 |---|---|---|---|
 | `enabled` | boolean | `true` | Master switch for memkeeper. Off = memkeeper stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected). |
 | `defaultModel` | model | `null` | One model for all components. `null`/unset uses the current session model. Per-component models override this. |
+| `defaultThinkingLevel` | thinking-level | `null` | Thinking level for all components. `null`/Session default = use the session's thinking level; `off` = no thinking. Per-component levels override this. |
 | `renderMode` | string | `selected-root` | What memkeeper injects after compaction (and what `/mk:*` recall reads). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the root view of the memory graph. |
 | `observerMode` | string | `on-threshold` | When the Observer captures memory. `on-threshold` = throughout the session, after a turn once enough new text accumulates; `on-compaction` = all at once, at compaction time only. |
 | `builderMode` | string | `on-compaction` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
@@ -35,6 +36,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `observerIncludeThinking` | boolean | `false` | Include non-redacted thinking blocks in the chunks the Observer reads. |
 | `observerToolBlockCapTokens` | number | `400` | When capturing tool calls and results, trim each block to this many tokens (keeping the start and end). `null` = keep the whole block. |
 | `observerMaxTokens` | number | `8192` | Maximum output tokens per Observer LLM call. |
+| `observerThinkingLevel` | thinking-level | `null` | Thinking level for the Observer. `null`/Inherit default = use `defaultThinkingLevel`; `off` = no thinking. |
 
 ## Builder
 
@@ -47,6 +49,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `builderSkipWithinBudget` | boolean | `false` | Skip the Builder when the root view is already within budget. Off = the Builder always runs at least once. |
 | `maxBuilderPasses` | number | `3` | Max passes per Builder run. |
 | `builderMaxTokens` | number | `8192` | Maximum output tokens per Builder LLM call. |
+| `builderThinkingLevel` | thinking-level | `null` | Thinking level for the Builder. `null`/Inherit default = use `defaultThinkingLevel`; `off` = no thinking. |
 
 ## Selector
 
@@ -59,6 +62,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `selectorRootViewThreshold` | number | `20000` | Target size (in tokens) for the root view of the selected tree. |
 | `maxSelectorPasses` | number | `3` | Max passes per Selector run. |
 | `selectorMaxTokens` | number | `8192` | Maximum output tokens per Selector LLM call. |
+| `selectorThinkingLevel` | thinking-level | `null` | Thinking level for the Selector. `null`/Inherit default = use `defaultThinkingLevel`; `off` = no thinking. |
 
 ## Models
 
@@ -69,6 +73,16 @@ Each component (Observer, Builder, Selector) resolves its model by the first of:
 3. else the **current session model**.
 
 So set a per-component model to tune individually (e.g. a larger model for the Builder), set `defaultModel` to apply one model everywhere, or leave both unset to follow the session.
+
+## Thinking levels
+
+Each component resolves its thinking level by the first of:
+
+1. its **component-specific** level (`observerThinkingLevel` / `builderThinkingLevel` / `selectorThinkingLevel`), if not *Inherit default*;
+2. else **`defaultThinkingLevel`**, if not *Session default*;
+3. else the **session's thinking level**.
+
+`off` at any tier disables thinking for that component (the reasoning field is omitted from the LLM call). Leave all unset to follow the session, or set `defaultThinkingLevel` once to apply a level everywhere.
 
 ## Settings UI & environment
 

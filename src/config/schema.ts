@@ -34,6 +34,9 @@ export interface MemkeeperConfig {
   // General
   enabled: boolean;
   defaultModel: string | null;
+  /** Thinking level for all stages when a stage doesn't override. null = reuse
+   *  the session's thinking level (ctx.thinkingLevel). "off" = no thinking. */
+  defaultThinkingLevel: string | null;
   renderMode: "selected-root" | "observations-root";
   observerMode: "on-threshold" | "on-compaction";
   builderMode: "on-compaction" | "each-N-observations" | "on-session-context-threshold" | "on-root-view-threshold";
@@ -60,6 +63,8 @@ export interface MemkeeperConfig {
   observerToolBlockCapTokens: number | null;
   /** Maximum output tokens per Observer LLM call (per turn). */
   observerMaxTokens: number;
+  /** Thinking level for the Observer. null = inherit defaultThinkingLevel. */
+  observerThinkingLevel: string | null;
   // Builder
   builderModel: string | null;
   builderEveryNObservations: number;
@@ -72,6 +77,8 @@ export interface MemkeeperConfig {
   maxBuilderPasses: number;
   /** Maximum output tokens per Builder LLM call (per turn). */
   builderMaxTokens: number;
+  /** Thinking level for the Builder. null = inherit defaultThinkingLevel. */
+  builderThinkingLevel: string | null;
   // Selector
   selectorModel: string | null;
   selectorSessionContextThresholdTokens: number;
@@ -79,6 +86,8 @@ export interface MemkeeperConfig {
   maxSelectorPasses: number;
   /** Maximum output tokens per Selector LLM call (per turn). */
   selectorMaxTokens: number;
+  /** Thinking level for the Selector. null = inherit defaultThinkingLevel. */
+  selectorThinkingLevel: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +116,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   // General
   enabled: true,
   defaultModel: NO_MODEL,
+  defaultThinkingLevel: NO_MODEL,
   renderMode: DEFAULT_RENDER_MODE,
   observerMode: DEFAULT_OBSERVER_MODE,
   builderMode: DEFAULT_BUILDER_MODE,
@@ -122,6 +132,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   observerIncludeThinking: false,
   observerToolBlockCapTokens: 400,
   observerMaxTokens: DEFAULT_MAX_TOKENS,
+  observerThinkingLevel: NO_MODEL,
   // Builder
   builderModel: NO_MODEL,
   builderEveryNObservations: 40,
@@ -130,12 +141,14 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   builderSkipWithinBudget: DEFAULT_FAST_PATH,
   maxBuilderPasses: 3,
   builderMaxTokens: DEFAULT_MAX_TOKENS,
+  builderThinkingLevel: NO_MODEL,
   // Selector
   selectorModel: NO_MODEL,
   selectorSessionContextThresholdTokens: 200000,
   selectorRootViewThreshold: 20000,
   maxSelectorPasses: 3,
   selectorMaxTokens: DEFAULT_MAX_TOKENS,
+  selectorThinkingLevel: NO_MODEL,
 } satisfies MemkeeperConfig);
 
 // ---------------------------------------------------------------------------
@@ -194,6 +207,31 @@ const ROOT_VIEW_PRESETS: readonly PresetElement[] = [
   ["160K", 160000],
 ];
 const MAX_PASSES_PRESETS: readonly PresetElement[] = [1, 3, 5];
+// Thinking-level presets. settings-ui's thinking-level type defaults to the six
+// levels; these override to prepend a null "inherit" option (null = fall through
+// to the next tier, mirroring how a null model setting means "use default"). Each
+// entry is a full [label, value] pair — the thinking-level type's parse rejects
+// bare-string presets (it does not degrade to identity under an empty-presets ctx
+// the way the plain string type does), so pairs (which skip parse validation) are
+// required.
+const THINKING_LEVEL_SESSION_PRESETS: readonly PresetElement[] = [
+  ["Session default", NO_MODEL],
+  ["off", "off"],
+  ["minimal", "minimal"],
+  ["low", "low"],
+  ["medium", "medium"],
+  ["high", "high"],
+  ["xhigh", "xhigh"],
+];
+const THINKING_LEVEL_INHERIT_PRESETS: readonly PresetElement[] = [
+  ["Inherit default", NO_MODEL],
+  ["off", "off"],
+  ["minimal", "minimal"],
+  ["low", "low"],
+  ["medium", "medium"],
+  ["high", "high"],
+  ["xhigh", "xhigh"],
+];
 
 // ---------------------------------------------------------------------------
 // MEMKEEPER_SCHEMA — the full settings-ui schema (4 tabs).
@@ -218,6 +256,14 @@ const SETTINGS: readonly SettingSchema[] = [
     description: "One model for all components. Empty = use the current session model.",
     type: "model",
     defaultValue: DEFAULT_CONFIG.defaultModel,
+  }),
+  setting("defaultThinkingLevel", {
+    label: "Default thinking level",
+    description:
+      "Thinking level for all components. Session default = use the session's thinking level; off = no thinking.",
+    type: "thinking-level",
+    defaultValue: DEFAULT_CONFIG.defaultThinkingLevel,
+    presets: THINKING_LEVEL_SESSION_PRESETS,
   }),
   setting("renderMode", {
     label: "Render mode",
@@ -334,6 +380,13 @@ const SETTINGS: readonly SettingSchema[] = [
     min: MIN_MAX_TOKENS,
     presets: MAX_TOKENS_PRESETS,
   }),
+  setting("observerThinkingLevel", {
+    label: "Observer thinking level",
+    description: "Thinking level for the Observer. Inherit default = use Default thinking level; off = no thinking.",
+    type: "thinking-level",
+    defaultValue: DEFAULT_CONFIG.observerThinkingLevel,
+    presets: THINKING_LEVEL_INHERIT_PRESETS,
+  }),
 
   // ── Builder ────────────────────────────────────────────────────────────────
   setting("builderModel", {
@@ -391,6 +444,13 @@ const SETTINGS: readonly SettingSchema[] = [
     min: MIN_MAX_TOKENS,
     presets: MAX_TOKENS_PRESETS,
   }),
+  setting("builderThinkingLevel", {
+    label: "Builder thinking level",
+    description: "Thinking level for the Builder. Inherit default = use Default thinking level; off = no thinking.",
+    type: "thinking-level",
+    defaultValue: DEFAULT_CONFIG.builderThinkingLevel,
+    presets: THINKING_LEVEL_INHERIT_PRESETS,
+  }),
 
   // ── Selector ───────────────────────────────────────────────────────────────
   setting("selectorModel", {
@@ -431,6 +491,13 @@ const SETTINGS: readonly SettingSchema[] = [
     min: MIN_MAX_TOKENS,
     presets: MAX_TOKENS_PRESETS,
   }),
+  setting("selectorThinkingLevel", {
+    label: "Selector thinking level",
+    description: "Thinking level for the Selector. Inherit default = use Default thinking level; off = no thinking.",
+    type: "thinking-level",
+    defaultValue: DEFAULT_CONFIG.selectorThinkingLevel,
+    presets: THINKING_LEVEL_INHERIT_PRESETS,
+  }),
 ];
 
 const TABS: readonly SettingsTabSchema[] = [
@@ -439,6 +506,7 @@ const TABS: readonly SettingsTabSchema[] = [
     settingIds: [
       "enabled",
       "defaultModel",
+      "defaultThinkingLevel",
       "renderMode",
       "observerMode",
       "builderMode",
@@ -458,6 +526,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "observerIncludeThinking",
       "observerToolBlockCapTokens",
       "observerMaxTokens",
+      "observerThinkingLevel",
     ],
   },
   {
@@ -470,6 +539,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "builderSkipWithinBudget",
       "maxBuilderPasses",
       "builderMaxTokens",
+      "builderThinkingLevel",
     ],
   },
   {
@@ -480,6 +550,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "selectorRootViewThreshold",
       "maxSelectorPasses",
       "selectorMaxTokens",
+      "selectorThinkingLevel",
     ],
   },
 ];

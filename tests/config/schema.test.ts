@@ -40,6 +40,7 @@ const EXPECTED_IDS = [
   // General
   "enabled",
   "defaultModel",
+  "defaultThinkingLevel",
   "renderMode",
   "observerMode",
   "builderMode",
@@ -55,6 +56,7 @@ const EXPECTED_IDS = [
   "observerIncludeThinking",
   "observerToolBlockCapTokens",
   "observerMaxTokens",
+  "observerThinkingLevel",
   // Builder
   "builderModel",
   "builderEveryNObservations",
@@ -63,12 +65,14 @@ const EXPECTED_IDS = [
   "builderSkipWithinBudget",
   "maxBuilderPasses",
   "builderMaxTokens",
+  "builderThinkingLevel",
   // Selector
   "selectorModel",
   "selectorSessionContextThresholdTokens",
   "selectorRootViewThreshold",
   "maxSelectorPasses",
   "selectorMaxTokens",
+  "selectorThinkingLevel",
 ] as const;
 
 // File-level teardown: clear the module handle (set by initMemkeeperSettings in the
@@ -140,6 +144,7 @@ describe("MEMKEEPER_SCHEMA", () => {
     const expectedType: Record<string, string> = {
       enabled: "boolean",
       defaultModel: "model",
+      defaultThinkingLevel: "thinking-level",
       renderMode: "string",
       observerMode: "string",
       builderMode: "string",
@@ -154,6 +159,7 @@ describe("MEMKEEPER_SCHEMA", () => {
       observerIncludeThinking: "boolean",
       observerToolBlockCapTokens: "number",
       observerMaxTokens: "number",
+      observerThinkingLevel: "thinking-level",
       builderModel: "model",
       builderEveryNObservations: "number",
       builderSessionContextThresholdTokens: "number",
@@ -161,11 +167,13 @@ describe("MEMKEEPER_SCHEMA", () => {
       builderSkipWithinBudget: "boolean",
       maxBuilderPasses: "number",
       builderMaxTokens: "number",
+      builderThinkingLevel: "thinking-level",
       selectorModel: "model",
       selectorSessionContextThresholdTokens: "number",
       selectorRootViewThreshold: "number",
       maxSelectorPasses: "number",
       selectorMaxTokens: "number",
+      selectorThinkingLevel: "thinking-level",
     };
     for (const s of MEMKEEPER_SCHEMA.settings) {
       expect(s.type, `${s.id} type`).toBe(expectedType[s.id]);

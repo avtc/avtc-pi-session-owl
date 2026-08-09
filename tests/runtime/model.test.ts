@@ -4,7 +4,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { resolveStageModel, resolveStageModelOrNotify } from "../../src/runtime/model.js";
+import { resolveStageModel, resolveStageModelOrNotify, resolveStageReasoning } from "../../src/runtime/model.js";
 
 // A minimal Model stand-in (only provider/id matter for resolution).
 function fakeModel(provider: string, id: string): Model<never> {
@@ -134,5 +134,29 @@ describe("resolveStageModelOrNotify", () => {
     expect(calls.length).toBe(1);
     expect(calls[0]).toMatch(/Selector skipped a run: /);
     expect(calls[0]).toMatch(/openai\/missing/);
+  });
+});
+
+describe("resolveStageReasoning", () => {
+  it("stage level wins: a set level is returned", () => {
+    expect(resolveStageReasoning("low", "high", "medium")).toBe("low");
+  });
+  it("stage 'off' disables (returns null = omit reasoning)", () => {
+    expect(resolveStageReasoning("off", "high", "medium")).toBeNull();
+  });
+  it("stage null inherits the default level", () => {
+    expect(resolveStageReasoning(null, "medium", "high")).toBe("medium");
+  });
+  it("stage + default both null inherits the session level", () => {
+    expect(resolveStageReasoning(null, null, "low")).toBe("low");
+  });
+  it("all null + session 'off' → null (omit)", () => {
+    expect(resolveStageReasoning(null, null, "off")).toBeNull();
+  });
+  it("all null + session undefined → null (omit)", () => {
+    expect(resolveStageReasoning(null, null, undefined)).toBeNull();
+  });
+  it("default 'off' (stage null) disables even when the session has a level", () => {
+    expect(resolveStageReasoning(null, "off", "high")).toBeNull();
   });
 });

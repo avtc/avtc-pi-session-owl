@@ -25,7 +25,7 @@ import { runStage, type StageRunInput, type StageRunResult, type StageUsage } fr
 import type { ConvergenceOutcome } from "../runtime/convergence.js";
 import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
-import { resolveStageModelOrNotify } from "../runtime/model.js";
+import { resolveStageModelOrNotify, resolveStageReasoning } from "../runtime/model.js";
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import type { MemkeeperGraph, NodeId } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
@@ -203,6 +203,11 @@ async function runPass(
     signal: input.signal,
     maxTokens: input.settings.builderMaxTokens,
     timeoutMs: input.settings.llmCallTimeoutMs,
+    reasoning: resolveStageReasoning(
+      input.settings.builderThinkingLevel,
+      input.settings.defaultThinkingLevel,
+      input.ctx.thinkingLevel,
+    ),
     onEvent,
     onStageEnd,
     outcome,

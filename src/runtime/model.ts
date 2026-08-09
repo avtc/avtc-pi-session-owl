@@ -10,7 +10,7 @@
 // Then the api key is resolved for the chosen model. A failed resolution (unknown
 // model, no key, no model at all) is reported so the stage can skip + notify.
 
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
@@ -80,4 +80,36 @@ export async function resolveStageModelOrNotify(
 /** Render the model setting for a log line (null → "session default"). */
 function modelDescription(modelSetting: string | null): string {
   return modelSetting ?? "session default";
+}
+
+/** A thinking-level config value: null = inherit the next tier; otherwise one of
+ *  the settings-ui thinking-level presets ("off" | "minimal" | "low" | "medium" |
+ *  "high" | "xhigh"). */
+export type ThinkingSetting = string | null;
+
+/** Resolve a stage's reasoning level into the agentLoop `reasoning` value
+ *  (ThinkingLevel, or null to OMIT it so agentLoop uses its default).
+ *
+ *  Chain: stageLevel → defaultLevel → session thinking level (ctx.thinkingLevel).
+ *  - any non-null stage level wins ("off" disables; a level sets it);
+ *  - else any non-null default level;
+ *  - else the session's thinking level (undefined ⇒ null = omit, i.e. off when
+ *    the session reports no thinking level).
+ *  Mirrors how `defaultModel`/`observerModel` resolve (null = inherit) and how
+ *  avtc-pi-user-decisions maps a level to `reasoning` ("off" → omit). */
+export function resolveStageReasoning(
+  stageLevel: ThinkingSetting,
+  defaultLevel: ThinkingSetting,
+  // ctx.thinkingLevel is "off" | a level | undefined (the session runtime reports
+  // "off" explicitly rather than omitting).
+  sessionLevel: "off" | ThinkingLevel | undefined,
+): ThinkingLevel | null {
+  const level = stageLevel ?? defaultLevel;
+  if (level === null) {
+    // inherit the session: "off"/undefined → omit reasoning; else the session level
+    if (sessionLevel === undefined || sessionLevel === "off") return null;
+    return sessionLevel;
+  }
+  if (level === "off") return null;
+  return level as ThinkingLevel;
 }

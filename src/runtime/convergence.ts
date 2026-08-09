@@ -14,7 +14,6 @@ import { TRY_FINISH_TOOL } from "../graph/read-tools.js";
 import { log } from "../log.js";
 import {
   NO_LOOP_OVERRIDE,
-  NO_REASONING,
   NO_TURN_LIMIT,
   type StageRunInput,
   type StageRunResult,
@@ -71,6 +70,8 @@ export interface ConvergencePassArgs {
   maxTokens: number;
   /** Per-LLM-call timeout (forwarded to runStage; null = no limit). */
   timeoutMs: number | null;
+  /** Thinking level for the run (forwarded to runStage; null = omit reasoning). */
+  reasoning: StageRunInput["reasoning"];
   onEvent: (event: AgentEvent) => void;
   /** Stage-end hook (fed the run's accumulated usage). The run wires this to the
    *  usage-ledger feed; `NO_STAGE_END_HOOK` when unused. */
@@ -95,7 +96,7 @@ export async function runConvergencePass(args: ConvergencePassArgs): Promise<voi
     model: args.model,
     apiKey: args.apiKey,
     signal: args.signal,
-    reasoning: NO_REASONING,
+    reasoning: args.reasoning,
     maxTurns: NO_TURN_LIMIT,
     maxTokens: args.maxTokens,
     timeoutMs: args.timeoutMs,

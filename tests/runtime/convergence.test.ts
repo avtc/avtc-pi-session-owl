@@ -95,6 +95,7 @@ describe("runConvergencePass", () => {
     signal: new AbortController().signal,
     maxTokens: 8192,
     timeoutMs: null,
+    reasoning: null,
     onStageEnd: null as ((usage: StageUsage) => void) | null,
     stageLabel: "test",
   } as const;

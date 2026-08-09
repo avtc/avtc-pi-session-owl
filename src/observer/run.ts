@@ -30,14 +30,13 @@ import { notify } from "../notify.js";
 import { OBSERVER_SYSTEM } from "../prompts/observer.js";
 import {
   NO_LOOP_OVERRIDE,
-  NO_REASONING,
   NO_TURN_LIMIT,
   runStage,
   type StageRunInput,
   type StageRunResult,
 } from "../runtime/agent-loop.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
-import { resolveStageModelOrNotify } from "../runtime/model.js";
+import { resolveStageModelOrNotify, resolveStageReasoning } from "../runtime/model.js";
 import { ImportanceSchema } from "../schema.js";
 import { encodeObservation, type ObservationEntry } from "../store/codecs.js";
 import { appendGraphDeltaBatch, appendObservation, getGraphStore, type StoreContext } from "../store/graph-store.js";
@@ -220,7 +219,11 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         model: resolved.model,
         apiKey: resolved.apiKey,
         signal: input.signal,
-        reasoning: NO_REASONING,
+        reasoning: resolveStageReasoning(
+          input.settings.observerThinkingLevel,
+          input.settings.defaultThinkingLevel,
+          input.ctx.thinkingLevel,
+        ),
         maxTurns: NO_TURN_LIMIT,
         maxTokens: input.settings.observerMaxTokens,
         timeoutMs: input.settings.llmCallTimeoutMs,
