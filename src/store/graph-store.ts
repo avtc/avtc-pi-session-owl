@@ -11,6 +11,12 @@
 // store applies mutations ONLY during load() reconstruction (event-sourcing).
 
 import { clearDetailsCache, type EntryResolver } from "../format/details.js";
+import {
+  childLinksConsistent,
+  everyObservationAttached,
+  exactlyOneNodePerObservation,
+  noCycles,
+} from "../graph/invariants.js";
 import { type GraphDelta, parseSeq, recomputeRange } from "../graph/mutations.js";
 import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
@@ -370,4 +376,18 @@ export async function load(ctx: StoreContext): Promise<void> {
   }
 
   storeState.graph = graph;
+
+  // 6. Final whole-graph structural check. Per-delta assertStructural was
+  //    skipped during replay (the graph is mid-rebuild there — an observation
+  //    can reference a sibling node not yet created this batch); this catches a
+  //    genuinely corrupt/truncated delta sequence. Structural invariants only
+  //    (not nGoal/seed — those hold via seedNGoal). WARN, not throw (tolerant).
+  const structurallyValid =
+    everyObservationAttached(graph) &&
+    exactlyOneNodePerObservation(graph) &&
+    childLinksConsistent(graph) &&
+    noCycles(graph);
+  if (!structurallyValid) {
+    log.warn("graph-store: reconstructed graph failed final structural validation");
+  }
 }

@@ -258,7 +258,11 @@ export function applyCreateNode(
   return { ...delta, type: "create_node" };
 }
 
-export function applyRecordObservation(graph: MemkeeperGraph, args: { obs: Observation }): RecordObservationDelta {
+export function applyRecordObservation(
+  graph: MemkeeperGraph,
+  args: { obs: Observation },
+  opts: { skipStructural?: boolean } = {},
+): RecordObservationDelta {
   const obs = args.obs;
   const parent = requireNode(graph, obs.parentNode, "record_observation");
   if (graph.observations.has(obs.id)) {
@@ -268,7 +272,7 @@ export function applyRecordObservation(graph: MemkeeperGraph, args: { obs: Obser
   if (!parent.observationIds.includes(obs.id)) parent.observationIds.push(obs.id);
   touchAndRecompute(graph, parent);
   if (graph.nextObsId <= parseSeq(obs.id)) graph.nextObsId = parseSeq(obs.id) + 1;
-  assertStructural(graph, "record_observation");
+  if (opts.skipStructural !== true) assertStructural(graph, "record_observation");
   return { type: "record_observation", obs };
 }
 
@@ -287,6 +291,7 @@ export function applyMv(
   graph: MemkeeperGraph,
   args: { sourceIds: Array<ObsId | NodeId>; destId: NodeId | null; newSummary?: string },
   policy: MutationPolicy,
+  opts: { skipStructural?: boolean } = {},
 ): MvDelta {
   const dest = args.destId === null ? null : requireNode(graph, args.destId, "mv");
   // validate + classify sources
@@ -365,7 +370,7 @@ export function applyMv(
     const n = graph.nodes.get(id);
     if (n !== undefined) touchAndRecompute(graph, n);
   }
-  assertStructural(graph, "mv");
+  if (opts.skipStructural !== true) assertStructural(graph, "mv");
   return {
     type: "mv",
     sourceIds: args.sourceIds,
@@ -384,6 +389,7 @@ export function applyMerge(
     resolvedDestId?: NodeId;
   },
   policy: MutationPolicy,
+  opts: { skipStructural?: boolean } = {},
 ): MergeDelta {
   if (args.destId === null && args.newSummary === undefined) {
     throw new GraphInvariantError("merge: newSummary is required when destId is null (names the new root node)");
@@ -472,7 +478,7 @@ export function applyMerge(
     const n = graph.nodes.get(id);
     if (n !== undefined) touchAndRecompute(graph, n);
   }
-  assertStructural(graph, "merge");
+  if (opts.skipStructural !== true) assertStructural(graph, "merge");
   return {
     type: "merge",
     sourceIds: args.sourceIds,
@@ -487,6 +493,7 @@ export function applySupersede(
   graph: MemkeeperGraph,
   args: { nodeId: NodeId; supersededNodeIds: NodeId[] },
   policy: MutationPolicy,
+  opts: { skipStructural?: boolean } = {},
 ): SupersedeDelta {
   const replacement = requireNode(graph, args.nodeId, "supersede");
   if (replacement.state === "obsolete") {
@@ -520,7 +527,7 @@ export function applySupersede(
     node.supersededBy = replacement.id;
     node.timestamps.updatedAt = currentTimestamp();
   }
-  assertStructural(graph, "supersede");
+  if (opts.skipStructural !== true) assertStructural(graph, "supersede");
   return { type: "supersede", nodeId: args.nodeId, supersededNodeIds: args.supersededNodeIds };
 }
 
@@ -534,6 +541,7 @@ export function applySetMeta(
     summary: string | null;
   },
   policy: MutationPolicy,
+  opts: { skipStructural?: boolean } = {},
 ): SetMetaDelta {
   const node = requireNode(graph, args.nodeId, "set_meta");
   if (args.obsolete === true) {
@@ -564,7 +572,7 @@ export function applySetMeta(
     node.summaryTokens = estimateContentTokens(args.summary);
   }
   node.timestamps.updatedAt = currentTimestamp();
-  assertStructural(graph, "set_meta");
+  if (opts.skipStructural !== true) assertStructural(graph, "set_meta");
   return {
     type: "set_meta",
     nodeId: args.nodeId,

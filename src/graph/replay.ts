@@ -37,13 +37,16 @@ export function applyDelta(graph: MemkeeperGraph, delta: GraphDelta, policy: Mut
         importance: delta.importance,
         parentNode: delta.parentNode,
         state: delta.state,
+        skipStructural: true,
       });
       return;
     case "record_observation":
-      applyRecordObservation(graph, { obs: delta.obs });
+      applyRecordObservation(graph, { obs: delta.obs }, { skipStructural: true });
       return;
     case "mv":
-      applyMv(graph, { sourceIds: delta.sourceIds, destId: delta.destId, newSummary: delta.newSummary }, policy);
+      applyMv(graph, { sourceIds: delta.sourceIds, destId: delta.destId, newSummary: delta.newSummary }, policy, {
+        skipStructural: true,
+      });
       return;
     case "merge":
       applyMerge(
@@ -56,10 +59,13 @@ export function applyDelta(graph: MemkeeperGraph, delta: GraphDelta, policy: Mut
           resolvedDestId: delta.resolvedDestId,
         },
         policy,
+        { skipStructural: true },
       );
       return;
     case "supersede":
-      applySupersede(graph, { nodeId: delta.nodeId, supersededNodeIds: delta.supersededNodeIds }, policy);
+      applySupersede(graph, { nodeId: delta.nodeId, supersededNodeIds: delta.supersededNodeIds }, policy, {
+        skipStructural: true,
+      });
       return;
     case "set_meta":
       applySetMeta(
@@ -72,6 +78,7 @@ export function applyDelta(graph: MemkeeperGraph, delta: GraphDelta, policy: Mut
           summary: delta.summary,
         },
         policy,
+        { skipStructural: true },
       );
       return;
     case "flush_new":
