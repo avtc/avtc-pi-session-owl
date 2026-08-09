@@ -27,7 +27,21 @@
 
 import { afterAll, beforeEach, vi } from "vitest";
 import { _resetMemkeeperSettingsHandle, _setRegisterSettingsCommand } from "../src/config/schema.js";
+import { _setBaseLoggerForTest } from "../src/log.js";
 import { resetForNewSession } from "../src/store/graph-store.js";
+
+// Tests must NEVER write to the real production log file (~/.pi/logs/...). The
+// real avtc-pi-logger is created at log.ts module load (shared under
+// isolate:false), so redirect it to a no-op sink here. Re-asserted in beforeEach
+// so a test that swaps in its own sink (tests/log.test.ts) can't leave the real
+// logger re-enabled for later files via its afterAll restore.
+const NO_OP_LOG_SINK = {
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  debug: () => {},
+};
+_setBaseLoggerForTest(NO_OP_LOG_SINK);
 
 // ---- per-file stub flags --------------------------------------------------
 
@@ -195,6 +209,7 @@ vi.mock("../src/todo/wiring.js", async (importOriginal) => {
 // freeze real-timer waits and time tests out.
 beforeEach(() => {
   vi.useRealTimers();
+  _setBaseLoggerForTest(NO_OP_LOG_SINK);
 });
 
 // Reset module singletons + stub state after each test FILE (the isolate:false

@@ -14,7 +14,6 @@ import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
 import { BUILDER } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
-import { log } from "../log.js";
 import type { StageUsage } from "../runtime/agent-loop.js";
 import { deltaTextOf, deltaTokens, messageEndUsage, streamedOutputUsage } from "../runtime/streaming-tokens.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -40,10 +39,6 @@ export interface Baseline {
 /** The widget key + placement. */
 export const WIDGET_KEY = "memkeeper_progress";
 export const WIDGET_PLACEMENT = "aboveEditor" as const;
-/** debug-trace caps: bound per-stage message_update + render log volume so a
- *  debugLog run stays readable (the first N events paint the full picture). */
-const DEBUG_MSG_CAP = 300;
-const DEBUG_RENDER_CAP = 300;
 
 /** `setWidget` is NOT on the no-bare-literals allowlist → a bare undefined 2nd
  *  arg fails lint:bare-literals; pass this named constant to hide the line. */
@@ -132,8 +127,6 @@ export function createTracker(): ProgressTracker {
     fallbackTokens: number;
     primaryTokens: number;
     cachedRoots: { count: number; viewTokens: number } | null;
-    /** debug-only: message_update events seen this stage (caps trace verbosity). */
-    debugMsgCount: number;
   } = {
     stage: null,
     pass: 1,
@@ -149,7 +142,6 @@ export function createTracker(): ProgressTracker {
     fallbackTokens: 0,
     primaryTokens: 0,
     cachedRoots: null,
-    debugMsgCount: 0,
   };
 
   return {
@@ -195,7 +187,6 @@ export function createTracker(): ProgressTracker {
       state.streamingOutputTokens = 0;
       state.fallbackTokens = 0;
       state.primaryTokens = 0;
-      state.debugMsgCount = 0;
       // selected counts + baseline are per-Select-run; a fresh stage start
       // re-anchors the selected baseline on the next first push.
       state.selectedCount = null;
@@ -238,8 +229,6 @@ export function createTracker(): ProgressTracker {
         state.primaryTokens = 0;
         state.fallbackTokens = 0;
         state.streamingOutputTokens = 0;
-        state.debugMsgCount = 0;
-        log.debug("widget:message_start — reset streaming counter");
       } else if (event.type === "message_end") {
         const u = messageEndUsage(event.message);
         if (u !== null) {
@@ -276,16 +265,6 @@ export function createTracker(): ProgressTracker {
         // shows whichever is further along, so the counter progresses throughout
         // streaming and converges to accurate output when the provider reports it.
         state.streamingOutputTokens = Math.max(state.primaryTokens, state.fallbackTokens);
-        // trace (debugLog): one line per message_update, capped per stage, so a
-        // debug run shows which assistantMessageEvent subtypes arrive, whether
-        // usage.output is reported, and whether primary/fallback/streaming rise.
-        state.debugMsgCount += 1;
-        if (state.debugMsgCount <= DEBUG_MSG_CAP) {
-          const sub = (event as { assistantMessageEvent?: { type?: string } }).assistantMessageEvent?.type ?? "?";
-          log.debug(
-            `widget:msg_update #${state.debugMsgCount} sub=${sub} usage=${streamed ?? "-"} primary=${state.primaryTokens} fallback=${state.fallbackTokens} stream=${state.streamingOutputTokens}`,
-          );
-        }
       } else if (event.type === "tool_execution_end") {
         // a mutate happened → the cached root view is stale; rebuild on next snapshot.
         state.cachedRoots = null;
@@ -423,17 +402,12 @@ export function initWidget(): WidgetController {
   const RENDER_INTERVAL_MS = 200;
   let lastRenderMs = 0;
   let trailingTimer: ReturnType<typeof setTimeout> | null = null;
-  let debugRenderCount = 0;
   const scheduleRender = (): void => {
     const now = Date.now();
     const elapsed = now - lastRenderMs;
     if (trailingTimer === null && elapsed >= RENDER_INTERVAL_MS) {
       lastRenderMs = now;
       renderWidget(tracker, ctxRef);
-      debugRenderCount += 1;
-      if (debugRenderCount <= DEBUG_RENDER_CAP) {
-        log.debug(`widget:render #${debugRenderCount} leading stream=${tracker.streamingOutputTokens}`);
-      }
       return;
     }
     if (trailingTimer !== null) return; // a trailing render is already pending
@@ -441,10 +415,6 @@ export function initWidget(): WidgetController {
       trailingTimer = null;
       lastRenderMs = Date.now();
       renderWidget(tracker, ctxRef);
-      debugRenderCount += 1;
-      if (debugRenderCount <= DEBUG_RENDER_CAP) {
-        log.debug(`widget:render #${debugRenderCount} trailing stream=${tracker.streamingOutputTokens}`);
-      }
     }, RENDER_INTERVAL_MS - elapsed);
   };
   return {
@@ -459,7 +429,6 @@ export function initWidget(): WidgetController {
     },
     startStage(stage, init) {
       tracker.startStage(stage, init);
-      debugRenderCount = 0;
     },
     setPass(pass) {
       tracker.setPass(pass);
