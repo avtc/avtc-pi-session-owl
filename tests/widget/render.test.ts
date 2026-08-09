@@ -27,7 +27,7 @@ function visible(line: string): string {
   return line.replace(/«[^|]*\|/g, "").replace(/»/g, "");
 }
 
-const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 };
+const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 };
 
 function snap(over: Partial<WidgetSnapshot>): WidgetSnapshot {
   return {

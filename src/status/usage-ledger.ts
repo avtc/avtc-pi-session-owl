@@ -25,6 +25,7 @@ export function addPhaseUsage(ledger: UsageLedger, phase: Phase, usage: StageUsa
   p.cacheRead += usage.cacheRead;
   p.cost += usage.cost;
   p.turns += usage.turns;
+  p.elapsedMs += usage.elapsedMs;
   return ledger;
 }
 
@@ -68,5 +69,6 @@ function subtractPhase(a: PhaseUsage, b: PhaseUsage): PhaseUsage {
     cost: a.cost - b.cost,
     turns: a.turns - b.turns,
     runs: a.runs - b.runs,
+    elapsedMs: a.elapsedMs - b.elapsedMs,
   };
 }

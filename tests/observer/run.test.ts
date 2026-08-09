@@ -88,7 +88,7 @@ function scriptedRunStage(batchesPerChunk: RecordObservationInput[][]): {
     }
     return {
       messages: [] as AgentMessage[],
-      usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
+      usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
       outputTokens: 0,
       aborted: false,
     };
@@ -376,7 +376,7 @@ describe("runObserver", () => {
       calls += 1;
       return {
         messages: [],
-        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
         outputTokens: 0,
         aborted: false,
       };
@@ -438,7 +438,7 @@ describe("runObserver", () => {
       if (chunk === 1) controller.abort();
       return {
         messages: [] as AgentMessage[],
-        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
+        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
         outputTokens: 0,
         aborted: controller.signal.aborted,
       };
@@ -556,7 +556,7 @@ describe("runObserver", () => {
         });
         return {
           messages: [] as AgentMessage[],
-          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
         };
@@ -658,7 +658,7 @@ describe("runObserver", () => {
       if (chunk === 1) controller.abort(); // abort after the first chunk processes
       return {
         messages: [] as AgentMessage[],
-        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1 },
+        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
         outputTokens: 0,
         aborted: controller.signal.aborted,
       };
@@ -689,8 +689,8 @@ describe("runObserver", () => {
     // then returns the result. Returns a distinct non-zero usage per call.
     let call = 0;
     const usages = [
-      { input: 1000, output: 500, cacheRead: 300, cost: 0.05, turns: 3 },
-      { input: 2000, output: 1500, cacheRead: 700, cost: 0.11, turns: 5 },
+      { input: 1000, output: 500, cacheRead: 300, cost: 0.05, turns: 3, elapsedMs: 0 },
+      { input: 2000, output: 1500, cacheRead: 700, cost: 0.11, turns: 5, elapsedMs: 0 },
     ];
     const runStageFn: ObserverRunInput["runStageFn"] = async (input) => {
       call += 1;
@@ -730,11 +730,11 @@ describe("runObserver", () => {
       const tool = input.tools[0] as AgentTool;
       // chunk 1 records an observation + reports usage, then abort fires
       await tool.execute("c1", { observations: [{ summary: "Initial.", importance: "high", sourceEntryIds: ["u1"] }] });
-      input.onStageEnd?.({ input: 1000, output: 500, cacheRead: 0, cost: 0, turns: 1 });
+      input.onStageEnd?.({ input: 1000, output: 500, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 });
       if (call === 1) controller.abort();
       return {
         messages: [],
-        usage: { input: 1000, output: 500, cacheRead: 0, cost: 0, turns: 1 },
+        usage: { input: 1000, output: 500, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
         outputTokens: 0,
         aborted: controller.signal.aborted,
       };

@@ -525,7 +525,7 @@ describe("runBuilder", () => {
         runStageCalls += 1;
         return Promise.resolve({
           messages: [],
-          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
         });

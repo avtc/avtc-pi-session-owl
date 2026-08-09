@@ -12,8 +12,8 @@ import {
 } from "../../src/status/usage-ledger.js";
 import { cloneLedger, EMPTY_LEDGER, type PhaseUsage, type UsageLedger } from "../../src/store/codecs.js";
 
-const STAGE_USAGE_A: StageUsage = { input: 1000, output: 500, cacheRead: 300, cost: 0.05, turns: 3 };
-const STAGE_USAGE_B: StageUsage = { input: 2000, output: 1500, cacheRead: 700, cost: 0.11, turns: 5 };
+const STAGE_USAGE_A: StageUsage = { input: 1000, output: 500, cacheRead: 300, cost: 0.05, turns: 3, elapsedMs: 0 };
+const STAGE_USAGE_B: StageUsage = { input: 2000, output: 1500, cacheRead: 700, cost: 0.11, turns: 5, elapsedMs: 0 };
 
 function phase(
   input: number,
@@ -23,7 +23,7 @@ function phase(
   turns: number,
   runs: number,
 ): PhaseUsage {
-  return { input, output, cacheRead, cost, turns, runs };
+  return { input, output, cacheRead, cost, turns, runs, elapsedMs: 0 };
 }
 
 describe("usage-ledger", () => {

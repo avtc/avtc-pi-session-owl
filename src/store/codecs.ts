@@ -50,6 +50,8 @@ export interface PhaseUsage {
   cost: number;
   turns: number;
   runs: number;
+  /** Wall-clock ms spent in this phase (additive — legacy ledgers lack it; default 0). */
+  elapsedMs: number;
 }
 
 export interface UsageLedger {
@@ -65,6 +67,7 @@ export const EMPTY_PHASE_USAGE: PhaseUsage = {
   cost: 0,
   turns: 0,
   runs: 0,
+  elapsedMs: 0,
 };
 
 export const EMPTY_LEDGER: UsageLedger = {
@@ -353,6 +356,7 @@ function isPhaseUsage(v: unknown): v is PhaseUsage {
   // ledgers) — accept either (tolerant reader, additive rename).
   const runs = v.runs ?? v.passes;
   const { input, output, cacheRead, cost, turns } = v;
+  // elapsedMs is additive (legacy ledgers lack it → default 0 on normalize).
   return (
     typeof input === "number" &&
     typeof output === "number" &&
@@ -378,7 +382,11 @@ export function decodeUsage(raw: unknown): UsageLedger | null {
 function normalizePhase(p: PhaseUsage): PhaseUsage {
   const NO_RUNS = 0;
   const runs = (p as { runs?: number; passes?: number }).runs ?? (p as { passes?: number }).passes ?? NO_RUNS;
-  return { input: p.input, output: p.output, cacheRead: p.cacheRead, cost: p.cost, turns: p.turns, runs };
+  const elapsedMs =
+    typeof (p as { elapsedMs?: number }).elapsedMs === "number"
+      ? ((p as { elapsedMs?: number }).elapsedMs ?? NO_RUNS)
+      : NO_RUNS;
+  return { input: p.input, output: p.output, cacheRead: p.cacheRead, cost: p.cost, turns: p.turns, runs, elapsedMs };
 }
 
 /** Known MemkeeperDetails schema versions (tolerant reader rejects others). */

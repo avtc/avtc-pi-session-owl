@@ -44,7 +44,7 @@ export const WIDGET_PLACEMENT = "aboveEditor" as const;
  *  arg fails lint:bare-literals; pass this named constant to hide the line. */
 export const HIDE_WIDGET: undefined = undefined;
 
-const ZERO_USAGE: StageUsage = { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 };
+const ZERO_USAGE: StageUsage = { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 };
 
 // --- the snapshot the render formats (pure data; render.ts is pure over it) --
 

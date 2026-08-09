@@ -367,7 +367,7 @@ describe("runSelector", () => {
         runStageCalls += 1;
         return Promise.resolve({
           messages: [],
-          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
         });
@@ -409,7 +409,7 @@ describe("runSelector", () => {
         runStageCalls += 1;
         return Promise.resolve({
           messages: [],
-          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
         });
@@ -481,7 +481,7 @@ describe("runSelector", () => {
         runStageCalls += 1;
         return Promise.resolve({
           messages: [],
-          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
         });
@@ -650,7 +650,7 @@ describe("runSelector", () => {
         runStageCalls += 1;
         return Promise.resolve({
           messages: [],
-          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
         });
@@ -691,7 +691,7 @@ describe("runSelector", () => {
         runStageCalls += 1;
         return Promise.resolve({
           messages: [],
-          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
         });
@@ -726,7 +726,7 @@ describe("runSelector", () => {
       const res = await scripted(input);
       // report non-zero usage so the ledger folds it in-memory
       ac.abort();
-      return { ...res, usage: { ...res.usage, input: 500, output: 10, turns: 1 } };
+      return { ...res, usage: { ...res.usage, input: 500, output: 10, turns: 1, elapsedMs: 0 } };
     };
     const cap = recordingPi();
     await runSelector({
@@ -766,7 +766,7 @@ describe("runSelector", () => {
         runStageCalls += 1;
         return Promise.resolve({
           messages: [],
-          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 },
+          usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
         });

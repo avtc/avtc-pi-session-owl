@@ -104,7 +104,7 @@ function appendPhaseLines(lines: string[], ledger: UsageLedger): void {
   for (const phase of PHASES) {
     const p = ledger[phase];
     lines.push(
-      `  ${phase.padEnd(PHASE_LABEL_WIDTH)}  in ${formatTokens(p.input)} — out ${formatTokens(p.output)} — cache ${formatTokens(p.cacheRead)} — ${formatCost(p.cost)}`,
+      `  ${phase.padEnd(PHASE_LABEL_WIDTH)}  in ${formatTokens(p.input)} — out ${formatTokens(p.output)} — cache ${formatTokens(p.cacheRead)} — ${formatCost(p.cost)} — ${formatDuration(p.elapsedMs)}`,
     );
   }
 }

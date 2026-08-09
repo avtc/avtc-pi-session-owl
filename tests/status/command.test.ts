@@ -185,16 +185,16 @@ describe("buildStatusReport", () => {
     expect(noSelected).not.toContain("selected view");
   });
 
-  it("Usage since session start + since last compaction sections (per-phase in/out/cache/$)", () => {
+  it("Usage since session start + since last compaction sections (per-phase in/out/cache/$/time)", () => {
     const usage = ledger({
-      observe: { input: 45000, output: 4000, cacheRead: 30000, cost: 0.082, turns: 10, runs: 3 },
+      observe: { input: 45000, output: 4000, cacheRead: 30000, cost: 0.082, turns: 10, runs: 3, elapsedMs: 90061000 },
     });
     const baseline = ledger({
-      observe: { input: 30000, output: 2500, cacheRead: 22000, cost: 0.06, turns: 6, runs: 2 },
+      observe: { input: 30000, output: 2500, cacheRead: 22000, cost: 0.06, turns: 6, runs: 2, elapsedMs: 86400000 },
     });
     const report = buildStatusReport(input({ usageLedger: usage, lastCompactionLedger: baseline }));
     expect(report).toContain("Usage since session start");
-    // since-session-start observe line: 45k in / 4.0k out / 30k cache / $0.082
+    // since-session-start observe line: 45k in / 4.0k out / 30k cache / $0.082 / 1d 01:01:01
     const startIdx = report.indexOf("Usage since session start");
     const sinceStartBlock = report.slice(startIdx, report.indexOf("Usage since last compaction"));
     expect(sinceStartBlock).toContain("observe");
@@ -202,16 +202,20 @@ describe("buildStatusReport", () => {
     expect(sinceStartBlock).toContain("4.0k");
     expect(sinceStartBlock).toContain("30k");
     expect(sinceStartBlock).toContain("$0.082");
-    // since-last-compaction observe line: 15k in (45k-30k) / 1.5k out / 8.0k cache
+    // elapsed = 90061000ms → 1d 01:01:01
+    expect(sinceStartBlock).toContain("1d 01:01:01");
+    // since-last-compaction observe line: 15k in (45k-30k) / 1.5k out / 8.0k cache / 01:01:01
     const sinceCompactionBlock = report.slice(report.indexOf("Usage since last compaction"));
     expect(sinceCompactionBlock).toContain("15k");
     expect(sinceCompactionBlock).toContain("1.5k");
     expect(sinceCompactionBlock).toContain("8.0k");
+    // elapsed delta = 90061000 - 86400000 = 3661000ms → 01:01:01
+    expect(sinceCompactionBlock).toContain("01:01:01");
   });
 
   it("since last compaction mirrors since session start when lastCompactionLedger is null (no compaction yet)", () => {
     const usage = ledger({
-      observe: { input: 45000, output: 4000, cacheRead: 30000, cost: 0.082, turns: 10, runs: 3 },
+      observe: { input: 45000, output: 4000, cacheRead: 30000, cost: 0.082, turns: 10, runs: 3, elapsedMs: 0 },
     });
     const report = buildStatusReport(input({ usageLedger: usage, lastCompactionLedger: null }));
     const sinceCompactionBlock = report.slice(report.indexOf("Usage since last compaction"));
@@ -220,9 +224,9 @@ describe("buildStatusReport", () => {
 
   it("formats all three phases (observe/build/select) in each usage section", () => {
     const usage = ledger({
-      observe: { input: 1000, output: 100, cacheRead: 0, cost: 0, turns: 1, runs: 1 },
-      build: { input: 2000, output: 200, cacheRead: 0, cost: 0, turns: 1, runs: 1 },
-      select: { input: 3000, output: 300, cacheRead: 0, cost: 0, turns: 1, runs: 1 },
+      observe: { input: 1000, output: 100, cacheRead: 0, cost: 0, turns: 1, runs: 1, elapsedMs: 0 },
+      build: { input: 2000, output: 200, cacheRead: 0, cost: 0, turns: 1, runs: 1, elapsedMs: 0 },
+      select: { input: 3000, output: 300, cacheRead: 0, cost: 0, turns: 1, runs: 1, elapsedMs: 0 },
     });
     const report = buildStatusReport(input({ usageLedger: usage, lastCompactionLedger: null }));
     const block = report.slice(report.indexOf("Usage since session start"));
@@ -251,7 +255,7 @@ describe("gatherStatusInput", () => {
       },
     } as unknown as Observation);
     getGraphStore().usageLedger = ledger({
-      observe: { input: 500, output: 0, cacheRead: 0, cost: 0, turns: 1, runs: 1 },
+      observe: { input: 500, output: 0, cacheRead: 0, cost: 0, turns: 1, runs: 1, elapsedMs: 0 },
     });
 
     const gathered = gatherStatusInput(settings({}), { sessionStartMs: 1000, compactionCount: 2 });

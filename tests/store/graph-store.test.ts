@@ -715,11 +715,11 @@ describe("load reconstruction", () => {
   it("restores the usage ledger from a usage delta + lastCompactionLedger baseline", async () => {
     freshStore();
     const fake = new FakeStore();
-    const baselineLedger = { ...EMPTY_LEDGER, observe: { ...EMPTY_LEDGER.observe, input: 50, runs: 1 } };
+    const baselineLedger = { ...EMPTY_LEDGER, observe: { ...EMPTY_LEDGER.observe, input: 50, runs: 1, elapsedMs: 0 } };
     const details = encodeDetails(getGraphStore().graph, null, baselineLedger);
     fake.addCompaction("e1", details);
     const laterLedger = {
-      observe: { input: 100, output: 20, cacheRead: 5, cost: 0.01, turns: 2, runs: 2 },
+      observe: { input: 100, output: 20, cacheRead: 5, cost: 0.01, turns: 2, runs: 2, elapsedMs: 0 },
       build: { ...EMPTY_LEDGER.build },
       select: { ...EMPTY_LEDGER.select },
     };
@@ -734,7 +734,7 @@ describe("load reconstruction", () => {
     freshStore();
     const fake = new FakeStore();
     const baselineLedger = {
-      observe: { ...EMPTY_LEDGER.observe, input: 50, runs: 1 },
+      observe: { ...EMPTY_LEDGER.observe, input: 50, runs: 1, elapsedMs: 0 },
       build: { ...EMPTY_LEDGER.build },
       select: { ...EMPTY_LEDGER.select },
     };

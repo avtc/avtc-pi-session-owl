@@ -366,6 +366,7 @@ describe("compactionHook", () => {
       cacheRead: 800,
       cost: 0.2,
       turns: 4,
+      elapsedMs: 0,
     });
     bumpRun(getGraphStore().usageLedger, "observe");
     expect(getGraphStore().lastCompactionLedger).toBeNull(); // none yet
@@ -378,7 +379,14 @@ describe("compactionHook", () => {
     expect(snapshot?.observe.input).toBe(5000);
     expect(snapshot?.observe.runs).toBe(1);
     // deep copy: later stage activity must not mutate the captured baseline.
-    addPhaseUsage(getGraphStore().usageLedger, "observe", { input: 1000, output: 0, cacheRead: 0, cost: 0, turns: 1 });
+    addPhaseUsage(getGraphStore().usageLedger, "observe", {
+      input: 1000,
+      output: 0,
+      cacheRead: 0,
+      cost: 0,
+      turns: 1,
+      elapsedMs: 0,
+    });
     expect(getGraphStore().lastCompactionLedger?.observe.input).toBe(5000);
     expect(getGraphStore().lastCompactionLedger?.observe.runs).toBe(1);
   });

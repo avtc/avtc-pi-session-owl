@@ -45,6 +45,8 @@ export interface StageUsage {
   cacheRead: number;
   cost: number;
   turns: number;
+  /** Wall-clock milliseconds the stage call spent running (LLM + tool calls). */
+  elapsedMs: number;
 }
 
 /** What `runStage` returns on a clean (non-throwing) run. */
@@ -98,7 +100,7 @@ export class StageRunError extends Error {
 
 /** A fresh zeroed usage accumulator. */
 function emptyUsage(): StageUsage {
-  return { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 };
+  return { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 };
 }
 
 /**
@@ -126,6 +128,7 @@ export function makeTurnCap(
  */
 export async function runStage(input: StageRunInput): Promise<StageRunResult> {
   const usage = emptyUsage();
+  const startMs = Date.now();
   let fallbackTokens = 0;
 
   try {
@@ -238,6 +241,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
   } catch (cause) {
     throw new StageRunError(cause);
   } finally {
+    usage.elapsedMs = Date.now() - startMs;
     if (input.onStageEnd !== null) input.onStageEnd(usage);
   }
 }

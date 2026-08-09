@@ -216,19 +216,23 @@ describe("runStage — usage accumulation", () => {
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(result.usage).toEqual({
-      input: 600,
-      output: 250,
-      cacheRead: 60,
-      cost: 0.006,
-      turns: 2,
-    });
+    expect(result.usage).toEqual(
+      expect.objectContaining({
+        input: 600,
+        output: 250,
+        cacheRead: 60,
+        cost: 0.006,
+        turns: 2,
+      }),
+    );
+    // elapsedMs is wall-clock (non-deterministic); just assert it's a number.
+    expect(typeof result.usage.elapsedMs).toBe("number");
   });
 
   it("reports zero usage for a stream with no message_end events", async () => {
     const events: AgentEvent[] = [agentEnd([])];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(result.usage).toEqual({ input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 });
+    expect(result.usage).toEqual(expect.objectContaining({ input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 }));
   });
 
   it("counts a non-assistant message_end (no usage) as zero, not NaN", async () => {
@@ -239,7 +243,9 @@ describe("runStage — usage accumulation", () => {
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(result.usage).toEqual({ input: 100, output: 50, cacheRead: 10, cost: 0.001, turns: 1 });
+    expect(result.usage).toEqual(
+      expect.objectContaining({ input: 100, output: 50, cacheRead: 10, cost: 0.001, turns: 1 }),
+    );
   });
 });
 
@@ -352,7 +358,7 @@ describe("runStage — onEvent + onStageEnd hooks", () => {
         onStageEnd: (u) => calls.push(u),
       }),
     );
-    expect(calls).toEqual([{ input: 10, output: 5, cacheRead: 0, cost: 0, turns: 1 }]);
+    expect(calls).toEqual([expect.objectContaining({ input: 10, output: 5, cacheRead: 0, cost: 0, turns: 1 })]);
   });
 
   it("invokes onStageEnd once on throw with the partial usage accumulated so far", async () => {
@@ -368,7 +374,7 @@ describe("runStage — onEvent + onStageEnd hooks", () => {
         }),
       ),
     ).rejects.toBeInstanceOf(StageRunError);
-    expect(calls).toEqual([{ input: 7, output: 3, cacheRead: 0, cost: 0, turns: 0 }]);
+    expect(calls).toEqual([expect.objectContaining({ input: 7, output: 3, cacheRead: 0, cost: 0, turns: 0 })]);
   });
 });
 
