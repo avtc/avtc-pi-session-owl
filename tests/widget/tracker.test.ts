@@ -209,3 +209,25 @@ describe("ProgressTracker state", () => {
     });
   });
 });
+
+describe("onEvent — message_start resets the streaming counter per prompt", () => {
+  let tracker: ProgressTracker;
+
+  beforeEach(() => {
+    resetForNewSession();
+    tracker = createTracker();
+  });
+
+  it("resets primary/fallback/streaming to 0 on message_start (each prompt is fresh)", () => {
+    tracker.startStage("build", { pass: 1 });
+    tracker.onEvent(textDeltaEvent("a".repeat(NUM_FORTY))); // fallback +10
+    tracker.onEvent({ type: "message_update", message: { usage: { output: 250 } } } as unknown as AgentEvent);
+    expect(tracker.streamingOutputTokens).toBe(250);
+    // a new prompt (next turn/chunk) resets the counter so it reflects the CURRENT
+    // generation, not a stage-wide cumulative that grows too large to see move
+    tracker.onEvent({ type: "message_start", message: {} } as unknown as AgentEvent);
+    expect(tracker.streamingOutputTokens).toBe(0);
+    tracker.onEvent(textDeltaEvent("b".repeat(NUM_FORTY))); // fresh fallback +10
+    expect(tracker.streamingOutputTokens).toBe(10);
+  });
+});
