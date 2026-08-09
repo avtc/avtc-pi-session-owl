@@ -575,15 +575,15 @@ describe("orderActiveSetRoots — canonical active-set ordering", () => {
     expect(ids[ids.length - 1]).toBe(N_IRRELEVANT);
   });
 
-  it("orders the rest by importance desc then recency desc", () => {
+  it("orders the rest by time ascending (oldest first), nGoal-first / nIrrelevant-last", () => {
     const ordered = orderActiveSetRoots([MED, HIGH_OLDER, HIGH_RECENT, GOAL, IRRELEVANT]);
-    // nGoal → high(recent) → high(older) → med → nIrrelevant
-    expect(ordered.map((n) => n.id)).toEqual([N_GOAL, "n7", "n8", "n12", N_IRRELEVANT]);
+    // nGoal → oldest(n8) → n7 → n12 → nIrrelevant (time ascending; importance is only a tiebreak)
+    expect(ordered.map((n) => n.id)).toEqual([N_GOAL, "n8", "n7", "n12", N_IRRELEVANT]);
   });
 
-  it("works with neither special node present (plain importance/recency)", () => {
+  it("works with neither special node present (plain time ascending)", () => {
     const ordered = orderActiveSetRoots([MED, HIGH_OLDER, HIGH_RECENT]);
-    expect(ordered.map((n) => n.id)).toEqual(["n7", "n8", "n12"]);
+    expect(ordered.map((n) => n.id)).toEqual(["n8", "n7", "n12"]);
   });
 });
 

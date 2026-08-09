@@ -699,7 +699,7 @@ describe("buildSelectorInputView", () => {
     expect(view).not.toContain("Todo");
   });
 
-  it("renders working-tree roots nGoal-first, then importance-desc/recency-desc, nIrrelevant-last", () => {
+  it("renders working-tree roots nGoal-first, then time ascending (oldest first), nIrrelevant-last", () => {
     const nodes = new Map<NodeId, Node>();
     const observations = new Map<ObsId, Observation>();
     nodes.set(
@@ -773,9 +773,11 @@ describe("buildSelectorInputView", () => {
       }),
     );
     const treeSection = view.split("Current task")[0] ?? "";
-    expect(treeSection.indexOf("goal summary")).toBeLessThan(treeSection.indexOf("alpha high newer"));
-    expect(treeSection.indexOf("alpha high newer")).toBeLessThan(treeSection.indexOf("bravo high older")); // newer before older on importance tie
-    expect(treeSection.indexOf("bravo high older")).toBeLessThan(treeSection.indexOf("charlie low")); // high before low
+    expect(treeSection.indexOf("goal summary")).toBeLessThan(treeSection.indexOf("bravo high older"));
+    // n2 (older) before n1 (newer) — time ascending
+    expect(treeSection.indexOf("bravo high older")).toBeLessThan(treeSection.indexOf("alpha high newer"));
+    // same time (n1 + n3) → importance tiebreak: high before low
+    expect(treeSection.indexOf("alpha high newer")).toBeLessThan(treeSection.indexOf("charlie low"));
     expect(treeSection.indexOf("charlie low")).toBeLessThan(treeSection.indexOf("Irrelevant")); // nIrrelevant last
   });
 

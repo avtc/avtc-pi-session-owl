@@ -179,16 +179,24 @@ export function makeMaybeBuilder(opts: {
 }): () => Promise<boolean> {
   return async () => {
     if (opts.signal.aborted) return false;
+    // The mid-run Builder respects builderMode (each-N / on-root-view /
+    // on-context) in BOTH scopes — so "each-N-observations" folds incrementally
+    // during a compaction catch-up too, not only at turn_end. In compaction
+    // scope, the root-view threshold is an ADDITIONAL boundedness safeguard
+    // (fires regardless of mode so the root view can't balloon to hundreds of
+    // roots before one giant Builder pass).
+    const decision = builderTriggerDecision({ ctx: opts.ctx, settings: opts.settings });
+    let fire = decision.shouldFire;
+    let reason = decision.reason;
     if (opts.scope !== null) {
       const tokens = computeRootViewTokens();
-      if (tokens < opts.settings.builderRootViewThreshold) return false;
-      log.info(`observer: mid-catch-up builder (root view ${tokens} ≥ ${opts.settings.builderRootViewThreshold})`);
-      await opts.runBuilder();
-      return true;
+      if (tokens >= opts.settings.builderRootViewThreshold) {
+        fire = true;
+        reason = `root view ${tokens} ≥ ${opts.settings.builderRootViewThreshold}`;
+      }
     }
-    const decision = builderTriggerDecision({ ctx: opts.ctx, settings: opts.settings });
-    if (!decision.shouldFire) return false;
-    log.info(`observer: mid-run builder (${decision.reason})`);
+    if (!fire) return false;
+    log.info(`observer: mid-run builder (${reason})`);
     await opts.runBuilder();
     return true;
   };

@@ -12,6 +12,7 @@ import {
   evaluateBuilderTrigger,
   evaluateObserverTrigger,
   evaluateSelectorTrigger,
+  makeMaybeBuilder,
   onTurnEnd,
   type RunFn,
   resetStageRuns,
@@ -386,6 +387,60 @@ describe("evaluateBuilderTrigger", () => {
     );
     expect(res.shouldFire).toBe(false);
     handle.release();
+  });
+});
+
+// ===========================================================================
+describe("makeMaybeBuilder (mid-run / mid-catch-up Builder)", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    _resetRunLock();
+  });
+
+  it("compaction scope fires on each-N-observations (not only the root-view safeguard)", async () => {
+    // each-40: 3 new nodes < 40 → root view under threshold → must NOT fire.
+    addRootNode("n1" as NodeId, "new");
+    addRootNode("n2" as NodeId, "new");
+    let ran = false;
+    const mb = makeMaybeBuilder({
+      ctx: makeInput().ctx,
+      settings: {
+        ...DEFAULT_CONFIG,
+        builderMode: "each-N-observations",
+        builderEveryNObservations: 40,
+        builderRootViewThreshold: 999_999,
+      },
+      signal: new AbortController().signal,
+      scope: { firstKeptEntryId: null },
+      runBuilder: async () => {
+        ran = true;
+      },
+    });
+    expect(await mb()).toBe(false);
+    expect(ran).toBe(false);
+
+    // now 41 new nodes >= 40 → fires even though root view is far under threshold.
+    for (let i = 3; i <= 41; i += 1) addRootNode(`n${i}` as NodeId, "new");
+    expect(await mb()).toBe(true);
+    expect(ran).toBe(true);
+  });
+
+  it("compaction scope fires on the root-view safeguard regardless of mode (boundedness)", async () => {
+    // on-compaction mode: builderTriggerDecision says false, but the root view is
+    // over threshold → the safeguard must still fire during a catch-up.
+    addRootNode("n1" as NodeId, "active");
+    let ran = false;
+    const mb = makeMaybeBuilder({
+      ctx: makeInput().ctx,
+      settings: { ...DEFAULT_CONFIG, builderMode: "on-compaction", builderRootViewThreshold: 0 },
+      signal: new AbortController().signal,
+      scope: { firstKeptEntryId: null },
+      runBuilder: async () => {
+        ran = true;
+      },
+    });
+    expect(await mb()).toBe(true);
+    expect(ran).toBe(true);
   });
 });
 

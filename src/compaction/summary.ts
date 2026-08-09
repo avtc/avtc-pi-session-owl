@@ -95,14 +95,14 @@ function activeSetRoots(args: RenderSummaryArgs): RenderableNode[] {
   return sourceRoots(args.graph);
 }
 
-/** Non-obsolete source roots, nGoal first then importance/recency. */
+/** Non-obsolete source roots, nGoal first then time (oldest first). */
 function sourceRoots(graph: SummaryGraph): RenderableNode[] {
-  // nGoal first, the rest by importance/recency (nIrrelevant is source-absent).
+  // nGoal first, the rest by time (oldest first; nIrrelevant is source-absent).
   return orderedNonObsoleteRoots(graph.nodes.values());
 }
 
 /** Non-obsolete selected-tree roots, nGoal first, nIrrelevant last. */
 function selectedRoots(tree: SerializedSelection): RenderableNode[] {
-  // nGoal first, nIrrelevant last, the rest by importance/recency.
+  // nGoal first, nIrrelevant last, the rest by time (oldest first).
   return orderedNonObsoleteRoots(tree.nodes);
 }

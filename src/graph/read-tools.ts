@@ -220,16 +220,18 @@ export interface OrderableNode {
   timestamps: { rangeEnd: string };
 }
 
-/** Importance desc (crit→low), then rangeEnd recency desc (newer first). */
+/** Time ascending (oldest rangeEnd first → newest at the end), then importance
+ *  desc as a tiebreak (same-time: crit before low). New observations thus land
+ *  at the END of the root view, older ones near the TOP. */
 function compareNodeOrder<T extends OrderableNode>(a: T, b: T): number {
-  const byImportance = IMPORTANCE_RANK[b.importance] - IMPORTANCE_RANK[a.importance];
-  if (byImportance !== 0) return byImportance;
-  return b.timestamps.rangeEnd.localeCompare(a.timestamps.rangeEnd);
+  const byTime = a.timestamps.rangeEnd.localeCompare(b.timestamps.rangeEnd);
+  if (byTime !== 0) return byTime;
+  return IMPORTANCE_RANK[b.importance] - IMPORTANCE_RANK[a.importance];
 }
 
 /** The canonical active-set root ordering shared by the compaction summary and
  *  the Selector working-tree render: nGoal first, nIrrelevant last, the rest by
- *  importance desc / recency desc. Callers pass already-filtered non-obsolete
+ *  time ascending (oldest first). Callers pass already-filtered non-obsolete
  *  roots (structural `Node` or render-only `RenderableNode`); obsolete nodes
  *  are never roots of the rendered view. */
 export function orderActiveSetRoots<T extends RenderableNode>(roots: readonly T[]): T[] {
@@ -259,7 +261,7 @@ export function isVisible(state: Node["state"], includeSuperseded: boolean): boo
 
 // --- root view + children --------------------------------------------------
 
-/** Non-obsolete roots, importance desc then recency — the view `ls` renders at
+/** Non-obsolete roots, time ascending (oldest first) — the view `ls` renders at
  *  the root and `try_finish` measures. Obsolete roots are hidden by default
  *  (findable via find with includeSuperseded). */
 export function nonObsoleteRoots(graph: MemkeeperGraph): Node[] {
@@ -289,7 +291,7 @@ export function orderedNonObsoleteRoots<T extends RenderableNode>(nodes: Iterabl
 }
 
 /** Direct child nodes + direct observations of a parent node, ordered
- *  nodes-first (importance desc, then recency) then observations (recency). */
+ *  nodes-first (time ascending (oldest first)) then observations (recency). */
 export function directChildren(graph: MemkeeperGraph, parent: Node): { nodes: Node[]; observations: Observation[] } {
   const nodes = parent.childNodeIds
     .map((id) => graph.nodes.get(id))
@@ -781,8 +783,7 @@ export function tryCompileFindRegex(query: string): { regex: RegExp } | { error:
 
 /** Collect ordered find matches across node summaries + observation content.
  *  `includeSuperseded=false` (default) applies the parent-state gate: obsolete
- *  nodes and their evidence are skipped. Nodes-first (importance desc, then
- *  recency), then observations (recency) — consistent with `ls`. Each match
+ *  nodes and their evidence are skipped. Nodes-first (time ascending, oldest first), then observations (time) — consistent with `ls`. Each match
  *  carries `in <parent>`. Shared by the agent `find` tool and the user
  *  `/mk:find` commands.
  *
@@ -846,7 +847,7 @@ export async function collectFindMatches(
       });
     }
   }
-  // nodes-first (importance desc, then recency), then observations (recency) —
+  // nodes-first (time ascending (oldest first)), then observations (recency) —
   // consistent with `ls`.
   nodeMatches.sort((a, b) => compareNodeOrder(a.node, b.node));
   obsMatches.sort((a, b) => compareObservationOrder(a.obs, b.obs));
