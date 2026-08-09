@@ -205,7 +205,7 @@ export async function compactionHook(
   } catch (cause) {
     log.error("compaction hook failed", cause);
     const reason = cause instanceof Error ? cause.message : String(cause);
-    notify(ctx, `memkeeper compaction failed: ${reason}; retrying`, "warning");
+    notify(ctx, `memkeeper compaction failed: ${reason}; retry`, "error");
     return CANCEL_RESULT;
   } finally {
     handle.release();

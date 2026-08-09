@@ -608,7 +608,7 @@ describe("runSelector", () => {
     expect(selectionEntries(cap.appended).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("keeps partial work when a pass errors after a mutate, then persists on normal end", async () => {
+  it("propagates an error after a mutate (partial work already persisted)", async () => {
     seedGraph([{ id: "n3", summary: "a" }]);
     let passCount = 0;
     const errorScript = scriptRunStageWithError(
@@ -616,22 +616,25 @@ describe("runSelector", () => {
       { toolsBeforeError: [{ name: MV_TOOL, ok: true }], errorPassIndex: 0 },
     );
     const cap = recordingPi();
-    await runSelector({
-      ctx: makeFakeCtx(),
-      pi: cap.pi,
-      settings: settings({ selectorRootViewThreshold: 0, maxSelectorPasses: 5 }),
-      signal: new AbortController().signal,
-      widget: NO_OP_WIDGET,
-      scope: { firstKeptEntryId: "e2" },
-      todo: null,
-      todoBridge: null,
-      runStageFn: (input) => {
-        passCount += 1;
-        return errorScript(input);
-      },
-    });
-    expect(passCount).toBe(2); // errored after mutate → pass counts; pass 2 converges
-    expect(selectionEntries(cap.appended).length).toBeGreaterThanOrEqual(1);
+    await expect(
+      runSelector({
+        ctx: makeFakeCtx(),
+        pi: cap.pi,
+        settings: settings({ selectorRootViewThreshold: 0, maxSelectorPasses: 5 }),
+        signal: new AbortController().signal,
+        widget: NO_OP_WIDGET,
+        scope: { firstKeptEntryId: "e2" },
+        todo: null,
+        todoBridge: null,
+        runStageFn: (input) => {
+          passCount += 1;
+          return errorScript(input);
+        },
+      }),
+    ).rejects.toThrow();
+    // the erroring pass propagates immediately (no retry); the mv before the
+    // error is already applied to the working copy.
+    expect(passCount).toBe(1);
   });
 
   it("aborts before start: no pass, no persist", async () => {

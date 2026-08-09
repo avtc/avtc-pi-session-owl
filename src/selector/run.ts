@@ -22,9 +22,14 @@ import { NON_BUILDER } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
-import { notify } from "../notify.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
-import { runStage, type StageRunInput, type StageRunResult, type StageUsage } from "../runtime/agent-loop.js";
+import {
+  runStage,
+  type StageRunInput,
+  type StageRunResult,
+  StageTimeoutError,
+  type StageUsage,
+} from "../runtime/agent-loop.js";
 import type { ConvergenceOutcome } from "../runtime/convergence.js";
 import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
@@ -162,11 +167,10 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
 
       // try_finish success → converged, stop.
       if (outcome.converged) break;
-      // a per-LLM-call timeout fired this pass — a stage-stopping error (NOT a
-      // silent no-op): stop now and tell the user.
+      // a per-LLM-call timeout — a stage-stopping error: THROW so the compaction
+      // hook cancels compaction + surfaces a visible error.
       if (outcome.timedOut) {
-        notify(input.ctx, "Selector stopped: an LLM call exceeded the time limit.", "warning");
-        break;
+        throw new StageTimeoutError("Selector", input.settings.llmCallTimeoutMs);
       }
       // no-op pass (0 mutates, not converged) → stop.
       if (outcome.mutates === NO_MUTATES) break;
@@ -176,9 +180,11 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
       input.widget.setPass(pass);
     }
   } catch (cause) {
-    // A run-ending error (error-before-any-mutate rethrown by runPass). Applied
-    // mutates on the working copy are kept; whatever tree exists is committed.
+    // Propagate (timeout / LLM failure / server down) so the compaction hook
+    // cancels compaction + notifies the user. Applied working-copy mutates are
+    // kept; whatever tree exists is committed in the finally.
     log.error("selector run failed", cause);
+    throw cause;
   } finally {
     // Best-effort teardown: a throw in one cleanup must not skip the others or
     // escape (the never-throws teardown contract). `endStage` always runs when a

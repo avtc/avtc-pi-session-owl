@@ -34,6 +34,7 @@ import {
   runStage,
   type StageRunInput,
   type StageRunResult,
+  StageTimeoutError,
 } from "../runtime/agent-loop.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify, resolveStageReasoning } from "../runtime/model.js";
@@ -244,27 +245,20 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         const result = await run(stageInput);
         timedOut = result.timedOut;
       } catch (cause) {
-        // a throwing chunk's own records are lost (not yet persisted this chunk);
-        // prior chunks are already durable (per-chunk persistence). Stop here so
-        // the failed chunk + everything after stay re-observable.
+        // Propagate (timeout / LLM failure / server down) so the compaction hook
+        // cancels compaction + surfaces a visible error. An abort (compaction
+        // cancelled) is not an error — return cleanly. Prior chunks are already
+        // durable (per-chunk persistence).
         if (input.signal.aborted) return;
-        log.error("observer stage failed", cause);
-        notify(
-          input.ctx,
-          "Observer stopped at a failed chunk (LLM error); later entries re-observed next run",
-          "warning",
-        );
-        break;
+        throw cause;
       } finally {
         done += 1;
         input.widget.setBatch(done, totalChunks);
       }
-      // a per-LLM-call timeout fired for this chunk — a stage-stopping error
-      // (NOT a silent skip): stop now and tell the user, so a slow/oversized
-      // Observer call surfaces instead of chunks silently stalling.
+      // a per-LLM-call timeout — a stage-stopping error: THROW so the compaction
+      // hook cancels compaction + surfaces a visible error.
       if (timedOut) {
-        notify(input.ctx, "Observer stopped: an LLM call exceeded the time limit.", "warning");
-        break;
+        throw new StageTimeoutError("Observer", input.settings.llmCallTimeoutMs);
       }
       // this chunk succeeded → wrap its records + persist IMMEDIATELY (per-chunk
       // durability: an abort loses only the in-flight chunk; the frontier has
@@ -314,11 +308,11 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       notify(input.ctx, "Observer returned no observations", "warning");
     }
   } catch (cause) {
-    // a persist-phase throw (e.g. a wrapper missing its node) is logged, not
-    // re-thrown — matching the Builder/Selector runs' error contract (never
-    // throw to the caller, keep partial work). Per-chunk LLM failures are
-    // caught + notified inline above; this catches the rest.
+    // Propagate (a persist-phase throw, e.g. a wrapper missing its node) so the
+    // compaction hook cancels + surfaces it. Per-chunk LLM failures propagate
+    // from the inline catch above. Applied chunks are already durable.
     log.error("observer run failed", cause);
+    throw cause;
   } finally {
     if (stageOpened) input.widget.endStage();
   }

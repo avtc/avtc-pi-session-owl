@@ -20,9 +20,14 @@ import { BUILDER } from "../format/render.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
-import { notify } from "../notify.js";
 import { BUILDER_SYSTEM } from "../prompts/builder.js";
-import { runStage, type StageRunInput, type StageRunResult, type StageUsage } from "../runtime/agent-loop.js";
+import {
+  runStage,
+  type StageRunInput,
+  type StageRunResult,
+  StageTimeoutError,
+  type StageUsage,
+} from "../runtime/agent-loop.js";
 import type { ConvergenceOutcome } from "../runtime/convergence.js";
 import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
@@ -148,12 +153,11 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
 
       // try_finish success → converged, stop (normal end).
       if (outcome.converged) break;
-      // a per-LLM-call timeout fired this pass — a stage-stopping error (NOT a
-      // silent no-op): stop now and tell the user, so a slow/oversized Builder
-      // call surfaces instead of the root view silently not shrinking.
+      // a per-LLM-call timeout — a stage-stopping error: THROW so the compaction
+      // hook cancels compaction + surfaces a visible error (a slow/oversized
+      // Builder call must not silently produce a partial/wrong summary).
       if (outcome.timedOut) {
-        notify(input.ctx, "Builder stopped: an LLM call exceeded the time limit.", "warning");
-        break;
+        throw new StageTimeoutError("Builder", input.settings.llmCallTimeoutMs);
       }
       // no-op pass (0 mutates, not converged) → stop (normal end).
       if (outcome.mutates === NO_MUTATES) break;
@@ -163,10 +167,12 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
       input.widget.setPass(pass);
     }
   } catch (cause) {
-    // A run-ending error (error-before-any-mutate rethrown by runPass). Applied
-    // mutates are already persisted; `new` nodes stay `new` (run ended early).
+    // Propagate the error (timeout / LLM failure / server down) so the
+    // compaction hook cancels compaction + notifies the user. Applied mutates
+    // are already persisted; `new` nodes stay `new` (run ended early).
     normalEnd = false;
     log.error("builder run failed", cause);
+    throw cause;
   } finally {
     // Best-effort teardown: a throw in one cleanup must not skip the others or
     // escape (the never-throws teardown contract). `endStage` always runs when a

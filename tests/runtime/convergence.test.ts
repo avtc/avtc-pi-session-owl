@@ -124,13 +124,16 @@ describe("runConvergencePass", () => {
     await expect(runConvergencePass({ ...BASE, onEvent, outcome, runStageFn })).rejects.toThrow("boom");
   });
 
-  it("swallows the error when the stage errors AFTER a mutate (partial kept)", async () => {
+  it("propagates the error when the stage errors AFTER a mutate (partial already persisted)", async () => {
     const { outcome, onEvent } = makeConvergenceTracker(() => {}, NAMES);
     const runStageFn = async (input: StageRunInput): Promise<StageRunResult> => {
       input.onEvent?.(endEvent(MKDIR_TOOL, true, false)); // 1 mutate applied
       throw new Error("boom-after");
     };
-    await expect(runConvergencePass({ ...BASE, onEvent, outcome, runStageFn })).resolves.toBeUndefined();
+    // Errors propagate (timeout / LLM failure / server down must not be swallowed
+    // — they cancel compaction with a visible error). Applied mutates are already
+    // persisted per-mutate, so propagating does not lose partial work.
+    await expect(runConvergencePass({ ...BASE, onEvent, outcome, runStageFn })).rejects.toThrow("boom-after");
     expect(outcome.mutates).toBe(1);
   });
 

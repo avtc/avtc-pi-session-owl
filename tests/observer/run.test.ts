@@ -539,7 +539,7 @@ describe("runObserver", () => {
     expect(getGraphStore().observerFrontier).toBe("a1");
   });
 
-  it("stops at the first failed chunk: frontier advances only over the successful prefix (later entries re-observable)", async () => {
+  it("throws at the first failed chunk: frontier advances only over the successful prefix (later entries re-observable)", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
     // three chunks (threshold 1 → each entry its own chunk): [u1], [a1], [a2].
@@ -571,7 +571,9 @@ describe("runObserver", () => {
       throw new Error("chunk 3 should not run");
     };
 
-    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: fn, thresholdTokens: 1 }));
+    await expect(runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: fn, thresholdTokens: 1 }))).rejects.toThrow(
+      "LLM boom",
+    );
 
     // only chunks 1 + 2 ran (chunk 3 was never reached)
     expect(chunk).toBe(2);
@@ -642,7 +644,9 @@ describe("runObserver", () => {
       endStage: () => calls.push("end"),
     };
 
-    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: throwing, widget }));
+    await expect(runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: throwing, widget }))).rejects.toThrow(
+      "LLM boom",
+    );
 
     // stage opened then closed despite the throw (finally ran)
     expect(calls).toContain("start");

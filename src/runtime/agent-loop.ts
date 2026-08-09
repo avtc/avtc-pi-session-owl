@@ -102,6 +102,17 @@ export class StageRunError extends Error {
   }
 }
 
+/** A per-LLM-call timeout — a stage-stopping error. Propagates to the compaction
+ *  hook (which cancels compaction + notifies the user) so a slow/oversized call
+ *  surfaces instead of silently producing a partial/wrong summary. */
+export class StageTimeoutError extends Error {
+  constructor(stage: string, limitMs: number | null) {
+    const limit = limitMs === null ? "the time limit" : `${Math.round(limitMs / 1000)}s time limit`;
+    super(`${stage} stopped: an LLM call exceeded the ${limit}`);
+    this.name = "StageTimeoutError";
+  }
+}
+
 /** A fresh zeroed usage accumulator. */
 function emptyUsage(): StageUsage {
   return { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 };

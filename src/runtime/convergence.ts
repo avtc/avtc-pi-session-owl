@@ -113,11 +113,11 @@ export async function runConvergencePass(args: ConvergencePassArgs): Promise<voi
       args.outcome.timedOut = true;
     }
   } catch (cause) {
-    if (args.outcome.mutates > NO_MUTATES) {
-      log.error(`${args.stageLabel} pass failed after partial work (kept)`, cause);
-      return;
-    }
-    log.error(`${args.stageLabel} pass failed before any mutate (ending run)`, cause);
+    // Errors (LLM failure, server down, timeout) PROPAGATE — they must not be
+    // swallowed: an infrastructure error cancels compaction with a visible
+    // message so the user can act + retry. Applied mutates are already
+    // persisted (per-mutate deltas), so propagating does not lose partial work.
+    log.error(`${args.stageLabel} pass failed`, cause);
     throw cause;
   }
 }

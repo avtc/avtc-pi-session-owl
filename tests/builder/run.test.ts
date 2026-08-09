@@ -18,7 +18,7 @@ import {
 } from "../../src/builder/tools.js";
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { applyCreateNode, applyRecordObservation, setClock } from "../../src/graph/mutations.js";
-import type { StageRunInput, StageRunResult } from "../../src/runtime/agent-loop.js";
+import { type StageRunInput, type StageRunResult, StageTimeoutError } from "../../src/runtime/agent-loop.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import type { MemkeeperGraph } from "../../src/types.js";
 import { makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
@@ -339,11 +339,12 @@ describe("runBuilder", () => {
     expect(passCount).toBe(1); // no-op → stop after pass 1
   });
 
-  it("stops + notifies on a per-LLM-call timeout (not a silent no-op pass)", async () => {
+  it("throws StageTimeoutError on a per-LLM-call timeout (propagates to cancel compaction)", async () => {
     seedGraph([{ id: "n3", summary: "a" }]);
     let passCount = 0;
     // runStage reports a per-call timeout (timedOut: true) — the Builder must
-    // STOP now (not silently retry up to maxBuilderPasses) and surface it.
+    // THROW (propagate to the compaction hook → cancel + visible error), not
+    // silently retry up to maxBuilderPasses.
     const timeoutRunStage = (_input: StageRunInput): Promise<StageRunResult> => {
       passCount += 1;
       return Promise.resolve({
@@ -354,19 +355,21 @@ describe("runBuilder", () => {
         timedOut: true,
       });
     };
-    await runBuilder({
-      pi: makeFakePi().pi,
-      ctx: makeFakeCtx(),
-      settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
-      signal: new AbortController().signal,
-      widget: NO_OP_WIDGET,
-      scope: null,
-      runStageFn: timeoutRunStage,
-    });
-    expect(passCount).toBe(1); // timeout → stop after pass 1 (not 5 silent retries)
+    await expect(
+      runBuilder({
+        pi: makeFakePi().pi,
+        ctx: makeFakeCtx(),
+        settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
+        signal: new AbortController().signal,
+        widget: NO_OP_WIDGET,
+        scope: null,
+        runStageFn: timeoutRunStage,
+      }),
+    ).rejects.toBeInstanceOf(StageTimeoutError);
+    expect(passCount).toBe(1); // timeout → throw after pass 1 (not 5 silent retries)
   });
 
-  it("keeps partial work and continues when error hits AFTER a mutate, then flushes on normal end", async () => {
+  it("propagates an error after a mutate (partial work already persisted, `new` preserved)", async () => {
     const g = seedGraph([{ id: "n3", summary: "a" }]);
     let passCount = 0;
     const errorScript = scriptRunStageWithError(
@@ -377,24 +380,25 @@ describe("runBuilder", () => {
       passCount += 1;
       return errorScript(input);
     };
-    const cap = makeFakePi();
-    await runBuilder({
-      pi: cap.pi,
-      ctx: makeFakeCtx(),
-      settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
-      signal: new AbortController().signal,
-      widget: NO_OP_WIDGET,
-      scope: null,
-      runStageFn: countingRunStage,
-    });
-    // pass 1 errored after 1 mutate → counts as finished; pass 2 converges.
-    expect(passCount).toBe(2);
-    // the run ended normally (pass 2 converged) → new flushed to active
-    expect(g.nodes.get("n3")?.state).toBe("active");
-    expect(flushNewCount(cap.appended)).toBeGreaterThanOrEqual(1);
+    await expect(
+      runBuilder({
+        pi: makeFakePi().pi,
+        ctx: makeFakeCtx(),
+        settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
+        signal: new AbortController().signal,
+        widget: NO_OP_WIDGET,
+        scope: null,
+        runStageFn: countingRunStage,
+      }),
+    ).rejects.toThrow();
+    // the erroring pass propagates immediately (no retry); the mkdir before the
+    // error is already persisted (per-mutate delta).
+    expect(passCount).toBe(1);
+    // error preserves `new` (no flush on a failed run)
+    expect(g.nodes.get("n3")?.state).toBe("new");
   });
 
-  it("ends the run when error hits BEFORE any mutate (0 applied), new preserved", async () => {
+  it("propagates an error before any mutate (0 applied), new preserved", async () => {
     const g = seedGraph([{ id: "n3", summary: "a" }]);
     let passCount = 0;
     const errorScript = scriptRunStageWithError(
@@ -405,20 +409,20 @@ describe("runBuilder", () => {
       passCount += 1;
       return errorScript(input);
     };
-    const cap = makeFakePi();
-    await runBuilder({
-      pi: cap.pi,
-      ctx: makeFakeCtx(),
-      settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
-      signal: new AbortController().signal,
-      widget: NO_OP_WIDGET,
-      scope: null,
-      runStageFn: countingRunStage,
-    });
-    expect(passCount).toBe(1); // error with 0 mutates → end run
-    // run-ending error → new preserved
+    await expect(
+      runBuilder({
+        pi: makeFakePi().pi,
+        ctx: makeFakeCtx(),
+        settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
+        signal: new AbortController().signal,
+        widget: NO_OP_WIDGET,
+        scope: null,
+        runStageFn: countingRunStage,
+      }),
+    ).rejects.toThrow();
+    expect(passCount).toBe(1); // error with 0 mutates → propagate
+    // run-ending error → new preserved (no flush)
     expect(g.nodes.get("n3")?.state).toBe("new");
-    expect(flushNewCount(cap.appended)).toBe(0);
   });
 
   it("stops at maxBuilderPasses without convergence", async () => {
