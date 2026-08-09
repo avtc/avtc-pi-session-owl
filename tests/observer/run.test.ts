@@ -680,7 +680,7 @@ describe("runObserver", () => {
     expect(calls).toContain("end");
   });
 
-  it("feeds each chunk's stage usage into the store ledger (persisted once at run end)", async () => {
+  it("feeds each chunk's stage usage into the store ledger (persisted per chunk)", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
     // two small chunks (low threshold forces a chunk per entry) → two stage passes
@@ -712,8 +712,46 @@ describe("runObserver", () => {
     // build/select untouched.
     expect(getGraphStore().usageLedger.build.runs).toBe(0);
     expect(getGraphStore().usageLedger.select.runs).toBe(0);
-    // the ledger is persisted ONCE at run end, not once per chunk (two chunks
-    // here but one durable memkeeper.usage entry).
-    expect(appended.filter((e) => e.type === "memkeeper.usage")).toHaveLength(1);
+    // the ledger is persisted PER CHUNK (two chunks → two durable
+    // memkeeper.usage entries) so an interrupted run keeps the usage tally for
+    // every completed chunk — matching the per-chunk durability of observations.
+    expect(appended.filter((e) => e.type === "memkeeper.usage")).toHaveLength(2);
+  });
+
+  it("persists usage per chunk so a mid-run abort keeps the tally for completed chunks", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const controller = new AbortController();
+    // two chunks (threshold 1 → each entry its own chunk): [u1], [a1].
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    let call = 0;
+    const runStageFn: ObserverRunInput["runStageFn"] = async (input) => {
+      call += 1;
+      const tool = input.tools[0] as AgentTool;
+      // chunk 1 records an observation + reports usage, then abort fires
+      await tool.execute("c1", { observations: [{ summary: "Initial.", importance: "high", sourceEntryIds: ["u1"] }] });
+      input.onStageEnd?.({ input: 1000, output: 500, cacheRead: 0, cost: 0, turns: 1 });
+      if (call === 1) controller.abort();
+      return {
+        messages: [],
+        usage: { input: 1000, output: 500, cacheRead: 0, cost: 0, turns: 1 },
+        outputTokens: 0,
+        aborted: controller.signal.aborted,
+      };
+    };
+
+    await runObserver({
+      ...makeArgs({ pi, ctx, unobserved, runStageFn, thresholdTokens: 1 }),
+      signal: controller.signal,
+    });
+
+    // only chunk 1 ran (the top-of-loop abort guard stopped chunk 2)
+    expect(call).toBe(1);
+    // chunk 1's usage WAS persisted (per-chunk) even though the run was aborted —
+    // matching the per-chunk durability of its observation. Previously usage was
+    // lost (persisted only at run end, which the abort skipped).
+    const usageEntries = appended.filter((e) => e.type === "memkeeper.usage");
+    expect(usageEntries).toHaveLength(1);
+    expect(getGraphStore().usageLedger.observe.input).toBe(1000);
   });
 });

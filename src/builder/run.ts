@@ -140,6 +140,11 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
 
       const { outcome } = await runPass(input, graph, resolved, tools, runStageFn, pass, ledger.onStageEnd);
 
+      // persist the cumulative usage ledger PER PASS so an interrupted run keeps
+      // the usage tally for every completed pass — matching the per-mutate
+      // durability of the graph deltas (the two stay consistent).
+      if (ledger.hasUsage()) persistLedger(store);
+
       // try_finish success → converged, stop (normal end).
       if (outcome.converged) break;
       // no-op pass (0 mutates, not converged) → stop (normal end).
@@ -161,10 +166,6 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
     try {
       // Flush `new`→`active` only on a normal stage-end; abort/error preserve it.
       if (normalEnd) flushNew(input.widget, store);
-      // Persist the cumulative usage ledger ONCE at run end (fold-per-pass,
-      // persist-once — mirroring the Observer). Skipped on abort/error (matching
-      // the Observer's no-usage-on-abort) and when no pass reported usage.
-      if (normalEnd && ledger.hasUsage()) persistLedger(store);
     } catch (cleanupErr) {
       log.error("builder stage teardown cleanup failed", cleanupErr);
     }

@@ -289,13 +289,14 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       if (recordTool.attempted > EMPTY_RECORDS && records.length === EMPTY_RECORDS) {
         notify(input.ctx, "Observer skipped a chunk: all observations cited invalid source ids", "warning");
       }
+      // persist the cumulative usage ledger PER CHUNK so an interrupted run
+      // (compaction cancelled, provider error, crash) keeps the usage tally for
+      // every completed chunk — matching the per-chunk durability of the
+      // observations themselves (the two stay consistent).
+      if (ledger.hasUsage()) persistLedger(store);
     }
 
     if (input.signal.aborted) return;
-
-    // persist the accumulated usage ledger at run end (best-effort — an aborted
-    // run keeps its per-chunk observations but may lose the usage tally).
-    if (ledger.hasUsage()) persistLedger(store);
 
     if (totalRecords === EMPTY_RECORDS) {
       // every chunk yielded nothing worth keeping. Completed chunks already

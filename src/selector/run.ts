@@ -122,7 +122,6 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   const { contextView, workingCopy } = buildInputView(graphStore.graph, input);
 
   let stageOpened = false;
-  let normalEnd = true;
   let pass = FIRST_PASS;
   const ledger = makeLedgerHook(SELECT_STAGE);
   try {
@@ -140,8 +139,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
     // convergence loop — bounded by the break conditions below (budget met / no-op / context limit / signal)
     while (true) {
       if (input.signal.aborted) {
-        normalEnd = false; // abort → run ended early
-        break;
+        break; // abort → run ended early
       }
 
       const { outcome } = await runPass(
@@ -156,6 +154,11 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
       );
       pushSelectedCounts(input.widget, workingCopy.graph);
 
+      // persist the cumulative usage ledger PER PASS so an interrupted run keeps
+      // the usage tally for every completed pass — matching the per-mutate
+      // durability of the working-copy deltas (the two stay consistent).
+      if (ledger.hasUsage()) persistLedger(store);
+
       // try_finish success → converged, stop.
       if (outcome.converged) break;
       // no-op pass (0 mutates, not converged) → stop.
@@ -168,7 +171,6 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   } catch (cause) {
     // A run-ending error (error-before-any-mutate rethrown by runPass). Applied
     // mutates on the working copy are kept; whatever tree exists is committed.
-    normalEnd = false;
     log.error("selector run failed", cause);
   } finally {
     // Best-effort teardown: a throw in one cleanup must not skip the others or
@@ -181,10 +183,6 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
       // available curation and committing it keeps mk_recall's target alive.
       // (Aborted-before-start leaves no working copy; stageOpened is false.)
       if (stageOpened) persistResult(store, graphStore, workingCopy.graph);
-      // Persist the cumulative usage ledger ONCE at run end (fold-per-pass,
-      // persist-once — mirroring the Observer + Builder). Skipped on abort/error
-      // and when no pass reported usage.
-      if (normalEnd && ledger.hasUsage()) persistLedger(store);
     } catch (cleanupErr) {
       log.error("selector stage teardown cleanup failed", cleanupErr);
     }
