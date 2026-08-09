@@ -52,6 +52,13 @@ function textDeltaEvent(delta: string): AgentEvent {
   } as unknown as AgentEvent;
 }
 
+function thinkingDeltaEvent(delta: string): AgentEvent {
+  return {
+    type: "message_update",
+    assistantMessageEvent: { type: "thinking_delta", delta },
+  } as unknown as AgentEvent;
+}
+
 describe("ProgressTracker state", () => {
   let tracker: ProgressTracker;
 
@@ -178,11 +185,27 @@ describe("ProgressTracker state", () => {
       expect(tracker.streamingOutputTokens).toBe(20);
     });
 
-    it("primary tier wins over fallback (when both present, usage.output is used)", () => {
+    it("uses max(primary, fallback): a larger primary is shown, a smaller one does not mask the rising fallback", () => {
       tracker.startStage("build", { pass: 1 });
       tracker.onEvent(textDeltaEvent("a".repeat(NUM_FORTY))); // fallback +10
       tracker.onEvent({ type: "message_update", message: { usage: { output: 99 } } } as unknown as AgentEvent);
+      // primary (99) > fallback (10) → 99 shown
       expect(tracker.streamingOutputTokens).toBe(99);
+    });
+
+    it("progresses during thinking: a stale primary does not freeze the counter (the fallback rises and max shows it)", () => {
+      // Reproduces the freeze: provider reports output=1 once early, then goes
+      // silent during extended thinking while thinking deltas stream. Under the
+      // old primary-wins rule the counter stuck at 1; max shows the rising fallback.
+      tracker.startStage("build", { pass: 1 });
+      tracker.onEvent({ type: "message_update", message: { usage: { output: 1 } } } as unknown as AgentEvent);
+      expect(tracker.streamingOutputTokens).toBe(1);
+      // thinking streams — no more usage.output, but thinking deltas arrive
+      tracker.onEvent(thinkingDeltaEvent("a".repeat(NUM_FORTY))); // fallback +10
+      tracker.onEvent(thinkingDeltaEvent("b".repeat(NUM_FORTY))); // fallback +20
+      expect(tracker.streamingOutputTokens).toBe(20); // max(1, 20)
+      tracker.onEvent(thinkingDeltaEvent("c".repeat(NUM_FORTY))); // fallback +30
+      expect(tracker.streamingOutputTokens).toBe(30); // progresses, no freeze
     });
   });
 });

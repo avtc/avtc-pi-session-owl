@@ -236,12 +236,19 @@ export function createTracker(): ProgressTracker {
         if (streamed !== null && streamed > state.primaryTokens) {
           state.primaryTokens = streamed;
         }
-        // fallback tier (chars/4 over deltas): accumulates so the counter always moves.
+        // fallback tier (chars/4 over text + thinking + tool-call deltas):
+        // accumulates so the counter always moves, including during extended
+        // thinking when the provider typically does NOT stream usage.output.
         const delta = deltaTextOf(event);
         if (delta !== null) {
           state.fallbackTokens += deltaTokens(delta);
         }
-        state.streamingOutputTokens = state.primaryTokens > 0 ? state.primaryTokens : state.fallbackTokens;
+        // max — NOT primary-wins: a provider that reports usage.output once early
+        // then goes silent during thinking would otherwise freeze the counter at
+        // that stale value while the fallback (thinking deltas) rises unseen. max
+        // shows whichever is further along, so the counter progresses throughout
+        // streaming and converges to accurate output when the provider reports it.
+        state.streamingOutputTokens = Math.max(state.primaryTokens, state.fallbackTokens);
       } else if (event.type === "tool_execution_end") {
         // a mutate happened → the cached root view is stale; rebuild on next snapshot.
         state.cachedRoots = null;
