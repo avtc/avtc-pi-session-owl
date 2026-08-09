@@ -343,7 +343,8 @@ describe("buildChunks", () => {
     const only = chunks[0];
     expect(only.text).toBe("<USER entry=u1>hello world</USER>\n<USER entry=u2>bye now</USER>");
     expect(only.allowedIds).toEqual(new Set(["u1", "u2"]));
-    // lastEntryId = the highest-branch-position entry in the chunk (blocks in entry order)
+    // firstEntryId/lastEntryId = the chunk's coverage range (blocks in entry order)
+    expect(only.firstEntryId).toBe("u1");
     expect(only.lastEntryId).toBe("u2");
   });
 
@@ -362,9 +363,11 @@ describe("buildChunks", () => {
     expect(chunks.length).toBe(2);
     expect(chunks[0].text).toBe(`<USER entry=u1>${"a".repeat(400)}</USER>`);
     expect(chunks[1].text).toBe(`<USER entry=u2>${"b".repeat(400)}</USER>`);
-    // each chunk's lastEntryId is its own tail (entry-order blocks) — the basis
-    // for advancing the frontier without re-scanning the gap per chunk.
+    // each chunk's firstEntryId/lastEntryId is its own range (entry-order blocks)
+    // — the basis for per-chunk coversFromId/coversUpToId.
+    expect(chunks[0].firstEntryId).toBe("u1");
     expect(chunks[0].lastEntryId).toBe("u1");
+    expect(chunks[1].firstEntryId).toBe("u2");
     expect(chunks[1].lastEntryId).toBe("u2");
   });
 

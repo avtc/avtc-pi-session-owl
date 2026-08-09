@@ -324,7 +324,7 @@ describe("runObserver", () => {
     expect(getGraphStore().observerFrontier).toBe("a2");
   });
 
-  it("on signal abort mid-run, stops and writes nothing (accumulate-then-append)", async () => {
+  it("on signal abort mid-run (chunk throws): nothing persisted for the in-flight chunk", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
     const controller = new AbortController();
@@ -387,21 +387,21 @@ describe("runObserver", () => {
     expect(getGraphStore().observerFrontier).toBeNull();
   });
 
-  it("discards accumulated records when abort fires BETWEEN chunks (chunk 1 done, chunk 2 aborted)", async () => {
+  it("persists chunk 1 before chunk 2 aborts: abort loses only the in-flight chunk (per-chunk durability)", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
     const controller = new AbortController();
-    // two chunks (low threshold forces one entry per chunk)
+    // two chunks (threshold 1 → each entry its own chunk): [u1], [a1].
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
     let chunk = 0;
     const fn = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
       chunk += 1;
       const tool = input.tools[0] as AgentTool;
-      // chunk 1 COMPLETES with a valid record (accumulates in allRecords)...
+      // chunk 1 COMPLETES with a valid record → persisted immediately per-chunk...
       await tool.execute("c1", {
-        observations: [{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }],
+        observations: [{ summary: "Initial goal stated.", importance: "high", sourceEntryIds: ["u1"] }],
       });
-      // ...then abort fires before chunk 2 starts (chunk 2 never passes)
+      // ...then abort fires before chunk 2 starts (chunk 2 never passes the top-of-loop guard)
       if (chunk === 1) controller.abort();
       return {
         messages: [] as AgentMessage[],
@@ -411,15 +411,21 @@ describe("runObserver", () => {
       };
     };
 
-    await runObserver({ ...makeArgs({ pi, ctx, unobserved, runStageFn: fn }), signal: controller.signal });
+    await runObserver({
+      ...makeArgs({ pi, ctx, unobserved, runStageFn: fn, thresholdTokens: 1 }),
+      signal: controller.signal,
+    });
 
-    // only chunk 1 ran (the abort-guards at the loop top stopped chunk 2)
+    // only chunk 1 ran (the top-of-loop abort guard stopped chunk 2)
     expect(chunk).toBe(1);
-    // chunk 1's accumulated records were DISCARDED — nothing persisted
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
-    expect(appended.filter((e) => e.type === "memkeeper.observation")).toHaveLength(0);
-    // frontier unchanged (the persist that advances it was never reached)
-    expect(getGraphStore().observerFrontier).toBeNull();
+    // chunk 1's record WAS persisted (per-chunk durability) — the fix for the
+    // old accumulate-then-append that lost everything on abort.
+    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(1);
+    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    expect(obsEntries).toHaveLength(1);
+    expect((obsEntries[0].data as { coversUpToId: string }).coversUpToId).toBe("u1");
+    // frontier advanced to chunk 1's last entry (chunk 2 re-observed next run)
+    expect(getGraphStore().observerFrontier).toBe("u1");
   });
 
   it("does NOT flush new nodes (leaves them state:new for the Builder)", async () => {
@@ -453,7 +459,7 @@ describe("runObserver", () => {
     expect(notify).toHaveBeenCalled();
   });
 
-  it("accumulates records across multiple good chunks into ONE observation delta", async () => {
+  it("persists each good chunk immediately: one observation delta per chunk (per-chunk durability)", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
     // two chunks (threshold 1 → each entry its own chunk): [u1], [a1].
@@ -465,26 +471,34 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn, thresholdTokens: 1 }));
 
-    // exactly ONE observation delta for the whole run, with BOTH records.
+    // per-chunk persistence: TWO observation deltas (one per chunk), each its own range.
     const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
-    expect(obsEntries).toHaveLength(1);
-    const entry = obsEntries[0].data as {
-      coversFromId: string | null;
+    expect(obsEntries).toHaveLength(2);
+    const e1 = obsEntries[0].data as {
+      coversFromId: string;
       coversUpToId: string;
       records: { summary: string }[];
       tokenCount: number;
     };
-    expect(entry.records.map((r) => r.summary)).toEqual(["Initial goal stated.", "Chose vitest."]);
-    expect(entry.coversFromId).toBe("u1");
-    expect(entry.coversUpToId).toBe("a1");
-    // exact tokenCount = sum of the two records' VERBATIM SOURCE sizes (detailsTokens).
+    const e2 = obsEntries[1].data as {
+      coversFromId: string;
+      coversUpToId: string;
+      records: { summary: string }[];
+      tokenCount: number;
+    };
+    expect(e1.records.map((r) => r.summary)).toEqual(["Initial goal stated."]);
+    expect(e1.coversFromId).toBe("u1");
+    expect(e1.coversUpToId).toBe("u1");
+    expect(e2.records.map((r) => r.summary)).toEqual(["Chose vitest."]);
+    expect(e2.coversFromId).toBe("a1");
+    expect(e2.coversUpToId).toBe("a1");
+    // per-chunk tokenCount = that chunk's record's verbatim source size
     const u1Details = "<USER>initial prompt captured mechanically</USER>";
     const a1Details = "<ASSISTANT>chose vitest</ASSISTANT>";
-    const expectedTokens = Math.ceil(u1Details.length / 4) + Math.ceil(a1Details.length / 4);
-    expect(entry.tokenCount).toBe(expectedTokens);
-    // two wrapper create_node deltas batched into ONE memkeeper.graph_delta
-    // entry (the Observer persists its wrapper batch as a single envelope).
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(1);
+    expect(e1.tokenCount).toBe(Math.ceil(u1Details.length / 4));
+    expect(e2.tokenCount).toBe(Math.ceil(a1Details.length / 4));
+    // two wrapper create_node deltas — ONE graph_delta envelope per chunk
+    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(2);
     // frontier advanced to the last entry of the whole run
     expect(getGraphStore().observerFrontier).toBe("a1");
   });

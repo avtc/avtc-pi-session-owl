@@ -7,10 +7,14 @@
 // batch. The Observer is a non-writer (it only appends observation +
 // new-wrapper deltas; it never restructures — that's the Builder).
 //
-// Persistence granularity: ONE `memkeeper.observation` delta per run
-// (coversFromId = first unobserved entry, coversUpToId = last), accumulated
-// across all chunks then appended at the end (accumulate-then-append — a failed
-// or aborted run writes nothing; idempotent by coverage range on re-run).
+// Persistence granularity: ONE `memkeeper.observation` delta PER CHUNK
+// (coversFromId = chunk's first entry, coversUpToId = chunk's last), persisted
+// immediately after each chunk's agentLoop succeeds (per-chunk durability).
+// An abort loses only the in-flight chunk — completed chunks are durable and the
+// frontier has already advanced past them, so a re-run skips them (idempotent by
+// coverage range). Reverses the earlier accumulate-then-append (one delta per
+// run, abort = lose everything), which lost all work on any run longer than the
+// abort window.
 
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -47,7 +51,6 @@ const OBSERVE_STAGE = "observe" as const;
 const NO_SOURCE_ENTRY: SessionEntry | undefined = undefined;
 const EMPTY_GAP = 0;
 const EMPTY_RECORDS = 0;
-const FIRST = 0;
 
 /** A captured observation (validated; before id/timestamp/wrap assignment). */
 export interface RecordObservation {
@@ -175,7 +178,6 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   }
 
   const store = toStoreContext(input.pi, input.ctx);
-  const graph = getGraphStore().graph;
 
   // Re-check abort after the model-resolution await: compaction may have
   // signalled during it (mirrors the Builder/Selector guard).
@@ -189,23 +191,20 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   };
   const chunks = buildChunks(input.unobserved, chunkOptions);
 
-  // The last source entry (by branch position) of each chunk — used to advance
-  // the frontier only over the CONTIGUOUS successful prefix: if chunk K fails,
-  // its entries (and every later chunk's) must stay re-observable, so the
-  // frontier stops at chunk K-1's last entry rather than the whole gap's tail.
-  const chunkLastIds = computeChunkLastIds(chunks);
-
   // index entries by id for timestamp lookup (mechanical from source).
   const entryById = new Map<string, SessionEntry>();
   for (const entry of input.unobserved) entryById.set(entry.id, entry);
 
-  const allRecords: RecordObservation[] = [];
+  // A local resolver over the in-hand unobserved entries computes each
+  // record's verbatim-source size hint (detailsLines/detailsTokens) without a
+  // session round-trip — the source entries are already in `entryById`.
+  const localResolver: EntryResolver = (ids) =>
+    ids.map((id) => entryById.get(id)).filter((entry): entry is SessionEntry => entry !== undefined);
+
   const totalChunks = chunks.length;
-  // the highest-index entry covered by the contiguous successful prefix
-  // (null until the first chunk succeeds). Failed chunks stop the prefix.
-  let contiguousCoversUpToId: string | null = null;
   let stageOpened = false;
   let done = 0;
+  let totalRecords = 0;
   const ledger = makeLedgerHook(OBSERVE_STAGE);
   try {
     input.widget.startStage(OBSERVE_STAGE, { batch: { done: 0, total: totalChunks } });
@@ -234,7 +233,9 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       try {
         await run(stageInput);
       } catch (cause) {
-        // an aborted run stops the whole Observer (nothing committed yet).
+        // a throwing chunk's own records are lost (not yet persisted this chunk);
+        // prior chunks are already durable (per-chunk persistence). Stop here so
+        // the failed chunk + everything after stay re-observable.
         if (input.signal.aborted) return;
         log.error("observer stage failed", cause);
         notify(
@@ -242,83 +243,40 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
           "Observer stopped at a failed chunk (LLM error); later entries re-observed next run",
           "warning",
         );
-        // stop the contiguous prefix here: the failed chunk + everything after
-        // must stay re-observable, so the frontier does not advance past it.
         break;
       } finally {
         done += 1;
         input.widget.setBatch(done, totalChunks);
       }
-      // this chunk succeeded → extend the contiguous covered prefix to its last entry.
-      contiguousCoversUpToId = chunkLastIds[chunkIndex];
-      allRecords.push(...recordTool.records);
+      // this chunk succeeded → wrap its records + persist IMMEDIATELY (per-chunk
+      // durability: an abort loses only the in-flight chunk; the frontier has
+      // already advanced past every prior record-bearing chunk). A 0-record
+      // chunk persists nothing — it is covered by the next record-bearing
+      // chunk's coversUpToId; trailing 0-record chunks re-observe next run.
+      const records = recordTool.records;
+      if (records.length > EMPTY_RECORDS) {
+        totalRecords += records.length;
+        persistChunk(store, chunk, records, entryById, localResolver);
+      }
       // an all-bad chunk (model attempted records but every id was foreign) is
       // skipped — no records from it — and the user is warned.
-      if (recordTool.attempted > EMPTY_RECORDS && recordTool.records.length === EMPTY_RECORDS) {
+      if (recordTool.attempted > EMPTY_RECORDS && records.length === EMPTY_RECORDS) {
         notify(input.ctx, "Observer skipped a chunk: all observations cited invalid source ids", "warning");
       }
     }
 
     if (input.signal.aborted) return;
 
-    // persist the accumulated usage ledger ONCE at run end (atomic with the
-    // run's other persists — an aborted run wrote no usage, matching no
-    // observations). Skipped when no chunk reported usage.
+    // persist the accumulated usage ledger at run end (best-effort — an aborted
+    // run keeps its per-chunk observations but may lose the usage tally).
     if (ledger.hasUsage()) persistLedger(store);
 
-    if (allRecords.length === EMPTY_RECORDS) {
-      // nothing worth keeping — no delta, frontier unchanged (re-runs next trigger).
+    if (totalRecords === EMPTY_RECORDS) {
+      // every chunk yielded nothing worth keeping. Completed chunks already
+      // advanced the frontier past their range (via the next record-bearing
+      // chunk, or trailing re-observe next run); nothing else to do.
       notify(input.ctx, "Observer returned no observations", "warning");
-      return;
     }
-
-    // wrap each record in a fresh `new` node at root, in-memory first (create_node
-    // + record_observation), tracking the pairs for persistence.
-    // A local resolver over the in-hand unobserved entries computes each
-    // record's verbatim-source size hint (detailsLines/detailsTokens) without a
-    // session round-trip — the source entries are already in `entryById`.
-    const localResolver: EntryResolver = (ids) =>
-      ids.map((id) => entryById.get(id)).filter((entry): entry is SessionEntry => entry !== undefined);
-    const pairs: WrappedPair[] = [];
-    for (const record of allRecords) {
-      const nodeId = `n${graph.nextNodeId}` as NodeId;
-      applyCreateNode(graph, {
-        id: nodeId,
-        // the wrapper carries the observation's one-line summary at birth so
-        // every node always reads with a summary; the Builder refines it later.
-        summary: record.summary,
-        importance: record.importance,
-        parentNode: null,
-        state: "new",
-      });
-      const obsId = `o${graph.nextObsId}` as ObsId;
-      const firstSource = record.sourceEntryIds
-        .map((id) => entryById.get(id))
-        .find((entry) => entry !== NO_SOURCE_ENTRY);
-      const timestamp = firstSource !== undefined ? toStoredTimestamp(firstSource.timestamp) : nowStoredTimestamp();
-      const counts = computeDetailsAndCache(obsId, record.sourceEntryIds, localResolver);
-      applyRecordObservation(graph, {
-        obs: makeObservation({
-          id: obsId,
-          summary: record.summary,
-          importance: record.importance,
-          sourceEntryIds: record.sourceEntryIds,
-          timestamp,
-          parentNode: nodeId,
-          detailsLines: counts?.lines,
-          detailsTokens: counts?.tokens,
-        }),
-      });
-      pairs.push({ nodeId, obsId });
-    }
-
-    // persist: the wrapper create_node deltas batched into ONE entry, the
-    // single observation entry for the whole run (coversFromId/coversUpToId),
-    // and the usage ledger persisted ONCE at run end. The record_observation
-    // delta is NOT persisted — observations enter via the observation entry's
-    // content index + reconcileLinks on load.
-    persistWrappers(store, pairs);
-    persistObservationBatch(store, input.unobserved, pairs, contiguousCoversUpToId);
   } catch (cause) {
     // a persist-phase throw (e.g. a wrapper missing its node) is logged, not
     // re-thrown — matching the Builder/Selector runs' error contract (never
@@ -332,55 +290,78 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
 
 // --- persist helpers -------------------------------------------------------
 
-/** The last source entry id of each chunk — the highest-branch-position entry
- *  in the chunk, captured at flush time (blocks are in entry order) so the
- *  frontier advances over the contiguous successful prefix without a re-scan. */
-function computeChunkLastIds(chunks: RenderedChunk[]): string[] {
-  return chunks.map((chunk) => chunk.lastEntryId);
-}
-
-/** Append ONE `memkeeper.graph_delta` entry holding all wrapper create_node
- *  deltas (a batched envelope), one structural mutate per record. */
-function persistWrappers(store: StoreContext, pairs: WrappedPair[]): void {
-  const graph = getGraphStore().graph;
-  const deltas: GraphDelta[] = [];
-  for (const pair of pairs) {
-    const node = graph.nodes.get(pair.nodeId);
-    if (node === undefined) continue; // tolerant: a dissolved wrapper is skipped
-    deltas.push({
-      type: "create_node",
-      id: node.id,
-      summary: node.summary,
-      importance: node.importance,
-      parentNode: null,
-      state: node.state,
-    });
-  }
-  appendGraphDeltaBatch(store, deltas);
-}
-
-/** Append the single `memkeeper.observation` delta covering the whole run.
- *  `coversUpToId` is the last entry of the contiguous successful prefix (NOT the
- *  whole gap's tail) so a mid-gap chunk failure leaves the failed chunk + later
- *  entries re-observable on the next run. */
-function persistObservationBatch(
+/** Wrap a chunk's records in fresh `new` root nodes + persist immediately: one
+ *  `memkeeper.graph_delta` entry (the wrapper create_node ops) and one
+ *  `memkeeper.observation` entry spanning this chunk's coversFromId/coversUpToId
+ *  range. The frontier advances to the chunk's lastEntryId via appendObservation
+ *  — so an abort loses only the in-flight chunk; completed chunks are durable
+ *  and skipped on re-run. */
+function persistChunk(
   store: StoreContext,
-  unobserved: SessionEntry[],
-  pairs: WrappedPair[],
-  contiguousCoversUpToId: string | null,
+  chunk: RenderedChunk,
+  records: readonly RecordObservation[],
+  entryById: Map<string, SessionEntry>,
+  resolver: EntryResolver,
 ): void {
   const graph = getGraphStore().graph;
+  const deltas: GraphDelta[] = [];
+  const pairs: WrappedPair[] = [];
+  for (const record of records) {
+    const nodeId = `n${graph.nextNodeId}` as NodeId;
+    // the wrapper carries the observation's one-line summary at birth so every
+    // node always reads with a summary; the Builder refines it later.
+    applyCreateNode(graph, {
+      id: nodeId,
+      summary: record.summary,
+      importance: record.importance,
+      parentNode: null,
+      state: "new",
+    });
+    deltas.push({
+      type: "create_node",
+      id: nodeId,
+      summary: record.summary,
+      importance: record.importance,
+      parentNode: null,
+      state: "new",
+    });
+    const obsId = `o${graph.nextObsId}` as ObsId;
+    const firstSource = record.sourceEntryIds.map((id) => entryById.get(id)).find((entry) => entry !== NO_SOURCE_ENTRY);
+    const timestamp = firstSource !== undefined ? toStoredTimestamp(firstSource.timestamp) : nowStoredTimestamp();
+    const counts = computeDetailsAndCache(obsId, record.sourceEntryIds, resolver);
+    applyRecordObservation(graph, {
+      obs: makeObservation({
+        id: obsId,
+        summary: record.summary,
+        importance: record.importance,
+        sourceEntryIds: record.sourceEntryIds,
+        timestamp,
+        parentNode: nodeId,
+        detailsLines: counts?.lines,
+        detailsTokens: counts?.tokens,
+      }),
+    });
+    pairs.push({ nodeId, obsId });
+  }
+  // wrappers: one graph_delta entry holding this chunk's create_node ops.
+  appendGraphDeltaBatch(store, deltas);
+  // observations: one observation entry covering THIS chunk's range
+  // (coversUpToId advances the frontier; a later record-bearing chunk's range
+  // subsumes any intervening 0-record chunks).
   let tokenCount = 0;
   const serializedRecords = pairs.map((pair) => {
     const obs = graph.observations.get(pair.obsId);
     if (obs === undefined) {
       throw new Error("observer wrap: observation missing");
     }
-    tokenCount += obs.detailsTokens; // verbatim source size processed this batch (matches the threshold gate's raw-token semantics)
+    tokenCount += obs.detailsTokens; // verbatim source size processed this batch
     return encodeObservation(obs);
   });
-  const coversFromId = unobserved[FIRST]?.id ?? null;
-  const coversUpToId = contiguousCoversUpToId ?? unobserved[FIRST]?.id ?? null;
-  const entry: ObservationEntry = { coversFromId, coversUpToId, records: serializedRecords, tokenCount };
+  const entry: ObservationEntry = {
+    coversFromId: chunk.firstEntryId,
+    coversUpToId: chunk.lastEntryId,
+    records: serializedRecords,
+    tokenCount,
+  };
   appendObservation(store, entry);
 }

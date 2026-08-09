@@ -46,6 +46,9 @@ export interface ChunkOptions {
 export interface RenderedChunk {
   readonly text: string;
   readonly allowedIds: ReadonlySet<string>;
+  /** The lowest-branch-position source entry id in this chunk — the start of the
+   *  chunk's coverage range (coversFromId). Captured at flush time. */
+  readonly firstEntryId: string;
   /** The highest-branch-position source entry id in this chunk — used to advance
    *  the observer frontier over the contiguous successful prefix. Captured at
    *  flush time (blocks are in entry order) so callers need not re-scan the gap. */
@@ -68,6 +71,7 @@ const ATTR_ERROR = "error";
 /** Separator between rendered blocks (each tag on its own line — readability for
  *  the Observer LLM and recall consumers; the inner text is already cleaned). */
 export const BLOCK_SEP = "\n";
+const FIRST_INDEX = 0;
 
 // --- sanitization & truncation ---------------------------------------------
 
@@ -314,8 +318,9 @@ export function buildChunks(entries: readonly SessionEntry[], options: ChunkOpti
     if (current.length === 0) return;
     const text = current.map((block) => block.text).join(BLOCK_SEP);
     const allowedIds = new Set(current.map((block) => block.entryId));
+    const firstEntryId = current[FIRST_INDEX]?.entryId ?? "";
     const lastEntryId = current[current.length - 1]?.entryId ?? "";
-    chunks.push({ text, allowedIds, lastEntryId });
+    chunks.push({ text, allowedIds, firstEntryId, lastEntryId });
     current = [];
     currentTokens = 0;
   };
