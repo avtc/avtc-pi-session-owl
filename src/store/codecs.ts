@@ -35,6 +35,11 @@ export const USAGE_TYPE = "memkeeper.usage";
 
 /** Current snapshot schema version (additive fields don't bump). */
 export const DETAILS_VERSION = "v1";
+/** Producer marker stamped on every memkeeper compaction snapshot. The compaction
+ *  `details` field is shared + last-writer-wins (any extension hooking
+ *  session_before_compact overwrites it), so `type` — NOT the generic `version` —
+ *  is the sound discriminator for "is this a memkeeper snapshot?". */
+export const DETAILS_TYPE = "memkeeper";
 
 // --- usage ledger ---------------------------------------------------------
 
@@ -172,6 +177,7 @@ export interface UsageEntry {
  * NOT observation content. Carries the last selected tree + usage baseline.
  */
 export interface MemkeeperDetails {
+  type: "memkeeper";
   version: string;
   nodes: SerializedNode[];
   oInitialPrompt: SerializedObservation | null;
@@ -389,8 +395,9 @@ const KNOWN_DETAILS_VERSIONS = new Set<string>([DETAILS_VERSION]);
  *  `version` field. */
 export function decodeDetails(raw: unknown): MemkeeperDetails | null {
   if (!isObject(raw)) return null;
-  const { version, nodes, oInitialPrompt, nextObsId, nextNodeId, selectedTree, lastCompactionLedger } = raw;
+  const { type, version, nodes, oInitialPrompt, nextObsId, nextNodeId, selectedTree, lastCompactionLedger } = raw;
   if (
+    type !== DETAILS_TYPE ||
     typeof version !== "string" ||
     !KNOWN_DETAILS_VERSIONS.has(version) ||
     !Array.isArray(nodes) ||
@@ -412,6 +419,7 @@ export function decodeDetails(raw: unknown): MemkeeperDetails | null {
     if (ledger === null) return null;
   }
   return {
+    type: DETAILS_TYPE,
     version,
     nodes: base.nodes,
     oInitialPrompt: base.oInitialPrompt,
@@ -509,6 +517,7 @@ export function encodeDetails(
   }
   const promptObs = graph.observations.get(O_INITIAL_PROMPT);
   return {
+    type: DETAILS_TYPE,
     version: DETAILS_VERSION,
     nodes,
     oInitialPrompt: promptObs === undefined ? null : encodeObservation(promptObs),

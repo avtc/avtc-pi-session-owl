@@ -206,7 +206,7 @@ describe("onSessionStart", () => {
     expect(ngoal?.importance).toBe("crit");
     expect(ngoal?.state).toBe("active");
     expect(ngoal?.summary).toBe("");
-    expect(graph.hasInitialPrompt).toBe(false); // oInitialPrompt NOT captured here
+    expect(graph.hasInitialPrompt).toBe(false); // empty branch -> no user message to capture
   });
 
   it("does not re-seed nGoal when the graph already has it (reload)", async () => {
@@ -234,6 +234,23 @@ describe("onSessionStart", () => {
     expect(deltas.length).toBe(0);
     // reconstruction still ran (graph is empty, just no seed write)
     expect(getGraphStore().graph.nodes.has(N_GOAL)).toBe(false);
+  });
+
+  it("captures oInitialPrompt at startup when the branch already has a first user message (resumed session)", async () => {
+    // A resumed pre-memkeeper session: the branch already contains the first
+    // user message, but no turn_end has fired yet. session_start must capture it
+    // so a compaction before any turn_end doesn't lose it (or observe it as a
+    // regular observation instead of oInitialPrompt).
+    const branch = [userEntry("u1", "Build me a memory keeper"), assistantEntry("a1", "ok")];
+    const { ctx, pi } = makeCtx(branch);
+    await onSessionStart({ type: "session_start", reason: "resume" }, ctx, pi, noopWidget);
+
+    const graph = getGraphStore().graph;
+    expect(graph.hasInitialPrompt).toBe(true);
+    expect(graph.observations.get(O_INITIAL_PROMPT)?.summary).toBe("Build me a memory keeper");
+    expect(graph.nodes.get(N_GOAL)?.summary).toBe("Build me a memory keeper");
+    // frontier advanced past the first user message (Observer never re-observes it)
+    expect(getGraphStore().observerFrontier).toBe("u1");
   });
 });
 

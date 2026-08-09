@@ -117,10 +117,6 @@ Check out the full suite of related extensions, [avtc-pi](https://github.com/avt
 
 Developed with [Z.ai](https://z.ai/subscribe?ic=N5IV4LLOOV) — get 10% off your subscription via this referral link.
 
-## Attribution
-
-Inspired by pi-observational-memory.
-
 ## License
 
 MIT

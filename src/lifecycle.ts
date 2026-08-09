@@ -220,10 +220,18 @@ export async function onSessionStart(
   clearDetailsCache();
   await load(store);
   // Fresh-session seed: if the graph is empty (no snapshot/deltas), nGoal must
-  // exist before any observation arrives. oInitialPrompt is NOT captured here
-  // (session_start carries no user message). Gated on enabled: a disabled
-  // session persists no graph_delta (the seed self-heals on enable via capture).
-  if (getMemkeeperSettings().enabled) ensureNGoalSeeded(store);
+  // exist before any observation arrives. Gated on enabled: a disabled session
+  // persists no graph_delta (the seed self-heals on enable via capture).
+  if (getMemkeeperSettings().enabled) {
+    ensureNGoalSeeded(store);
+    // Capture oInitialPrompt now too: for a RESUMED session the branch already
+    // holds the first user message, and session_start may be the only hook
+    // before a compaction (no turn_end yet) — without this, the compaction's
+    // Observer catch-up would observe the first user message as a regular obs
+    // (or lose it) instead of capturing it as oInitialPrompt. Idempotent
+    // (guarded by hasInitialPrompt); a new session's empty branch → no-op.
+    captureInitialPromptIfAbsent(ctx, pi);
+  }
 }
 
 /**
@@ -263,12 +271,16 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   });
   applyRecordObservation(graph, { obs });
 
-  // seed nGoal.summary from the first non-empty line
+  // seed nGoal.summary from the first non-empty line — ONLY when empty. Once
+  // the Builder has refined nGoal.summary (or a prior capture seeded it), the
+  // capture must not clobber it (e.g. a reload where the summary was set but the
+  // oInitialPrompt observation is absent must preserve the refined summary).
   const firstLine = text
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0);
-  if (firstLine !== undefined && firstLine !== graph.nodes.get(N_GOAL)?.summary) {
+  const currentSummary = graph.nodes.get(N_GOAL)?.summary ?? "";
+  if (firstLine !== undefined && currentSummary === "") {
     const metaDelta = applySetMeta(
       graph,
       { nodeId: N_GOAL, importance: null, archived: null, obsolete: null, summary: firstLine },

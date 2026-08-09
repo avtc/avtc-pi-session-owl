@@ -7,6 +7,7 @@ import { applyCreateNode, applyMerge, MUTATE_SOURCE } from "../../src/graph/muta
 import { log } from "../../src/log.js";
 import {
   cloneLedger,
+  DETAILS_TYPE,
   EMPTY_LEDGER,
   encodeDetails,
   encodeSelection,
@@ -227,6 +228,7 @@ describe("load reconstruction", () => {
     const fake = new FakeStore();
     // base snapshot at e5: nGoal + n1(active) with o1
     const details: MemkeeperDetails = {
+      type: DETAILS_TYPE,
       version: "v1",
       nodes: [
         {
@@ -542,13 +544,13 @@ describe("load reconstruction", () => {
     expect(store.graph.observations.has("o9")).toBe(true);
   });
 
-  it("warns on a corrupt memkeeper snapshot that CARRIES a version key (resembles memkeeper but fails validation)", async () => {
+  it("warns on a corrupt memkeeper snapshot (carries the memkeeper type marker but fails validation)", async () => {
     freshStore();
     const fake = new FakeStore();
     const warn = vi.spyOn(log, "warn");
-    // a details with a `version` (so it resembles a memkeeper snapshot) but a
-    // malformed body that fails decodeDetails → the warn branch + deltas-only
-    fake.addCompaction("e3", { version: "v1", nodes: "NOT_AN_ARRAY" });
+    // a details carrying the memkeeper type marker but a malformed body that
+    // fails decodeDetails → the warn branch + deltas-only
+    fake.addCompaction("e3", { type: DETAILS_TYPE, version: "v1", nodes: "NOT_AN_ARRAY" });
     fake.addCustomAt("e3b", GRAPH_DELTA_TYPE, {
       kind: "graph_delta",
       delta: {
@@ -613,6 +615,51 @@ describe("load reconstruction", () => {
 
     await load(fake);
     expect(getGraphStore().graph.observations.has("o1")).toBe(true);
+  });
+
+  it("stays silent (debug, not warn) on a foreign-TYPED snapshot — e.g. another memory extension's details", async () => {
+    // The compaction `details` field is shared + last-writer-wins; a snapshot
+    // another extension wrote (carrying ITS OWN type marker, not "memkeeper")
+    // legitimately fails decode. That is expected when switching extensions, not
+    // corruption — so it must NOT flood the log with warns on every load.
+    freshStore();
+    const fake = new FakeStore();
+    const warn = vi.spyOn(log, "warn");
+    fake.addCompaction("f1", { type: "some-other-extension", version: 4, observations: [] });
+    fake.addCustomAt("f1b", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      delta: {
+        type: "create_node",
+        id: "n1",
+        summary: "wrapper",
+        importance: "low",
+        parentNode: null,
+        state: "active",
+      },
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("f2", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "f2",
+      records: [
+        {
+          id: "o1",
+          summary: "foreign-skip",
+          importance: "high",
+          sourceEntryIds: ["9"],
+          timestamp: "t",
+          parentNode: "n1",
+        },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.leafId = "f2";
+
+    await load(fake);
+    // deltas-only reconstruction still applies
+    expect(getGraphStore().graph.observations.has("o1")).toBe(true);
+    // no warn — the foreign snapshot is expected, not corrupt
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("corrupt memkeeper snapshot"));
+    warn.mockRestore();
   });
 
   it("calls getBranch, never getEntries", async () => {
@@ -808,6 +855,7 @@ describe("load edge cases", () => {
     const fake = new FakeStore();
     // snapshot: a single node n1 with rangeEnd at an early time
     const details: MemkeeperDetails = {
+      type: DETAILS_TYPE,
       version: "v1",
       nodes: [
         {
