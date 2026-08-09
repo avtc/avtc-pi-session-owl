@@ -11,7 +11,7 @@
 // store applies mutations ONLY during load() reconstruction (event-sourcing).
 
 import { clearDetailsCache, type EntryResolver } from "../format/details.js";
-import { type GraphDelta, recomputeRange } from "../graph/mutations.js";
+import { type GraphDelta, parseSeq, recomputeRange } from "../graph/mutations.js";
 import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
 import { MemkeeperGraph, makeNode, type Node, type NodeId, type Observation, type ObsId } from "../types.js";
@@ -352,6 +352,22 @@ export async function load(ctx: StoreContext): Promise<void> {
 
   // 4. reconcile observation links (post-snapshot obs → their wrapper nodes).
   reconcileLinks(graph);
+
+  // 5. Guarantee the id counters are past every loaded node/observation id.
+  //    The snapshot fields + graph_delta replay advance them in the common case,
+  //    but a deltas-only load enters observation records directly into the map
+  //    (not via a mutator), leaving nextObsId at the seed — a later Observer run
+  //    would collide on a low id ("observation o1 already exists"). A skipped
+  //    inapplicable graph_delta could likewise leave nextNodeId low. Recompute
+  //    both from the loaded ids as a backstop (never lowers them).
+  for (const id of graph.observations.keys()) {
+    const seq = parseSeq(id);
+    if (graph.nextObsId <= seq) graph.nextObsId = seq + 1;
+  }
+  for (const id of graph.nodes.keys()) {
+    const seq = parseSeq(id);
+    if (graph.nextNodeId <= seq) graph.nextNodeId = seq + 1;
+  }
 
   storeState.graph = graph;
 }

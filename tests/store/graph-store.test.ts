@@ -544,6 +544,47 @@ describe("load reconstruction", () => {
     expect(store.graph.observations.has("o9")).toBe(true);
   });
 
+  it("deltas-only load advances nextObsId past loaded observation records (no collision on the next Observer run)", async () => {
+    // Reproduces the production crash: a deltas-only reconstruction (no valid
+    // snapshot — e.g. a session whose snapshots are foreign, or background
+    // Observer runs before the first compaction snapshot) loaded observations
+    // directly without advancing nextObsId, so the seed (1) stayed and the next
+    // Observer run created o1 → "observation o1 already exists".
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("g1", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      delta: {
+        type: "create_node",
+        id: "n1",
+        summary: "w1",
+        importance: "low",
+        parentNode: null,
+        state: "active",
+      },
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("g2", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "g2",
+      records: [
+        { id: "o1", summary: "a", importance: "low", sourceEntryIds: ["1"], timestamp: "t", parentNode: "n1" },
+        { id: "o2", summary: "b", importance: "low", sourceEntryIds: ["2"], timestamp: "t", parentNode: "n1" },
+      ],
+      tokenCount: 2,
+    } satisfies ObservationEntry);
+    fake.leafId = "g2";
+
+    await load(fake);
+    const store = getGraphStore();
+    expect(store.graph.observations.has("o1")).toBe(true);
+    expect(store.graph.observations.has("o2")).toBe(true);
+    // nextObsId advanced past the highest loaded id → the next Observer run
+    // creates o3, not o1 (no collision).
+    expect(store.graph.nextObsId).toBe(3);
+    // nextNodeId advanced past the wrapper node n1 → the next create is n2.
+    expect(store.graph.nextNodeId).toBe(2);
+  });
+
   it("warns on a corrupt memkeeper snapshot (carries the memkeeper type marker but fails validation)", async () => {
     freshStore();
     const fake = new FakeStore();

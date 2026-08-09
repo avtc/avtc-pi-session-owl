@@ -576,7 +576,7 @@ export function applySetMeta(
 }
 
 /** Parse the numeric sequence suffix off an id (n12 -> 12); specials -> 0. */
-function parseSeq(id: string): number {
+export function parseSeq(id: string): number {
   const match = id.match(/^[no](\d+)$/);
   return match ? Number(match[1]) : 0;
 }
