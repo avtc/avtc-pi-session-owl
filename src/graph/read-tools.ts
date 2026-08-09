@@ -243,7 +243,7 @@ export function orderActiveSetRoots<T extends RenderableNode>(roots: readonly T[
 
 /** Recency desc by timestamp (newer first). */
 function compareObservationOrder(a: Observation, b: Observation): number {
-  return b.timestamp.localeCompare(a.timestamp);
+  return a.timestamp.localeCompare(b.timestamp);
 }
 
 /** A raw state is obsolete when it is "obsolete" (the visible-by-default gate;
@@ -291,7 +291,7 @@ export function orderedNonObsoleteRoots<T extends RenderableNode>(nodes: Iterabl
 }
 
 /** Direct child nodes + direct observations of a parent node, ordered
- *  nodes-first (time ascending (oldest first)) then observations (recency). */
+ *  nodes-first then observations — both time ascending (oldest first). */
 export function directChildren(graph: MemkeeperGraph, parent: Node): { nodes: Node[]; observations: Observation[] } {
   const nodes = parent.childNodeIds
     .map((id) => graph.nodes.get(id))
