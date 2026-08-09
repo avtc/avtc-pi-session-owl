@@ -158,6 +158,7 @@ function selectionWidget(): WidgetController & {
     },
     endStage: base.endStage,
     onEvent: base.onEvent,
+    invalidateRoots: base.invalidateRoots,
     get selectedCalls() {
       return selectedCalls;
     },

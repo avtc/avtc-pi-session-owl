@@ -260,6 +260,11 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       if (records.length > EMPTY_RECORDS) {
         totalRecords += records.length;
         persistChunk(store, chunk, records, entryById, localResolver);
+        // The per-chunk persist adds nodes OUTSIDE the chunk's agentLoop, so the
+        // widget's cached root counts (last invalidated by the chunk's
+        // tool_execution_end, then re-cached pre-persist) are stale — drop them so
+        // the next render reflects the new roots this chunk (not the next one).
+        input.widget.invalidateRoots();
       }
       // an all-bad chunk (model attempted records but every id was foreign) is
       // skipped — no records from it — and the user is warned.

@@ -139,6 +139,7 @@ const noopWidget: WidgetController = {
   setSelectedCounts: () => {},
   endStage: () => {},
   onEvent: () => {},
+  invalidateRoots: () => {},
 };
 
 // --- tests -----------------------------------------------------------------

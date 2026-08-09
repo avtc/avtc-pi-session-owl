@@ -107,6 +107,7 @@ export const NO_OP_WIDGET: WidgetController = {
   setSelectedCounts: () => {},
   endStage: () => {},
   onEvent: () => {},
+  invalidateRoots: () => {},
 };
 
 /** A recording widget controller: records startStage/setPass/endStage calls. */
@@ -130,6 +131,7 @@ export function recordingWidget(): WidgetController & {
       calls.push("end");
     },
     onEvent: () => {},
+    invalidateRoots: () => {},
     get calls() {
       return calls;
     },

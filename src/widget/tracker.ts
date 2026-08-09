@@ -73,6 +73,11 @@ export interface StageController {
   endStage(): void;
   /** Consume one agent event (message_end → usage; message_update → streaming tokens). */
   onEvent(event: AgentEvent): void;
+  /** Drop the cached root counts so the next render recomputes them from the
+   *  live graph (call after a persist that adds nodes outside an agentLoop tool
+   *  call — e.g. the Observer's per-chunk persist, which happens after the
+   *  tool_execution_end that last invalidated the cache). */
+  invalidateRoots(): void;
 }
 
 /** The tracker's read-side state fields (the public ProgressTracker getters +
@@ -211,6 +216,9 @@ export function createTracker(): ProgressTracker {
     rootViewCounts(graph) {
       if (state.cachedRoots === null) state.cachedRoots = rootViewCounts(graph);
       return state.cachedRoots;
+    },
+    invalidateRoots() {
+      state.cachedRoots = null;
     },
     onEvent(event) {
       if (event.type === "message_end") {
@@ -370,6 +378,7 @@ export const NO_OP_WIDGET: WidgetController = {
   setSelectedCounts: NO_OP,
   endStage: NO_OP,
   onEvent: NO_OP,
+  invalidateRoots: NO_OP,
 };
 
 /** Build the real widget controller: a tracker + a ctx/ui ref + render-to-publish. */
@@ -418,6 +427,10 @@ export function initWidget(): WidgetController {
     },
     setBatch(done, total) {
       tracker.setBatch(done, total);
+    },
+    invalidateRoots() {
+      tracker.invalidateRoots();
+      scheduleRender();
     },
     setSelectedCounts(rootCount, rootViewTokens) {
       tracker.setSelectedCounts(rootCount, rootViewTokens);
