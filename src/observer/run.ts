@@ -145,6 +145,12 @@ export interface ObserverRunInput {
   widget: WidgetController;
   /** Test seam — fake stage runner override, or null/omitted for the real `runStage`. */
   runStageFn?: (input: StageRunInput) => Promise<StageRunResult>;
+  /** Optional mid-catch-up Builder trigger: after each chunk's persist, the
+   *  Observer awaits this; if it returns true the Builder ran (consolidating the
+   *  accumulated `new` roots) and the Observer re-asserts its observe stage
+   *  before the next chunk. Provided by the compaction hook (the ballooning
+   *  case — long catch-ups); undefined on the turn_end path (small batches). */
+  maybeBuild?: () => Promise<boolean>;
 }
 
 /** A wrapper node paired with the observation id it wraps (persistence pairs). */
@@ -265,6 +271,18 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         // tool_execution_end, then re-cached pre-persist) are stale — drop them so
         // the next render reflects the new roots this chunk (not the next one).
         input.widget.invalidateRoots();
+        // Mid-catch-up Builder: at compaction the Builder runs after the Observer
+        // anyway, so folding the accumulated `new` roots WHEN the root view crosses
+        // the threshold keeps it bounded through a long catch-up instead of
+        // ballooning to hundreds of roots before a single giant Builder pass. The
+        // orchestrator owns the trigger + the Builder run (the Observer stays
+        // decoupled). If it ran, re-assert the observe stage (the Builder flipped
+        // the widget to build then ended it).
+        if (input.maybeBuild !== undefined) {
+          const built = await input.maybeBuild();
+          if (input.signal.aborted) return;
+          if (built) input.widget.startStage(OBSERVE_STAGE, { batch: { done, total: totalChunks } });
+        }
       }
       // an all-bad chunk (model attempted records but every id was foreign) is
       // skipped — no records from it — and the user is warned.

@@ -12,6 +12,7 @@ import { type ObserverRunInput, runObserver } from "../observer/run.js";
 import { runSelector, type SelectorRunInput } from "../selector/run.js";
 import type { TodoWiring } from "../todo/wiring.js";
 import type { RunFn } from "../triggers.js";
+import { makeMaybeBuilder } from "../triggers.js";
 import type { WidgetController } from "../widget/tracker.js";
 
 /** A seam over the real runObserver (tests pass a fake; production passes runObserver). */
@@ -37,9 +38,31 @@ export { runSelector };
  * unobserved}` into the run function. The Observer's only input is the unobserved
  * slice; it honors `signal` and owns no run-lock (the caller owns the lifecycle).
  */
-export function makeObserverRun(pi: ExtensionAPI, widget: WidgetController, runObserverFn: RunObserverFn): RunFn {
+export function makeObserverRun(
+  pi: ExtensionAPI,
+  widget: WidgetController,
+  runObserverFn: RunObserverFn,
+  runBuilderFn: RunFn,
+): RunFn {
   return async (args) => {
     if (args.unobserved === null) return;
+    // turn_end background: the mid-run Builder fires per builderMode (each-N /
+    // on-root-view / on-context); on-compaction returns false (Builder runs at
+    // compaction). scope is null here, so makeMaybeBuilder takes the mode-aware path.
+    const maybeBuild = makeMaybeBuilder({
+      ctx: args.ctx,
+      settings: args.settings,
+      signal: args.signal,
+      scope: args.scope,
+      runBuilder: () =>
+        runBuilderFn({
+          ctx: args.ctx,
+          settings: args.settings,
+          signal: args.signal,
+          scope: args.scope,
+          unobserved: null,
+        }),
+    });
     await runObserverFn({
       ctx: args.ctx,
       pi,
@@ -47,6 +70,7 @@ export function makeObserverRun(pi: ExtensionAPI, widget: WidgetController, runO
       unobserved: args.unobserved,
       signal: args.signal,
       widget,
+      maybeBuild,
     });
   };
 }

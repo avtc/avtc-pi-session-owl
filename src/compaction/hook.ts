@@ -34,7 +34,7 @@ import { snapshotAtCompaction } from "../status/usage-ledger.js";
 import { encodeDetails } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import type { TodoBridge, TodoContext } from "../todo/types.js";
-import { computeUnobserved } from "../triggers.js";
+import { computeUnobserved, makeMaybeBuilder } from "../triggers.js";
 import { O_INITIAL_PROMPT } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 import { renderSummary } from "./summary.js";
@@ -134,7 +134,18 @@ export async function compactionHook(
     const gap = observerCatchUpGap(ctx, firstKeptEntryId);
     if (gap.length > EMPTY_GAP) {
       log.info(`compaction: observer catch-up start (${gap.length} entries)`);
-      await stageRuns.runObserver({ ctx, pi, settings, unobserved: gap, signal, widget });
+      // Mid-catch-up Builder: at compaction the Builder runs after the Observer
+      // anyway, so folding the accumulated `new` roots whenever the root view
+      // crosses the threshold keeps a long catch-up bounded instead of ballooning
+      // to hundreds of roots before one giant pass.
+      const maybeBuild = makeMaybeBuilder({
+        ctx,
+        settings,
+        signal,
+        scope: { firstKeptEntryId },
+        runBuilder: () => stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget }),
+      });
+      await stageRuns.runObserver({ ctx, pi, settings, unobserved: gap, signal, widget, maybeBuild });
       log.info("compaction: observer catch-up end");
     }
     if (signal.aborted) return cancelAborted(ctx);

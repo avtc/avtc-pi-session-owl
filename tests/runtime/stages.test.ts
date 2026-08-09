@@ -14,9 +14,14 @@ describe("makeObserverRun (Observer stage wiring)", () => {
     let calledWithUnobserved: unknown = "never";
     const pi = {} as unknown as ExtensionAPI;
     // inject a fake runObserver via the seam
-    const runFn = makeObserverRun(pi, NO_OP_WIDGET, async (args) => {
-      calledWithUnobserved = args.unobserved.map((e) => e.id);
-    });
+    const runFn = makeObserverRun(
+      pi,
+      NO_OP_WIDGET,
+      async (args) => {
+        calledWithUnobserved = args.unobserved.map((e) => e.id);
+      },
+      async () => {},
+    );
     setStageRuns({
       runObserver: runFn,
       runBuilder: async () => {},

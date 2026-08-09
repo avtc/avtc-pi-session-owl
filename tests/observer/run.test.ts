@@ -116,6 +116,7 @@ function makeArgs(opts: {
   runStageFn: ObserverRunInput["runStageFn"];
   thresholdTokens?: number;
   widget?: WidgetController;
+  maybeBuild?: ObserverRunInput["maybeBuild"];
 }): ObserverRunInput {
   return {
     ctx: opts.ctx,
@@ -130,6 +131,7 @@ function makeArgs(opts: {
     signal: new AbortController().signal,
     runStageFn: opts.runStageFn,
     widget: opts.widget ?? NO_OP_WIDGET,
+    ...(opts.maybeBuild !== undefined ? { maybeBuild: opts.maybeBuild } : {}),
   };
 }
 
@@ -385,6 +387,37 @@ describe("runObserver", () => {
     expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
     expect(appended.filter((e) => e.type === "memkeeper.observation")).toHaveLength(0);
     expect(getGraphStore().observerFrontier).toBeNull();
+  });
+
+  it("maybeBuild fires after each record-bearing chunk; when it runs the Builder the observe stage is re-asserted", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // two record-bearing chunks (threshold 1 → each entry its own chunk)
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = scriptedRunStage([
+      [{ summary: "Initial goal.", importance: "high", sourceEntryIds: ["u1"] }],
+      [{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }],
+    ]);
+    // track startStage calls (observe → build [via builder runs] → observe re-assert)
+    const stageCalls: string[] = [];
+    const widget: WidgetController = {
+      ...NO_OP_WIDGET,
+      startStage: (stage, init) => stageCalls.push(`${stage}:${init?.batch?.done ?? "?"}/${init?.batch?.total ?? "?"}`),
+    };
+    let builds = 0;
+    const maybeBuild = async (): Promise<boolean> => {
+      builds += 1;
+      // simulate the Builder flipping the widget to build then ending it
+      widget.startStage("build", {});
+      return true;
+    };
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn, thresholdTokens: 1, widget, maybeBuild }));
+
+    // maybeBuild was called after each of the 2 record-bearing chunks
+    expect(builds).toBe(2);
+    // observe stage opened at start, then re-asserted after each build (done/total tracks progress)
+    expect(stageCalls.filter((s) => s.startsWith("observe"))).toEqual(["observe:0/2", "observe:1/2", "observe:2/2"]);
   });
 
   it("persists chunk 1 before chunk 2 aborts: abort loses only the in-flight chunk (per-chunk durability)", async () => {

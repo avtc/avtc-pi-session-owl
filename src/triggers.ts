@@ -158,6 +158,42 @@ function computeRootViewTokens(): number {
   return measureRootViewTokens(getGraphStore().graph, BUILDER);
 }
 
+/** Build the Observer's mid-run Builder trigger. After each chunk's persist the
+ *  Observer awaits this; if it returns true the Builder ran and the Observer
+ *  re-asserts its observe stage. Two cases:
+ *  - Compaction catch-up (`scope !== null`): the Builder runs after the Observer
+ *    regardless of builderMode, so fold incrementally when the root view crosses
+ *    `builderRootViewThreshold` — a boundedness safeguard that keeps a long
+ *    catch-up from ballooning to hundreds of roots before one giant pass.
+ *  - turn_end background (`scope === null`): fire per `builderMode` (each-N /
+ *    on-root-view / on-context); on-compaction returns false here (the Builder
+ *    runs at compaction, not mid-turn).
+ *  `runBuilder` is a caller-supplied closure (the compaction hook + the turn_end
+ *  adapter each own their Builder run + widget/stage wiring). */
+export function makeMaybeBuilder(opts: {
+  ctx: ExtensionContext;
+  settings: MemkeeperConfig;
+  signal: AbortSignal;
+  scope: { firstKeptEntryId: string | null } | null;
+  runBuilder: () => Promise<void>;
+}): () => Promise<boolean> {
+  return async () => {
+    if (opts.signal.aborted) return false;
+    if (opts.scope !== null) {
+      const tokens = computeRootViewTokens();
+      if (tokens < opts.settings.builderRootViewThreshold) return false;
+      log.info(`observer: mid-catch-up builder (root view ${tokens} ≥ ${opts.settings.builderRootViewThreshold})`);
+      await opts.runBuilder();
+      return true;
+    }
+    const decision = builderTriggerDecision({ ctx: opts.ctx, settings: opts.settings });
+    if (!decision.shouldFire) return false;
+    log.info(`observer: mid-run builder (${decision.reason})`);
+    await opts.runBuilder();
+    return true;
+  };
+}
+
 /** Read the live session context tokens (null when pi reports unknown).
  *  Prefers a value threaded in by `onTurnEnd` (read once for both evaluators);
  *  falls back to pi's `getContextUsage()` when absent (direct test calls). */
