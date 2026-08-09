@@ -339,6 +339,33 @@ describe("runBuilder", () => {
     expect(passCount).toBe(1); // no-op → stop after pass 1
   });
 
+  it("stops + notifies on a per-LLM-call timeout (not a silent no-op pass)", async () => {
+    seedGraph([{ id: "n3", summary: "a" }]);
+    let passCount = 0;
+    // runStage reports a per-call timeout (timedOut: true) — the Builder must
+    // STOP now (not silently retry up to maxBuilderPasses) and surface it.
+    const timeoutRunStage = (_input: StageRunInput): Promise<StageRunResult> => {
+      passCount += 1;
+      return Promise.resolve({
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: true,
+      });
+    };
+    await runBuilder({
+      pi: makeFakePi().pi,
+      ctx: makeFakeCtx(),
+      settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      scope: null,
+      runStageFn: timeoutRunStage,
+    });
+    expect(passCount).toBe(1); // timeout → stop after pass 1 (not 5 silent retries)
+  });
+
   it("keeps partial work and continues when error hits AFTER a mutate, then flushes on normal end", async () => {
     const g = seedGraph([{ id: "n3", summary: "a" }]);
     let passCount = 0;
@@ -528,6 +555,7 @@ describe("runBuilder", () => {
           usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
+          timedOut: false,
         });
       },
     });

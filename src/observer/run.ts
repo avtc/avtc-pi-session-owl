@@ -239,8 +239,10 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       };
 
       const run = input.runStageFn ?? runStage;
+      let timedOut = false;
       try {
-        await run(stageInput);
+        const result = await run(stageInput);
+        timedOut = result.timedOut;
       } catch (cause) {
         // a throwing chunk's own records are lost (not yet persisted this chunk);
         // prior chunks are already durable (per-chunk persistence). Stop here so
@@ -256,6 +258,13 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       } finally {
         done += 1;
         input.widget.setBatch(done, totalChunks);
+      }
+      // a per-LLM-call timeout fired for this chunk — a stage-stopping error
+      // (NOT a silent skip): stop now and tell the user, so a slow/oversized
+      // Observer call surfaces instead of chunks silently stalling.
+      if (timedOut) {
+        notify(input.ctx, "Observer stopped: an LLM call exceeded the time limit.", "warning");
+        break;
       }
       // this chunk succeeded → wrap its records + persist IMMEDIATELY (per-chunk
       // durability: an abort loses only the in-flight chunk; the frontier has

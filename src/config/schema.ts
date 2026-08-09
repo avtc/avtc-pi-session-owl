@@ -103,7 +103,7 @@ const DEFAULT_SELECTOR_MODE = "on-compaction";
 const NO_MODEL: string | null = null;
 const NO_LIMIT: number | null = null;
 const DEFAULT_FIND_TIMEOUT_MS = 30_000;
-const DEFAULT_LLM_CALL_TIMEOUT_MS = 180_000;
+const DEFAULT_LLM_CALL_TIMEOUT_MS = 600_000;
 const MIN_LLM_CALL_TIMEOUT_MS = 1000;
 const DEFAULT_MAX_TOKENS = 8192;
 const MIN_MAX_TOKENS = 1;
@@ -182,9 +182,9 @@ const FIND_TIMEOUT_PRESETS: readonly PresetElement[] = [
   ["5m", 300_000],
 ];
 const LLM_CALL_TIMEOUT_PRESETS: readonly PresetElement[] = [
-  ["1m", 60_000],
   ["3m", 180_000],
   ["10m", 600_000],
+  ["30m", 1_800_000],
   ["Infinite", NO_LIMIT],
 ];
 const MAX_TOKENS_PRESETS: readonly PresetElement[] = [2048, 4096, 8192, 16384];

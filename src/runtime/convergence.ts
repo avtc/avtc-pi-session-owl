@@ -28,6 +28,9 @@ export const FIRST_PASS = 1;
 export interface ConvergenceOutcome {
   mutates: number;
   converged: boolean;
+  /** True when a per-LLM-call timeout fired this pass (a stage-stopping error).
+   *  Set from the runStage result — see StageRunResult.timedOut. */
+  timedOut: boolean;
 }
 
 /**
@@ -41,7 +44,7 @@ export function makeConvergenceTracker(
   downstream: (event: AgentEvent) => void,
   mutateNames: ReadonlySet<string>,
 ): { outcome: ConvergenceOutcome; onEvent: (event: AgentEvent) => void } {
-  const outcome: ConvergenceOutcome = { mutates: NO_MUTATES, converged: false };
+  const outcome: ConvergenceOutcome = { mutates: NO_MUTATES, converged: false, timedOut: false };
   const onEvent = (event: AgentEvent): void => {
     downstream(event);
     if (event.type !== "tool_execution_end") return;
@@ -105,7 +108,10 @@ export async function runConvergencePass(args: ConvergencePassArgs): Promise<voi
     loopFn: NO_LOOP_OVERRIDE,
   };
   try {
-    await args.runStageFn(stageInput);
+    const result = await args.runStageFn(stageInput);
+    if (result.timedOut) {
+      args.outcome.timedOut = true;
+    }
   } catch (cause) {
     if (args.outcome.mutates > NO_MUTATES) {
       log.error(`${args.stageLabel} pass failed after partial work (kept)`, cause);

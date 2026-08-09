@@ -20,6 +20,7 @@ import { BUILDER } from "../format/render.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
+import { notify } from "../notify.js";
 import { BUILDER_SYSTEM } from "../prompts/builder.js";
 import { runStage, type StageRunInput, type StageRunResult, type StageUsage } from "../runtime/agent-loop.js";
 import type { ConvergenceOutcome } from "../runtime/convergence.js";
@@ -147,6 +148,13 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
 
       // try_finish success → converged, stop (normal end).
       if (outcome.converged) break;
+      // a per-LLM-call timeout fired this pass — a stage-stopping error (NOT a
+      // silent no-op): stop now and tell the user, so a slow/oversized Builder
+      // call surfaces instead of the root view silently not shrinking.
+      if (outcome.timedOut) {
+        notify(input.ctx, "Builder stopped: an LLM call exceeded the time limit.", "warning");
+        break;
+      }
       // no-op pass (0 mutates, not converged) → stop (normal end).
       if (outcome.mutates === NO_MUTATES) break;
 

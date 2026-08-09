@@ -55,8 +55,12 @@ export interface StageRunResult {
   usage: StageUsage;
   /** Final two-tier output-token count (primary usage.output, fallback chars/4). */
   outputTokens: number;
-  /** True when `input.signal` was aborted during the run. */
+  /** True when `input.signal` (the run/compaction signal) was aborted during the run. */
   aborted: boolean;
+  /** True when the per-LLM-call timeout fired (distinct from a run-signal abort).
+   *  Surfaced so the caller can STOP the stage + notify (a timeout is an error
+   *  condition, not a silent no-op pass). */
+  timedOut: boolean;
 }
 
 /** Input to `runStage`. Every field is required; pass a `NO_*` sentinel for "absent". */
@@ -232,8 +236,12 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       // fallback only applies when the provider reports no output at all. (A live
       // widget counter is built separately from the raw onEvent stream.)
       const outputTokens = usage.output > 0 ? usage.output : fallbackTokens;
-      // aborted reflects either the run signal (compaction) or the per-turn timeout.
-      return { messages, usage, outputTokens, aborted: input.signal.aborted || turnTimeout.signal.aborted };
+      // aborted reflects either the run signal (compaction) or the per-turn timeout;
+      // timedOut isolates the per-turn-timeout case (run signal NOT aborted) so the
+      // caller can distinguish "compaction cancelled me" from "a single LLM call ran
+      // too long" and treat the latter as a stage-stopping error.
+      const timedOut = turnTimeout.signal.aborted && !input.signal.aborted;
+      return { messages, usage, outputTokens, aborted: input.signal.aborted || turnTimeout.signal.aborted, timedOut };
     } finally {
       if (turnTimer !== undefined) clearTimeout(turnTimer);
       input.signal.removeEventListener("abort", forwardAbort);

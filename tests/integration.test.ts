@@ -51,6 +51,7 @@ const EMPTY_RESULT: StageRunResult = {
   usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
   outputTokens: 0,
   aborted: false,
+  timedOut: false,
 };
 
 // --- fake session entries --------------------------------------------------

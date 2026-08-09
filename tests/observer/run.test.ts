@@ -91,6 +91,7 @@ function scriptedRunStage(batchesPerChunk: RecordObservationInput[][]): {
       usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
       outputTokens: 0,
       aborted: false,
+      timedOut: false,
     };
   };
   return {
@@ -379,6 +380,7 @@ describe("runObserver", () => {
         usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 },
         outputTokens: 0,
         aborted: false,
+        timedOut: false,
       };
     };
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
@@ -441,6 +443,7 @@ describe("runObserver", () => {
         usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
         outputTokens: 0,
         aborted: controller.signal.aborted,
+        timedOut: false,
       };
     };
 
@@ -559,6 +562,7 @@ describe("runObserver", () => {
           usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
           outputTokens: 0,
           aborted: false,
+          timedOut: false,
         };
       }
       // ...chunk 2 THROWS a non-abort error (LLM failure)...
@@ -661,6 +665,7 @@ describe("runObserver", () => {
         usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
         outputTokens: 0,
         aborted: controller.signal.aborted,
+        timedOut: false,
       };
     };
     const calls: string[] = [];
@@ -697,7 +702,7 @@ describe("runObserver", () => {
       const usage = usages[call - 1] ?? usages[0];
       // the real runStage invokes onStageEnd with the accumulated usage.
       input.onStageEnd?.(usage);
-      return { messages: [], usage, outputTokens: 0, aborted: false };
+      return { messages: [], usage, outputTokens: 0, aborted: false, timedOut: false };
     };
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn, thresholdTokens: 10 }));
@@ -737,6 +742,7 @@ describe("runObserver", () => {
         usage: { input: 1000, output: 500, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
         outputTokens: 0,
         aborted: controller.signal.aborted,
+        timedOut: false,
       };
     };
 

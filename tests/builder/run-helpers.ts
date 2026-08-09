@@ -58,6 +58,7 @@ export function scriptRunStage(script: FakeRunScript): (input: StageRunInput) =>
       usage: zeroUsage(),
       outputTokens: 0,
       aborted: false,
+      timedOut: false,
     };
   };
 }

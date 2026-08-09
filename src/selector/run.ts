@@ -22,6 +22,7 @@ import { NON_BUILDER } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
+import { notify } from "../notify.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
 import { runStage, type StageRunInput, type StageRunResult, type StageUsage } from "../runtime/agent-loop.js";
 import type { ConvergenceOutcome } from "../runtime/convergence.js";
@@ -161,6 +162,12 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
 
       // try_finish success → converged, stop.
       if (outcome.converged) break;
+      // a per-LLM-call timeout fired this pass — a stage-stopping error (NOT a
+      // silent no-op): stop now and tell the user.
+      if (outcome.timedOut) {
+        notify(input.ctx, "Selector stopped: an LLM call exceeded the time limit.", "warning");
+        break;
+      }
       // no-op pass (0 mutates, not converged) → stop.
       if (outcome.mutates === NO_MUTATES) break;
 

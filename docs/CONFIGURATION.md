@@ -23,7 +23,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `selectorMode` | string | `on-compaction` | When the Selector runs (only if `renderMode=selected-root`): `on-compaction` or `on-session-context-threshold`. |
 | `commandResultCap` | number | `50` | Max items a `/mk:*` command shows before a `... +N more` footer. `null` = show all. |
 | `findTimeoutMs` | duration | `30000` | Max duration a `find`/`mk_recall` search may run before it is stopped. |
-| `llmCallTimeoutMs` | duration | `180000` | Aborts any Observer, Builder, or Selector LLM call that runs longer than this. `null` = no limit. |
+| `llmCallTimeoutMs` | duration | `600000` | Aborts any Observer, Builder, or Selector LLM call that runs longer than this. `null` = no limit. |
 | `toolResultTokenBudget` | number | `6000` | Max size (in tokens) of a single `cat`/`find`/`ls`/`mk_recall` result. A larger result shows fewer items or less detail (each item stays whole); reading one observation in full is never cut off. |
 | `debugLog` | boolean | `false` | Write detailed trace logs to the log file. |
 
