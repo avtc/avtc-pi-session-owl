@@ -2,7 +2,15 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Api, AssistantMessage, AssistantMessageEvent, Model, ThinkingLevel, Usage } from "@earendil-works/pi-ai";
+import type {
+  Api,
+  AssistantMessage,
+  AssistantMessageEvent,
+  Model,
+  StopReason,
+  ThinkingLevel,
+  Usage,
+} from "@earendil-works/pi-ai";
 import { EventStream } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import {
@@ -14,6 +22,7 @@ import {
   NO_TURN_LIMIT,
   runStage,
   SEQUENTIAL,
+  StageModelError,
   StageRunError,
   type StageRunInput,
   type StageUsage,
@@ -508,6 +517,67 @@ describe("runStage — error propagation", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(StageRunError);
     }
+  });
+});
+
+describe("runStage — model failure (stopReason error)", () => {
+  // Per the StreamFn contract, a model/runtime failure (server unavailable,
+  // wrong model hosted, provider error) is encoded as a final assistant message
+  // with stopReason "error" — it does NOT throw from the stream. Without
+  // stopReason inspection runStage would return a clean no-record result, the
+  // stage caller would proceed, and Pi would prune an unobserved gap (silent
+  // data loss). runStage must throw StageModelError so the catch-chain
+  // (Observer/Builder/Selector -> compaction hook) cancels compaction.
+
+  /** A final assistant message with a given stopReason (+ optional error msg). */
+  function asstWithStop(stopReason: StopReason, errorMessage: string | null): AssistantMessage {
+    return { ...asstMsg(NO_USAGE), stopReason, errorMessage: errorMessage ?? undefined };
+  }
+
+  it("throws StageModelError when the final assistant message has stopReason error", async () => {
+    const failed = asstWithStop("error", "connect ECONNREFUSED 127.0.0.1:11434");
+    const events: AgentEvent[] = [{ type: "message_end", message: failed }, turnEnd(), agentEnd([failed])];
+    await expect(runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [failed] }) }))).rejects.toBeInstanceOf(
+      StageModelError,
+    );
+  });
+
+  it("StageModelError carries the model's errorMessage in its message", async () => {
+    const failed = asstWithStop("error", "model 'qwen2.5' not found");
+    const events: AgentEvent[] = [{ type: "message_end", message: failed }, agentEnd([failed])];
+    await expect(runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [failed] }) }))).rejects.toThrow(
+      /model 'qwen2.5' not found/,
+    );
+  });
+
+  it("still fires onStageEnd with partial usage before throwing", async () => {
+    // The ledger hook runs in runStage's finally regardless of the throw, so a
+    // model failure still accounts for the usage consumed up to it.
+    const failed: AssistantMessage = {
+      ...asstMsg(usageOf(120, 40, 5, 0.001)),
+      stopReason: "error",
+      errorMessage: "boom",
+    };
+    const events: AgentEvent[] = [{ type: "message_end", message: failed }, agentEnd([failed])];
+    const calls: StageUsage[] = [];
+    await expect(
+      runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [failed] }), onStageEnd: (u) => calls.push(u) })),
+    ).rejects.toBeInstanceOf(StageModelError);
+    expect(calls).toEqual([expect.objectContaining({ input: 120, output: 40, cacheRead: 5, cost: 0.001, turns: 0 })]);
+  });
+
+  it("does NOT throw when the model succeeds with a normal stop reason", async () => {
+    const events: AgentEvent[] = [messageEnd(usageOf(10, 5, 0, 0)), turnEnd(), agentEnd([])];
+    await expect(runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }))).resolves.toBeDefined();
+  });
+
+  it("does NOT throw on stopReason aborted (covered by the signal-based flags)", async () => {
+    // aborted is NOT a model error — it accompanies a signal abort, detected via
+    // the aborted/timedOut flags. runStage must return normally (not throw).
+    const aborted = asstWithStop("aborted", null);
+    const events: AgentEvent[] = [{ type: "message_end", message: aborted }, agentEnd([aborted])];
+    const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [aborted] }) }));
+    expect(result.aborted).toBe(false);
   });
 });
 

@@ -113,6 +113,31 @@ export class StageTimeoutError extends Error {
   }
 }
 
+/** A terminal model/runtime failure — the agentLoop stream ended with the final
+ *  assistant message's stopReason "error" (server unavailable, wrong model
+ *  hosted, provider error). Per the StreamFn contract such failures NEVER throw
+ *  from the stream; they are encoded as a final assistant message with stopReason
+ *  "error" and an errorMessage. `runStage` detects that stopReason and throws this
+ *  so the stage caller (Observer/Builder/Selector → compaction hook) cancels
+ *  compaction instead of silently treating the run as a no-record success
+ *  (which would let Pi prune an unobserved gap). Propagates UNWRAPPED — see
+ *  `runStage`'s catch, which re-throws `StageModelError` as-is rather than
+ *  wrapping it in a generic `StageRunError`. */
+export class StageModelError extends Error {
+  /** The model's own errorMessage from the final assistant message, or null. */
+  readonly modelErrorMessage: string | null;
+  constructor(modelErrorMessage: string | null) {
+    const detail = modelErrorMessage?.trim();
+    super(
+      detail
+        ? `agent model call failed (stopReason "error"): ${detail}`
+        : 'agent model call failed (stopReason "error")',
+    );
+    this.name = "StageModelError";
+    this.modelErrorMessage = detail || null;
+  }
+}
+
 /** A fresh zeroed usage accumulator. */
 function emptyUsage(): StageUsage {
   return { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 };
@@ -212,10 +237,25 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     armTurnTimeout(); // arm for the first turn (transformContext arms subsequent ones)
 
     try {
+      // Track the terminal assistant stopReason. Per the StreamFn contract, a
+      // model/runtime failure (server down, wrong model hosted, provider error)
+      // is encoded as a final assistant message with stopReason "error" — it
+      // does NOT throw from the stream. The agent loop stops immediately after
+      // such a message, so the LAST assistant message_end is authoritative.
+      // ("aborted" is NOT a model error — it is covered by the signal-based
+      // aborted/timedOut flags below.)
+      let lastAssistantStopReason: string | undefined;
+      let lastAssistantErrorMessage: string | undefined;
+
       for await (const event of stream) {
         if (input.onEvent !== null) input.onEvent(event);
 
         if (event.type === "message_end") {
+          const endMsg = event.message as { role?: string; stopReason?: string; errorMessage?: string };
+          if (endMsg.role === "assistant") {
+            lastAssistantStopReason = endMsg.stopReason;
+            lastAssistantErrorMessage = endMsg.errorMessage;
+          }
           // Only assistant messages carry usage; prompt/steering messages have none
           // (messageEndUsage returns null) and contribute zero.
           const u = messageEndUsage(event.message);
@@ -241,6 +281,12 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
 
       const messages = await stream.result();
       log.debug(`runStage: agentLoop stream done (${usage.turns} turns)`);
+      // A terminal model failure: surface it instead of returning a clean
+      // no-record result (which would let the stage caller proceed and Pi prune
+      // an unobserved gap). The outer catch re-throws StageModelError unwrapped.
+      if (lastAssistantStopReason === "error") {
+        throw new StageModelError(lastAssistantErrorMessage ?? null);
+      }
       // Two-tier: the authoritative output-token count is the SUM of
       // every message_end usage.output (usage.output — per-message, correct across
       // multi-turn runs since partial.usage.output resets each message). The chars/4
@@ -258,6 +304,10 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       input.signal.removeEventListener("abort", forwardAbort);
     }
   } catch (cause) {
+    // StageModelError is a DETECTED terminal model failure (stopReason "error"),
+    // not an unexpected throw — re-throw it as-is so its type/message survive to
+    // callers and logs (a generic StageRunError wrap would hide the cause).
+    if (cause instanceof StageModelError) throw cause;
     throw new StageRunError(cause);
   } finally {
     usage.elapsedMs = Date.now() - startMs;
