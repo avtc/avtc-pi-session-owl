@@ -10,6 +10,7 @@
 // compatible). `detailsTokens`/`summaryTokens` are recomputed on decode (never
 // trusted from the wire).
 
+import type { Usage } from "@earendil-works/pi-ai";
 import type { GraphDelta } from "../graph/mutations.js";
 import {
   IMPORTANCE_VALUES,
@@ -195,6 +196,10 @@ export interface MemkeeperDetails {
   nextNodeId: number;
   selectedTree: SerializedSelection | null;
   lastCompactionLedger: UsageLedger | null;
+  /** Per-stage pi-Usage breakdown for THIS compaction's Observer/Builder/Selector
+   *  cost (additive — feeds the bench's per-stage table). Absent on older
+   *  snapshots (decode leaves it undefined; tolerant reader).  */
+  compactionStages?: { observe: Usage; build: Usage; select: Usage };
 }
 
 // --- decoders (tolerant) ---------------------------------------------------
@@ -423,7 +428,17 @@ const KNOWN_DETAILS_VERSIONS = new Set<string>([DETAILS_VERSION]);
  *  `version` field. */
 export function decodeDetails(raw: unknown): MemkeeperDetails | null {
   if (!isObject(raw)) return null;
-  const { type, version, nodes, oInitialPrompt, nextObsId, nextNodeId, selectedTree, lastCompactionLedger } = raw;
+  const {
+    type,
+    version,
+    nodes,
+    oInitialPrompt,
+    nextObsId,
+    nextNodeId,
+    selectedTree,
+    lastCompactionLedger,
+    compactionStages,
+  } = raw;
   if (
     type !== DETAILS_TYPE ||
     typeof version !== "string" ||
@@ -455,6 +470,10 @@ export function decodeDetails(raw: unknown): MemkeeperDetails | null {
     nextNodeId,
     selectedTree: tree,
     lastCompactionLedger: ledger,
+    // additive per-stage breakdown (bench reads it off the raw JSONL; pass through if present).
+    compactionStages: isObject(compactionStages)
+      ? (compactionStages as MemkeeperDetails["compactionStages"])
+      : undefined,
   };
 }
 

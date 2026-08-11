@@ -14,6 +14,7 @@
 // per-run AbortController (from acquireForCompaction's handle) and LINKS
 // event.signal into it so the stages die if Pi abandons the compaction.
 
+import type { Usage } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -30,8 +31,8 @@ import type { ObserverRunInput } from "../observer/run.js";
 import { runObserver as realRunObserver } from "../observer/run.js";
 import { acquireForCompaction } from "../runtime/run-lock.js";
 import { runSelector as realRunSelector, type SelectorRunInput } from "../selector/run.js";
-import { snapshotAtCompaction } from "../status/usage-ledger.js";
-import { encodeDetails } from "../store/codecs.js";
+import { sinceLastCompaction, snapshotAtCompaction } from "../status/usage-ledger.js";
+import { cloneLedger, encodeDetails } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
 import type { TodoBridge, TodoContext } from "../todo/types.js";
 import { computeUnobserved, makeMaybeBuilder } from "../triggers.js";
@@ -39,6 +40,7 @@ import { O_INITIAL_PROMPT } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 import { renderSummary } from "./summary.js";
 import { extractTouchedFiles } from "./touched-files.js";
+import { aggregateLedgerUsage, ledgerToStageUsages } from "./usage-map.js";
 
 // --- seams (testability + later-task wiring) --------------------------------
 
@@ -91,7 +93,7 @@ const CANCEL_RESULT = { cancel: true } as const;
 /** The compaction hook's return (Pi infers the full SessionBeforeCompactResult). */
 export type CompactionResult =
   | { cancel: true }
-  | { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; details: unknown } };
+  | { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; usage: Usage; details: unknown } };
 
 /**
  * The session_before_compact handler. Runs the ensure-ready gate under the
@@ -127,6 +129,10 @@ export async function compactionHook(
   const signal = handle.abortController.signal;
 
   try {
+    // Snapshot the cumulative ledger BEFORE the ensure-ready stages run, so the
+    // post-stages delta isolates THIS compaction's Observer/Builder/Selector cost
+    // (the bench's metric, UD32). Cloned (deep) — the stages mutate usageLedger in place.
+    const preStageLedger = cloneLedger(getGraphStore().usageLedger);
     // (a) Observer catch-up — GAP-DRIVEN (regardless of observerMode): observe
     // the renderable entries strictly between the frontier and the compaction
     // cut (the compacted-away block). A lagging on-threshold frontier is the
@@ -188,17 +194,27 @@ export async function compactionHook(
       renderMode: settings.renderMode,
       touchedFiles,
     });
-    const details = encodeDetails(store.graph, store.selectedTree, store.usageLedger);
     // capture the compaction baseline so post-compaction /mk:status "since last
     // compaction" arithmetic is correct (deep copy — later stage activity must
     // not mutate the captured baseline).
     store.lastCompactionLedger = snapshotAtCompaction(store.usageLedger).lastCompactionLedger;
+
+    //  (UD32): isolate THIS compaction's stage cost (post-stages − pre-stages)
+    // + map to pi's Usage shape. The bench reads compaction.usage for totals
+    // + details.compactionStages for the per-stage breakdown table.
+    const compactionDelta = sinceLastCompaction(store.usageLedger, preStageLedger);
+    const compactionStages = ledgerToStageUsages(compactionDelta);
+    const compactionUsage = aggregateLedgerUsage(compactionDelta);
+    const details = encodeDetails(store.graph, store.selectedTree, store.usageLedger);
+    // attach the per-stage breakdown (additive details field; the bench reads it for)
+    details.compactionStages = compactionStages;
 
     return {
       compaction: {
         summary,
         firstKeptEntryId,
         tokensBefore: event.preparation.tokensBefore,
+        usage: compactionUsage,
         details,
       },
     };

@@ -6,6 +6,7 @@
 // renders the summary, snapshots the graph to details, and returns the
 // compaction result. Failure / abort → {cancel:true} + notify.
 
+import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -391,5 +392,110 @@ describe("compactionHook", () => {
     });
     expect(getGraphStore().lastCompactionLedger?.observe.input).toBe(5000);
     expect(getGraphStore().lastCompactionLedger?.observe.runs).toBe(1);
+  });
+
+  it("returns compaction.usage (pi shape) aggregating THIS compaction's stage cost + per-stage breakdown in details", async () => {
+    seedStoreGraph();
+    // a branch with a user anchor + assistant msg so the Observer catch-up gap is non-empty
+    // (otherwise Observer is skipped and its stage fake never folds usage).
+    const branch = [
+      {
+        type: "message",
+        id: "u1",
+        parentId: null,
+        timestamp: "t",
+        message: { role: "user", content: "first", timestamp: 0 },
+      },
+      assistantMsg("a1", "response"),
+    ];
+    const { addPhaseUsage, bumpRun } = await import("../../src/status/usage-ledger.js");
+    // fake stages fold usage into the store ledger (as the real Observer/Builder/Selector do).
+    setCompactionStageRuns({
+      runObserver: vi.fn(async () => {
+        addPhaseUsage(getGraphStore().usageLedger, "observe", {
+          input: 1000,
+          output: 500,
+          cacheRead: 300,
+          cacheWrite: 40,
+          cost: 0.05,
+          turns: 3,
+          elapsedMs: 0,
+        });
+        bumpRun(getGraphStore().usageLedger, "observe");
+      }),
+      runBuilder: vi.fn(async () => {
+        addPhaseUsage(getGraphStore().usageLedger, "build", {
+          input: 2000,
+          output: 1000,
+          cacheRead: 600,
+          cacheWrite: 80,
+          cost: 0.1,
+          turns: 5,
+          elapsedMs: 0,
+        });
+        bumpRun(getGraphStore().usageLedger, "build");
+      }),
+      runSelector: vi.fn(async () => {
+        addPhaseUsage(getGraphStore().usageLedger, "select", {
+          input: 500,
+          output: 200,
+          cacheRead: 100,
+          cacheWrite: 20,
+          cost: 0.02,
+          turns: 1,
+          elapsedMs: 0,
+        });
+        bumpRun(getGraphStore().usageLedger, "select");
+      }),
+    });
+
+    const result = (await compactionHook(
+      compactEvent({}),
+      makeFakeCtx(branch, NO_NOTIFY),
+      makeFakePi(),
+      NO_OP_WIDGET,
+      TODO_ABSENT,
+    )) as unknown as {
+      compaction: {
+        usage: Usage;
+        details: { compactionStages: { observe: Usage; build: Usage; select: Usage } };
+      };
+    };
+
+    const usage = result.compaction.usage;
+    expect(usage).toBeDefined();
+    // aggregate of observe+build+select
+    expect(usage.input).toBe(3500);
+    expect(usage.output).toBe(1700);
+    expect(usage.cacheRead).toBe(1000);
+    expect(usage.cacheWrite).toBe(140);
+    expect(usage.totalTokens).toBe(6340);
+    // cost is an object with a finite total (NEVER undefined — addUsageToTotals has no guards)
+    expect(typeof usage.cost).toBe("object");
+    expect(usage.cost.total).toBeCloseTo(0.17, 10);
+    // per-stage breakdown in details
+    const stages = result.compaction.details.compactionStages;
+    expect(stages).toBeDefined();
+    expect(stages.observe.input).toBe(1000);
+    expect(stages.build.input).toBe(2000);
+    expect(stages.select.input).toBe(500);
+  });
+
+  it("compaction.usage emits zeros (never undefined) when no stage produced usage", async () => {
+    seedStoreGraph();
+    setCompactionStageRuns(fakeRuns(newCalls()));
+    const result = (await compactionHook(
+      compactEvent({}),
+      makeFakeCtx([], NO_NOTIFY),
+      makeFakePi(),
+      NO_OP_WIDGET,
+      TODO_ABSENT,
+    )) as unknown as { compaction: { usage: Usage } };
+    const usage = result.compaction.usage;
+    expect(usage).toBeDefined();
+    expect(usage.input).toBe(0);
+    expect(usage.cacheWrite).toBe(0);
+    expect(usage.cost.total).toBe(0);
+    expect(Number.isFinite(usage.totalTokens)).toBe(true);
   });
 });
