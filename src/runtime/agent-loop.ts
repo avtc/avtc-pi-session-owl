@@ -38,11 +38,12 @@ export const NO_LOOP_OVERRIDE = null;
 /** Sequential tool execution (memkeeper stages run tools one-by-one). */
 export const SEQUENTIAL = "sequential" as const;
 
-/** Per-run usage accumulated by a stage (input/output/cacheRead/cost/turns). */
+/** Per-run usage accumulated by a stage (input/output/cacheRead/cacheWrite/cost/turns). */
 export interface StageUsage {
   input: number;
   output: number;
   cacheRead: number;
+  cacheWrite: number;
   cost: number;
   turns: number;
   /** Wall-clock milliseconds the stage call spent running (LLM + tool calls). */
@@ -140,7 +141,7 @@ export class StageModelError extends Error {
 
 /** A fresh zeroed usage accumulator. */
 function emptyUsage(): StageUsage {
-  return { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 };
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0, elapsedMs: 0 };
 }
 
 /**
@@ -263,6 +264,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
             usage.input += u.input;
             usage.output += u.output;
             usage.cacheRead += u.cacheRead;
+            usage.cacheWrite += u.cacheWrite;
             usage.cost += u.cost;
           }
         } else if (event.type === "turn_end") {

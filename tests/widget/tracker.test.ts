@@ -37,6 +37,7 @@ function messageEndEvent(usage: {
   input?: number;
   output?: number;
   cacheRead?: number;
+  cacheWrite?: number;
   cost?: { total?: number };
 }): AgentEvent {
   return {
@@ -136,18 +137,34 @@ describe("ProgressTracker state", () => {
   });
 
   describe("onEvent — usage accumulation", () => {
-    it("accumulates usage across message_end events (input/output/cacheRead/cost/turns)", () => {
+    it("accumulates usage across message_end events (input/output/cacheRead/cacheWrite/cost/turns)", () => {
       tracker.startStage("build", { pass: 1 });
-      tracker.onEvent(messageEndEvent({ input: 100, output: 50, cacheRead: 10, cost: { total: 0.01 } }));
-      tracker.onEvent(messageEndEvent({ input: 200, output: 60, cacheRead: 20, cost: { total: 0.02 } }));
+      tracker.onEvent(messageEndEvent({ input: 100, output: 50, cacheRead: 10, cacheWrite: 4, cost: { total: 0.01 } }));
+      tracker.onEvent(messageEndEvent({ input: 200, output: 60, cacheRead: 20, cacheWrite: 8, cost: { total: 0.02 } }));
       tracker.onEvent({ type: "turn_end" } as unknown as AgentEvent);
-      expect(tracker.usage).toEqual({ input: 300, output: 110, cacheRead: 30, cost: 0.03, turns: 1, elapsedMs: 0 });
+      expect(tracker.usage).toEqual({
+        input: 300,
+        output: 110,
+        cacheRead: 30,
+        cacheWrite: 12,
+        cost: 0.03,
+        turns: 1,
+        elapsedMs: 0,
+      });
     });
 
     it("ignores message_end events with no usage (steering/toolResult messages)", () => {
       tracker.startStage("build", { pass: 1 });
       tracker.onEvent(messageEndEvent({}));
-      expect(tracker.usage).toEqual({ input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0, elapsedMs: 0 });
+      expect(tracker.usage).toEqual({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0,
+        turns: 0,
+        elapsedMs: 0,
+      });
     });
   });
 

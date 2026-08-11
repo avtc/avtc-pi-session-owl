@@ -57,12 +57,12 @@ const NO_USAGE: Usage = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-function usageOf(input: number, output: number, cacheRead: number, costTotal: number): Usage {
+function usageOf(input: number, output: number, cacheRead: number, costTotal: number, cacheWrite: number): Usage {
   return {
     input,
     output,
     cacheRead,
-    cacheWrite: 0,
+    cacheWrite,
     totalTokens: input + output + cacheRead,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: costTotal },
   };
@@ -82,7 +82,7 @@ function deltaUpdate(type: "text_delta" | "thinking_delta" | "toolcall_delta", d
 
 /** A `message_update` whose partial carries a provider-streamed usage.output. */
 function usageUpdate(output: number): AgentEvent {
-  const partial = asstMsg(usageOf(0, output, 0, 0));
+  const partial = asstMsg(usageOf(0, output, 0, 0, 0));
   const ev: AssistantMessageEvent = { type: "text_end", contentIndex: 0, content: "", partial };
   return { type: "message_update", message: partial, assistantMessageEvent: ev };
 }
@@ -217,11 +217,11 @@ function baseInput(over: Partial<StageRunInput>): StageRunInput {
 describe("runStage — usage accumulation", () => {
   it("sums usage across every message_end event (multi-turn)", async () => {
     const events: AgentEvent[] = [
-      messageEnd(usageOf(100, 50, 10, 0.001)),
+      messageEnd(usageOf(100, 50, 10, 0.001, 2)),
       turnEnd(),
-      messageEnd(usageOf(200, 80, 20, 0.002)),
+      messageEnd(usageOf(200, 80, 20, 0.002, 4)),
       turnEnd(),
-      messageEnd(usageOf(300, 120, 30, 0.003)),
+      messageEnd(usageOf(300, 120, 30, 0.003, 6)),
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
@@ -230,6 +230,7 @@ describe("runStage — usage accumulation", () => {
         input: 600,
         output: 250,
         cacheRead: 60,
+        cacheWrite: 12,
         cost: 0.006,
         turns: 2,
       }),
@@ -241,12 +242,14 @@ describe("runStage — usage accumulation", () => {
   it("reports zero usage for a stream with no message_end events", async () => {
     const events: AgentEvent[] = [agentEnd([])];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(result.usage).toEqual(expect.objectContaining({ input: 0, output: 0, cacheRead: 0, cost: 0, turns: 0 }));
+    expect(result.usage).toEqual(
+      expect.objectContaining({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 }),
+    );
   });
 
   it("counts a non-assistant message_end (no usage) as zero, not NaN", async () => {
     const events: AgentEvent[] = [
-      messageEnd(usageOf(100, 50, 10, 0.001)),
+      messageEnd(usageOf(100, 50, 10, 0.001, 0)),
       nonAssistantMessageEnd(), // prompt/steering user message — no usage block
       turnEnd(),
       agentEnd([]),
@@ -263,7 +266,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
     const events: AgentEvent[] = [
       deltaUpdate("text_delta", "hello world"), // 11 chars -> 3 tokens fallback
       usageUpdate(77), // provider streams usage mid-stream
-      messageEnd(usageOf(0, 77, 0, 0)), // authoritative output -> primary
+      messageEnd(usageOf(0, 77, 0, 0, 0)), // authoritative output -> primary
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
@@ -276,7 +279,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
       deltaUpdate("text_delta", "12345678"), // 8
       deltaUpdate("thinking_delta", "abcdefgh"), // 8
       deltaUpdate("toolcall_delta", "abcd"), // 4
-      messageEnd(usageOf(0, 0, 0, 0)), // output 0 -> primary never fires
+      messageEnd(usageOf(0, 0, 0, 0, 0)), // output 0 -> primary never fires
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
@@ -289,7 +292,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
     const events: AgentEvent[] = [
       deltaUpdate("text_delta", "x".repeat(400)), // 400 chars -> 100 fallback
       usageUpdate(5), // provider streams usage -> primary = 5
-      messageEnd(usageOf(0, 5, 0, 0)),
+      messageEnd(usageOf(0, 5, 0, 0, 0)),
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
@@ -300,7 +303,7 @@ describe("runStage — streaming output tokens (two-tier)", () => {
     const text = "some longer delta text for the fallback estimate";
     const events: AgentEvent[] = [
       deltaUpdate("text_delta", text),
-      messageEnd(usageOf(0, 0, 0, 0)), // no provider usage -> fallback path
+      messageEnd(usageOf(0, 0, 0, 0, 0)), // no provider usage -> fallback path
       agentEnd([]),
     ];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
@@ -313,10 +316,10 @@ describe("runStage — streaming output tokens (two-tier)", () => {
     // The correct cumulative is the SUM of every message_end usage.output (80).
     const events: AgentEvent[] = [
       usageUpdate(50), // turn 1 partial climbs to 50
-      messageEnd(usageOf(0, 50, 0, 0)),
+      messageEnd(usageOf(0, 50, 0, 0, 0)),
       turnEnd(),
       usageUpdate(30), // turn 2 partial resets, climbs to 30
-      messageEnd(usageOf(0, 30, 0, 0)),
+      messageEnd(usageOf(0, 30, 0, 0, 0)),
       turnEnd(),
       agentEnd([]),
     ];
@@ -328,10 +331,10 @@ describe("runStage — streaming output tokens (two-tier)", () => {
 describe("runStage — turns", () => {
   it("counts turns from turn_end events", async () => {
     const events: AgentEvent[] = [
-      messageEnd(usageOf(0, 0, 0, 0)),
+      messageEnd(usageOf(0, 0, 0, 0, 0)),
       turnEnd(),
-      messageEnd(usageOf(0, 0, 0, 0)),
-      messageEnd(usageOf(0, 0, 0, 0)),
+      messageEnd(usageOf(0, 0, 0, 0, 0)),
+      messageEnd(usageOf(0, 0, 0, 0, 0)),
       turnEnd(),
       agentEnd([]),
     ];
@@ -345,7 +348,7 @@ describe("runStage — onEvent + onStageEnd hooks", () => {
     const seen: AgentEvent[] = [];
     const events: AgentEvent[] = [
       deltaUpdate("text_delta", "x"),
-      messageEnd(usageOf(0, 0, 0, 0)),
+      messageEnd(usageOf(0, 0, 0, 0, 0)),
       turnEnd(),
       agentEnd([]),
     ];
@@ -360,7 +363,7 @@ describe("runStage — onEvent + onStageEnd hooks", () => {
 
   it("invokes onStageEnd once on success with the accumulated usage", async () => {
     const calls: StageUsage[] = [];
-    const events: AgentEvent[] = [messageEnd(usageOf(10, 5, 0, 0)), turnEnd(), agentEnd([])];
+    const events: AgentEvent[] = [messageEnd(usageOf(10, 5, 0, 0, 0)), turnEnd(), agentEnd([])];
     await runStage(
       baseInput({
         loopFn: makeFakeLoop({ events, messages: [] }),
@@ -372,7 +375,7 @@ describe("runStage — onEvent + onStageEnd hooks", () => {
 
   it("invokes onStageEnd once on throw with the partial usage accumulated so far", async () => {
     const calls: StageUsage[] = [];
-    const events: AgentEvent[] = [messageEnd(usageOf(7, 3, 0, 0))];
+    const events: AgentEvent[] = [messageEnd(usageOf(7, 3, 0, 0, 0))];
     const throwingLoop: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _c, _cfg, signal) =>
       new RejectingStream(events, signal) as unknown as EventStream<AgentEvent, AgentMessage[]>;
     await expect(
@@ -391,9 +394,9 @@ describe("runStage — abort", () => {
   it("reports aborted=true when the signal fires mid-stream", async () => {
     const controller = new AbortController();
     const events: AgentEvent[] = [
-      messageEnd(usageOf(10, 5, 0, 0)),
+      messageEnd(usageOf(10, 5, 0, 0, 0)),
       turnEnd(),
-      messageEnd(usageOf(20, 8, 0, 0)),
+      messageEnd(usageOf(20, 8, 0, 0, 0)),
       turnEnd(),
       agentEnd([]),
     ];
@@ -417,7 +420,7 @@ describe("runStage — abort", () => {
   });
 
   it("reports aborted=false when the run completes cleanly", async () => {
-    const events: AgentEvent[] = [messageEnd(usageOf(1, 1, 0, 0)), agentEnd([])];
+    const events: AgentEvent[] = [messageEnd(usageOf(1, 1, 0, 0, 0)), agentEnd([])];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
     expect(result.aborted).toBe(false);
   });
@@ -426,9 +429,9 @@ describe("runStage — abort", () => {
     const controller = new AbortController();
     const calls: StageUsage[] = [];
     const events: AgentEvent[] = [
-      messageEnd(usageOf(10, 5, 0, 0)),
+      messageEnd(usageOf(10, 5, 0, 0, 0)),
       turnEnd(),
-      messageEnd(usageOf(20, 8, 0, 0)),
+      messageEnd(usageOf(20, 8, 0, 0, 0)),
       turnEnd(),
       agentEnd([]),
     ];
@@ -500,7 +503,7 @@ describe("runStage — per-LLM-call bounds (maxTokens + timeout)", () => {
   });
 
   it("does not abort a clean run under timeoutMs (the timer is cleared on settle)", async () => {
-    const events: AgentEvent[] = [messageEnd(usageOf(1, 1, 0, 0)), agentEnd([])];
+    const events: AgentEvent[] = [messageEnd(usageOf(1, 1, 0, 0, 0)), agentEnd([])];
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }), timeoutMs: 50 }));
     expect(result.aborted).toBe(false);
   });
@@ -508,7 +511,7 @@ describe("runStage — per-LLM-call bounds (maxTokens + timeout)", () => {
 
 describe("runStage — error propagation", () => {
   it("throws StageRunError on a stage failure", async () => {
-    const events: AgentEvent[] = [messageEnd(usageOf(5, 2, 0, 0))];
+    const events: AgentEvent[] = [messageEnd(usageOf(5, 2, 0, 0, 0))];
     const rejecting: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _c, _cfg, signal) =>
       new RejectingStream(events, signal) as unknown as EventStream<AgentEvent, AgentMessage[]>;
     try {
@@ -554,7 +557,7 @@ describe("runStage — model failure (stopReason error)", () => {
     // The ledger hook runs in runStage's finally regardless of the throw, so a
     // model failure still accounts for the usage consumed up to it.
     const failed: AssistantMessage = {
-      ...asstMsg(usageOf(120, 40, 5, 0.001)),
+      ...asstMsg(usageOf(120, 40, 5, 0.001, 0)),
       stopReason: "error",
       errorMessage: "boom",
     };
@@ -567,7 +570,7 @@ describe("runStage — model failure (stopReason error)", () => {
   });
 
   it("does NOT throw when the model succeeds with a normal stop reason", async () => {
-    const events: AgentEvent[] = [messageEnd(usageOf(10, 5, 0, 0)), turnEnd(), agentEnd([])];
+    const events: AgentEvent[] = [messageEnd(usageOf(10, 5, 0, 0, 0)), turnEnd(), agentEnd([])];
     await expect(runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }))).resolves.toBeDefined();
   });
 

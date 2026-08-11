@@ -13,7 +13,15 @@ import { makeLedgerHook, persistLedger } from "../../src/runtime/ledger-hook.js"
 import { cloneLedger, EMPTY_LEDGER } from "../../src/store/codecs.js";
 import { getGraphStore, type StoreContext, type StoreEntry } from "../../src/store/graph-store.js";
 
-const USAGE_A: StageUsage = { input: 1000, output: 500, cacheRead: 300, cost: 0.05, turns: 3, elapsedMs: 0 };
+const USAGE_A: StageUsage = {
+  input: 1000,
+  output: 500,
+  cacheRead: 300,
+  cacheWrite: 0,
+  cost: 0.05,
+  turns: 3,
+  elapsedMs: 0,
+};
 
 function freshStore(): StoreContext {
   const entries: StoreEntry[] = [];
@@ -66,6 +74,7 @@ describe("makeLedgerHook", () => {
       input: 2000,
       output: 1000,
       cacheRead: 600,
+      cacheWrite: 0,
       cost: 0.1,
       turns: 6,
       elapsedMs: 0,

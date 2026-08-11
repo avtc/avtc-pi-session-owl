@@ -764,7 +764,7 @@ describe("load reconstruction", () => {
     const details = encodeDetails(getGraphStore().graph, null, baselineLedger);
     fake.addCompaction("e1", details);
     const laterLedger = {
-      observe: { input: 100, output: 20, cacheRead: 5, cost: 0.01, turns: 2, runs: 2, elapsedMs: 0 },
+      observe: { input: 100, output: 20, cacheRead: 5, cacheWrite: 0, cost: 0.01, turns: 2, runs: 2, elapsedMs: 0 },
       build: { ...EMPTY_LEDGER.build },
       select: { ...EMPTY_LEDGER.select },
     };

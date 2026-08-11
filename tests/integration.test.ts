@@ -48,7 +48,7 @@ import { N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
  *  `vi.mocked(runStage).mockImplementation`. */
 const EMPTY_RESULT: StageRunResult = {
   messages: [],
-  usage: { input: 0, output: 0, cacheRead: 0, cost: 0, turns: 1, elapsedMs: 0 },
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
   outputTokens: 0,
   aborted: false,
   timedOut: false,

@@ -14,11 +14,13 @@ function messageUpdate(payload: unknown): AgentEvent {
 }
 
 describe("messageEndUsage", () => {
-  it("reads input/output/cacheRead/cost/totalTokens off an assistant message carrying usage", () => {
+  it("reads input/output/cacheRead/cacheWrite/cost/totalTokens off an assistant message carrying usage", () => {
     const u = messageEndUsage(
-      messageWith({ usage: { input: 10, output: 20, cacheRead: 5, cost: { total: 3 }, totalTokens: 66_000 } }),
+      messageWith({
+        usage: { input: 10, output: 20, cacheRead: 5, cacheWrite: 8, cost: { total: 3 }, totalTokens: 66_000 },
+      }),
     );
-    expect(u).toEqual({ input: 10, output: 20, cacheRead: 5, cost: 3, totalTokens: 66_000 });
+    expect(u).toEqual({ input: 10, output: 20, cacheRead: 5, cacheWrite: 8, cost: 3, totalTokens: 66_000 });
   });
 
   it("returns null for a message with no usage (prompt/steering messages)", () => {
@@ -27,7 +29,7 @@ describe("messageEndUsage", () => {
 
   it("treats missing sub-fields as zero rather than undefined", () => {
     const u = messageEndUsage(messageWith({ usage: { output: 7 } }));
-    expect(u).toEqual({ input: 0, output: 7, cacheRead: 0, cost: 0, totalTokens: 0 });
+    expect(u).toEqual({ input: 0, output: 7, cacheRead: 0, cacheWrite: 0, cost: 0, totalTokens: 0 });
   });
 });
 

@@ -24,6 +24,7 @@ export interface MessageUsage {
   input: number;
   output: number;
   cacheRead: number;
+  cacheWrite: number;
   cost: number;
   totalTokens: number;
 }
@@ -34,7 +35,14 @@ export interface MessageUsage {
 export function messageEndUsage(message: AgentMessage): MessageUsage | null {
   const u = (
     message as {
-      usage?: { input?: number; output?: number; cacheRead?: number; cost?: { total?: number }; totalTokens?: number };
+      usage?: {
+        input?: number;
+        output?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+        cost?: { total?: number };
+        totalTokens?: number;
+      };
     }
   ).usage;
   if (u === undefined) return null;
@@ -42,6 +50,7 @@ export function messageEndUsage(message: AgentMessage): MessageUsage | null {
     input: u.input ?? 0,
     output: u.output ?? 0,
     cacheRead: u.cacheRead ?? 0,
+    cacheWrite: u.cacheWrite ?? 0,
     cost: u.cost?.total ?? 0,
     totalTokens: u.totalTokens ?? 0,
   };
