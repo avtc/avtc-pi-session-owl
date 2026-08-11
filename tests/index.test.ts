@@ -36,6 +36,7 @@ import {
   _setGetMemkeeperSettings,
   _setRegisterSettingsCommand,
   DEFAULT_CONFIG,
+  type MemkeeperConfig,
 } from "../src/config/schema.js";
 import memkeeperExtension from "../src/index.js";
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "../src/lifecycle.js";
@@ -56,6 +57,7 @@ function makeFakePi(): ExtensionAPI {
     appendEntry: () => {},
     registerTool: vi.fn(),
     registerCommand: vi.fn(),
+    events: { emit: vi.fn() },
   };
   return { ...pi, _handlers: handlers } as unknown as ExtensionAPI;
 }
@@ -246,5 +248,66 @@ describe("memkeeperExtension (activate wiring)", () => {
     const result = await handler?.(event, makeCtx());
     expect(result).toBeUndefined();
     expect(compactionHook).not.toHaveBeenCalled();
+  });
+});
+
+describe("memkeeperExtension :ready API (memkeeper:ready)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetForNewSession();
+    _resetGetMemkeeperSettings();
+    useStubs({
+      lifecycle: true,
+      triggers: true,
+      compactionHook: true,
+      widget: true,
+      stages: true,
+      todoWiring: true,
+    });
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG }));
+    _setRegisterSettingsCommand((() => ({
+      getSettings: () => ({ ...DEFAULT_CONFIG, enabled: true }),
+      updateSetting: () => {},
+      loadSettingsIntoMemory: () => {},
+    })) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand);
+  });
+  afterEach(() => _resetGetMemkeeperSettings());
+  afterAll(() => _resetMemkeeperSettingsHandle());
+
+  it("does NOT emit :ready at activate time (deferred to session_start)", () => {
+    const pi = makeFakePi() as FakePiWithHandlers;
+    memkeeperExtension(pi);
+    const eventsEmit = (pi as unknown as { events: { emit: ReturnType<typeof vi.fn> } }).events.emit;
+    expect(eventsEmit).not.toHaveBeenCalled();
+  });
+
+  it("emits memkeeper:ready on session_start with the api", async () => {
+    const pi = makeFakePi() as FakePiWithHandlers;
+    memkeeperExtension(pi);
+    // The :ready emitter is the SECOND session_start handler (after onSessionStart).
+    const readyHandler = pi._handlers.get("session_start")?.[1];
+    expect(readyHandler).toBeDefined();
+    await readyHandler?.({ type: "session_start", reason: "startup" } as SessionStartEvent, makeCtx());
+
+    const eventsEmit = (pi as unknown as { events: { emit: ReturnType<typeof vi.fn> } }).events.emit;
+    expect(eventsEmit).toHaveBeenCalledTimes(1);
+    const [event, api] = eventsEmit.mock.calls[0] ?? [];
+    expect(event).toBe("memkeeper:ready");
+    expect(api).toBeDefined();
+    expect(typeof (api as { reloadConfig: unknown }).reloadConfig).toBe("function");
+    expect(typeof (api as { getConfig: unknown }).getConfig).toBe("function");
+  });
+
+  it("api.getConfig returns getMemkeeperSettings()", async () => {
+    const pi = makeFakePi() as FakePiWithHandlers;
+    memkeeperExtension(pi);
+    await pi._handlers.get("session_start")?.[1]?.({ reason: "startup" } as SessionStartEvent, makeCtx());
+
+    const api = ((pi as unknown as { events: { emit: ReturnType<typeof vi.fn> } }).events.emit.mock.calls[0] ??
+      [])[1] as {
+      getConfig: () => MemkeeperConfig;
+    };
+    // _setGetMemkeeperSettings (beforeEach) pinned the read to DEFAULT_CONFIG.
+    expect(api.getConfig()).toEqual(DEFAULT_CONFIG);
   });
 });

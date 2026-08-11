@@ -102,6 +102,11 @@ const DEFAULT_BUILDER_MODE = "on-compaction";
 const DEFAULT_SELECTOR_MODE = "on-compaction";
 const NO_MODEL: string | null = null;
 const NO_LIMIT: number | null = null;
+/** loadSettingsIntoMemory args: `undefined` makes avtc-pi-settings-ui fall back to its
+ *  defaults (cwd → process.cwd(); globalDir unchanged) — same convention as the settings-ui
+ *  factory's NO_GLOBAL_DIR. */
+const RELOAD_USE_DEFAULT_CWD: string | undefined = undefined;
+const RELOAD_KEEP_GLOBAL_DIR: string | undefined = undefined;
 const DEFAULT_FIND_TIMEOUT_MS = 30_000;
 const DEFAULT_LLM_CALL_TIMEOUT_MS = 600_000;
 const MIN_LLM_CALL_TIMEOUT_MS = 1000;
@@ -568,6 +573,13 @@ export const MEMKEEPER_SCHEMA: SettingsSchema = {
 // Handle ownership + live read
 // ---------------------------------------------------------------------------
 
+/** The runtime settings-ui handle carries `loadSettingsIntoMemory` (avtc-pi-settings-ui
+ *  factory.ts returns it), but the public `SettingsHandle` type omits it (loading is "internal").
+ *  `reloadMemkeeperConfig` needs it, so widen the handle with this structural member. */
+type ReloadableSettingsHandle = SettingsHandle<MemkeeperConfig> & {
+  loadSettingsIntoMemory(cwd?: string, globalDir?: string): void;
+};
+
 let handle: SettingsHandle<MemkeeperConfig> | undefined;
 
 /** Test-only override for the settings read (the repo DI/mock pattern): when set,
@@ -614,4 +626,15 @@ export function initMemkeeperSettings(pi: ExtensionAPI): SettingsHandle<Memkeepe
 export function getMemkeeperSettings(): MemkeeperConfig {
   if (_getSettingsOverride) return _getSettingsOverride();
   return handle ? handle.getSettings() : DEFAULT_CONFIG;
+}
+
+/** Re-read settings from env (PI_SETTINGS_MEMKEEPER) first, then files — refreshes the
+ *  in-memory cache. Lets a host (e.g. avtc-pi-bench-compact) reconfigure memkeeper LIVE
+ *  without ctx.reload() (which invalidates the command ctx). No-op before initMemkeeperSettings
+ *  (handle undefined — nothing to reload). */
+export function reloadMemkeeperConfig(): void {
+  (handle as ReloadableSettingsHandle | undefined)?.loadSettingsIntoMemory(
+    RELOAD_USE_DEFAULT_CWD,
+    RELOAD_KEEP_GLOBAL_DIR,
+  );
 }

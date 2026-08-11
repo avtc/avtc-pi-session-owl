@@ -13,6 +13,7 @@ import {
   getMemkeeperSettings,
   initMemkeeperSettings,
   MEMKEEPER_SCHEMA,
+  reloadMemkeeperConfig,
 } from "../../src/config/schema.js";
 import { ImportanceSchema, NodeStateSchema } from "../../src/schema.js";
 import { IMPORTANCE_VALUES, NODE_STATE_VALUES } from "../../src/types.js";
@@ -285,5 +286,42 @@ describe("tool schemas derive from canonical types (no drift)", () => {
 
   it("NodeStateSchema enum equals NODE_STATE_VALUES", () => {
     expect([...(NodeStateSchema as { enum: string[] }).enum]).toEqual([...NODE_STATE_VALUES]);
+  });
+});
+
+describe("reloadMemkeeperConfig", () => {
+  // Dedicated fake handle tracking loadSettingsIntoMemory (the settings-ui refresh call).
+  const loadSettingsIntoMemory = vi.fn();
+  const reloadRegisterSpy = vi.fn((_pi: ExtensionAPI, _schema: unknown, _opts: unknown) => ({
+    getSettings: () => DEFAULT_CONFIG,
+    updateSetting: () => {},
+    loadSettingsIntoMemory,
+    storageLevels: ["session", "project", "global"],
+  })) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand & {
+    mock: ReturnType<typeof vi.fn>["mock"];
+  };
+
+  beforeAll(() => _setRegisterSettingsCommand(reloadRegisterSpy));
+  afterAll(() => {
+    _setRegisterSettingsCommand(null);
+    _resetMemkeeperSettingsHandle();
+  });
+
+  beforeEach(() => {
+    loadSettingsIntoMemory.mockReset();
+    _resetMemkeeperSettingsHandle();
+  });
+
+  it("is a no-op before initMemkeeperSettings (handle undefined — no throw)", () => {
+    // handle is undefined here (cleared in beforeEach)
+    expect(() => reloadMemkeeperConfig()).not.toThrow();
+    expect(loadSettingsIntoMemory).not.toHaveBeenCalled();
+  });
+
+  it("calls the handle's loadSettingsIntoMemory(undefined, undefined) after init", () => {
+    initMemkeeperSettings({} as ExtensionAPI);
+    reloadMemkeeperConfig();
+    expect(loadSettingsIntoMemory).toHaveBeenCalledTimes(1);
+    expect(loadSettingsIntoMemory).toHaveBeenCalledWith(undefined, undefined);
   });
 });

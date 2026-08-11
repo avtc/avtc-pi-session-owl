@@ -159,7 +159,7 @@ function makeFakePi(): ExtensionAPI {
       list.push(handler);
       handlers.set(event, list);
     },
-    events: { on: vi.fn(() => () => {}) },
+    events: { on: vi.fn(() => () => {}), emit: vi.fn() },
     // test-only dispatcher: fires all handlers for an event in order, returns
     // the last non-undefined return (Pi uses the session_before_compact return).
     emit: async (event: string, ...args: unknown[]) => {

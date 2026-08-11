@@ -10,7 +10,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerUserCommands } from "./commands/user.js";
 import { compactionHook } from "./compaction/hook.js";
-import { getMemkeeperSettings, initMemkeeperSettings } from "./config/schema.js";
+import { getMemkeeperSettings, initMemkeeperSettings, reloadMemkeeperConfig } from "./config/schema.js";
 import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "./lifecycle.js";
 import { log } from "./log.js";
 import { makeMkRecallTool } from "./recall/mk-recall.js";
@@ -95,5 +95,18 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
       context: todo.getContext(),
       bridge: todo.getBridge(),
     });
+  });
+
+  // --- memkeeper:ready extensibility API (for avtc-pi-bench-compact) ---
+  // Lets a host reconfigure memkeeper LIVE (reload the in-memory settings cache from
+  // PI_SETTINGS_MEMKEEPER env / files) without ctx.reload() (which invalidates the
+  // command ctx). Deferred to session_start (reload-safe: memkeeper re-activates each
+  // reload; consumers clean their own listener on session_shutdown — see the snippet).
+  const api = {
+    reloadConfig: () => reloadMemkeeperConfig(),
+    getConfig: () => getMemkeeperSettings(),
+  };
+  pi.on("session_start", () => {
+    pi.events.emit("memkeeper:ready", api);
   });
 }
