@@ -8,6 +8,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { setClock } from "../../src/graph/mutations.js";
 import { type ObserverRunInput, runObserver } from "../../src/observer/run.js";
+import { _resetSessionAffinity, setMemkeeperSessionBase } from "../../src/runtime/session-affinity.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import { NO_OP_WIDGET, type WidgetController } from "../../src/widget/tracker.js";
 
@@ -140,6 +141,7 @@ describe("runObserver", () => {
   beforeEach(() => {
     resetForNewSession();
     setClock(() => "2026-07-29T10:05:00.000Z");
+    _resetSessionAffinity();
   });
   afterAll(() => {
     setClock(null);
@@ -763,5 +765,31 @@ describe("runObserver", () => {
     const usageEntries = appended.filter((e) => e.type === "memkeeper.usage");
     expect(usageEntries).toHaveLength(1);
     expect(getGraphStore().usageLedger.observe.input).toBe(1000);
+  });
+
+  it("forwards a per-stage affinity id (:observe) to runStage when a session base is set", async () => {
+    setMemkeeperSessionBase("sess-7");
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "do the thing"), assistantEntry("a1", "ok")];
+    const seen: string[] = [];
+    const runStageFn = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
+      seen.push(input.sessionId ?? "");
+      // execute the record tool so the chunk is acknowledged, then resolve
+      const tool = input.tools[0] as AgentTool;
+      await tool.execute("call-1", {
+        observations: [{ summary: "x", importance: "med", sourceEntryIds: ["u1"] }],
+      });
+      return {
+        messages: [] as AgentMessage[],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn, thresholdTokens: 1 }));
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    for (const id of seen) expect(id).toBe("sess-7:observe");
   });
 });

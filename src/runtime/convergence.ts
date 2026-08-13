@@ -19,6 +19,7 @@ import {
   type StageRunResult,
   type StageUsage,
 } from "./agent-loop.js";
+import { getStageAffinityId } from "./session-affinity.js";
 
 /** Shared loop sentinels used by the Builder + Selector convergence runs. */
 export const NO_MUTATES = 0;
@@ -106,6 +107,9 @@ export async function runConvergencePass(args: ConvergencePassArgs): Promise<voi
     onEvent: args.onEvent,
     onStageEnd: args.onStageEnd,
     loopFn: NO_LOOP_OVERRIDE,
+    // Per-stage affinity so a session's Builder/Selector passes route consistently
+    // and share a cache namespace (null outside an active session — no header).
+    sessionId: getStageAffinityId(args.stageLabel) ?? undefined,
   };
   try {
     const result = await args.runStageFn(stageInput);

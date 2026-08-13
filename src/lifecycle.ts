@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
+import { randomUUID } from "node:crypto";
+
 // Session lifecycle: startup (reconstruct + seed nGoal), the mechanical
 // oInitialPrompt capture (NOT the Observer; the first user
 // message is captured verbatim under nGoal), shutdown (drop the widget ref),
@@ -24,6 +26,7 @@ import { abortGoalExtract, runGoalExtract } from "./goal-extract/run.js";
 import { applyCreateNode, applyRecordObservation } from "./graph/mutations.js";
 import { terminateRegexWorker } from "./graph/regex-runner.js";
 import { abortInFlight } from "./runtime/run-lock.js";
+import { clearMemkeeperSessionBase, setMemkeeperSessionBase } from "./runtime/session-affinity.js";
 import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
 import {
   appendGraphDelta,
@@ -210,6 +213,11 @@ export async function onSessionStart(
   widget: WidgetController,
 ): Promise<void> {
   widget.setCtx(ctx);
+  // A fresh per-session affinity base so the maintenance stages' LLM calls route
+  // consistently (and namespace their caches) for this session only. Cleared on
+  // shutdown. Random per session instance — not content-derived — so a resumed
+  // session does not couple to the prior instance's node/cache namespace.
+  setMemkeeperSessionBase(randomUUID());
   const store = toStoreContext(pi, ctx);
   // Refresh the session-entry resolver on every session_start — a ctx captured
   // once goes stale across session changes (new/resume/fork), and entry ids are
@@ -322,6 +330,7 @@ export function captureInitialPromptAndExtract(
  *  Fire-and-forget — the run releases in its own `finally`. */
 export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetController): void {
   abortInFlight();
+  clearMemkeeperSessionBase();
   abortGoalExtract();
   terminateRegexWorker();
   // Clear the resolver so recall never reads a dead session's manager.

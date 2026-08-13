@@ -14,6 +14,7 @@
 // aborted on session shutdown so a discarded session's pending extraction stops.
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { CacheRetention } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
 import { stripAnsi } from "../format/sanitize.js";
@@ -43,6 +44,9 @@ const GOAL_REASONING = NO_REASONING;
 const GOAL_MAX_TURNS = 1;
 /** Generous cap for a one-line reply (no thinking tokens to consume it). */
 const GOAL_MAX_TOKENS = 512;
+/** One-shot extraction: its prefix never recurs, so disable prompt-cache writes
+ *  (no wasted cache write that is never read). No session-affinity id either. */
+const GOAL_CACHE_RETENTION: CacheRetention = "none";
 
 /** Input to `runGoalExtract`. The run honors its own abort controller (aborted
  *  on shutdown); it takes no run-lock. */
@@ -117,6 +121,8 @@ export async function runGoalExtract(input: GoalExtractInput): Promise<void> {
       onEvent: NO_EVENT_SINK,
       onStageEnd: NO_STAGE_END_HOOK,
       loopFn: NO_LOOP_OVERRIDE,
+      // One-shot: the prefix never recurs, so skip cache writes (and no affinity id).
+      cacheRetention: GOAL_CACHE_RETENTION,
     });
     if (result.aborted) return;
 

@@ -2,11 +2,12 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { MKDIR_TOOL, MV_TOOL } from "../../src/graph/mutate-tools.js";
 import { LS_TOOL, TRY_FINISH_TOOL } from "../../src/graph/read-tools.js";
 import type { StageRunInput, StageRunResult, StageUsage } from "../../src/runtime/agent-loop.js";
 import { makeConvergenceTracker, runConvergencePass } from "../../src/runtime/convergence.js";
+import { _resetSessionAffinity, setMemkeeperSessionBase } from "../../src/runtime/session-affinity.js";
 
 const NAMES = new Set<string>([MKDIR_TOOL, MV_TOOL]);
 
@@ -86,6 +87,8 @@ describe("makeConvergenceTracker", () => {
 });
 
 describe("runConvergencePass", () => {
+  afterEach(() => _resetSessionAffinity());
+
   const BASE = {
     systemPrompt: "sys",
     messages: [] as StageRunInput["messages"],
@@ -160,5 +163,40 @@ describe("runConvergencePass", () => {
       runStageFn,
     });
     expect(receivedHook).toBe(sink);
+  });
+
+  it("forwards a per-stage affinity id derived from the session base + stage label", async () => {
+    setMemkeeperSessionBase("sess-1");
+    const { outcome, onEvent } = makeConvergenceTracker(() => {}, NAMES);
+    let receivedId: string | undefined;
+    const runStageFn = async (input: StageRunInput): Promise<StageRunResult> => {
+      receivedId = input.sessionId;
+      return {
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+    await runConvergencePass({ ...BASE, stageLabel: "build", onEvent, outcome, runStageFn });
+    expect(receivedId).toBe("sess-1:build");
+  });
+
+  it("omits the affinity id when no session base is set (no affinity header)", async () => {
+    const { outcome, onEvent } = makeConvergenceTracker(() => {}, NAMES);
+    let receivedId: string | undefined;
+    const runStageFn = async (input: StageRunInput): Promise<StageRunResult> => {
+      receivedId = input.sessionId;
+      return {
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+    await runConvergencePass({ ...BASE, stageLabel: "select", onEvent, outcome, runStageFn });
+    expect(receivedId).toBeUndefined();
   });
 });

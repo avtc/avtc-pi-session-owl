@@ -22,7 +22,7 @@ import type {
   StreamFn,
 } from "@earendil-works/pi-agent-core";
 import { agentLoop } from "@earendil-works/pi-agent-core";
-import type { Api, Message, Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, CacheRetention, Message, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import { log } from "../log.js";
 import { deltaTextOf, deltaTokens, messageEndUsage } from "./streaming-tokens.js";
 
@@ -90,6 +90,14 @@ export interface StageRunInput {
   onStageEnd: ((usage: StageUsage) => void) | null;
   /** Test seam — fake loop override, or `NO_LOOP_OVERRIDE` for the real `agentLoop`. */
   loopFn: typeof agentLoop | null;
+  /** LLM session-affinity id forwarded to the provider (Anthropic `x-session-affinity`,
+   *  Mistral `promptCacheKey`). Omit for one-shot calls with no recurring prefix
+   *  (e.g. goal-extract). Absent = no affinity header / cache namespace. */
+  sessionId?: string;
+  /** Prompt-cache retention forwarded to the provider. Omit for recurring-prefix
+   *  stages (defaults to the provider's "short"). Set `"none"` for one-shot calls
+   *  whose prefix never recurs (no wasted cache write). */
+  cacheRetention?: CacheRetention;
 }
 
 /** A stage run failure. The `onStageEnd` hook fires in `runStage`'s finally
@@ -215,6 +223,8 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       // Per-turn output cap (applied to every provider request; a truncated
       // response's tool calls are rejected by agentLoop).
       maxTokens: input.maxTokens,
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.cacheRetention ? { cacheRetention: input.cacheRetention } : {}),
       ...(input.reasoning === null ? {} : { reasoning: input.reasoning }),
       ...(input.timeoutMs === null
         ? {}

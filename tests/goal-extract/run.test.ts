@@ -199,6 +199,22 @@ describe("runGoalExtract", () => {
     expect(received).toEqual([{ role: "user", content: "Build me a memory keeper" }]);
   });
 
+  it("disables prompt-cache writes for the one-shot extraction (cacheRetention none)", async () => {
+    let received: StageRunInput | undefined;
+    await runGoalExtract(
+      makeInput({
+        verbatimText: "Build me a memory keeper",
+        runStageFn: async (input) => {
+          received = input;
+          return assistantResult("goal");
+        },
+      }),
+    );
+    expect(received?.cacheRetention).toBe("none");
+    // one-shot: no recurring prefix, so no affinity id either
+    expect(received?.sessionId).toBeUndefined();
+  });
+
   it("aborts an in-flight call's signal on shutdown (abortGoalExtract) → no write", async () => {
     let resolveGate: () => void = () => {};
     const gate = new Promise<void>((resolve) => {

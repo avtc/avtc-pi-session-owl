@@ -633,4 +633,38 @@ describe("runStage — config wiring", () => {
     expect(typeof captured[0]?.cfg.shouldStopAfterTurn).toBe("function");
     expect(captured[0]?.cfg).toHaveProperty("reasoning", "med");
   });
+
+  it("forwards sessionId + cacheRetention onto the loop config when set", async () => {
+    const captured: AgentLoopConfig[] = [];
+    const spy: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _ctx, cfg) => {
+      captured.push(cfg);
+      const stream = new EventStream<AgentEvent, AgentMessage[]>(
+        (e) => e.type === "agent_end",
+        (e) => (e.type === "agent_end" ? e.messages : []),
+      );
+      queueMicrotask(() => stream.push(agentEnd([])));
+      return stream;
+    };
+    await runStage(baseInput({ loopFn: spy, sessionId: "base-1:build", cacheRetention: "none" }));
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toHaveProperty("sessionId", "base-1:build");
+    expect(captured[0]).toHaveProperty("cacheRetention", "none");
+  });
+
+  it("omits sessionId + cacheRetention from the loop config when absent (provider defaults)", async () => {
+    const captured: AgentLoopConfig[] = [];
+    const spy: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _ctx, cfg) => {
+      captured.push(cfg);
+      const stream = new EventStream<AgentEvent, AgentMessage[]>(
+        (e) => e.type === "agent_end",
+        (e) => (e.type === "agent_end" ? e.messages : []),
+      );
+      queueMicrotask(() => stream.push(agentEnd([])));
+      return stream;
+    };
+    await runStage(baseInput({ loopFn: spy }));
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).not.toHaveProperty("sessionId");
+    expect(captured[0]).not.toHaveProperty("cacheRetention");
+  });
 });

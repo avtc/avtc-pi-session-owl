@@ -15,6 +15,7 @@ import {
   onSessionStart,
 } from "../src/lifecycle.js";
 import { _resetRunLock, acquireOrSkip, type RunHandle } from "../src/runtime/run-lock.js";
+import { _resetSessionAffinity, getStageAffinityId, setMemkeeperSessionBase } from "../src/runtime/session-affinity.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
 import { N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
 import type { WidgetController } from "../src/widget/tracker.js";
@@ -195,6 +196,7 @@ describe("onSessionStart", () => {
   beforeEach(() => {
     resetForNewSession();
     _resetGetMemkeeperSettings();
+    _resetSessionAffinity();
   });
   afterEach(() => _resetGetMemkeeperSettings());
 
@@ -235,6 +237,21 @@ describe("onSessionStart", () => {
     expect(deltas.length).toBe(0);
     // reconstruction still ran (graph is empty, just no seed write)
     expect(getGraphStore().graph.nodes.has(N_GOAL)).toBe(false);
+  });
+
+  it("sets the per-session affinity base (maintenance stages get a stage id)", async () => {
+    expect(getStageAffinityId("build")).toBeNull();
+    const { ctx, pi } = makeCtx([]);
+    await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
+    // a non-null, stage-suffixed id is now resolvable for each maintenance stage
+    expect(getStageAffinityId("observe")).toMatch(/^.+:observe$/);
+    expect(getStageAffinityId("build")).toMatch(/^.+:build$/);
+    expect(getStageAffinityId("select")).toMatch(/^.+:select$/);
+    // each session gets a fresh base (not a fixed constant)
+    const first = getStageAffinityId("build");
+    _resetSessionAffinity();
+    await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
+    expect(getStageAffinityId("build")).not.toBe(first);
   });
 
   it("captures oInitialPrompt at startup when the branch already has a first user message (resumed session)", async () => {
@@ -370,6 +387,7 @@ describe("onSessionShutdown", () => {
   beforeEach(() => {
     resetForNewSession();
     _resetRunLock();
+    _resetSessionAffinity();
   });
 
   it("ends the widget stage display and clears the ctx", () => {
@@ -394,6 +412,15 @@ describe("onSessionShutdown", () => {
     // the worker was discarded; a subsequent call must respawn cleanly
     const res = await runRegexTests(/foo/, ["foobar"], 5000);
     expect("results" in res).toBe(true);
+  });
+
+  it("clears the per-session affinity base", () => {
+    setMemkeeperSessionBase("abc-123");
+    expect(getStageAffinityId("build")).toBe("abc-123:build");
+    onSessionShutdown({ type: "session_shutdown", reason: "quit" }, noopWidget);
+    expect(getStageAffinityId("observe")).toBeNull();
+    expect(getStageAffinityId("build")).toBeNull();
+    expect(getStageAffinityId("select")).toBeNull();
   });
 });
 
