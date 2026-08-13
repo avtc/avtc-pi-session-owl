@@ -21,6 +21,7 @@ import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { BUILDER_SYSTEM } from "../prompts/builder.js";
+// jscpd:ignore-start — shared stage-run runtime surface (Builder + Selector import the same infra)
 import {
   runStage,
   type StageRunInput,
@@ -32,6 +33,7 @@ import type { ConvergenceOutcome } from "../runtime/convergence.js";
 import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify, resolveStageReasoning } from "../runtime/model.js";
+// jscpd:ignore-end
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import type { MemkeeperGraph, NodeId } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";

@@ -23,6 +23,7 @@ import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.j
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { SELECTOR_SYSTEM } from "../prompts/selector.js";
+// jscpd:ignore-start — shared stage-run runtime surface (Builder + Selector import the same infra)
 import {
   runStage,
   type StageRunInput,
@@ -34,6 +35,7 @@ import type { ConvergenceOutcome } from "../runtime/convergence.js";
 import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify, resolveStageReasoning } from "../runtime/model.js";
+// jscpd:ignore-end
 import { encodeSelection } from "../store/codecs.js";
 import { type GraphStore, getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
 import type { TodoBridge, TodoContext } from "../todo/types.js";
