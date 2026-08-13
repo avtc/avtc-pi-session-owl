@@ -101,6 +101,7 @@ const STUB_RUN_FN = (): unknown => undefined;
 
 const stubs = {
   captureInitialPromptIfAbsent: (): unknown => undefined,
+  captureInitialPromptAndExtract: (): unknown => undefined,
   onSessionStart: (): unknown => Promise.resolve(undefined),
   onSessionShutdown: (): unknown => undefined,
   toStoreContext: (): unknown => undefined,
@@ -148,6 +149,11 @@ vi.mock("../src/lifecycle.js", async (importOriginal) => {
       "lifecycle",
       orig.captureInitialPromptIfAbsent as ForwarderImpl,
       stubs.captureInitialPromptIfAbsent,
+    ),
+    captureInitialPromptAndExtract: gated(
+      "lifecycle",
+      orig.captureInitialPromptAndExtract as ForwarderImpl,
+      stubs.captureInitialPromptAndExtract,
     ),
     onSessionStart: gated("lifecycle", orig.onSessionStart as ForwarderImpl, stubs.onSessionStart),
     onSessionShutdown: gated("lifecycle", orig.onSessionShutdown as ForwarderImpl, stubs.onSessionShutdown),

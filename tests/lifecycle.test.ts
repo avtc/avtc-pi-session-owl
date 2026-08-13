@@ -249,7 +249,8 @@ describe("onSessionStart", () => {
     const graph = getGraphStore().graph;
     expect(graph.hasInitialPrompt).toBe(true);
     expect(graph.observations.get(O_INITIAL_PROMPT)?.summary).toBe("Build me a memory keeper");
-    expect(graph.nodes.get(N_GOAL)?.summary).toBe("Build me a memory keeper");
+    // nGoal.summary is left empty for the goal-extract stage (no mechanical seed).
+    expect(graph.nodes.get(N_GOAL)?.summary).toBe("");
     // frontier advanced past the first user message (Observer never re-observes it)
     expect(getGraphStore().observerFrontier).toBe("u1");
   });
@@ -272,8 +273,8 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(obs?.parentNode).toBe(N_GOAL);
     expect(obs?.sourceEntryIds).toEqual(["u1"]);
     expect(obs?.importance).toBe("crit");
-    // nGoal summary seeded from the first non-empty line
-    expect(graph.nodes.get(N_GOAL)?.summary).toBe("Build me a CLI tool");
+    // nGoal.summary is left empty for the goal-extract stage (no mechanical seed).
+    expect(graph.nodes.get(N_GOAL)?.summary).toBe("");
     // frontier advanced past the first user message (Observer never re-observes it)
     expect(getGraphStore().observerFrontier).toBe("u1");
   });
@@ -319,12 +320,19 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(graph.nodes.get(N_GOAL)?.summary).toBe("");
   });
 
-  it("seeds nGoal.summary from the first non-empty line (multi-line prompt)", async () => {
+  it("leaves nGoal.summary empty for the goal-extract stage (no mechanical seed)", async () => {
+    // The capture no longer seeds nGoal.summary from the first line — the
+    // goal-extract stage distills it from the verbatim prompt. The summary
+    // stays empty here (no goal-extract model wired in this unit test).
     const branch = [userEntry("u1", "  \nBuild the memory extension\nDetails follow")];
     const { ctx, pi } = makeCtx(branch);
     await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
     captureInitialPromptIfAbsent(ctx, pi);
-    expect(getGraphStore().graph.nodes.get(N_GOAL)?.summary).toBe("Build the memory extension");
+    expect(getGraphStore().graph.nodes.get(N_GOAL)?.summary).toBe("");
+    // the verbatim multi-line prompt is still captured whole as oInitialPrompt
+    expect(getGraphStore().graph.observations.get(O_INITIAL_PROMPT)?.summary).toBe(
+      "  \nBuild the memory extension\nDetails follow",
+    );
   });
 
   it("strips ANSI escape sequences from the captured prompt (same surface as Observer)", async () => {
@@ -340,7 +348,7 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(obs?.summary).not.toContain(ansiRed);
   });
 
-  it("persist the capture (observation entry + graph deltas incl. set_meta)", async () => {
+  it("persist the capture (observation entry + nGoal seed graph_delta)", async () => {
     const branch = [userEntry("u1", "do the thing")];
     const { ctx, pi, appended } = makeCtx(branch);
     await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
@@ -349,11 +357,12 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(obs.length).toBe(1);
     // coversUpToId = the first user entry (frontier advances past it)
     expect((obs[0][1] as { coversUpToId: string }).coversUpToId).toBe("u1");
-    // graph_delta log: create_node (nGoal seed) + set_meta (nGoal summary)
+    // graph_delta log: create_node (nGoal seed) only — nGoal.summary is set by
+    // the goal-extract stage, not a capture-time set_meta.
     const deltas = appended.filter(([t]) => t === "memkeeper.graph_delta");
-    expect(deltas.length).toBe(2);
+    expect(deltas.length).toBe(1);
     const setMetas = deltas.filter(([, d]) => (d as { delta: { type: string } }).delta?.type === "set_meta");
-    expect(setMetas.length).toBe(1);
+    expect(setMetas.length).toBe(0);
   });
 });
 

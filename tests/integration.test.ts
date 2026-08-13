@@ -186,13 +186,17 @@ beforeEach(() => {
   vi.mocked(runStage).mockImplementation(async () => EMPTY_RESULT);
 });
 
-afterEach(() => {
+afterEach(async () => {
   _resetGetMemkeeperSettings();
   // Defensive reset of the run-lock singleton between tests — the green path
   // always releases (background launches are awaited, compaction acquires+
   // releases), so this is not a current defect, but without a reset a future
   // test change or a real hang would cascade-lock the whole suite.
   _resetRunLock();
+  // Drain any fire-and-forget goal-extract call queued by a session_start /
+  // turn_end capture this test, so its pending runStage call can't land in a
+  // later test and contaminate that test's runStage call counts.
+  await new Promise((r) => setTimeout(r, 0));
 });
 
 // activate sets the module `handle` via initMemkeeperSettings (the REAL
@@ -250,7 +254,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     expect(graph.observations.has(O_INITIAL_PROMPT)).toBe(false);
   });
 
-  it("first user turn captures oInitialPrompt verbatim + seeds nGoal.summary", async () => {
+  it("first user turn captures oInitialPrompt verbatim (nGoal.summary left for goal extraction)", async () => {
     const state: FakePiState = {
       branch: [userEntry("u1", "Fix the login bug in auth.ts")],
       appendedEntries: [],
@@ -267,8 +271,9 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     expect(obs).toBeDefined();
     expect(obs?.summary).toBe("Fix the login bug in auth.ts");
     expect(obs?.parentNode).toBe(N_GOAL);
-    // nGoal.summary seeded from the first non-empty line.
-    expect(graph.nodes.get(N_GOAL)?.summary).toBe("Fix the login bug in auth.ts");
+    // nGoal.summary is NOT seeded at capture; the goal-extract stage distills it
+    // (the default no-op runStage mock here returns nothing → stays empty).
+    expect(graph.nodes.get(N_GOAL)?.summary).toBe("");
   });
 
   it("Observer fires at turn_end (background) → wraps new nodes + advances frontier", async () => {
@@ -471,7 +476,11 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     memkeeperExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
-
+    // session_start captured oInitialPrompt + fired the goal-extract call
+    // (fire-and-forget); let it settle and drop its runStage call so the
+    // assertion below targets only the compaction path.
+    await new Promise((r) => setTimeout(r, 0));
+    vi.mocked(runStage).mockClear();
     const compactEvt: SessionBeforeCompactEvent = {
       type: "session_before_compact",
       preparation: { firstKeptEntryId: "a1", tokensBefore: 50000 } as SessionBeforeCompactEvent["preparation"],
@@ -586,8 +595,8 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
       undefined,
       undefined,
     )) as { content: { type: string; text?: string }[] };
-    // selected-root mode: the render references the graph content (the
-    // oInitialPrompt-seeded nGoal summary 'Fix the login bug' is in the tree).
+    // selected-root mode: the render references the graph content (the verbatim
+    // oInitialPrompt 'Fix the login bug' is in the tree).
     const text = result.content.map((c) => c.text ?? "").join("\n");
     expect(text.length).toBeGreaterThan(0);
     expect(text).toContain("login");

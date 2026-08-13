@@ -20,7 +20,8 @@ import { getMemkeeperSettings } from "./config/schema.js";
 import { clearDetailsCache, computeDetailsAndCache, type EntryResolver } from "./format/details.js";
 import { toStoredTimestamp } from "./format/render.js";
 import { stripAnsi } from "./format/sanitize.js";
-import { applyCreateNode, applyRecordObservation, applySetMeta, MUTATE_SOURCE } from "./graph/mutations.js";
+import { abortGoalExtract, runGoalExtract } from "./goal-extract/run.js";
+import { applyCreateNode, applyRecordObservation } from "./graph/mutations.js";
 import { terminateRegexWorker } from "./graph/regex-runner.js";
 import { abortInFlight } from "./runtime/run-lock.js";
 import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
@@ -230,19 +231,26 @@ export async function onSessionStart(
     // Observer catch-up would observe the first user message as a regular obs
     // (or lose it) instead of capturing it as oInitialPrompt. Idempotent
     // (guarded by hasInitialPrompt); a new session's empty branch → no-op.
-    captureInitialPromptIfAbsent(ctx, pi);
+    // On a fresh capture this also fires the one-shot goal extraction
+    // (fire-and-forget) that sets nGoal.summary from the verbatim prompt.
+    captureInitialPromptAndExtract(ctx, pi, widget);
   }
 }
 
 /**
  * Capture the verbatim initial user message as oInitialPrompt under nGoal
- * (mechanical, NOT the Observer). No-op once present (the signal
- * derives from the graph via hasInitialPrompt, never a persisted boolean). The
- * Observer frontier starts past this message so it is never re-observed.
+ * (mechanical, NOT the Observer). No-op once present (the signal derives from
+ * the graph via hasInitialPrompt, never a persisted boolean). The Observer
+ * frontier starts past this message so it is never re-observed. nGoal.summary
+ * is NOT seeded here — the goal extraction (below) distills it from the
+ * verbatim prompt; until then it stays empty and the Builder is the backstop.
+ *
+ * Returns the verbatim text when this call just captured oInitialPrompt (so the
+ * caller can fire the goal extraction), or null on a no-op.
  */
-export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: ExtensionAPI): void {
+export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: ExtensionAPI): string | null {
   const graph = getGraphStore().graph;
-  if (graph.hasInitialPrompt) return;
+  if (graph.hasInitialPrompt) return null;
   const store = toStoreContext(pi, ctx);
   ensureNGoalSeeded(store);
 
@@ -250,9 +258,9 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   const firstUser = branch.find(
     (entry): entry is SessionMessageEntry => entry.type === "message" && entry.message.role === "user",
   );
-  if (firstUser === undefined) return; // no user message yet
+  if (firstUser === undefined) return null; // no user message yet
   const text = stripAnsi(extractMessageText(firstUser.message));
-  if (text.length === 0) return;
+  if (text.length === 0) return null;
 
   // record oInitialPrompt under nGoal (built once via makeObservation; the
   // persisted record derives from it, omitting the cached summaryTokens).
@@ -271,24 +279,6 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   });
   applyRecordObservation(graph, { obs });
 
-  // seed nGoal.summary from the first non-empty line — ONLY when empty. Once
-  // the Builder has refined nGoal.summary (or a prior capture seeded it), the
-  // capture must not clobber it (e.g. a reload where the summary was set but the
-  // oInitialPrompt observation is absent must preserve the refined summary).
-  const firstLine = text
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  const currentSummary = graph.nodes.get(N_GOAL)?.summary ?? "";
-  if (firstLine !== undefined && currentSummary === "") {
-    const metaDelta = applySetMeta(
-      graph,
-      { nodeId: N_GOAL, importance: null, archived: null, obsolete: null, summary: firstLine },
-      MUTATE_SOURCE,
-    );
-    appendGraphDelta(store, metaDelta);
-  }
-
   // persist the capture: the observation (content + provenance) as a
   // memkeeper.observation entry (coversUpToId = first user entry → frontier
   // advances past it); the record_observation is NOT a graph_delta (the store never applies mutations).
@@ -299,6 +289,32 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
     tokenCount: obs.detailsTokens, // verbatim source size (matches the Observer delta's raw-token semantics)
   };
   appendObservation(store, observationEntry);
+  return text;
+}
+
+/**
+ * Capture oInitialPrompt (synchronously — the verbatim record + frontier advance
+ * must commit before the Observer reads the graph, so the first user message is
+ * exclusively oInitialPrompt, never re-observed) and, on a fresh capture, fire
+ * the one-shot goal extraction that distills the verbatim prompt into
+ * nGoal.summary. The extraction is fire-and-forget; it logs on any failure and
+ * leaves nGoal.summary empty (the Builder backstop sets it later).
+ */
+export function captureInitialPromptAndExtract(
+  ctx: ExtensionContext,
+  pi: ExtensionAPI,
+  widget: WidgetController,
+): void {
+  const verbatim = captureInitialPromptIfAbsent(ctx, pi);
+  if (verbatim === null) return;
+  const store = toStoreContext(pi, ctx);
+  void runGoalExtract({
+    ctx,
+    settings: getMemkeeperSettings(),
+    store,
+    widget,
+    verbatimText: verbatim,
+  });
 }
 
 /** Shutdown: abort any in-flight stage (so it stops wasting LLM tokens on a
@@ -306,6 +322,7 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
  *  Fire-and-forget — the run releases in its own `finally`. */
 export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetController): void {
   abortInFlight();
+  abortGoalExtract();
   terminateRegexWorker();
   // Clear the resolver so recall never reads a dead session's manager.
   clearEntryResolver();

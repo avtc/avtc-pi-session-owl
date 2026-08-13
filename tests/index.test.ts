@@ -39,7 +39,7 @@ import {
   type MemkeeperConfig,
 } from "../src/config/schema.js";
 import memkeeperExtension from "../src/index.js";
-import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "../src/lifecycle.js";
+import { captureInitialPromptAndExtract, onSessionShutdown, onSessionStart } from "../src/lifecycle.js";
 import { makeBuilderRun, makeObserverRun, makeSelectorRun } from "../src/runtime/stages.js";
 import { resetForNewSession } from "../src/store/graph-store.js";
 import { onTurnEnd, setStageRuns } from "../src/triggers.js";
@@ -185,7 +185,7 @@ describe("memkeeperExtension (activate wiring)", () => {
     memkeeperExtension(pi);
     const handler = pi._handlers.get("turn_end")?.[0];
     handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx());
-    expect(captureInitialPromptIfAbsent).not.toHaveBeenCalled();
+    expect(captureInitialPromptAndExtract).not.toHaveBeenCalled();
     expect(onTurnEnd).not.toHaveBeenCalled();
   });
 
@@ -194,12 +194,12 @@ describe("memkeeperExtension (activate wiring)", () => {
     memkeeperExtension(pi);
     const handler = pi._handlers.get("turn_end")?.[0];
     handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx());
-    expect(captureInitialPromptIfAbsent).toHaveBeenCalledTimes(1);
+    expect(captureInitialPromptAndExtract).toHaveBeenCalledTimes(1);
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
   });
 
   it("turn_end still fires onTurnEnd when capture throws (error isolation)", () => {
-    vi.mocked(captureInitialPromptIfAbsent).mockImplementationOnce(() => {
+    vi.mocked(captureInitialPromptAndExtract).mockImplementationOnce(() => {
       throw new Error("boom");
     });
     const pi = makeFakePi() as FakePiWithHandlers;
@@ -220,7 +220,7 @@ describe("memkeeperExtension (activate wiring)", () => {
     // but the index.ts try/catch surfaces it in the memkeeper log and keeps the
     // handler returning normally.
     expect(() => handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx())).not.toThrow();
-    expect(captureInitialPromptIfAbsent).toHaveBeenCalledTimes(1);
+    expect(captureInitialPromptAndExtract).toHaveBeenCalledTimes(1);
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
   });
 

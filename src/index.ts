@@ -11,7 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerUserCommands } from "./commands/user.js";
 import { compactionHook } from "./compaction/hook.js";
 import { getMemkeeperSettings, initMemkeeperSettings, reloadMemkeeperConfig } from "./config/schema.js";
-import { captureInitialPromptIfAbsent, onSessionShutdown, onSessionStart } from "./lifecycle.js";
+import { captureInitialPromptAndExtract, onSessionShutdown, onSessionStart } from "./lifecycle.js";
 import { log } from "./log.js";
 import { makeMkRecallTool } from "./recall/mk-recall.js";
 import {
@@ -67,11 +67,12 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
     // Capture the verbatim initial user message SYNCHRONOUSLY before the
     // fire-and-forget trigger: the capture's graph mutations commit before the
     // Observer reads the graph, so the first user message is exclusively
-    // oInitialPrompt (never re-observed). Isolated so a capture failure (a real
-    // invariant bug, surfaced via the logger) does not suppress this turn's
-    // background trigger — the Observer still runs.
+    // oInitialPrompt (never re-observed). On a fresh capture this also fires the
+    // one-shot goal extraction (fire-and-forget) for nGoal.summary. Isolated so
+    // a capture failure (a real invariant bug, surfaced via the logger) does not
+    // suppress this turn's background trigger — the Observer still runs.
     try {
-      captureInitialPromptIfAbsent(ctx, pi);
+      captureInitialPromptAndExtract(ctx, pi, widget);
     } catch (err) {
       log.error("turn_end: initial-prompt capture failed", err);
     }
