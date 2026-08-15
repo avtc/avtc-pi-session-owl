@@ -23,7 +23,7 @@ import type { MemkeeperConfig } from "../config/schema.js";
 import { buildChunks, type ChunkOptions, type RenderedChunk } from "../format/chunk.js";
 import { computeDetailsAndCache, type EntryResolver } from "../format/details.js";
 import { toStoredTimestamp } from "../format/render.js";
-import { applyCreateNode, applyRecordObservation, type GraphDelta } from "../graph/mutations.js";
+import { applyCreateNode, applyRecordObservation, assertGraphStructure, type GraphDelta } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
@@ -155,10 +155,14 @@ export interface ObserverRunInput {
   maybeBuild?: () => Promise<boolean>;
 }
 
-/** A wrapper node paired with the observation id it wraps (persistence pairs). */
+/** A wrapper node paired with the observation it wraps, plus the prepared
+ *  create_node delta (persistence pairs — built whole in the prepare phase,
+ *  applied + persisted only when the chunk fully prepares). */
 interface WrappedPair {
   readonly nodeId: NodeId;
   readonly obsId: ObsId;
+  readonly obs: ReturnType<typeof makeObservation>;
+  readonly delta: Extract<GraphDelta, { type: "create_node" }>;
 }
 
 // --- the run ---------------------------------------------------------------
@@ -329,7 +333,9 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
  *  `memkeeper.observation` entry spanning this chunk's coversFromId/coversUpToId
  *  range. The frontier advances to the chunk's lastEntryId via appendObservation
  *  — so an abort loses only the in-flight chunk; completed chunks are durable
- *  and skipped on re-run. */
+ *  and skipped on re-run. The chunk is prepared WHOLE before anything applies
+ *  (ids minted, details counted, observations built), so a mid-prepare throw
+ *  leaves the graph exactly as it was — memory never runs ahead of the log. */
 function persistChunk(
   store: StoreContext,
   chunk: RenderedChunk,
@@ -338,32 +344,36 @@ function persistChunk(
   resolver: EntryResolver,
 ): void {
   const graph = getGraphStore().graph;
-  const deltas: GraphDelta[] = [];
+  // one structural gate per chunk: an invalid graph rejects the whole chunk
+  // BEFORE anything applies (no partial chunk, no empty-wrapper cruft)
+  assertGraphStructure(graph, "persist_chunk");
+  // prepare: build every wrapper delta + observation as pure data. Ids are
+  // minted from local counters so nothing in the graph advances until apply.
   const pairs: WrappedPair[] = [];
+  let nodeSeq = graph.nextNodeId;
+  let obsSeq = graph.nextObsId;
   for (const record of records) {
-    const nodeId = `n${graph.nextNodeId}` as NodeId;
+    const nodeId = `n${nodeSeq}` as NodeId;
+    nodeSeq += 1;
+    const obsId = `o${obsSeq}` as ObsId;
+    obsSeq += 1;
+    const firstSource = record.sourceEntryIds.map((id) => entryById.get(id)).find((entry) => entry !== NO_SOURCE_ENTRY);
+    const timestamp = firstSource !== undefined ? toStoredTimestamp(firstSource.timestamp) : nowStoredTimestamp();
+    const counts = computeDetailsAndCache(obsId, record.sourceEntryIds, resolver);
     // the wrapper carries the observation's one-line summary at birth so every
     // node always reads with a summary; the Builder refines it later.
-    applyCreateNode(graph, {
-      id: nodeId,
-      summary: record.summary,
-      importance: record.importance,
-      parentNode: null,
-      state: "new",
-    });
-    deltas.push({
+    const delta = {
       type: "create_node",
       id: nodeId,
       summary: record.summary,
       importance: record.importance,
       parentNode: null,
       state: "new",
-    });
-    const obsId = `o${graph.nextObsId}` as ObsId;
-    const firstSource = record.sourceEntryIds.map((id) => entryById.get(id)).find((entry) => entry !== NO_SOURCE_ENTRY);
-    const timestamp = firstSource !== undefined ? toStoredTimestamp(firstSource.timestamp) : nowStoredTimestamp();
-    const counts = computeDetailsAndCache(obsId, record.sourceEntryIds, resolver);
-    applyRecordObservation(graph, {
+    } as const;
+    pairs.push({
+      nodeId,
+      obsId,
+      delta,
       obs: makeObservation({
         id: obsId,
         summary: record.summary,
@@ -375,21 +385,30 @@ function persistChunk(
         detailsTokens: counts?.tokens,
       }),
     });
-    pairs.push({ nodeId, obsId });
+  }
+  // apply: the prepared wrappers + observations land in the graph
+  for (const pair of pairs) {
+    applyCreateNode(graph, {
+      id: pair.delta.id,
+      summary: pair.delta.summary,
+      importance: pair.delta.importance,
+      parentNode: null,
+      state: "new",
+    });
+    applyRecordObservation(graph, { obs: pair.obs });
   }
   // wrappers: one graph_delta entry holding this chunk's create_node ops.
-  appendGraphDeltaBatch(store, deltas);
+  appendGraphDeltaBatch(
+    store,
+    pairs.map((pair) => pair.delta),
+  );
   // observations: one observation entry covering THIS chunk's range
   // (coversUpToId advances the frontier; a later record-bearing chunk's range
   // subsumes any intervening 0-record chunks).
   let tokenCount = 0;
   const serializedRecords = pairs.map((pair) => {
-    const obs = graph.observations.get(pair.obsId);
-    if (obs === undefined) {
-      throw new Error("observer wrap: observation missing");
-    }
-    tokenCount += obs.detailsTokens; // verbatim source size processed this batch
-    return encodeObservation(obs);
+    tokenCount += pair.obs.detailsTokens; // verbatim source size processed this batch
+    return encodeObservation(pair.obs);
   });
   const entry: ObservationEntry = {
     coversFromId: chunk.firstEntryId,

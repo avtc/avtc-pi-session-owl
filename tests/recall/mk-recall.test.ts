@@ -1126,3 +1126,78 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     });
   });
 });
+
+// --- renderResult (transcript collapse) -------------------------------------
+
+/** A fake theme: wraps text in markers so assertions can see color classes. */
+const renderTheme = {
+  fg: (cls: string, s: string) => `<${cls}>${s}</${cls}>`,
+} as unknown as Parameters<NonNullable<ReturnType<typeof makeMkRecallTool>["renderResult"]>>[2];
+
+/** The mk_recall tool definition's renderResult, if registered. */
+function renderResultOf(): NonNullable<ReturnType<typeof makeMkRecallTool>["renderResult"]> {
+  const def = makeMkRecallTool();
+  if (def.renderResult === undefined) throw new Error("mk_recall has no renderResult");
+  return def.renderResult;
+}
+
+type RenderResultFn = ReturnType<typeof renderResultOf>;
+/** The render context arg is unused by the renderer — a named undefined for it. */
+const NO_CONTEXT = undefined as unknown as Parameters<RenderResultFn>[3];
+/** Collapsed-mode options. */
+const COLLAPSED = { expanded: false, isPartial: false } as const;
+const EXPANDED = { expanded: true, isPartial: false } as const;
+
+/** Invoke the renderer (4-arg pi signature → 3-arg test call). */
+function render(result: unknown, options: { expanded: boolean; isPartial: boolean }): string {
+  return renderedText(renderResultOf()(result as Parameters<RenderResultFn>[0], options, renderTheme, NO_CONTEXT));
+}
+
+function renderedText(out: unknown): string {
+  return (out as unknown as { text: string }).text;
+}
+
+function resultOver(
+  linesOfText: string[],
+  error: boolean,
+): { content: { type: "text"; text: string }[]; details: { error: boolean } } {
+  return { content: [{ type: "text", text: linesOfText.join("\n") }], details: { error } };
+}
+
+describe("mk_recall renderResult (collapsed transcript render)", () => {
+  const many = Array.from({ length: 20 }, (_, i) => `n${i + 1} · line ${i + 1}`);
+
+  it("collapsed: a >12-line result truncates to 12 lines + expand hint", () => {
+    const out = render(resultOver(many, false), COLLAPSED);
+    const lines = out.split("\n");
+    expect(lines).toHaveLength(13); // 12 content + hint
+    expect(lines[12]).toContain("(Ctrl+O to expand)");
+    expect(out).not.toContain("line 13");
+  });
+
+  it("expanded: the full text renders with no hint", () => {
+    const out = render(resultOver(many, false), EXPANDED);
+    expect(out).toContain("line 20");
+    expect(out).not.toContain("Ctrl+O to expand");
+  });
+
+  it("collapsed: a result fitting in 12 lines renders whole (no hint)", () => {
+    const few = many.slice(0, 12);
+    const out = render(resultOver(few, false), COLLAPSED);
+    expect(out).toContain("line 12");
+    expect(out).not.toContain("Ctrl+O to expand");
+  });
+
+  it("boundary: exactly 13 lines truncates; 12 does not", () => {
+    const thirteen = render(resultOver(many.slice(0, 13), false), COLLAPSED);
+    expect(thirteen).toContain("(Ctrl+O to expand)");
+    const twelve = render(resultOver(many.slice(0, 12), false), COLLAPSED);
+    expect(twelve).not.toContain("Ctrl+O to expand");
+  });
+
+  it("error results render untruncated even when collapsed", () => {
+    const out = render(resultOver(many, true), COLLAPSED);
+    expect(out).toContain("line 20");
+    expect(out).not.toContain("Ctrl+O to expand");
+  });
+});

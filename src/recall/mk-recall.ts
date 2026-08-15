@@ -8,7 +8,8 @@
 // tree in selected-root (falling back to the source graph when no tree exists
 // yet). Read-only; never mutates.
 
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { getMemkeeperSettings } from "../config/schema.js";
 import { renderDetails } from "../format/details.js";
@@ -58,6 +59,10 @@ const VIEWER: RenderViewer = NON_BUILDER;
 const TERSE_CONTENT_MAX = 120;
 const TRUNCATION_ELLIPSIS = "…";
 const CHILD_DEPTH = 1;
+/** Maximum lines a collapsed (non-expanded) transcript render shows. */
+const COLLAPSED_LINE_LIMIT = 12;
+/** Appended under a truncated collapsed render — expanding shows the full text. */
+const EXPAND_HINT = "(Ctrl+O to expand)";
 /** Named undefined for an observation block's showParent (no bare literals). */
 const NO_PARENT: string | undefined = undefined;
 /** Named undefined for the pre-computed grep excerpts arg (no bare literals). */
@@ -726,7 +731,39 @@ export function makeMkRecallTool(): ToolDefinition<typeof MK_RECALL_PARAMS> {
         details: result.error ? { error: true } : { ok: true },
       };
     },
+    renderResult(result, options, theme) {
+      return renderRecallResult(result, options, theme);
+    },
   };
+}
+
+/** The subset of a tool result the transcript renderer reads (satisfied by
+ *  pi's AgentToolResult — content blocks + the error flag). */
+interface RenderableToolResult {
+  readonly content?: readonly { readonly type: string; readonly text?: string }[];
+  readonly details?: unknown;
+}
+
+/** Transcript render for mk_recall results. The default fallback prints the
+ *  whole text — a browse or fullDetails read would flood the visible transcript.
+ *  Collapsed shows the first COLLAPSED_LINE_LIMIT lines + the expand hint;
+ *  expanded (Ctrl+O) and error results render in full. */
+function renderRecallResult(result: RenderableToolResult, options: { expanded?: boolean }, theme: Theme): Text {
+  const textBlocks = result.content?.filter((block) => block.type === "text") ?? [];
+  const last = textBlocks.length > 0 ? (textBlocks[textBlocks.length - 1]?.text ?? "") : "";
+  const isError =
+    typeof result.details === "object" &&
+    result.details !== null &&
+    (result.details as { error?: unknown }).error === true;
+  if (options.expanded === true || isError) {
+    return new Text(theme.fg("toolOutput", last), 0, 0);
+  }
+  const lines = last.split("\n");
+  if (lines.length <= COLLAPSED_LINE_LIMIT) {
+    return new Text(theme.fg("toolOutput", last), 0, 0);
+  }
+  const truncated = lines.slice(0, COLLAPSED_LINE_LIMIT).join("\n");
+  return new Text(theme.fg("toolOutput", `${truncated}\n${EXPAND_HINT}`), 0, 0);
 }
 
 /** A recall result: the rendered text + whether it is a hard error (invalid

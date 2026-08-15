@@ -793,3 +793,56 @@ describe("runObserver", () => {
     for (const id of seen) expect(id).toBe("sess-7:observe");
   });
 });
+
+describe("runObserver chunk atomicity", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    setClock(() => "2026-07-29T10:05:00.000Z");
+    _resetSessionAffinity();
+  });
+  afterAll(() => {
+    setClock(null);
+  });
+
+  it("a structurally invalid graph rejects the whole chunk: nothing applied, nothing persisted, no wrapper cruft", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // seed a corrupt graph: nGoal listing a phantom observation
+    resetForNewSession();
+    const store = getGraphStore();
+    store.graph.nodes.set("nGoal", {
+      id: "nGoal",
+      summary: "",
+      summaryTokens: 0,
+      importance: "crit",
+      state: "active",
+      parentNode: null,
+      observationIds: ["o404"],
+      childNodeIds: [],
+      supersededBy: null,
+      timestamps: { createdAt: "t", updatedAt: "t", rangeStart: "t", rangeEnd: "t" },
+    });
+    const nodesBefore = store.graph.nodes.size;
+    const obsBefore = store.graph.observations.size;
+
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = scriptedRunStage([
+      [
+        { summary: "Chose vitest for all new tests.", importance: "high", sourceEntryIds: ["a1"] },
+        { summary: "A second record in the same chunk.", importance: "med", sourceEntryIds: ["a1"] },
+      ],
+    ]);
+
+    await expect(runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }))).rejects.toThrow(
+      /missing observation|multi|parent/i,
+    );
+
+    // memory untouched: no wrapper, no observation — applied state == persisted state
+    expect(store.graph.nodes.size).toBe(nodesBefore);
+    expect(store.graph.observations.size).toBe(obsBefore);
+    // nothing persisted for the chunk
+    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "memkeeper.observation")).toHaveLength(0);
+    expect(getGraphStore().observerFrontier).toBeNull();
+  });
+});

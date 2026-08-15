@@ -13,7 +13,7 @@ import {
   setClock,
 } from "../../src/graph/mutations.js";
 import type { StoreContext } from "../../src/store/graph-store.js";
-import { MemkeeperGraph, makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
+import { MemkeeperGraph, makeObservation, N_GOAL, type NodeId, type ObsId } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 
@@ -538,6 +538,54 @@ describe("Builder mutate tools", () => {
       expect(Check(MERGE_PARAMS, { sourceIds: ["n8"], destId: "n7", newSummary: "merged", importance: "crit" })).toBe(
         true,
       );
+    });
+  });
+
+  describe("pre-op structural gate (corrupt graph)", () => {
+    /** A comparable fingerprint of the whole graph — catches ANY in-memory
+     *  drift from a rejected call (the applied-but-unpersisted failure mode). */
+    const fingerprint = (g: MemkeeperGraph): string =>
+      JSON.stringify({
+        nodes: [...g.nodes.entries()].map(([id, n]) => [id, n]),
+        observations: [...g.observations.entries()].map(([id, o]) => [id, o]),
+      });
+
+    it("rejects mv without mutating memory or persisting (applied ⇒ persisted)", async () => {
+      const g = buildGraph();
+      const { ctx, entries } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      // corrupt: n7 lists a phantom observation (e.g. a poison snapshot load)
+      g.nodes.get("n7")?.observationIds.push("o404" as ObsId);
+      const before = fingerprint(g);
+      const r = await callTool(tools, "mv", { sourceIds: ["o5"], destId: "n12" });
+      expect(isError(r)).toBe(true);
+      expect(textOf(r)).toBe("mv: a node references a missing observation");
+      expect(graphDeltas(entries)).toHaveLength(0);
+      expect(fingerprint(g)).toBe(before);
+    });
+
+    it("rejects merge without mutating memory or persisting", async () => {
+      const g = buildGraph();
+      const { ctx, entries } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      g.nodes.get("n7")?.observationIds.push("o404" as ObsId);
+      const before = fingerprint(g);
+      const r = await callTool(tools, "merge", { sourceIds: ["n8"], destId: "n7", newSummary: "x" });
+      expect(isError(r)).toBe(true);
+      expect(graphDeltas(entries)).toHaveLength(0);
+      expect(fingerprint(g)).toBe(before);
+    });
+
+    it("rejects mkdir without creating the node", async () => {
+      const g = buildGraph();
+      const { ctx, entries } = makeFakeStore();
+      const tools = makeBuilderTools(g, ctx, DEFAULT_CONFIG);
+      g.nodes.get("n7")?.observationIds.push("o404" as ObsId);
+      const before = fingerprint(g);
+      const r = await callTool(tools, "mkdir", { summary: "new container", importance: "high" });
+      expect(isError(r)).toBe(true);
+      expect(graphDeltas(entries)).toHaveLength(0);
+      expect(fingerprint(g)).toBe(before);
     });
   });
 });

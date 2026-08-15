@@ -22,9 +22,9 @@ import {
   childLinksConsistent,
   dissolvable,
   everyObservationAttached,
-  exactlyOneNodePerObservation,
   GraphInvariantError,
   noCycles,
+  observationParentingError,
 } from "./invariants.js";
 
 /** Whether special-node protection (nGoal/oInitialPrompt) is enforced. */
@@ -102,11 +102,16 @@ function requireNode(graph: MemkeeperGraph, id: NodeId, what: string): Node {
   return node;
 }
 
-/** Post-condition guard: structural invariants (not the nGoal seed invariant). */
-function assertStructural(graph: MemkeeperGraph, what: string): void {
+/** Structural invariants (not the nGoal seed invariant). The post-condition
+ *  guard inside every mutator, the pre-mutation gate for tool-driven mutations
+ *  (a structurally invalid graph rejects the op BEFORE anything is applied),
+ *  and the pre-encode gate for the compaction snapshot (an invalid graph is
+ *  never frozen into `details`). Throws `GraphInvariantError` naming the first
+ *  violation. */
+export function assertGraphStructure(graph: MemkeeperGraph, what: string): void {
   if (!everyObservationAttached(graph)) throw new GraphInvariantError(`${what}: an observation is detached`);
-  if (!exactlyOneNodePerObservation(graph))
-    throw new GraphInvariantError(`${what}: an observation is multi/root parented`);
+  const parenting = observationParentingError(graph);
+  if (parenting !== null) throw new GraphInvariantError(`${what}: ${parenting}`);
   if (!childLinksConsistent(graph)) throw new GraphInvariantError(`${what}: a containment child-link is inconsistent`);
   if (!noCycles(graph)) throw new GraphInvariantError(`${what}: the containment tree has a cycle`);
 }
@@ -252,7 +257,7 @@ export function applyCreateNode(
     }
   }
   if (graph.nextNodeId <= parseSeq(args.id)) graph.nextNodeId = parseSeq(args.id) + 1;
-  if (args.skipStructural !== true) assertStructural(graph, "create_node");
+  if (args.skipStructural !== true) assertGraphStructure(graph, "create_node");
   const { skipStructural: _omit, ...delta } = args;
   void _omit;
   return { ...delta, type: "create_node" };
@@ -272,7 +277,7 @@ export function applyRecordObservation(
   if (!parent.observationIds.includes(obs.id)) parent.observationIds.push(obs.id);
   touchAndRecompute(graph, parent);
   if (graph.nextObsId <= parseSeq(obs.id)) graph.nextObsId = parseSeq(obs.id) + 1;
-  if (opts.skipStructural !== true) assertStructural(graph, "record_observation");
+  if (opts.skipStructural !== true) assertGraphStructure(graph, "record_observation");
   return { type: "record_observation", obs };
 }
 
@@ -370,7 +375,7 @@ export function applyMv(
     const n = graph.nodes.get(id);
     if (n !== undefined) touchAndRecompute(graph, n);
   }
-  if (opts.skipStructural !== true) assertStructural(graph, "mv");
+  if (opts.skipStructural !== true) assertGraphStructure(graph, "mv");
   return {
     type: "mv",
     sourceIds: args.sourceIds,
@@ -478,7 +483,7 @@ export function applyMerge(
     const n = graph.nodes.get(id);
     if (n !== undefined) touchAndRecompute(graph, n);
   }
-  if (opts.skipStructural !== true) assertStructural(graph, "merge");
+  if (opts.skipStructural !== true) assertGraphStructure(graph, "merge");
   return {
     type: "merge",
     sourceIds: args.sourceIds,
@@ -527,7 +532,7 @@ export function applySupersede(
     node.supersededBy = replacement.id;
     node.timestamps.updatedAt = currentTimestamp();
   }
-  if (opts.skipStructural !== true) assertStructural(graph, "supersede");
+  if (opts.skipStructural !== true) assertGraphStructure(graph, "supersede");
   return { type: "supersede", nodeId: args.nodeId, supersededNodeIds: args.supersededNodeIds };
 }
 
@@ -572,7 +577,7 @@ export function applySetMeta(
     node.summaryTokens = estimateContentTokens(args.summary);
   }
   node.timestamps.updatedAt = currentTimestamp();
-  if (opts.skipStructural !== true) assertStructural(graph, "set_meta");
+  if (opts.skipStructural !== true) assertGraphStructure(graph, "set_meta");
   return {
     type: "set_meta",
     nodeId: args.nodeId,

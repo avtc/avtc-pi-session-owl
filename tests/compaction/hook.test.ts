@@ -19,7 +19,7 @@ import {
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { _resetRunLock, acquireOrSkip } from "../../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
-import { N_GOAL } from "../../src/types.js";
+import { N_GOAL, type ObsId } from "../../src/types.js";
 import { NO_OP_WIDGET } from "../../src/widget/tracker.js";
 
 // --- fixtures ---------------------------------------------------------------
@@ -174,6 +174,31 @@ describe("compactionHook", () => {
     expect(compaction.tokensBefore).toBe(50000);
     expect(compaction.summary).toContain("# Memory");
     expect(compaction.details).toBeDefined();
+  });
+
+  it("cancels compaction (no snapshot) when the graph is structurally invalid at encode time", async () => {
+    seedStoreGraph();
+    // poison: a node lists an observation whose record does not exist
+    const g = getGraphStore().graph;
+    g.nodes.get(N_GOAL)?.observationIds.push("o404" as ObsId);
+    const calls = newCalls();
+    setCompactionStageRuns(fakeRuns(calls));
+    const notify = vi.fn();
+
+    const result = await compactionHook(
+      compactEvent({}),
+      makeFakeCtx([], notify),
+      makeFakePi(),
+      NO_OP_WIDGET,
+      TODO_ABSENT,
+    );
+
+    // cancelled with a visible error — never a poisoned snapshot
+    expect((result as { cancel?: boolean }).cancel).toBe(true);
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("memkeeper compaction failed: encode snapshot: a node references a missing observation"),
+      "error",
+    );
   });
 
   it("passes Observer catch-up (gap-driven), Builder, Selector in order", async () => {

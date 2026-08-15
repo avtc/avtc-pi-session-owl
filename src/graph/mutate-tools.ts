@@ -18,6 +18,7 @@ import {
   applyMerge,
   applyMv,
   applySetMeta,
+  assertGraphStructure,
   type GraphDelta,
   type MutationPolicy,
 } from "./mutations.js";
@@ -70,12 +71,16 @@ function stripOpPrefix(message: string): string {
 
 /** Run a mutation, persist its delta via `ctx.persist`, and report success — or
  *  catch a structural rejection (GraphInvariantError) and surface it as an error
- *  result the model can retry from. A rejected mutate leaves the graph (and the
- *  delta log, when the Builder persists) unchanged (the mutator throws before
- *  mutating). `describe(delta)` builds the success text from the APPLIED delta so
- *  the model learns any new/resolved ids (e.g. merge with destId=null resolves a
+ *  result the model can retry from. The graph is structurally validated BEFORE
+ *  the op applies: a graph that is already invalid rejects the call with zero
+ *  mutation, so memory never ends up ahead of the delta log (applied-but-
+ *  unpersisted state). A structural failure AFTER apply is an op bug — it is
+ *  surfaced the same way (never silently swallowed), with nothing persisted.
+ *  `describe(delta)` builds the success text from the APPLIED delta so the
+ *  model learns any new/resolved ids (e.g. merge with destId=null resolves a
  *  new root id). */
 export function runMutate(
+  graph: MemkeeperGraph,
   ctx: MutateContext,
   what: string,
   apply: () => GraphDelta,
@@ -83,6 +88,7 @@ export function runMutate(
 ): AgentToolResult<unknown> {
   let delta: GraphDelta;
   try {
+    assertGraphStructure(graph, what);
     delta = apply();
   } catch (cause) {
     if (cause instanceof GraphInvariantError) {
@@ -157,6 +163,7 @@ export function makeMkdirTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
       // generate the id from the counter BEFORE applyCreateNode (which advances it).
       const id = `n${graph.nextNodeId}` as NodeId;
       return runMutate(
+        graph,
         ctx,
         `mkdir ${id}`,
         () =>
@@ -191,6 +198,7 @@ export function makeMvTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool
       // newSummary is meaningful only when there is a dest node to rewrite.
       const newSummary = destId === null ? undefined : params.newSummary;
       return runMutate(
+        graph,
         ctx,
         "mv",
         () =>
@@ -227,6 +235,7 @@ export function makeMergeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
     async execute(_toolCallId, params) {
       const destId = (params.destId ?? null) as NodeId | null;
       return runMutate(
+        graph,
         ctx,
         "merge",
         () =>
@@ -275,6 +284,7 @@ export function makeSelectorSetMetaTool(
         return errorResult("set_meta: provide at least one of summary or importance.");
       }
       return runMutate(
+        graph,
         ctx,
         "set_meta",
         () =>

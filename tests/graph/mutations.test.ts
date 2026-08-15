@@ -11,6 +11,7 @@ import {
   applyRecordObservation,
   applySetMeta,
   applySupersede,
+  assertGraphStructure,
   MUTATE_SOURCE,
   MUTATE_WORKING_COPY,
   setClock,
@@ -556,6 +557,44 @@ describe("protection matrix (policy: source)", () => {
     expect(nodeById(g, N_GOAL).summary).toBe("the goal");
     expect(nodeById(g, N_GOAL).observationIds).not.toContain("o1");
     expect(g.nodes.has("n1")).toBe(true);
+  });
+});
+
+describe("assertGraphStructure", () => {
+  it("passes silently on a well-formed graph", () => {
+    const g = graphWithNGoal();
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) });
+    expect(() => assertGraphStructure(g, "gate")).not.toThrow();
+  });
+
+  it("names a phantom listing (a node list entry with no record)", () => {
+    const g = graphWithNGoal();
+    nodeById(g, "n1").observationIds.push("o404" as ObsId);
+    expect(() => assertGraphStructure(g, "gate")).toThrow("gate: a node references a missing observation");
+  });
+
+  it("names a double listing, a parent/list drift, and an unlisted record", () => {
+    const g = graphWithNGoal();
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) });
+    // double listing: oInitialPrompt (legitimately under nGoal) also listed under n1
+    nodeById(g, "n1").observationIds.push("oInitialPrompt" as ObsId);
+    expect(() => assertGraphStructure(g, "gate")).toThrow("gate: an observation is listed under multiple nodes");
+    nodeById(g, "n1").observationIds.pop();
+    // drift: the record's parentNode is not the listing node
+    obsById(g, "o1").parentNode = N_GOAL;
+    expect(() => assertGraphStructure(g, "gate")).toThrow("gate: an observation's parent does not match its listing");
+    obsById(g, "o1").parentNode = "n1";
+    // unlisted: the record exists but appears in no node's list
+    nodeById(g, "n1").observationIds = [];
+    expect(() => assertGraphStructure(g, "gate")).toThrow("gate: an observation is not listed under any node");
+  });
+
+  it("surfaces the specific reason through a mutator's post-condition guard", () => {
+    const g = graphWithNGoal();
+    nodeById(g, "n1").observationIds.push("o404" as ObsId);
+    expect(() =>
+      applyCreateNode(g, { id: "n9", summary: "x", importance: "med", parentNode: null, state: "active" }),
+    ).toThrow("create_node: a node references a missing observation");
   });
 });
 

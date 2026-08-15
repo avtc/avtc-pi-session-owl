@@ -11,6 +11,7 @@ import {
   isSpecial,
   nGoalInvariants,
   noCycles,
+  observationParentingError,
   supersededByCorrelatesState,
   validateGraph,
 } from "../../src/graph/invariants.js";
@@ -92,6 +93,30 @@ describe("structural validators", () => {
     const g = validGraph();
     node(g, "n5" as NodeId).observationIds.push("o1" as ObsId);
     expect(exactlyOneNodePerObservation(g)).toBe(false);
+  });
+
+  it("observationParentingError names each failure mode", () => {
+    const g = validGraph();
+    expect(observationParentingError(g)).toBeNull();
+
+    // phantom: a node list entry with no observation record behind it
+    node(g, "n5" as NodeId).observationIds.push("o404" as ObsId);
+    expect(observationParentingError(g)).toBe("a node references a missing observation");
+    node(g, "n5" as NodeId).observationIds.pop();
+
+    // double listing: the same obs under two nodes
+    node(g, "n5" as NodeId).observationIds.push("o1" as ObsId);
+    expect(observationParentingError(g)).toBe("an observation is listed under multiple nodes");
+    node(g, "n5" as NodeId).observationIds.pop();
+
+    // drift: the listing node is not the observation's own parentNode
+    observation(g, "o2" as ObsId).parentNode = "n6" as NodeId;
+    expect(observationParentingError(g)).toBe("an observation's parent does not match its listing");
+    observation(g, "o2" as ObsId).parentNode = "n5" as NodeId;
+
+    // unlisted: a record that appears in no node's list
+    g.observations.set("o9" as ObsId, obsWith({ id: "o9", parentNode: "n5" as NodeId }));
+    expect(observationParentingError(g)).toBe("an observation is not listed under any node");
   });
 
   it("exactlyOneNodePerObservation fails when a node lists an obs whose parentNode is a different node", () => {

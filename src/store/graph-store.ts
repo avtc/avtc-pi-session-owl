@@ -26,6 +26,7 @@ import {
   type Node,
   type NodeId,
   nowStoredTimestamp,
+  O_INITIAL_PROMPT,
   type Observation,
   type ObsId,
 } from "../types.js";
@@ -289,39 +290,109 @@ function materializeBase(details: MemkeeperDetails): MemkeeperGraph {
   });
 }
 
-/** Reconcile observation→node links; drop obs whose parent node is gone. */
+/** Reconcile observation→node links after reconstruction. The node lists
+ *  (snapshot ∘ post-snapshot deltas) are the AUTHORITY for membership: a
+ *  persisted record's `parentNode` is capture-time only — an mv/merge that ran
+ *  before the snapshot rewired the graph without rewriting the immutable
+ *  record, so the record can name a wrapper that dissolved long ago.
+ *  - a listing whose record never persisted is pruned (dead weight);
+ *  - an observation listed under one node is repaired to that node (stale
+ *    pointer or duplicate listing — the first listing wins);
+ *  - an unlisted observation links into its record's parent when that node
+ *    exists (post-snapshot capture, mid-pair repair); otherwise it is
+ *    re-wrapped in a fresh deterministic root — the ledger is never pruned on
+ *    load, so nothing captured is ever dropped.
+ *  Each node whose evidence set changed has its range recomputed once. */
 function reconcileLinks(graph: MemkeeperGraph): void {
-  // Collect the parents whose observation set grew (a newly-linked post-snapshot
-  // obs extends its time range) and recompute each parent's range ONCE — not
-  // once per newly-linked obs (recomputeRange re-scans the parent's evidence, so
-  // K new obs under one parent would otherwise trigger K identical subtree walks).
-  // Build a per-parent existing-obs Set once so the membership check is O(1)
-  // (a `.includes` per obs would be O(K) → O(K²) over a parent's evidence).
-  const existing = new Map<string, Set<string>>();
+  const touched = new Set<NodeId>();
+  // Pass 1: prune phantom listings; collect the surviving listers per record.
+  const listersOf = new Map<ObsId, NodeId[]>();
   for (const node of graph.nodes.values()) {
-    if (node.observationIds.length > 0) existing.set(node.id, new Set(node.observationIds));
+    let pruned = false;
+    const kept: ObsId[] = [];
+    for (const obsId of node.observationIds) {
+      if (!graph.observations.has(obsId)) {
+        pruned = true;
+        continue;
+      }
+      kept.push(obsId);
+      const listers = listersOf.get(obsId);
+      if (listers === undefined) listersOf.set(obsId, [node.id]);
+      else listers.push(node.id);
+    }
+    if (pruned) {
+      node.observationIds = kept;
+      touched.add(node.id);
+    }
   }
-  const touchedParents = new Set<string>();
+  // Pass 2: every listed observation belongs to its first listing node —
+  // repair the record's pointer and delist any duplicate.
+  for (const [obsId, listers] of listersOf) {
+    const keep = listers[0];
+    if (keep === undefined) continue;
+    for (const dup of listers.slice(1)) {
+      const n = graph.nodes.get(dup);
+      if (n !== undefined) {
+        n.observationIds = n.observationIds.filter((id) => id !== obsId);
+        touched.add(dup);
+      }
+    }
+    const obs = graph.observations.get(obsId);
+    if (obs !== undefined && obs.parentNode !== keep) {
+      obs.parentNode = keep;
+      touched.add(keep);
+    }
+  }
+  // Pass 3: unlisted records. oInitialPrompt is nGoal's permanent seed — the
+  // session-start seeding owns it when nGoal itself is absent (a fresh branch
+  // recaptures the prompt), so it is never re-wrapped or dropped here.
   for (const [obsId, obs] of graph.observations) {
+    if (listersOf.has(obsId)) continue;
     const parent = graph.nodes.get(obs.parentNode);
-    if (parent === undefined) {
-      // Parent node was dissolved/never created — drop the orphaned obs from the
-      // in-memory graph (persisted record survives for a future repair). Keeps
-      // the graph invariant-satisfiable.
-      graph.observations.delete(obsId);
+    if (parent !== undefined) {
+      if (!parent.observationIds.includes(obsId)) parent.observationIds.push(obsId);
+      touched.add(parent.id);
       continue;
     }
-    const have = existing.get(parent.id);
-    if (have === undefined || !have.has(obsId)) {
-      parent.observationIds.push(obsId);
-      have?.add(obsId);
-      touchedParents.add(parent.id);
-    }
+    if (obs.id === O_INITIAL_PROMPT) continue;
+    const wrapper = rewrapOrphan(graph, obs);
+    if (wrapper !== null) touched.add(wrapper);
   }
-  for (const parentId of touchedParents) {
-    const parent = graph.nodes.get(parentId as NodeId);
-    if (parent !== undefined) recomputeRange(graph, parent);
+  for (const id of touched) {
+    const n = graph.nodes.get(id);
+    if (n !== undefined) recomputeRange(graph, n);
   }
+}
+
+/** Re-wrap an orphaned record in a fresh root node mirroring the Observer's
+ *  capture pairing (`oK` under `nK`, `state:"new"`). Deterministic across
+ *  loads — the id derives from the record id (or the id counter when that id
+ *  is taken), so re-derivation mints the identical node. Returns the wrapper
+ *  id, or null when the record id carries no numeric sequence (unrepresentable). */
+function rewrapOrphan(graph: MemkeeperGraph, obs: Observation): NodeId | null {
+  const seq = parseSeq(obs.id);
+  if (seq <= 0) return null;
+  const preferred = `n${seq}` as NodeId;
+  const id = graph.nodes.has(preferred) ? (`n${graph.nextNodeId}` as NodeId) : preferred;
+  graph.nodes.set(
+    id,
+    makeNode({
+      id,
+      summary: obs.summary,
+      importance: obs.importance,
+      state: "new",
+      parentNode: null,
+      observationIds: [obs.id],
+      childNodeIds: [],
+      supersededBy: null,
+      createdAt: obs.timestamp,
+      rangeStart: obs.timestamp,
+      rangeEnd: obs.timestamp,
+    }),
+  );
+  obs.parentNode = id;
+  if (graph.nextNodeId <= parseSeq(id)) graph.nextNodeId = parseSeq(id) + 1;
+  return id;
 }
 
 /**
@@ -405,7 +476,8 @@ export async function load(ctx: StoreContext): Promise<void> {
     }
   }
 
-  // 4. reconcile observation links (post-snapshot obs → their wrapper nodes).
+  // 4. reconcile observation links (node lists are the authority; unlisted
+  //    records link into their wrapper or are re-wrapped in a fresh root).
   reconcileLinks(graph);
 
   // 5. Guarantee the id counters are past every loaded node/observation id.

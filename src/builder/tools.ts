@@ -89,6 +89,7 @@ function makeSupersedeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool
     parameters: SUPERSEDE_PARAMS,
     async execute(_toolCallId, params) {
       return runMutate(
+        graph,
         ctx,
         "supersede",
         () =>
@@ -130,6 +131,7 @@ function makeSetMetaTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<t
     parameters: SET_META_PARAMS,
     async execute(_toolCallId, params) {
       return runMutate(
+        graph,
         ctx,
         "set_meta",
         () =>

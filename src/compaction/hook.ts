@@ -25,6 +25,7 @@ import type { BuilderRunInput } from "../builder/run.js";
 import { runBuilder as realRunBuilder } from "../builder/run.js";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
 import { isRenderableEntry } from "../format/chunk.js";
+import { assertGraphStructure } from "../graph/mutations.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
 import type { ObserverRunInput } from "../observer/run.js";
@@ -185,6 +186,10 @@ export async function compactionHook(
     // Render + snapshot. The summary IS the injection.
     log.info("compaction: rendering summary + encoding snapshot");
     const store = getGraphStore();
+    // The snapshot freeze is the point of no return: every future load trusts
+    // `details` blindly. An invalid graph cancels the compaction visibly
+    // instead of poisoning the log (the last-good snapshot stays authoritative).
+    assertGraphStructure(store.graph, "encode snapshot");
     const touchedFiles = extractTouchedFiles(ctx.sessionManager, firstKeptEntryId);
     const oInitialPromptObs = store.graph.observations.get(O_INITIAL_PROMPT) ?? null;
     const summary = renderSummary({

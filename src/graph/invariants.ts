@@ -43,18 +43,28 @@ export function everyObservationAttached(graph: MemkeeperGraph): boolean {
  * over nodes (linear in node + edge count) — not nested in the obs count.
  */
 export function exactlyOneNodePerObservation(graph: MemkeeperGraph): boolean {
+  return observationParentingError(graph) === null;
+}
+
+/**
+ * The specific way `exactlyOneNodePerObservation` is violated, or null when it
+ * holds. Names the actual condition so a rejection tells the model (and the
+ * logs) what broke — a phantom listing, a double listing, a parent/list drift,
+ * or an unlisted observation — instead of one conflated message.
+ */
+export function observationParentingError(graph: MemkeeperGraph): string | null {
   const ownerOf = new Map<string, Node>();
   for (const node of graph.nodes.values()) {
     for (const obsId of node.observationIds) {
       const obs = graph.observations.get(obsId);
-      if (obs === undefined) return false; // phantom obs id in a node list
-      if (ownerOf.has(obsId)) return false; // listed under more than one node
-      if (obs.parentNode !== node.id) return false; // listed node != obs.parentNode
+      if (obs === undefined) return "a node references a missing observation";
+      if (ownerOf.has(obsId)) return "an observation is listed under multiple nodes";
+      if (obs.parentNode !== node.id) return "an observation's parent does not match its listing";
       ownerOf.set(obsId, node);
     }
   }
-  // every observation must appear in some node's list
-  return ownerOf.size === graph.observations.size;
+  if (ownerOf.size !== graph.observations.size) return "an observation is not listed under any node";
+  return null;
 }
 
 /**

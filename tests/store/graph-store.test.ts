@@ -19,6 +19,7 @@ import {
   RESCAN_TYPE,
   SELECTION_TYPE,
   type SelectionEntry,
+  type SerializedObservation,
   USAGE_TYPE,
   type UsageEntry,
 } from "../../src/store/codecs.js";
@@ -892,8 +893,13 @@ describe("load edge cases", () => {
 
     await load(fake); // must not throw
     const store = getGraphStore();
-    // the orphaned obs is dropped from the in-memory graph (persisted record survives)
-    expect(store.graph.observations.has("o1")).toBe(false);
+    // the record survives — re-wrapped in a deterministic fresh root (the
+    // ledger is never pruned on load); a later Builder pass re-groups it.
+    expect(store.graph.observations.has("o1")).toBe(true);
+    const wrapper = store.graph.nodes.get("n1" as NodeId);
+    expect(wrapper?.state).toBe("new");
+    expect(wrapper?.observationIds).toContain("o1");
+    expect(store.graph.observations.get("o1")?.parentNode).toBe("n1");
     expect(store.observerFrontier).toBe("e1");
   });
 
@@ -992,5 +998,190 @@ describe("load edge cases", () => {
     expect(n1?.observationIds).toContain("o1");
     // the linked obs extended the node's range (not stale at the snapshot value)
     expect(n1?.timestamps.rangeEnd).toBe("2026-07-09T12:00:00.000Z");
+  });
+});
+
+// --- load reconciliation (node lists authoritative) -------------------------
+
+/** The serialized-node literal used by snapshot fixtures in this describe. */
+function snapNode(id: string, observationIds: string[]): MemkeeperDetails["nodes"][number] {
+  return {
+    id,
+    summary: `summary of ${id}`,
+    summaryTokens: 3,
+    state: "active",
+    importance: "med",
+    parentNode: null,
+    observationIds,
+    childNodeIds: [],
+    supersededBy: null,
+    timestamps: { createdAt: "t0", updatedAt: "t0", rangeStart: "t0", rangeEnd: "t0" },
+  };
+}
+
+function snapshotDetails(nodes: MemkeeperDetails["nodes"], nextObsId: number, nextNodeId: number): MemkeeperDetails {
+  return {
+    type: DETAILS_TYPE,
+    version: "v1",
+    nodes,
+    oInitialPrompt: null,
+    nextObsId,
+    nextNodeId,
+    selectedTree: null,
+    lastCompactionLedger: null,
+  };
+}
+
+function obsRecord(id: string, parentNode: string, timestamp: string): SerializedObservation {
+  return {
+    id,
+    summary: `record ${id}`,
+    importance: "med",
+    sourceEntryIds: ["1"],
+    timestamp,
+    parentNode,
+  };
+}
+
+describe("load reconciliation (node lists authoritative)", () => {
+  it("repairs a pre-snapshot moved observation instead of dropping it (poison-free reload)", async () => {
+    // The incident shape: the Builder mv'd/merged o1 off its wrapper n1 into a
+    // container n2 BEFORE the snapshot. The snapshot lists o1 under n2; the
+    // immutable record still says parentNode n1 — and n1 dissolved at the merge.
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [obsRecord("o1", "n1", "2026-08-01T00:00:00.000Z")],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCompaction("e2", snapshotDetails([snapNode("n2", ["o1"])], 2, 3));
+    fake.leafId = "e2";
+
+    await load(fake);
+    const g = getGraphStore().graph;
+    // the record survives and its stale pointer is repaired to the listing node
+    expect(g.observations.get("o1")?.parentNode).toBe("n2");
+    expect(g.nodes.get("n2")?.observationIds).toContain("o1");
+    // the reloaded graph must admit the Observer's first mutation
+    expect(() =>
+      applyCreateNode(g, { id: "n9", summary: "x", importance: "med", parentNode: null, state: "new" }),
+    ).not.toThrow();
+  });
+
+  it("does not double-list when the stale parent node still exists", async () => {
+    // o1's record says n1 (still in the snapshot — the wrapper survived), but
+    // the snapshot lists o1 under n2. Repair wins: n1 must NOT gain a listing.
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [obsRecord("o1", "n1", "2026-08-01T00:00:00.000Z")],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCompaction("e2", snapshotDetails([snapNode("n1", []), snapNode("n2", ["o1"])], 2, 3));
+    fake.leafId = "e2";
+
+    await load(fake);
+    const g = getGraphStore().graph;
+    expect(g.observations.get("o1")?.parentNode).toBe("n2");
+    expect(g.nodes.get("n1")?.observationIds).toEqual([]);
+    expect(g.nodes.get("n2")?.observationIds).toEqual(["o1"]);
+  });
+
+  it("delists a double-listed snapshot entry to the first listing node", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [obsRecord("o1", "n1", "2026-08-01T00:00:00.000Z")],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    // a corrupt snapshot lists o1 under BOTH n1 and n2
+    fake.addCompaction("e2", snapshotDetails([snapNode("n1", ["o1"]), snapNode("n2", ["o1"])], 2, 3));
+    fake.leafId = "e2";
+
+    await load(fake);
+    const g = getGraphStore().graph;
+    expect(g.nodes.get("n1")?.observationIds).toEqual(["o1"]);
+    expect(g.nodes.get("n2")?.observationIds).toEqual([]);
+    expect(g.observations.get("o1")?.parentNode).toBe("n1");
+  });
+
+  it("prunes a phantom listing (an id with no persisted record)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [obsRecord("o1", "n1", "2026-08-01T00:00:00.000Z")],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCompaction("e2", snapshotDetails([snapNode("n1", ["o1", "o404"])], 3, 2));
+    fake.leafId = "e2";
+
+    await load(fake);
+    const g = getGraphStore().graph;
+    expect(g.nodes.get("n1")?.observationIds).toEqual(["o1"]);
+  });
+
+  it("re-wraps an orphaned record idempotently across loads", async () => {
+    // A record whose node is gone ANYWHERE (mid-pair crash, truncated delta
+    // log, snapshot that lost the wrapper) is re-wrapped in a deterministic
+    // fresh root — never pruned — and a second load mints the same id.
+    const build = async (): Promise<FakeStore> => {
+      freshStore();
+      const fake = new FakeStore();
+      fake.addCustomAt("e1", OBSERVATION_TYPE, {
+        coversFromId: null,
+        coversUpToId: "e1",
+        records: [obsRecord("o7", "n70", "2026-08-02T00:00:00.000Z")],
+        tokenCount: 1,
+      } satisfies ObservationEntry);
+      fake.leafId = "e1";
+      await load(fake);
+      return fake;
+    };
+    const first = await build();
+    const g1 = getGraphStore().graph;
+    expect(g1.nodes.get("n7")?.state).toBe("new");
+    expect(g1.nodes.get("n7")?.observationIds).toEqual(["o7"]);
+    expect(g1.observations.get("o7")?.parentNode).toBe("n7");
+    expect(g1.nodes.get("n7")?.timestamps.rangeStart).toBe("2026-08-02T00:00:00.000Z");
+    void first;
+    const second = await build();
+    const g2 = getGraphStore().graph;
+    expect(g2.nodes.get("n7")?.observationIds).toEqual(["o7"]);
+    void second;
+  });
+
+  it("links an unlisted oInitialPrompt record into nGoal", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [
+        {
+          id: "oInitialPrompt",
+          summary: "the goal text",
+          importance: "crit",
+          sourceEntryIds: ["1"],
+          timestamp: "t0",
+          parentNode: "nGoal",
+        },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCompaction("e2", snapshotDetails([snapNode(N_GOAL, [])], 1, 1));
+    fake.leafId = "e2";
+
+    await load(fake);
+    const g = getGraphStore().graph;
+    expect(g.nodes.get(N_GOAL)?.observationIds).toEqual(["oInitialPrompt"]);
+    expect(g.observations.get("oInitialPrompt")?.parentNode).toBe(N_GOAL);
   });
 });
