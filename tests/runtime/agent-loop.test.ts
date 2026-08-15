@@ -12,8 +12,11 @@ import type {
   Usage,
 } from "@earendil-works/pi-ai";
 import { EventStream } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _setBaseLoggerForTest } from "../../src/log.js";
 import {
+  makeNoProgressTurnStop,
   makeTurnCap,
   NO_EVENT_SINK,
   NO_LOOP_OVERRIDE,
@@ -99,6 +102,17 @@ function nonAssistantMessageEnd(): AgentEvent {
 
 function turnEnd(): AgentEvent {
   return { type: "turn_end", message: asstMsg(NO_USAGE), toolResults: [] };
+}
+
+/** A `tool_execution_end` event with a one-block text result. */
+function toolExecutionEnd(toolName: string, isError: boolean, text: string): AgentEvent {
+  return {
+    type: "tool_execution_end",
+    toolCallId: "tc1",
+    toolName,
+    result: { content: [{ type: "text", text }] },
+    isError,
+  } as AgentEvent;
 }
 
 function agentEnd(messages: AgentMessage[]): AgentEvent {
@@ -604,6 +618,58 @@ describe("makeTurnCap", () => {
   });
 });
 
+// --- makeNoProgressTurnStop ------------------------------------------------
+
+/** A shouldStopAfterTurn payload with a fabricated assistant message (text or empty). */
+function npTurn(text: string | null): Parameters<ReturnType<typeof makeNoProgressTurnStop>>[0] {
+  const content = text === null ? [] : [{ type: "text", text }];
+  return { message: { role: "assistant", content } } as unknown as Parameters<
+    ReturnType<typeof makeNoProgressTurnStop>
+  >[0];
+}
+
+describe("makeNoProgressTurnStop", () => {
+  it("stops on the Nth consecutive no-progress turn (no records, no text)", () => {
+    const count = 0;
+    const stop = makeNoProgressTurnStop(3, () => count);
+    expect(stop(npTurn(null))).toBe(false); // failed attempt 1
+    expect(stop(npTurn(null))).toBe(false); // failed attempt 2
+    expect(stop(npTurn(null))).toBe(true); // 3rd consecutive -> stop
+  });
+
+  it("never stops while the progress counter advances each turn", () => {
+    let count = 0;
+    const stop = makeNoProgressTurnStop(3, () => count);
+    for (let i = 0; i < 10; i += 1) {
+      count += 1;
+      expect(stop(npTurn(null))).toBe(false);
+    }
+  });
+
+  it("plain text output resets the streak", () => {
+    const count = 0;
+    const stop = makeNoProgressTurnStop(3, () => count);
+    expect(stop(npTurn(null))).toBe(false);
+    expect(stop(npTurn(null))).toBe(false);
+    expect(stop(npTurn("working…"))).toBe(false); // text resets
+    expect(stop(npTurn(null))).toBe(false);
+    expect(stop(npTurn(null))).toBe(false);
+    expect(stop(npTurn(null))).toBe(true); // 3 consecutive after the reset
+  });
+
+  it("a progress advance resets the streak", () => {
+    let count = 0;
+    const stop = makeNoProgressTurnStop(3, () => count);
+    expect(stop(npTurn(null))).toBe(false);
+    expect(stop(npTurn(null))).toBe(false);
+    count += 1;
+    expect(stop(npTurn(null))).toBe(false); // records landed -> reset
+    expect(stop(npTurn(null))).toBe(false);
+    expect(stop(npTurn(null))).toBe(false);
+    expect(stop(npTurn(null))).toBe(true);
+  });
+});
+
 describe("runStage — config wiring", () => {
   it("uses sequential tool execution and identity convertToLlm", async () => {
     const captured: Array<{ ctx: AgentContext; cfg: AgentLoopConfig }> = [];
@@ -666,5 +732,76 @@ describe("runStage — config wiring", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0]).not.toHaveProperty("sessionId");
     expect(captured[0]).not.toHaveProperty("cacheRetention");
+  });
+});
+
+describe("runStage — stopAfterTurn override", () => {
+  it("forwards stopAfterTurn as the loop's shouldStopAfterTurn (identity)", async () => {
+    const received: AgentLoopConfig["shouldStopAfterTurn"][] = [];
+    const spy: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _ctx, cfg) => {
+      received.push(cfg.shouldStopAfterTurn);
+      const stream = new EventStream<AgentEvent, AgentMessage[]>(
+        (e) => e.type === "agent_end",
+        (e) => (e.type === "agent_end" ? e.messages : []),
+      );
+      queueMicrotask(() => stream.push(agentEnd([])));
+      return stream;
+    };
+    const probe = makeNoProgressTurnStop(3, () => 0);
+    await runStage(baseInput({ loopFn: spy, stopAfterTurn: probe }));
+    expect(received).toHaveLength(1);
+    expect(received[0]).toBe(probe);
+  });
+
+  it("falls back to the maxTurns cap when no override is given", async () => {
+    const received: AgentLoopConfig["shouldStopAfterTurn"][] = [];
+    const spy: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _ctx, cfg) => {
+      received.push(cfg.shouldStopAfterTurn);
+      const stream = new EventStream<AgentEvent, AgentMessage[]>(
+        (e) => e.type === "agent_end",
+        (e) => (e.type === "agent_end" ? e.messages : []),
+      );
+      queueMicrotask(() => stream.push(agentEnd([])));
+      return stream;
+    };
+    await runStage(baseInput({ loopFn: spy, maxTurns: NO_TURN_LIMIT }));
+    expect(received).toHaveLength(1);
+    expect(received[0]).not.toBe(undefined);
+  });
+});
+
+describe("runStage — tool-call debug logging", () => {
+  const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  afterAll(() => {
+    _setBaseLoggerForTest(null);
+    _resetGetMemkeeperSettings();
+  });
+
+  it("logs each tool_execution_end (name + ok/error + bounded error text) when debugLog is on", async () => {
+    _setBaseLoggerForTest(sink);
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, debugLog: true }));
+    sink.debug.mockClear();
+    const events = [
+      toolExecutionEnd("record_observations", false, "recorded 2; continue or reply Done"),
+      toolExecutionEnd("mkdir", true, "boom\nsecond line"),
+      agentEnd([]),
+    ];
+    await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
+    const lines = sink.debug.mock.calls.map((c) => String(c[0]));
+    expect(lines.some((l) => l.includes("record_observations") && l.includes("ok"))).toBe(true);
+    const errLine = lines.find((l) => l.includes("mkdir"));
+    expect(errLine).toBeDefined();
+    expect(errLine).toContain("error");
+    expect(errLine).toContain("boom second line"); // newlines collapsed
+    expect((errLine ?? "").split("\n")).toHaveLength(1); // one physical line
+  });
+
+  it("logs nothing when debugLog is off", async () => {
+    _setBaseLoggerForTest(sink);
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, debugLog: false }));
+    sink.debug.mockClear();
+    const events = [toolExecutionEnd("record_observations", false, "recorded 1"), agentEnd([])];
+    await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
+    expect(sink.debug).not.toHaveBeenCalled();
   });
 });

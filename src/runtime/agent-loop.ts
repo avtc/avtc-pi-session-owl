@@ -38,6 +38,33 @@ export const NO_LOOP_OVERRIDE = null;
 /** Sequential tool execution (memkeeper stages run tools one-by-one). */
 export const SEQUENTIAL = "sequential" as const;
 
+/** Empty string constant for the no-progress text check (no bare literals). */
+const EMPTY_TEXT = "";
+/** Cap for the error text included in a tool-call debug line. */
+const TOOL_LOG_TEXT_CAP = 200;
+const ELLIPSIS = "…";
+
+/** Debug-log one completed tool call: name + ok/error (+ collapsed, capped
+ *  error text). Gives tool-level visibility (rejected/truncated calls, what
+ *  the model got wrong) when `debugLog` is on. */
+function logToolExecutionEnd(toolName: string, isError: boolean, result: unknown): void {
+  const status = isError ? "error" : "ok";
+  const text = isError ? firstResultText(result) : EMPTY_TEXT;
+  const suffix = text === EMPTY_TEXT ? EMPTY_TEXT : `: ${text}`;
+  log.debug(`runStage: tool ${toolName} ${status}${suffix}`);
+}
+
+/** First text block of a tool result, whitespace-collapsed and capped to one
+ *  physical line (long/stacky errors stay greppable without flooding the log). */
+function firstResultText(result: unknown): string {
+  const blocks = (result as { content?: Array<{ type: string; text?: string }> } | null)?.content;
+  if (!Array.isArray(blocks)) return EMPTY_TEXT;
+  const text = blocks.find((b) => b.type === "text" && typeof b.text === "string")?.text ?? EMPTY_TEXT;
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  if (oneLine.length <= TOOL_LOG_TEXT_CAP) return oneLine;
+  return `${oneLine.slice(0, TOOL_LOG_TEXT_CAP - ELLIPSIS.length)}${ELLIPSIS}`;
+}
+
 /** Per-run usage accumulated by a stage (input/output/cacheRead/cacheWrite/cost/turns). */
 export interface StageUsage {
   input: number;
@@ -76,6 +103,11 @@ export interface StageRunInput {
   reasoning: ThinkingLevel | null;
   /** Per-pass turn cap, or `NO_TURN_LIMIT` for unbounded. */
   maxTurns: number | null;
+  /** Turn-stop override: replaces the maxTurns cap as the loop's
+   *  shouldStopAfterTurn when present (e.g. the Observer's no-progress rule —
+   *  stop after N consecutive turns that neither advanced work nor emitted
+   *  text). */
+  stopAfterTurn?: TurnPredicate;
   /** Maximum output tokens per LLM call (per agentLoop turn). Applied to every
    *  provider request; a response hitting it is truncated and its tool calls
    *  rejected. Bounds runaway generation. */
@@ -170,6 +202,34 @@ export function makeTurnCap(
   };
 }
 
+/** A `shouldStopAfterTurn` predicate over one completed turn. */
+export type TurnPredicate = (turn: Parameters<NonNullable<AgentLoopConfig["shouldStopAfterTurn"]>>[0]) => boolean;
+
+/** Build a `shouldStopAfterTurn` that stops after `maxSequential` consecutive
+ *  NO-PROGRESS turns — a turn that neither advanced `progress()` (e.g. accepted
+ *  records count) nor emitted any plain text. A turn with text or progress
+ *  resets the streak. Bounds the degenerate retry spiral (model emits a
+ *  failing tool call every turn, never valid work, never a terminal plain-text
+ *  message) that would otherwise loop forever under `NO_TURN_LIMIT`. */
+export function makeNoProgressTurnStop(maxSequential: number, progress: () => number): TurnPredicate {
+  let streak = 0;
+  let lastProgress = progress();
+  return (turn) => {
+    const now = progress();
+    const advanced = now > lastProgress;
+    lastProgress = now;
+    const hasText = turn.message.content.some(
+      (block) => block.type === "text" && block.text.trim().length > EMPTY_TEXT.length,
+    );
+    if (advanced || hasText) {
+      streak = 0;
+      return false;
+    }
+    streak += 1;
+    return streak >= maxSequential;
+  };
+}
+
 /**
  * Run one LLM stage: build the agentLoop context + config, drain its event
  * stream, accumulate usage + streaming tokens, honour abort, and settle the
@@ -218,7 +278,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       // so the AgentMessage[]->Message[] transform is an identity cast.
       convertToLlm: (msgs: AgentMessage[]) => msgs as unknown as Message[],
       toolExecution: SEQUENTIAL,
-      shouldStopAfterTurn: makeTurnCap(input.maxTurns),
+      shouldStopAfterTurn: input.stopAfterTurn ?? makeTurnCap(input.maxTurns),
       getApiKey: () => input.apiKey,
       // Per-turn output cap (applied to every provider request; a truncated
       // response's tool calls are rejected by agentLoop).
@@ -279,6 +339,8 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
           }
         } else if (event.type === "turn_end") {
           usage.turns += 1;
+        } else if (event.type === "tool_execution_end") {
+          logToolExecutionEnd(event.toolName, event.isError, event.result);
         } else if (event.type === "message_update") {
           // Fallback tier: accumulate chars/4 over streamed deltas so
           // a live counter (fed via onEvent) always has a value even when the

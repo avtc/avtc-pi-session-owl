@@ -29,6 +29,7 @@ import { log } from "../log.js";
 import { notify } from "../notify.js";
 import { OBSERVER_SYSTEM } from "../prompts/observer.js";
 import {
+  makeNoProgressTurnStop,
   NO_LOOP_OVERRIDE,
   NO_TURN_LIMIT,
   runStage,
@@ -49,6 +50,9 @@ import type { WidgetController } from "../widget/tracker.js";
 
 export const RECORD_OBS_TOOL = "record_observations";
 const OBSERVE_STAGE = "observe" as const;
+/** Consecutive no-progress turns (no accepted records AND no plain text)
+ *  allowed before a chunk's agentLoop is stopped. Normal chunks take 1–2 turns. */
+const OBSERVER_NO_PROGRESS_TURNS = 3;
 const NO_SOURCE_ENTRY: SessionEntry | undefined = undefined;
 const EMPTY_GAP = 0;
 const EMPTY_RECORDS = 0;
@@ -119,6 +123,7 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
         accepted += 1;
       }
       const ack = `recorded ${accepted}${rejected > EMPTY_RECORDS ? `, ${rejected} rejected for invalid ids` : ""}; continue or reply Done`;
+      log.debug(`observer: record_observations accepted=${accepted} rejected=${rejected}`);
       return { content: [{ type: "text", text: ack }], details: { accepted, rejected } };
     },
   };
@@ -237,6 +242,11 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
           input.ctx.thinkingLevel,
         ),
         maxTurns: NO_TURN_LIMIT,
+        // Degenerate-spiral bound: stop the chunk after 3 consecutive turns
+        // that neither accepted records nor emitted plain text (a failing
+        // tool-call retry loop would otherwise spin forever — maxTurns is
+        // NO_TURN_LIMIT and each LLM call completes under the call timeout).
+        stopAfterTurn: makeNoProgressTurnStop(OBSERVER_NO_PROGRESS_TURNS, () => recordTool.records.length),
         maxTokens: input.settings.observerMaxTokens,
         timeoutMs: input.settings.llmCallTimeoutMs,
         onEvent: (event) => input.widget.onEvent(event),

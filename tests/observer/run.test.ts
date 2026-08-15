@@ -5,9 +5,11 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { setClock } from "../../src/graph/mutations.js";
+import { _setBaseLoggerForTest } from "../../src/log.js";
 import { type ObserverRunInput, runObserver } from "../../src/observer/run.js";
+import type { TurnPredicate } from "../../src/runtime/agent-loop.js";
 import { _resetSessionAffinity, setMemkeeperSessionBase } from "../../src/runtime/session-affinity.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import { NO_OP_WIDGET, type WidgetController } from "../../src/widget/tracker.js";
@@ -844,5 +846,114 @@ describe("runObserver chunk atomicity", () => {
     expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
     expect(appended.filter((e) => e.type === "memkeeper.observation")).toHaveLength(0);
     expect(getGraphStore().observerFrontier).toBeNull();
+  });
+});
+
+// --- no-progress turn stop + record-call debug logging -----------------------
+
+/** A shouldStopAfterTurn payload with a fabricated assistant message. */
+function stopTurn(text: string | null): Parameters<TurnPredicate>[0] {
+  const content = text === null ? [] : [{ type: "text", text }];
+  return { message: { role: "assistant", content } } as unknown as Parameters<TurnPredicate>[0];
+}
+
+describe("runObserver — no-progress turn stop", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    setClock(() => "2026-07-29T10:05:00.000Z");
+    _resetSessionAffinity();
+  });
+  afterAll(() => {
+    setClock(null);
+  });
+
+  it("wires a per-chunk stopAfterTurn: 3 consecutive no-progress turns stop, text resets", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const stops: (TurnPredicate | null)[] = [];
+    let seen: TurnPredicate | null = null;
+    const fn = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
+      seen = input.stopAfterTurn ?? null;
+      stops.push(seen);
+      const tool = input.tools[0] as AgentTool;
+      await tool.execute("c1", {
+        observations: [{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }],
+      });
+      return {
+        messages: [] as AgentMessage[],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: fn }));
+
+    // the chunk's stop rule saw records land (0 → 1): the FIRST stop call
+    // observes that advance and resets; then three consecutive no-progress
+    // turns stop on the fourth call
+    expect(seen).not.toBeNull();
+    const stop = seen as unknown as TurnPredicate;
+    expect(stop(stopTurn(null))).toBe(false); // advance observed -> reset
+    expect(stop(stopTurn(null))).toBe(false); // streak 1
+    expect(stop(stopTurn(null))).toBe(false); // streak 2
+    expect(stop(stopTurn(null))).toBe(true); // streak 3 -> stop
+    // a fresh chunk's rule resets on text: second run, no records accepted
+    const fn2 = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
+      seen = input.stopAfterTurn ?? null;
+      stops.push(seen);
+      return {
+        messages: [] as AgentMessage[],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+    await runObserver(makeArgs({ pi: makeFakePi().pi, ctx: makeFakeCtx(), unobserved, runStageFn: fn2 }));
+    const stop2 = seen as unknown as TurnPredicate;
+    expect(stop2(stopTurn(null))).toBe(false);
+    expect(stop2(stopTurn(null))).toBe(false);
+    expect(stop2(stopTurn("all rejected — retrying smaller"))).toBe(false); // text resets
+    expect(stop2(stopTurn(null))).toBe(false);
+    expect(stop2(stopTurn(null))).toBe(false);
+    expect(stop2(stopTurn(null))).toBe(true);
+    expect(stops.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("runObserver — record_observations debug logging", () => {
+  const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  beforeEach(() => {
+    resetForNewSession();
+    setClock(() => "2026-07-29T10:05:00.000Z");
+    _resetSessionAffinity();
+    _setBaseLoggerForTest(sink);
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, debugLog: true }));
+    sink.debug.mockClear();
+  });
+  afterAll(() => {
+    setClock(null);
+    _setBaseLoggerForTest(null);
+    _resetGetMemkeeperSettings();
+  });
+
+  it("logs accepted/rejected counts per record_observations call when debugLog is on", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = scriptedRunStage([
+      [
+        { summary: "Every commit must keep the build green.", importance: "crit", sourceEntryIds: ["a1"] }, // good
+        { summary: "Foreign fact.", importance: "med", sourceEntryIds: ["ZZZ-not-in-chunk"] }, // foreign id
+      ],
+    ]);
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+    const line = sink.debug.mock.calls.map((c) => String(c[0])).find((l) => l.includes("record_observations"));
+    expect(line).toBeDefined();
+    expect(line).toContain("accepted=1");
+    expect(line).toContain("rejected=1");
   });
 });

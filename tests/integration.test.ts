@@ -28,6 +28,8 @@ vi.mock("../src/runtime/agent-loop.js", () => ({
   NO_STAGE_END_HOOK: null,
   NO_LOOP_OVERRIDE: null,
   SEQUENTIAL: "sequential",
+  // the mock never stops on no-progress (turn-stop logic is unit-tested for real)
+  makeNoProgressTurnStop: (): (() => boolean) => (): boolean => false,
 }));
 
 import {
