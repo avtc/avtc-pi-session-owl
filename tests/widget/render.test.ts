@@ -99,6 +99,17 @@ describe("formatWidgetLine", () => {
     expect(single).not.toContain("1/1");
   });
 
+  it("BUILD with an in-flight observe batch shows N/M in the obs section (mid-catch-up Builder)", () => {
+    const { text } = render(snap({ stage: "build", pass: 1, batch: { done: 3, total: 12 } }));
+    expect(text).toContain("obs 3/12 →");
+    expect(text).toContain("#1");
+  });
+
+  it("BUILD with no in-flight batch shows no N/M (post-Observer Builder at compaction)", () => {
+    const { text } = render(snap({ stage: "build", pass: 1, batch: null }));
+    expect(text).not.toMatch(/obs \d+\/\d+/);
+  });
+
   it("BUILD appends #pass to the roots section", () => {
     const { text } = render(
       snap({

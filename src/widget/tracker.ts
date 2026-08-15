@@ -23,7 +23,10 @@ import { formatWidgetLine } from "./render.js";
 /** The maintenance stages the widget surfaces (one at a time; run-level). */
 export type WidgetStage = "observe" | "build" | "select";
 
-/** Observe multi-chunk progress (shown only when total > 1). */
+/** Observe multi-chunk progress (shown only when total > 1). Survives an
+ *  interleaved stage start (the mid-catch-up Builder runs inside an observe
+ *  run); cleared on endStage so a finished/aborted batch never leaks into a
+ *  later independent stage. */
 export interface BatchProgress {
   done: number;
   total: number;
@@ -65,11 +68,15 @@ export interface WidgetSnapshot {
 /** The stage-control methods shared by the tracker + the controller surface
  *  (startStage/setPass/setBatch/setSelectedCounts/endStage/onEvent). */
 export interface StageController {
-  /** Begin a stage, optionally seeding its pass/batch; snapshots the baseline. */
+  /** Begin a stage, optionally seeding its pass/batch; snapshots the baseline.
+   *  An omitted batch preserves an in-flight observe batch (an interleaved
+   *  stage — the mid-catch-up Builder — runs inside the observe run that owns
+   *  the batch). */
   startStage(stage: WidgetStage, init?: { pass?: number; batch?: BatchProgress }): void;
   setPass(pass: number): void;
   setBatch(done: number, total: number): void;
   setSelectedCounts(rootCount: number, rootViewTokens: number): void;
+  /** End the stage (idle → the line hides); clears any in-flight batch. */
   endStage(): void;
   /** Consume one agent event (message_end → usage; message_update → streaming tokens). */
   onEvent(event: AgentEvent): void;
@@ -181,7 +188,9 @@ export function createTracker(): ProgressTracker {
     startStage(stage, init) {
       state.stage = stage;
       state.pass = init?.pass ?? 1;
-      state.batch = init?.batch ?? null;
+      // an omitted batch keeps an in-flight observe batch visible: the
+      // mid-catch-up Builder interleaves inside the observe run that owns it.
+      state.batch = init?.batch ?? state.batch;
       state.baseline = currentRootBaseline();
       state.usage = { ...ZERO_USAGE };
       state.streamingOutputTokens = 0;
@@ -212,6 +221,9 @@ export function createTracker(): ProgressTracker {
     },
     endStage() {
       state.stage = null;
+      // the owning run ended → its batch must not leak into a later
+      // independent stage (e.g. the post-Observer Builder at compaction).
+      state.batch = null;
     },
     rootViewCounts(graph) {
       if (state.cachedRoots === null) state.cachedRoots = rootViewCounts(graph);

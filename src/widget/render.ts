@@ -5,7 +5,7 @@
 // builds the colored one-line string the factory wraps in a pi-tui Text.
 //
 // Format: 🦉 {obs} → {roots} [#N] [→ {selected} #N] · {ctx/window} · {tok} tok
-// - obs section:   {count}{(+Δ)} obs   (+ inline N/M batch on observe when total>1)
+// - obs section:   {count}{(+Δ)} obs   (+ inline N/M batch while a multi-chunk observe batch is in flight — observe or an interleaved build)
 // - roots section: {count}{(+Δ)} roots {viewTokens}{(+Δ)}/{threshold}   (#N pass on build)
 // - selected sect: {count}{(+Δ)} selected {viewTokens}{(+Δ)}/{threshold}  (#N pass on select; selected-root only)
 // - trailing:      {ctxUsed}/{contextWindow} · {tok} tok   (active only; joined to
@@ -47,7 +47,7 @@ function paint(theme: ThemeSeam, color: Color, text: string): string {
   return theme.fg(color, text);
 }
 
-/** The obs section: {count}{Δ} obs [N/M batch]. */
+/** The obs section: {count}{Δ} obs [N/M batch — while one is in flight]. */
 function obsSection(snap: WidgetSnapshot, theme: ThemeSeam): string {
   const active = snap.stage === "observe";
   const countColor: Color = active ? "accent" : "text";
@@ -55,10 +55,10 @@ function obsSection(snap: WidgetSnapshot, theme: ThemeSeam): string {
   const delta = signedCount(snap.obs.delta);
   const deltaColored = delta === "" ? "" : paint(theme, countColor, delta);
   const label = paint(theme, "dim", " obs");
+  // stage-independent: the batch belongs to the observe RUN, so it also shows
+  // during an interleaved build (the mid-catch-up Builder inside the observe loop).
   const batch =
-    snap.stage === "observe" && snap.batch !== null && snap.batch.total > 1
-      ? paint(theme, "dim", ` ${snap.batch.done}/${snap.batch.total}`)
-      : "";
+    snap.batch !== null && snap.batch.total > 1 ? paint(theme, "dim", ` ${snap.batch.done}/${snap.batch.total}`) : "";
   return `${count}${deltaColored}${label}${batch}`;
 }
 

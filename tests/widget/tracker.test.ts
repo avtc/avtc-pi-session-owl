@@ -79,7 +79,7 @@ describe("ProgressTracker state", () => {
       expect(tracker.baseline?.rootsCount).toBe(1);
     });
 
-    it("startStage seeds pass=1 and clears batch when only pass given", () => {
+    it("startStage seeds pass=1 and leaves batch null when none is in flight", () => {
       tracker.startStage("build", { pass: 1 });
       expect(tracker.pass).toBe(1);
       expect(tracker.batch).toBeNull();
@@ -88,6 +88,37 @@ describe("ProgressTracker state", () => {
     it("startStage seeds batch when given (observe multi-chunk)", () => {
       tracker.startStage("observe", { batch: { done: 0, total: 7 } });
       expect(tracker.batch).toEqual({ done: 0, total: 7 });
+    });
+
+    it("startStage without an explicit batch preserves an in-flight observe batch (mid-catch-up Builder)", () => {
+      tracker.startStage("observe", { batch: { done: 0, total: 12 } });
+      tracker.setBatch(3, 12);
+      // the mid-catch-up Builder interleaves inside the observe run → the
+      // observe batch stays visible during the build stage
+      tracker.startStage("build", { pass: 1 });
+      expect(tracker.batch).toEqual({ done: 3, total: 12 });
+    });
+
+    it("endStage clears the in-flight batch (never leaks into a later independent stage)", () => {
+      tracker.startStage("observe", { batch: { done: 0, total: 12 } });
+      tracker.setBatch(3, 12);
+      tracker.endStage();
+      expect(tracker.stage).toBeNull();
+      expect(tracker.batch).toBeNull();
+      // the post-Observer Builder at compaction starts fresh → no stale 3/12
+      tracker.startStage("build", { pass: 1 });
+      expect(tracker.batch).toBeNull();
+    });
+
+    it("the interleaved Builder's endStage clears the batch; the Observer re-assert re-seeds it", () => {
+      tracker.startStage("observe", { batch: { done: 0, total: 12 } });
+      tracker.setBatch(3, 12);
+      tracker.startStage("build", { pass: 1 }); // interleaved Builder (preserves 3/12)
+      tracker.endStage(); // Builder ends
+      expect(tracker.batch).toBeNull();
+      // the Observer re-asserts its stage + batch before the next chunk
+      tracker.startStage("observe", { batch: { done: 3, total: 12 } });
+      expect(tracker.batch).toEqual({ done: 3, total: 12 });
     });
 
     it("endStage resets stage to null (next snapshot is idle)", () => {
