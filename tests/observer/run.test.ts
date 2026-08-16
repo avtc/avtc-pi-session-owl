@@ -395,6 +395,42 @@ describe("runObserver", () => {
     expect(getGraphStore().observerFrontier).toBeNull();
   });
 
+  it("stops after the current block when `enabled` flips off mid-run (live master switch, per-block re-check)", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // two chunks (threshold 1 → each entry its own chunk): [u1], [a1].
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    let call = 0;
+    const runStageFn: ObserverRunInput["runStageFn"] = async (input) => {
+      call += 1;
+      const tool = input.tools[0] as AgentTool;
+      await tool.execute("c1", {
+        observations: [{ summary: `chunk ${call}.`, importance: "high", sourceEntryIds: [call === 1 ? "u1" : "a1"] }],
+      });
+      // disable memkeeper AFTER the first chunk's stage run (mid-run toggle).
+      if (call === 1) _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+      return {
+        messages: [] as AgentMessage[],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+
+    // the per-chunk enabled re-check stops chunk 2; the run completes cleanly.
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn, thresholdTokens: 1 }));
+
+    // only chunk 1 ran; its record was persisted (per-chunk durability).
+    expect(call).toBe(1);
+    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    expect(obsEntries).toHaveLength(1);
+    expect((obsEntries[0].data as { coversUpToId: string }).coversUpToId).toBe("u1");
+    // frontier advanced to chunk 1 — chunk 2 re-observes on a later run.
+    expect(getGraphStore().observerFrontier).toBe("u1");
+    _resetGetMemkeeperSettings();
+  });
+
   it("maybeBuild fires after each record-bearing chunk; when it runs the Builder the observe stage is re-asserted", async () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();

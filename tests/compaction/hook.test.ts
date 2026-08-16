@@ -350,6 +350,74 @@ describe("compactionHook", () => {
     expect(calls.selector).toBe(0);
   });
 
+  it("leaves the gate (native compaction) when `enabled` flips off between phases (live master switch)", async () => {
+    seedStoreGraph();
+    setCompactionSettingsGetter(() => settings({ builderRootViewThreshold: 0 }));
+    const branch = [
+      {
+        type: "message",
+        id: "u1",
+        parentId: null,
+        timestamp: "x",
+        message: { role: "user", content: "f", timestamp: 0 },
+      },
+      assistantMsg("a1", "r"),
+    ];
+    const calls = newCalls();
+    const passes = fakeRuns(calls);
+    // the Observer stage flips `enabled` to false mid-gate (live toggle).
+    let enabled = true;
+    passes.runObserver = vi.fn(async (args) => {
+      calls.observer += 1;
+      calls.observerUnobservedLen.push(args.unobserved.length);
+      calls.order.push("observer");
+      enabled = false;
+    });
+    setCompactionStageRuns(passes);
+    setCompactionSettingsGetter(() => settings({ enabled, builderRootViewThreshold: 0 }));
+
+    const result = await compactionHook(
+      compactEvent({}),
+      makeFakeCtx(branch, NO_NOTIFY),
+      makeFakePi(),
+      NO_OP_WIDGET,
+      TODO_ABSENT,
+    );
+    // undefined → Pi runs its native compaction (NOT a cancel, NOT a memkeeper summary)
+    expect(result).toBeUndefined();
+    // Observer ran; Builder + Selector skipped (disabled before they started).
+    expect(calls.observer).toBe(1);
+    expect(calls.builder).toBe(0);
+    expect(calls.selector).toBe(0);
+    expect(calls.order).toEqual(["observer"]);
+  });
+
+  it("leaves the gate (native compaction) when `enabled` flips off after the Builder (Selector skipped)", async () => {
+    seedStoreGraph();
+    const calls = newCalls();
+    const passes = fakeRuns(calls);
+    let enabled = true;
+    passes.runBuilder = vi.fn(async () => {
+      calls.builder += 1;
+      calls.order.push("builder");
+      enabled = false;
+    });
+    setCompactionStageRuns(passes);
+    setCompactionSettingsGetter(() => settings({ enabled }));
+
+    const result = await compactionHook(
+      compactEvent({}),
+      makeFakeCtx([], NO_NOTIFY),
+      makeFakePi(),
+      NO_OP_WIDGET,
+      TODO_ABSENT,
+    );
+    expect(result).toBeUndefined();
+    expect(calls.builder).toBe(1);
+    expect(calls.selector).toBe(0);
+    expect(calls.order).toEqual(["builder"]);
+  });
+
   it("acquireForCompaction awaits an in-flight background run's release before proceeding", async () => {
     _resetRunLock();
     seedStoreGraph();

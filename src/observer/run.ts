@@ -19,7 +19,7 @@
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { MemkeeperConfig } from "../config/schema.js";
+import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
 import { buildChunks, type ChunkOptions, type RenderedChunk } from "../format/chunk.js";
 import { computeDetailsAndCache, type EntryResolver } from "../format/details.js";
 import { toStoredTimestamp } from "../format/render.js";
@@ -228,6 +228,14 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
       const chunk = chunks[chunkIndex];
       if (input.signal.aborted) return;
+      // live master switch: the run re-reads `enabled` after EVERY block, so
+      // disabling mid-run stops it at the next block boundary — completed
+      // chunks are durable (their coversUpToId advanced the frontier), the
+      // uncovered tail re-observes on a later run.
+      if (!getMemkeeperSettings().enabled) {
+        log.info(`observer: stopping: memkeeper disabled (after ${done}/${totalChunks} chunks)`);
+        return;
+      }
       const recordTool = makeRecordObservationsTool(chunk.allowedIds);
       const stageInput: StageRunInput = {
         systemPrompt: OBSERVER_SYSTEM,

@@ -4,7 +4,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG } from "../src/config/schema.js";
+import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
 import { _resetRunLock, acquireOrSkip, inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
 import {
@@ -97,6 +97,7 @@ afterEach(() => {
   _resetRunLock();
   resetForNewSession();
   resetStageRuns();
+  _resetGetMemkeeperSettings();
 });
 
 // ===========================================================================
@@ -442,6 +443,25 @@ describe("makeMaybeBuilder (mid-run / mid-catch-up Builder)", () => {
     expect(await mb()).toBe(true);
     expect(ran).toBe(true);
   });
+
+  it("returns false (no Builder launch) when memkeeper is disabled (live master switch re-check)", async () => {
+    addRootNode("n1" as NodeId, "new");
+    let ran = false;
+    // over the root-view safeguard threshold — it WOULD fire if enabled.
+    const mb = makeMaybeBuilder({
+      ctx: makeInput().ctx,
+      settings: { ...DEFAULT_CONFIG, builderMode: "on-compaction", builderRootViewThreshold: 0 },
+      signal: new AbortController().signal,
+      scope: { firstKeptEntryId: null },
+      runBuilder: async () => {
+        ran = true;
+      },
+    });
+    // disable memkeeper live → the mid-run Builder is skipped even over threshold.
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    expect(await mb()).toBe(false);
+    expect(ran).toBe(false);
+  });
 });
 
 // ===========================================================================
@@ -679,6 +699,89 @@ describe("onTurnEnd chained launch", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(order).toEqual([]); // skipped — nothing ran; the gap batches on the next trigger
     handle.release();
+  });
+
+  it("skips the remaining phases when `enabled` flips off mid-run (live master switch, between-phase re-check)", async () => {
+    const order: string[] = [];
+    let enabled = true;
+    setStageRuns({
+      runObserver: async () => {
+        order.push("observe");
+        enabled = false;
+        _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled }));
+      },
+      runBuilder: async () => {
+        order.push("build");
+      },
+      runSelector: async () => {
+        order.push("select");
+      },
+    });
+    const entries: FakeEntry[] = [
+      userEntry("u1", "initial prompt"),
+      ...Array.from({ length: 20 }, (_, i) => assistantEntry(`a${i}`, "x".repeat(200))),
+    ];
+    const ctx = {
+      getContextUsage: () => ({ tokens: 100000, contextWindow: 200000, percent: 50 }),
+      sessionManager: { getLeafId: () => "leaf-1", getBranch: () => entries },
+    } as unknown as ExtensionContext;
+    onTurnEnd(
+      makeInput({
+        ctx,
+        settings: {
+          ...DEFAULT_CONFIG,
+          observerThresholdTokens: 1,
+          builderMode: "on-session-context-threshold",
+          builderSessionContextThresholdTokens: 1,
+          selectorMode: "on-session-context-threshold",
+          selectorSessionContextThresholdTokens: 1,
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    // Observer ran; the between-phase re-check stopped Builder + Selector.
+    expect(order).toEqual(["observe"]);
+    expect(runLockInFlight()).toBe(false); // released by the chain's finally
+  });
+
+  it("skips the Selector when `enabled` flips off after the Builder (between-phase re-check)", async () => {
+    const order: string[] = [];
+    let enabled = true;
+    setStageRuns({
+      runObserver: async () => {},
+      runBuilder: async () => {
+        order.push("build");
+        enabled = false;
+        _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled }));
+      },
+      runSelector: async () => {
+        order.push("select");
+      },
+    });
+    const entries: FakeEntry[] = [
+      userEntry("u1", "initial prompt"),
+      ...Array.from({ length: 20 }, (_, i) => assistantEntry(`a${i}`, "x".repeat(200))),
+    ];
+    const ctx = {
+      getContextUsage: () => ({ tokens: 100000, contextWindow: 200000, percent: 50 }),
+      sessionManager: { getLeafId: () => "leaf-1", getBranch: () => entries },
+    } as unknown as ExtensionContext;
+    onTurnEnd(
+      makeInput({
+        ctx,
+        settings: {
+          ...DEFAULT_CONFIG,
+          observerThresholdTokens: 1,
+          builderMode: "on-session-context-threshold",
+          builderSessionContextThresholdTokens: 1,
+          selectorMode: "on-session-context-threshold",
+          selectorSessionContextThresholdTokens: 1,
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual(["build"]);
+    expect(runLockInFlight()).toBe(false);
   });
 
   it("releases the lock even when a chained stage rejects", async () => {

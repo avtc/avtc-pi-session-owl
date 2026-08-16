@@ -110,7 +110,7 @@ export async function compactionHook(
   pi: ExtensionAPI,
   widget: WidgetController,
   todo: { context: TodoContext | null; bridge: TodoBridge | null },
-): Promise<CompactionResult> {
+): Promise<CompactionResult | undefined> {
   const settings = settingsGetter();
 
   // Honor Pi's compaction signal: if Pi already gave up before we start, bail.
@@ -156,6 +156,13 @@ export async function compactionHook(
       log.info("compaction: observer catch-up end");
     }
     if (signal.aborted) return cancelAborted(ctx);
+    // live master switch: disabling mid-gate leaves memkeeper out of this
+    // compaction — Pi runs its native summary (NOT a cancel). The Observer's
+    // completed chunks are durable (per-chunk persistence).
+    if (!settingsGetter().enabled) {
+      log.info("compaction: memkeeper disabled mid-gate — leaving (native compaction)");
+      return undefined;
+    }
 
     // (b) Builder — always called; it owns the internal fast-path (root view
     // under threshold → flush `new` nodes and skip LLM passes). Processing all
@@ -164,6 +171,12 @@ export async function compactionHook(
     await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget });
     log.info("compaction: builder end");
     if (signal.aborted) return cancelAborted(ctx);
+    // live master switch (between phases): a disable after the Builder leaves
+    // the gate — the Selector is skipped and Pi runs its native compaction.
+    if (!settingsGetter().enabled) {
+      log.info("compaction: memkeeper disabled mid-gate — leaving (native compaction)");
+      return undefined;
+    }
 
     // (c) Selector — only selected-root; always called (the Selector owns the internal
     // fast-path; the hook does NOT gate on threshold alone).

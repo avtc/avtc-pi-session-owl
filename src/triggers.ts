@@ -13,7 +13,7 @@
 // (Observer/Builder/Selector) so this module is testable before those land.
 
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { MemkeeperConfig } from "./config/schema.js";
+import { getMemkeeperSettings, type MemkeeperConfig } from "./config/schema.js";
 import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./format/chunk.js";
 import { BUILDER } from "./format/render.js";
 import { measureRootViewTokens } from "./graph/read-tools.js";
@@ -179,6 +179,9 @@ export function makeMaybeBuilder(opts: {
 }): () => Promise<boolean> {
   return async () => {
     if (opts.signal.aborted) return false;
+    // live master switch: a disable mid-catch-up skips the mid-run Builder (the
+    // Observer's per-block re-check stops the run at the next block boundary).
+    if (!getMemkeeperSettings().enabled) return false;
     // The mid-run Builder respects builderMode (each-N / on-root-view /
     // on-context) in BOTH scopes — so "each-N-observations" folds incrementally
     // during a compaction catch-up too, not only at turn_end. In compaction
@@ -396,6 +399,12 @@ export function onTurnEnd(input: TriggerInput): void {
         log.info("background run: aborted after observer — stopping");
         return;
       }
+      // live master switch: a disable mid-run stops the remaining phases (the
+      // Observer's chunks are durable; re-enable resumes on the next trigger).
+      if (!getMemkeeperSettings().enabled) {
+        log.info("background run: memkeeper disabled after observer — stopping");
+        return;
+      }
       // Re-evaluate Builder/Selector AFTER the Observer (fresh `new` nodes).
       if (builderTriggerDecision(withCtx).shouldFire) {
         handle.setStage("build");
@@ -405,6 +414,12 @@ export function onTurnEnd(input: TriggerInput): void {
       }
       if (signal.aborted) {
         log.info("background run: aborted after builder — stopping");
+        return;
+      }
+      // live master switch (between phases): a disable after the Builder skips
+      // the Selector.
+      if (!getMemkeeperSettings().enabled) {
+        log.info("background run: memkeeper disabled after builder — stopping");
         return;
       }
       if (selectorTriggerDecision(withCtx).shouldFire) {
