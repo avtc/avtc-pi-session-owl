@@ -3,13 +3,20 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { GraphDelta } from "../../src/graph/mutations.js";
-import { applyCreateNode, applyMerge, MUTATE_SOURCE } from "../../src/graph/mutations.js";
+import {
+  applyCreateNode,
+  applyMerge,
+  applyMv,
+  applyRecordObservation,
+  MUTATE_SOURCE,
+} from "../../src/graph/mutations.js";
 import { log } from "../../src/log.js";
 import {
   cloneLedger,
   DETAILS_TYPE,
   EMPTY_LEDGER,
   encodeDetails,
+  encodeObservation,
   encodeSelection,
   GRAPH_DELTA_TYPE,
   type GraphDeltaEntry,
@@ -26,6 +33,7 @@ import {
 import type { StoreContext, StoreEntry } from "../../src/store/graph-store.js";
 import {
   appendGraphDelta,
+  appendGraphDeltaBatch,
   appendObservation,
   appendUsage,
   clearEntryResolver,
@@ -33,10 +41,11 @@ import {
   load,
   persistSelectedTree,
   resetForNewSession,
+  resetGraphForReuse,
   setEntryResolver,
 } from "../../src/store/graph-store.js";
-import type { Importance, NodeId } from "../../src/types.js";
-import { MemkeeperGraph, makeNode, N_GOAL } from "../../src/types.js";
+import type { Importance, NodeId, ObsId } from "../../src/types.js";
+import { MemkeeperGraph, makeNode, makeObservation, N_GOAL } from "../../src/types.js";
 
 // --- fake StoreContext -----------------------------------------------------
 
@@ -1183,5 +1192,417 @@ describe("load reconciliation (node lists authoritative)", () => {
     const g = getGraphStore().graph;
     expect(g.nodes.get(N_GOAL)?.observationIds).toEqual(["oInitialPrompt"]);
     expect(g.observations.get("oInitialPrompt")?.parentNode).toBe(N_GOAL);
+  });
+});
+
+// --- replay faithfulness (the create+record op stream) ----------------------
+
+/** Build one observation record (wire-independent helper for the fixtures). */
+function mkRecord(id: string, parentNode: string, timestamp: string): ReturnType<typeof makeObservation> {
+  return makeObservation({
+    id: id as ObsId,
+    summary: `obs ${id}`,
+    importance: "med",
+    sourceEntryIds: ["s1"],
+    timestamp,
+    parentNode: parentNode as NodeId,
+  });
+}
+
+describe("load replay faithfulness (observer create+record batches + builder ops)", () => {
+  /** Persist one Observer-chunk-shaped slice the way persistChunk does: ONE
+   *  graph_delta envelope holding [create_node, record_observation] per pair,
+   *  then ONE observation entry covering the chunk. Applies to `graph` live. */
+  function persistChunk(
+    graph: ReturnType<typeof getGraphStore>["graph"],
+    persist: FakeStore,
+    pairs: Array<{ nodeId: string; obsId: string; timestamp: string }>,
+    covers: { from: string | null; upTo: string },
+  ): void {
+    const deltas: GraphDelta[] = [];
+    const records: SerializedObservation[] = [];
+    for (const pair of pairs) {
+      deltas.push(
+        applyCreateNode(graph, {
+          id: pair.nodeId as NodeId,
+          summary: `wrap ${pair.obsId}`,
+          importance: "med",
+          parentNode: null,
+          state: "new",
+        }),
+      );
+      const obs = mkRecord(pair.obsId, pair.nodeId, pair.timestamp);
+      applyRecordObservation(graph, { obs });
+      // snapshot copy — mirrors the real persistChunk (the live object's
+      // parentNode mutates on later merges; the delta freezes append-time state)
+      deltas.push({ type: "record_observation", obs: { ...obs } });
+      records.push(encodeObservation(obs));
+    }
+    appendGraphDeltaBatch(persist, deltas);
+    appendObservation(persist, {
+      coversFromId: covers.from,
+      coversUpToId: covers.upTo,
+      records,
+      tokenCount: records.length,
+    });
+  }
+
+  it("replays an observe→merge sequence faithfully: wrappers stay dissolved, records stay under the merge dest (no resurrection)", async () => {
+    freshStore();
+    const producer = getGraphStore().graph;
+    const persist = new FakeStore();
+    persistChunk(
+      producer,
+      persist,
+      [
+        { nodeId: "n1", obsId: "o1", timestamp: "2026-08-01T10:00:00.000Z" },
+        { nodeId: "n2", obsId: "o2", timestamp: "2026-08-01T10:05:00.000Z" },
+      ],
+      { from: "u1", upTo: "a1" },
+    );
+    const merge = applyMerge(
+      producer,
+      { sourceIds: ["n1", "n2"], destId: null, newSummary: "consolidated", importance: "high" },
+      MUTATE_SOURCE,
+    );
+    appendGraphDelta(persist, merge);
+    const liveRoots = [...producer.nodes.values()].filter((n) => n.parentNode === null).length;
+
+    resetForNewSession();
+    const result = await load(persist);
+    const g = getGraphStore().graph;
+    // the wrappers dissolved and STAY dissolved — reconcile must not resurrect them
+    expect(g.nodes.has("n1" as NodeId)).toBe(false);
+    expect(g.nodes.has("n2" as NodeId)).toBe(false);
+    const dest = g.nodes.get((merge.resolvedDestId ?? "nX") as NodeId);
+    expect(dest?.observationIds).toEqual(["o1", "o2"]);
+    expect(g.observations.get("o1")?.parentNode).toBe(merge.resolvedDestId);
+    expect(g.observations.get("o2")?.parentNode).toBe(merge.resolvedDestId);
+    // the reconstructed root count matches the live one exactly
+    expect([...g.nodes.values()].filter((n) => n.parentNode === null).length).toBe(liveRoots);
+    expect(result).toEqual({ skippedDeltas: 0, rewrappedOrphans: 0 });
+  });
+
+  it("survives the reload cascade: post-reload builder ops on pre-reload nodes replay on the NEXT reload (no skipped deltas)", async () => {
+    freshStore();
+    const producer = getGraphStore().graph;
+    const persist = new FakeStore();
+    persistChunk(
+      producer,
+      persist,
+      [
+        { nodeId: "n1", obsId: "o1", timestamp: "2026-08-01T10:00:00.000Z" },
+        { nodeId: "n2", obsId: "o2", timestamp: "2026-08-01T10:05:00.000Z" },
+      ],
+      { from: "u1", upTo: "a1" },
+    );
+    const merge = applyMerge(
+      producer,
+      { sourceIds: ["n1", "n2"], destId: null, newSummary: "consolidated", importance: "high" },
+      MUTATE_SOURCE,
+    );
+    appendGraphDelta(persist, merge);
+
+    // reload #1 (fresh store: the live session restarts here)
+    resetForNewSession();
+    await load(persist);
+    const reloaded = getGraphStore().graph;
+    // post-reload builder work: a fresh container + the merged root moved under it
+    appendGraphDelta(
+      persist,
+      applyCreateNode(reloaded, {
+        id: "n10",
+        summary: "container",
+        importance: "med",
+        parentNode: null,
+        state: "active",
+      }),
+    );
+    appendGraphDelta(
+      persist,
+      applyMv(reloaded, { sourceIds: [merge.resolvedDestId as NodeId], destId: "n10" as NodeId }, MUTATE_SOURCE),
+    );
+
+    // reload #2: both post-reload deltas must replay cleanly
+    resetForNewSession();
+    const result = await load(persist);
+    const g = getGraphStore().graph;
+    expect(result.skippedDeltas).toBe(0);
+    expect(g.nodes.get(merge.resolvedDestId as NodeId)?.parentNode).toBe("n10");
+    expect(g.nodes.get("n10" as NodeId)?.observationIds).toEqual([]);
+    expect(g.nodes.get("n10" as NodeId)?.childNodeIds).toContain(merge.resolvedDestId);
+  });
+
+  it("tolerant-attach: a record_observation delta whose record is already indexed (entry-before-delta order) links instead of colliding", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    const obs = mkRecord("o1", "n1", "2026-08-01T10:00:00.000Z");
+    // the observation ENTRY first (indexes the record), THEN the op batch
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [encodeObservation(obs)],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCustomAt("e2", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      deltas: [
+        {
+          type: "create_node",
+          id: "n1",
+          summary: "wrap o1",
+          importance: "med",
+          parentNode: null,
+          state: "new",
+        },
+        { type: "record_observation", obs: { ...obs } },
+      ],
+    } satisfies GraphDeltaEntry);
+    fake.leafId = "e2";
+
+    const result = await load(fake);
+    const g = getGraphStore().graph;
+    expect(result).toEqual({ skippedDeltas: 0, rewrappedOrphans: 0 });
+    expect(g.nodes.get("n1" as NodeId)?.observationIds).toEqual(["o1"]);
+    expect(g.observations.get("o1")?.parentNode).toBe("n1");
+  });
+
+  it("the oInitialPrompt record_observation delta links under nGoal at fold time (not only via reconcile)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    const prompt = makeObservation({
+      id: "oInitialPrompt",
+      summary: "build the thing",
+      importance: "crit",
+      sourceEntryIds: ["u1"],
+      timestamp: "2026-08-01T09:00:00.000Z",
+      parentNode: "nGoal",
+    });
+    fake.addCustomAt("e1", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      deltas: [
+        { type: "create_node", id: "nGoal", summary: "", importance: "crit", parentNode: null, state: "active" },
+        { type: "record_observation", obs: { ...prompt } },
+      ],
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("e2", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "u1",
+      records: [encodeObservation(prompt)],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.leafId = "e2";
+
+    const result = await load(fake);
+    const g = getGraphStore().graph;
+    expect(result).toEqual({ skippedDeltas: 0, rewrappedOrphans: 0 });
+    expect(g.nodes.get(N_GOAL)?.observationIds).toEqual(["oInitialPrompt"]);
+    expect(g.observations.get("oInitialPrompt")?.parentNode).toBe(N_GOAL);
+  });
+
+  it("counts skipped deltas in LoadResult and warns once (corrupt tail is visible, not silent)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    const warn = vi.spyOn(log, "warn");
+    fake.addCustomAt("e1", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      delta: { type: "mv", sourceIds: ["nMissing" as NodeId], destId: null },
+    } satisfies GraphDeltaEntry);
+    fake.leafId = "e1";
+
+    const result = await load(fake);
+    expect(result.skippedDeltas).toBe(1);
+    expect(result.rewrappedOrphans).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("skipped 1 graph delta"));
+    warn.mockRestore();
+  });
+});
+
+// --- rescan markers: plain (full void) vs reuse (structure-only void) -------
+
+describe("rescan markers (plain vs --reuse-observations)", () => {
+  it("a reuse marker voids structure but KEEPS the observation ledger + frontier + usage", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    // pre-marker structure + records
+    fake.addCustomAt("e1", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      deltas: [
+        { type: "create_node", id: "n1", summary: "wrap", importance: "med", parentNode: null, state: "new" },
+        {
+          type: "record_observation",
+          obs: {
+            id: "o1",
+            summary: "first",
+            importance: "high",
+            sourceEntryIds: ["1"],
+            timestamp: "t1",
+            parentNode: "n1",
+            summaryTokens: 2,
+            detailsLines: 1,
+            detailsTokens: 3,
+          },
+        },
+      ],
+    } satisfies GraphDeltaEntry);
+    fake.addCustomAt("e2", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "u2",
+      records: [
+        { id: "o1", summary: "first", importance: "high", sourceEntryIds: ["1"], timestamp: "t1", parentNode: "n1" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCustomAt("e3", USAGE_TYPE, {
+      ledger: {
+        observe: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, runs: 1, elapsedMs: 0 },
+        build: cloneLedger(EMPTY_LEDGER).build,
+        select: cloneLedger(EMPTY_LEDGER).select,
+      },
+    } satisfies UsageEntry);
+    const tree = encodeSelection(
+      new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 }),
+      null,
+      null,
+    );
+    fake.addCustomAt("e4", SELECTION_TYPE, tree satisfies SelectionEntry);
+    // the reuse marker (structure-only void)
+    fake.addCustomAt("e5", RESCAN_TYPE, { at: "t", mode: "reuse" });
+    // post-marker rebuild ops: fresh wrapper n1 (id space reset) + attach o1
+    fake.addCustomAt("e6", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      deltas: [
+        { type: "create_node", id: "n1", summary: "rebuilt wrap", importance: "med", parentNode: null, state: "new" },
+        {
+          type: "record_observation",
+          obs: {
+            id: "o1",
+            summary: "first",
+            importance: "high",
+            sourceEntryIds: ["1"],
+            timestamp: "t1",
+            parentNode: "n1",
+            summaryTokens: 2,
+            detailsLines: 1,
+            detailsTokens: 3,
+          },
+        },
+      ],
+    } satisfies GraphDeltaEntry);
+    fake.leafId = "e6";
+
+    await load(fake);
+    const store = getGraphStore();
+    // structure: pre-marker selected tree voided; the post-marker wrapper is the graph
+    expect(store.selectedTree).toBeNull();
+    expect(store.graph.nodes.get("n1" as NodeId)?.summary).toBe("rebuilt wrap");
+    // the observation LEDGER survived the reuse marker (record + link via the fold)
+    expect(store.graph.observations.has("o1")).toBe(true);
+    expect(store.graph.nodes.get("n1" as NodeId)?.observationIds).toEqual(["o1"]);
+    expect(store.graph.observations.get("o1")?.parentNode).toBe("n1");
+    // frontier + usage survived
+    expect(store.observerFrontier).toBe("u2");
+    expect(store.usageLedger.observe.input).toBe(10);
+  });
+
+  it("a PLAIN marker after a reuse marker voids everything (ledger restarts)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "u1",
+      records: [
+        { id: "o1", summary: "first", importance: "high", sourceEntryIds: ["1"], timestamp: "t1", parentNode: "n1" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCustomAt("e2", RESCAN_TYPE, { at: "t", mode: "reuse" });
+    fake.addCustomAt("e3", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "u3",
+      records: [
+        { id: "o2", summary: "second", importance: "med", sourceEntryIds: ["3"], timestamp: "t3", parentNode: "n2" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCustomAt("e4", RESCAN_TYPE, { at: "t" });
+    fake.addCustomAt("e5", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "u5",
+      records: [
+        { id: "o3", summary: "third", importance: "low", sourceEntryIds: ["5"], timestamp: "t5", parentNode: "n3" },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.leafId = "e5";
+
+    await load(fake);
+    const store = getGraphStore();
+    // the plain marker at e4 voided BOTH earlier observation entries
+    expect(store.graph.observations.has("o1")).toBe(false);
+    expect(store.graph.observations.has("o2")).toBe(false);
+    expect(store.graph.observations.has("o3")).toBe(true);
+    expect(store.observerFrontier).toBe("u5");
+  });
+
+  it("a snapshot BEFORE a reuse marker is void structure (the rebuild replaces it)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    // a pre-marker snapshot carrying node n9
+    fake.addCompaction("e1", snapshotDetails([snapNode("n9" as NodeId, [])], 1, 1));
+    fake.addCustomAt("e2", RESCAN_TYPE, { at: "t", mode: "reuse" });
+    fake.addCustomAt("e3", GRAPH_DELTA_TYPE, {
+      kind: "graph_delta",
+      delta: {
+        type: "create_node",
+        id: "n1",
+        summary: "post-reuse wrap",
+        importance: "med",
+        parentNode: null,
+        state: "new",
+      },
+    } satisfies GraphDeltaEntry);
+    fake.leafId = "e3";
+
+    await load(fake);
+    const g = getGraphStore().graph;
+    expect(g.nodes.has("n9")).toBe(false);
+    expect(g.nodes.get("n1" as NodeId)?.summary).toBe("post-reuse wrap");
+  });
+
+  it("resetGraphForReuse persists a reuse marker and wipes ONLY the structure in-memory", () => {
+    freshStore();
+    const fake = new FakeStore();
+    // seed: nGoal + oIP-linked graph, frontier, usage, selected tree
+    const g = getGraphStore().graph;
+    applyCreateNode(g, { id: N_GOAL, summary: "goal", importance: "crit", parentNode: null, state: "active" });
+    const prompt = makeObservation({
+      id: "oInitialPrompt",
+      summary: "the goal",
+      importance: "crit",
+      sourceEntryIds: ["u1"],
+      timestamp: "t0",
+      parentNode: N_GOAL,
+    });
+    applyRecordObservation(g, { obs: prompt });
+    getGraphStore().observerFrontier = "u9";
+    getGraphStore().usageLedger.observe.input = 42;
+
+    resetGraphForReuse(fake);
+    const store = getGraphStore();
+    // the marker persisted with mode reuse
+    const marker = fake.entries[fake.entries.length - 1];
+    expect(marker !== undefined && marker.type === "custom" && marker.customType === RESCAN_TYPE).toBe(true);
+    const mode = (marker as { data?: { mode?: unknown } } | undefined)?.data?.mode;
+    expect(mode).toBe("reuse");
+    // structure wiped, id space reset
+    expect(store.graph.nodes.size).toBe(0);
+    expect(store.graph.nextNodeId).toBe(1);
+    expect(store.selectedTree).toBeNull();
+    // the ledger + frontier + usage survived
+    expect(store.graph.observations.has("oInitialPrompt")).toBe(true);
+    expect(store.graph.nextObsId).toBeGreaterThanOrEqual(1);
+    expect(store.observerFrontier).toBe("u9");
+    expect(store.usageLedger.observe.input).toBe(42);
   });
 });

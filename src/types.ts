@@ -22,6 +22,14 @@ export const O_INITIAL_PROMPT = "oInitialPrompt" as const;
  * is uniform (a no-op in the source graph, which never contains it).
  */
 export const N_IRRELEVANT = "nIrrelevant" as const;
+/**
+ * The rebuild parking node (source-graph special): `/mk:rescan
+ * --reuse-observations` parks the collected observation records under it while
+ * re-wrapping them into a fresh structure in batches. Immovable/merge-proof
+ * (the rebuild owns it), but dissolvable — it auto-dissolves when the last
+ * batch moves its records out.
+ */
+export const N_PENDING = "nPending" as const;
 
 // --- Ids -------------------------------------------------------------------
 
@@ -39,7 +47,7 @@ export type ObsId = GeneratedObsId | typeof O_INITIAL_PROMPT;
  * Any node id: a generated `n<seq>` OR a fixed special — the predefined goal
  * node `nGoal` (source-graph) or the working-copy demote bin `nIrrelevant`.
  */
-export type NodeId = GeneratedNodeId | typeof N_GOAL | typeof N_IRRELEVANT;
+export type NodeId = GeneratedNodeId | typeof N_GOAL | typeof N_IRRELEVANT | typeof N_PENDING;
 
 // --- Importance ------------------------------------------------------------
 

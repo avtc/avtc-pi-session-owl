@@ -7,13 +7,15 @@
 //
 // The mutators re-validate each op live; a corrupt/foreign-id delta
 // throws `GraphInvariantError`, which the store's replay loop catches and skips
-// (tolerant reader). This module is a thin dispatcher — it owns no state
+// (tolerant reader). `record_observation` is tolerant-attach (see the case).
+// This module is a thin dispatcher — it owns no state
 // and adds no mutation logic of its own.
 
 import type { MemkeeperGraph } from "../types.js";
 import { GraphInvariantError } from "./invariants.js";
 import type { MutationPolicy } from "./mutations.js";
 import {
+  applyAttachObservation,
   applyCreateNode,
   applyFlushNew,
   applyMerge,
@@ -40,9 +42,20 @@ export function applyDelta(graph: MemkeeperGraph, delta: GraphDelta, policy: Mut
         skipStructural: true,
       });
       return;
-    case "record_observation":
-      applyRecordObservation(graph, { obs: delta.obs }, { skipStructural: true });
+    case "record_observation": {
+      // tolerant-attach: the load fold may have ALREADY indexed this record from
+      // its memkeeper.observation entry (the entry precedes/follows the delta in
+      // file order; both carry the same immutable content) — then the op is just
+      // the listing link (re-point + list), never an id collision. A record new
+      // to the map applies fully.
+      const existing = graph.observations.get(delta.obs.id);
+      if (existing === undefined) {
+        applyRecordObservation(graph, { obs: delta.obs }, { skipStructural: true });
+      } else {
+        applyAttachObservation(graph, { obsId: delta.obs.id, parentNode: delta.obs.parentNode });
+      }
       return;
+    }
     case "mv":
       applyMv(graph, { sourceIds: delta.sourceIds, destId: delta.destId, newSummary: delta.newSummary }, policy, {
         skipStructural: true,

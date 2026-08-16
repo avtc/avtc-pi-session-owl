@@ -7,9 +7,11 @@
 // batch. The Observer is a non-writer (it only appends observation +
 // new-wrapper deltas; it never restructures — that's the Builder).
 //
-// Persistence granularity: ONE `memkeeper.observation` delta PER CHUNK
-// (coversFromId = chunk's first entry, coversUpToId = chunk's last), persisted
-// immediately after each chunk's agentLoop succeeds (per-chunk durability).
+// Persistence granularity: ONE `memkeeper.observation` entry PER CHUNK
+// (coversFromId = chunk's first entry, coversUpToId = chunk's last) plus ONE
+// `memkeeper.graph_delta` batch per chunk holding the chunk's ops in live order
+// ([create_node, record_observation] per wrapper), persisted immediately after
+// each chunk's agentLoop succeeds (per-chunk durability).
 // An abort loses only the in-flight chunk — completed chunks are durable and the
 // frontier has already advanced past them, so a re-run skips them (idempotent by
 // coverage range). Reverses the earlier accumulate-then-append (one delta per
@@ -415,10 +417,16 @@ function persistChunk(
     });
     applyRecordObservation(graph, { obs: pair.obs });
   }
-  // wrappers: one graph_delta entry holding this chunk's create_node ops.
+  // wrappers + records: one graph_delta entry holding this chunk's ops in live
+  // order — each create_node immediately followed by its record_observation.
+  // Replay re-executes the exact live sequence, so later Builder merges/mvs
+  // relocate the records as they did live (wrapper membership is part of the
+  // log, not inferred from capture-time pointers). The record is embedded as a
+  // SNAPSHOT copy — the live object's parentNode mutates on every later
+  // mv/merge, and the delta must freeze the value at append time.
   appendGraphDeltaBatch(
     store,
-    pairs.map((pair) => pair.delta),
+    pairs.flatMap((pair) => [pair.delta, { type: "record_observation", obs: { ...pair.obs } } as const]),
   );
   // observations: one observation entry covering THIS chunk's range
   // (coversUpToId advances the frontier; a later record-bearing chunk's range

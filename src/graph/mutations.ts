@@ -11,6 +11,7 @@ import {
   type Importance,
   type MemkeeperGraph,
   N_GOAL,
+  N_PENDING,
   type Node,
   type NodeId,
   nowStoredTimestamp,
@@ -281,6 +282,36 @@ export function applyRecordObservation(
   return { type: "record_observation", obs };
 }
 
+/** Attach an ALREADY-RECORDED observation under a node (re-point + link; the
+ *  record's content is immutable). Tolerant of a dissolved old parent — the
+ *  unlink is skipped when the node is gone. Used by replay (a
+ *  record_observation delta whose record is already indexed from its
+ *  observation entry links instead of colliding) and by the rescan-reuse
+ *  rebuild (re-wrapping collected records into a fresh structure). Throws when
+ *  the record or the target node does not exist (caller decides skip/abort). */
+export function applyAttachObservation(
+  graph: MemkeeperGraph,
+  args: { obsId: ObsId; parentNode: NodeId },
+): RecordObservationDelta {
+  const obs = graph.observations.get(args.obsId);
+  if (obs === undefined) {
+    throw new GraphInvariantError(`record_observation: observation ${args.obsId} does not exist`);
+  }
+  const parent = requireNode(graph, args.parentNode, "record_observation");
+  if (obs.parentNode !== args.parentNode) {
+    const oldParent = graph.nodes.get(obs.parentNode);
+    if (oldParent !== undefined) {
+      oldParent.observationIds = oldParent.observationIds.filter((id) => id !== obs.id);
+      recomputeRange(graph, oldParent);
+    }
+    obs.parentNode = args.parentNode;
+  }
+  if (!parent.observationIds.includes(obs.id)) parent.observationIds.push(obs.id);
+  recomputeRange(graph, parent);
+  if (graph.nextObsId <= parseSeq(obs.id)) graph.nextObsId = parseSeq(obs.id) + 1;
+  return { type: "record_observation", obs };
+}
+
 export function applyFlushNew(graph: MemkeeperGraph, args: { nodeIds: NodeId[] }): FlushNewDelta {
   for (const id of args.nodeIds) {
     const node = graph.nodes.get(id);
@@ -321,6 +352,12 @@ export function applyMv(
   if (policy === MUTATE_SOURCE) {
     if (nodeSources.some((n) => n.id === N_GOAL)) {
       throw new GraphInvariantError("mv: nGoal is immovable");
+    }
+    if (nodeSources.some((n) => n.id === N_PENDING)) {
+      throw new GraphInvariantError("mv: nPending is immovable (rebuild parking)");
+    }
+    if (dest?.id === N_PENDING) {
+      throw new GraphInvariantError("mv: nPending cannot be a destination (rebuild parking)");
     }
     if (obsSources.some((o) => o.id === O_INITIAL_PROMPT)) {
       throw new GraphInvariantError("mv: oInitialPrompt cannot be detached from nGoal");
@@ -407,9 +444,15 @@ export function applyMerge(
     if (sources.some((n) => n.id === N_GOAL)) {
       throw new GraphInvariantError("merge: nGoal cannot be a merge source");
     }
+    if (sources.some((n) => n.id === N_PENDING)) {
+      throw new GraphInvariantError("merge: nPending cannot be a merge source (rebuild parking)");
+    }
     if (args.destId === N_GOAL) {
       // nGoal is a predefined root curated via set_meta + mv-in, never a fold target
       throw new GraphInvariantError("merge: nGoal cannot be a merge destination");
+    }
+    if (args.destId === N_PENDING) {
+      throw new GraphInvariantError("merge: nPending cannot be a merge destination (rebuild parking)");
     }
   }
   // cycle pre-check (BEFORE creating any dest node, so a rejected call leaves
@@ -507,6 +550,9 @@ export function applySupersede(
   if (policy === MUTATE_SOURCE) {
     if (args.nodeId === N_GOAL || args.supersededNodeIds.includes(N_GOAL)) {
       throw new GraphInvariantError("supersede: nGoal cannot be superseded");
+    }
+    if (args.nodeId === N_PENDING || args.supersededNodeIds.includes(N_PENDING)) {
+      throw new GraphInvariantError("supersede: nPending cannot be superseded (rebuild parking)");
     }
   }
   for (const id of args.supersededNodeIds) {

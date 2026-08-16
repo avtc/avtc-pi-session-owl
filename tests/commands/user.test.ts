@@ -3,7 +3,7 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { formatList, runMkCat, runMkFind, runMkFindAll, runMkLs } from "../../src/commands/user.js";
+import { formatList, runMkCat, runMkFind, runMkFindAll, runMkLs, runMkRescan } from "../../src/commands/user.js";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import {
   applyCreateNode,
@@ -15,6 +15,7 @@ import {
 } from "../../src/graph/mutations.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import { MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
+import { NO_OP_WIDGET } from "../../src/widget/tracker.js";
 
 const T0 = "2026-07-17T09:00:00.000Z";
 const T1 = "2026-07-17T14:30:00.000Z";
@@ -390,5 +391,129 @@ describe("formatList (cap helper)", () => {
     expect(out.truncated).toBe(3);
     expect(out.text).toContain("+3 more");
     expect(out.text).not.toContain("\na");
+  });
+});
+
+describe("/mk:rescan", () => {
+  beforeEach(() => {
+    resetForNewSession();
+  });
+  afterEach(() => {
+    _resetGetMemkeeperSettings();
+  });
+
+  /** A command ctx capturing notify + a scripted confirm result. */
+  function makeRescanCtx(confirmResult: boolean): {
+    ctx: ExtensionCommandContext;
+    confirmTitle: () => string | null;
+    confirmBody: () => string | null;
+    messages: string[];
+  } {
+    let title: string | null = null;
+    let body: string | null = null;
+    const messages: string[] = [];
+    const ctx = {
+      sessionManager: {
+        getLeafId: () => null,
+        getBranch: () => [],
+      },
+      ui: {
+        notify: (message: string) => {
+          messages.push(message);
+        },
+        confirm: (t: string, b: string) => {
+          title = t;
+          body = b;
+          return Promise.resolve(confirmResult);
+        },
+      },
+    } as unknown as ExtensionCommandContext;
+    return { ctx, confirmTitle: () => title, confirmBody: () => body, messages };
+  }
+
+  function makeDeps(): {
+    pi: { appended: { type: string; data: unknown }[] } & Record<string, unknown>;
+    deps: Parameters<typeof runMkRescan>[2];
+    launched: Promise<void>[];
+  } {
+    const appended: { type: string; data: unknown }[] = [];
+    const pi = { appended, appendEntry: (t: string, d: unknown) => appended.push({ type: t, data: d }) };
+    const launched: Promise<void>[] = [];
+    const deps = {
+      pi: pi as unknown as Parameters<typeof runMkRescan>[2]["pi"],
+      widget: NO_OP_WIDGET,
+      runBuilderStage: async () => {},
+      onLaunched: (p: Promise<void>) => {
+        launched.push(p);
+      },
+    };
+    return { pi, deps, launched };
+  }
+
+  it("reuse mode: confirms with the collected count and launches the rebuild", async () => {
+    _setGetMemkeeperSettings(
+      () =>
+        ({
+          ...DEFAULT_CONFIG,
+          enabled: true,
+          builderMode: "each-N-observations",
+          builderEveryNObservations: 1,
+        }) as typeof DEFAULT_CONFIG,
+    );
+    seedSource(); // 3 observations incl. oInitialPrompt -> 2 collected
+    const { ctx, confirmTitle, confirmBody, messages } = makeRescanCtx(true);
+    const harness = makeDeps();
+    await runMkRescan("--reuse-observations", ctx, harness.deps);
+    for (const p of harness.launched) await p;
+    expect(confirmTitle()).toBe("Rebuild memory");
+    expect(confirmBody()).toContain("2 collected observations");
+    expect(messages.some((m) => m.includes("Rebuilding"))).toBe(true);
+    const markers = harness.pi.appended.filter((e) => e.type === "memkeeper.rescan");
+    expect(markers).toHaveLength(1);
+    expect((markers[0]?.data as { mode?: string })?.mode).toBe("reuse");
+  });
+
+  it("reuse mode with an empty ledger: notifies and skips the confirm", async () => {
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: true }) as typeof DEFAULT_CONFIG);
+    resetForNewSession();
+    const { ctx, confirmTitle, messages } = makeRescanCtx(true);
+    const harness = makeDeps();
+    await runMkRescan("--reuse-observations", ctx, harness.deps);
+    expect(confirmTitle()).toBeNull();
+    expect(messages.some((m) => m.includes("Nothing to rebuild"))).toBe(true);
+    expect(harness.pi.appended.filter((e) => e.type === "memkeeper.rescan")).toHaveLength(0);
+  });
+
+  it("reuse mode declined: nothing happens", async () => {
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: true }) as typeof DEFAULT_CONFIG);
+    seedSource();
+    const { ctx, messages } = makeRescanCtx(false);
+    const harness = makeDeps();
+    await runMkRescan("--reuse-observations", ctx, harness.deps);
+    expect(messages).toHaveLength(0);
+    expect(harness.pi.appended).toHaveLength(0);
+  });
+
+  it("plain mode: resets everything (marker without mode, frontier cleared)", async () => {
+    _setGetMemkeeperSettings(
+      () => ({ ...DEFAULT_CONFIG, enabled: true, observerMode: "on-threshold" }) as typeof DEFAULT_CONFIG,
+    );
+    seedSource();
+    getGraphStore().observerFrontier = "some-entry";
+    const { ctx, confirmTitle } = makeRescanCtx(false);
+    const harness = makeDeps();
+    await runMkRescan("", ctx, harness.deps);
+    expect(confirmTitle()).toBe("Rescan memory");
+    expect(getGraphStore().observerFrontier).toBe("some-entry"); // declined -> untouched
+  });
+
+  it("disabled: warns and does nothing", async () => {
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }) as typeof DEFAULT_CONFIG);
+    seedSource();
+    const { ctx, confirmTitle, messages } = makeRescanCtx(true);
+    const harness = makeDeps();
+    await runMkRescan("--reuse-observations", ctx, harness.deps);
+    expect(confirmTitle()).toBeNull();
+    expect(messages.some((m) => m.includes("disabled"))).toBe(true);
   });
 });

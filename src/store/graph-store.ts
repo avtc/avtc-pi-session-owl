@@ -43,6 +43,7 @@ import {
   type MemkeeperDetails,
   OBSERVATION_TYPE,
   type ObservationEntry,
+  RESCAN_MODE_REUSE,
   RESCAN_TYPE,
   SELECTION_TYPE,
   type SerializedSelection,
@@ -209,6 +210,25 @@ export function resetGraphForRescan(ctx: StoreContext): void {
   s.lastCompactionLedger = null;
 }
 
+/** `/mk:rescan --reuse-observations`: void the STRUCTURE at/before now (persist
+ *  a reuse-mode rescan marker) and reset the in-memory graph to empty structure,
+ *  KEEPING the collected observation records (the ledger), the Observer
+ *  frontier, and the usage ledger — the rebuild pipeline re-wraps the records
+ *  into a fresh graph without re-running the Observer LLM. Old entries stay in
+ *  the session file (append-only) but load ignores structure at/before the
+ *  marker. */
+export function resetGraphForReuse(ctx: StoreContext): void {
+  ctx.appendEntry(RESCAN_TYPE, { at: nowStoredTimestamp(), mode: RESCAN_MODE_REUSE });
+  const s = getGraphStore();
+  s.graph = new MemkeeperGraph({
+    nodes: new Map(),
+    observations: s.graph.observations,
+    nextObsId: s.graph.nextObsId,
+    nextNodeId: 1,
+  });
+  s.selectedTree = null;
+}
+
 // --- load (reconstruction) ------------------------------------------------
 
 function isCustomEntry(e: StoreEntry): e is StoreCustomEntry {
@@ -246,15 +266,26 @@ function findLatestSnapshot(
   return null;
 }
 
-/** The index of the latest `/mk:rescan` marker, or -1 when none. On load,
- *  everything at or before this index is void (the graph rebuilds from the
- *  marker forward). */
-function findLatestRescanMarker(entries: StoreEntry[]): number {
+/** The index of the latest `/mk:rescan` markers. `structureAt` = the latest
+ *  marker of ANY mode (structure at/before it is void: nodes, graph deltas,
+ *  snapshots, selected tree). `plainAt` = the latest FULL marker (additionally
+ *  voids the observation ledger + frontier at/before it). A reuse-mode marker
+ *  (`/mk:rescan --reuse-observations`) voids structure only — the collected
+ *  observation records survive it for the structure rebuild. */
+function findLatestRescanMarkers(entries: StoreEntry[]): { plainAt: number; structureAt: number } {
+  let plainAt = -1;
+  let structureAt = -1;
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const e = entries[i];
-    if (e !== undefined && isCustomEntry(e) && e.customType === RESCAN_TYPE) return i;
+    if (e === undefined || !isCustomEntry(e) || e.customType !== RESCAN_TYPE) continue;
+    if (structureAt === -1) structureAt = i;
+    const mode = (e.data as { mode?: unknown } | undefined)?.mode;
+    if (mode !== RESCAN_MODE_REUSE) {
+      plainAt = i;
+      break;
+    }
   }
-  return -1;
+  return { plainAt, structureAt };
 }
 
 /** Materialize the node graph + id counters + oInitialPrompt from a snapshot. */
@@ -302,9 +333,11 @@ function materializeBase(details: MemkeeperDetails): MemkeeperGraph {
  *    exists (post-snapshot capture, mid-pair repair); otherwise it is
  *    re-wrapped in a fresh deterministic root — the ledger is never pruned on
  *    load, so nothing captured is ever dropped.
- *  Each node whose evidence set changed has its range recomputed once. */
-function reconcileLinks(graph: MemkeeperGraph): void {
+ *  Each node whose evidence set changed has its range recomputed once.
+ *  Returns the number of re-wrapped orphans (a corruption diagnostic). */
+function reconcileLinks(graph: MemkeeperGraph): number {
   const touched = new Set<NodeId>();
+  let rewrapped = 0;
   // Pass 1: prune phantom listings; collect the surviving listers per record.
   const listersOf = new Map<ObsId, NodeId[]>();
   for (const node of graph.nodes.values()) {
@@ -356,12 +389,16 @@ function reconcileLinks(graph: MemkeeperGraph): void {
     }
     if (obs.id === O_INITIAL_PROMPT) continue;
     const wrapper = rewrapOrphan(graph, obs);
-    if (wrapper !== null) touched.add(wrapper);
+    if (wrapper !== null) {
+      touched.add(wrapper);
+      rewrapped += 1;
+    }
   }
   for (const id of touched) {
     const n = graph.nodes.get(id);
     if (n !== undefined) recomputeRange(graph, n);
   }
+  return rewrapped;
 }
 
 /** Re-wrap an orphaned record in a fresh root node mirroring the Observer's
@@ -395,25 +432,40 @@ function rewrapOrphan(graph: MemkeeperGraph, obs: Observation): NodeId | null {
   return id;
 }
 
+/** Load outcome counters (diagnostics for the caller). A clean load of a
+ *  complete op stream is all zeros; non-zero values mean a corrupt/truncated
+ *  tail — surfaced once as a summary warn so the damage is visible, not silent. */
+export interface LoadResult {
+  /** graph deltas skipped as inapplicable (corrupt/truncated tail). */
+  skippedDeltas: number;
+  /** orphaned observation records re-wrapped in fresh roots by the
+   *  reconciliation pass (their listing was lost to a skipped delta). */
+  rewrappedOrphans: number;
+}
+
 /**
  * Reconstruct the in-memory graph from the active branch: latest snapshot +
- * folded deltas-since. Tolerant — a corrupt snapshot/delta is skipped,
+ * chronological fold of the entries since. ONE pass in file order — the exact
+ * op sequence the live pipeline executed (observation entries index records +
+ * advance the frontier; graph_delta entries re-apply mutations; selection and
+ * usage are latest-wins). Tolerant — a corrupt snapshot/delta is skipped,
  * never poisoning the session.
  */
-export async function load(ctx: StoreContext): Promise<void> {
+export async function load(ctx: StoreContext): Promise<LoadResult> {
   const entries = ctx.getBranch(ctx.getLeafId());
   const storeState = getGraphStore();
   // reset the frontier — re-derived below from the replayed observation entries
   storeState.observerFrontier = null;
 
-  // `/mk:rescan` voids everything at or before the latest marker — reconstruct
-  // from the marker forward (empty graph, reseed nGoal).
-  const rescanAt = findLatestRescanMarker(entries);
+  // `/mk:rescan` markers: the latest of ANY mode voids structure at/before it;
+  //  the latest PLAIN marker additionally voids the observation ledger +
+  //  frontier (a reuse-mode marker keeps them for the structure rebuild).
+  const { plainAt, structureAt } = findLatestRescanMarkers(entries);
 
-  // 1. find the latest valid snapshot AFTER the rescan marker (or start empty)
-  const snapshot = findLatestSnapshot(entries, rescanAt);
+  // 1. find the latest valid snapshot AFTER the structure cutoff (or start empty)
+  const snapshot = findLatestSnapshot(entries, structureAt);
   let graph: MemkeeperGraph;
-  let replayFrom = rescanAt + 1;
+  let replayFrom = structureAt + 1;
   if (snapshot !== null) {
     graph = materializeBase(snapshot.details);
     storeState.selectedTree = snapshot.details.selectedTree;
@@ -429,13 +481,17 @@ export async function load(ctx: StoreContext): Promise<void> {
     });
   }
 
-  // 2. single pass over the branch (from the rescan marker forward): populate
-  //    the observation content index (from EVERY observation entry — they are
-  //    immutable + never pruned, so all contribute), replay nothing here, and
-  //    pick up the latest-wins selected tree + usage ledger. Folding the
-  //    selection/usage latest-wins into the observation pass avoids a second
-  //    full-branch scan.
-  for (let i = rescanAt + 1; i < entries.length; i += 1) {
+  // 2. ONE chronological pass over the ledger span (from the latest PLAIN marker
+  //    forward), in file order = live op order: observation entries index their
+  //    records (immutable, never pruned — all contribute) + advance the frontier;
+  //    usage is latest-wins across the span; graph_delta entries re-apply their
+  //    ops via the mutators — but ONLY from the snapshot forward (earlier deltas
+  //    are already baked into the snapshot's node lists). Bad deltas are skipped
+  //    (tolerant reader) and counted — the summary warn makes the loss visible.
+  //    The selected tree is structure: latest-wins only AFTER the structure
+  //    cutoff (a reuse marker voids earlier trees).
+  let skippedDeltas = 0;
+  for (let i = plainAt + 1; i < entries.length; i += 1) {
     const e = entries[i];
     if (e === undefined || !isCustomEntry(e)) continue;
     if (e.customType === OBSERVATION_TYPE) {
@@ -449,38 +505,33 @@ export async function load(ctx: StoreContext): Promise<void> {
         const obs = decodeObservation(rec);
         if (obs !== null) graph.observations.set(obs.id, obs);
       }
-    } else if (e.customType === SELECTION_TYPE) {
+    } else if (e.customType === SELECTION_TYPE && i > structureAt) {
       const tree = decodeSelection(e.data);
       if (tree !== null) storeState.selectedTree = tree;
     } else if (e.customType === USAGE_TYPE) {
       const usage = decodeUsage((e.data as { ledger?: unknown } | undefined)?.ledger);
       if (usage !== null) storeState.usageLedger = usage;
-    }
-  }
-
-  // 3. replay post-snapshot graph deltas (structural mutations) via the mutators.
-  //    Bad deltas are skipped (tolerant reader).
-  for (let i = replayFrom; i < entries.length; i += 1) {
-    const e = entries[i];
-    if (e === undefined || !isCustomEntry(e) || e.customType !== GRAPH_DELTA_TYPE) continue;
-    const payload = e.data as GraphDeltaEntry | undefined;
-    if (payload === undefined || payload.kind !== "graph_delta") continue;
-    const batch = payload.deltas ?? (payload.delta !== undefined ? [payload.delta] : []);
-    for (const delta of batch) {
-      try {
-        applyDelta(graph, delta, "source");
-      } catch (err) {
-        // skip corrupt/inapplicable delta — reconstruction continues (logged)
-        log.warn(`graph-store: skipping inapplicable graph_delta at ${e.id}: ${String(err)}`);
+    } else if (e.customType === GRAPH_DELTA_TYPE && i >= replayFrom) {
+      const payload = e.data as GraphDeltaEntry | undefined;
+      if (payload === undefined || payload.kind !== "graph_delta") continue;
+      const batch = payload.deltas ?? (payload.delta !== undefined ? [payload.delta] : []);
+      for (const delta of batch) {
+        try {
+          applyDelta(graph, delta, "source");
+        } catch (err) {
+          skippedDeltas += 1;
+          // skip corrupt/inapplicable delta — reconstruction continues (logged)
+          log.warn(`graph-store: skipping inapplicable graph_delta at ${e.id}: ${String(err)}`);
+        }
       }
     }
   }
 
-  // 4. reconcile observation links (node lists are the authority; unlisted
+  // 3. reconcile observation links (node lists are the authority; unlisted
   //    records link into their wrapper or are re-wrapped in a fresh root).
-  reconcileLinks(graph);
+  const rewrappedOrphans = reconcileLinks(graph);
 
-  // 5. Guarantee the id counters are past every loaded node/observation id.
+  // 4. Guarantee the id counters are past every loaded node/observation id.
   //    The snapshot fields + graph_delta replay advance them in the common case,
   //    but a deltas-only load enters observation records directly into the map
   //    (not via a mutator), leaving nextObsId at the seed — a later Observer run
@@ -498,7 +549,7 @@ export async function load(ctx: StoreContext): Promise<void> {
 
   storeState.graph = graph;
 
-  // 6. Final whole-graph structural check. Per-delta assertStructural was
+  // 5. Final whole-graph structural check. Per-delta assertStructural was
   //    skipped during replay (the graph is mid-rebuild there — an observation
   //    can reference a sibling node not yet created this batch); this catches a
   //    genuinely corrupt/truncated delta sequence. Structural invariants only
@@ -511,4 +562,10 @@ export async function load(ctx: StoreContext): Promise<void> {
   if (!structurallyValid) {
     log.warn("graph-store: reconstructed graph failed final structural validation");
   }
+  if (skippedDeltas > 0 || rewrappedOrphans > 0) {
+    log.warn(
+      `graph-store: load skipped ${skippedDeltas} graph delta(s) and re-wrapped ${rewrappedOrphans} orphaned observation(s) — a corrupt/truncated tail; the affected structure rebuilds on the next Builder run`,
+    );
+  }
+  return { skippedDeltas, rewrappedOrphans };
 }

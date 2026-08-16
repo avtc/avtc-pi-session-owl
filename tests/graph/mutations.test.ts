@@ -4,6 +4,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { exactlyOneNodePerObservation, GraphInvariantError } from "../../src/graph/invariants.js";
 import {
+  applyAttachObservation,
   applyCreateNode,
   applyFlushNew,
   applyMerge,
@@ -125,6 +126,49 @@ describe("applyRecordObservation", () => {
       GraphInvariantError,
     );
     expect(nodeById(g, "n1").observationIds).toEqual(["o1"]);
+  });
+});
+
+describe("applyAttachObservation", () => {
+  it("re-points an already-recorded observation to a new parent (unlink + link)", () => {
+    const g = bareGraphWithRoot("n1");
+    applyCreateNode(g, { id: "n2", summary: "dest", importance: "med", parentNode: null, state: "active" });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) });
+    const delta = applyAttachObservation(g, { obsId: "o1", parentNode: "n2" });
+    expect(delta.type).toBe("record_observation");
+    expect(nodeById(g, "n1").observationIds).toEqual([]);
+    expect(nodeById(g, "n2").observationIds).toEqual(["o1"]);
+    expect(g.observations.get("o1")?.parentNode).toBe("n2");
+  });
+
+  it("is tolerant of a dissolved old parent (the stale unlink is skipped)", () => {
+    const g = bareGraphWithRoot("n1");
+    applyCreateNode(g, { id: "n2", summary: "dest", importance: "med", parentNode: null, state: "active" });
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) });
+    // simulate the old parent dissolving (a merge that relocated the listing);
+    // the record's parentNode is now stale — attach must still link cleanly
+    g.nodes.delete("n1");
+    applyAttachObservation(g, { obsId: "o1", parentNode: "n2" });
+    expect(nodeById(g, "n2").observationIds).toEqual(["o1"]);
+    expect(g.observations.get("o1")?.parentNode).toBe("n2");
+  });
+
+  it("is idempotent when the record is already listed under the target", () => {
+    const g = bareGraphWithRoot("n1");
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) });
+    applyAttachObservation(g, { obsId: "o1", parentNode: "n1" });
+    expect(nodeById(g, "n1").observationIds).toEqual(["o1"]);
+  });
+
+  it("throws when the record or the target node does not exist", () => {
+    const g = bareGraphWithRoot("n1");
+    expect(() => applyAttachObservation(g, { obsId: "oMissing" as ObsId, parentNode: "n1" })).toThrow(
+      GraphInvariantError,
+    );
+    applyRecordObservation(g, { obs: obsWith({ id: "o1", timestamp: NOW, parentNode: "n1" }) });
+    expect(() => applyAttachObservation(g, { obsId: "o1", parentNode: "nMissing" as NodeId })).toThrow(
+      GraphInvariantError,
+    );
   });
 });
 

@@ -38,6 +38,11 @@ export const USAGE_TYPE = "memkeeper.usage";
  *  marker forward). Append-only/event-sourced, so the old entries stay in the
  *  session file but no longer contribute. */
 export const RESCAN_TYPE = "memkeeper.rescan";
+/** Rescan marker payload mode for `/mk:rescan --reuse-observations`: voids the
+ *  graph STRUCTURE only — the collected observation records + frontier survive
+ *  the marker so the rebuild pipeline can re-wrap them without re-observing
+ *  (no Observer LLM). Absent mode (or any other value) = the plain full void. */
+export const RESCAN_MODE_REUSE = "reuse" as const;
 
 /** Current snapshot schema version (additive fields don't bump). */
 export const DETAILS_VERSION = "v1";

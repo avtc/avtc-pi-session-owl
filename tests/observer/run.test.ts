@@ -162,13 +162,19 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
 
-    // exactly one create_node graph_delta (a batched envelope) + one
-    // memkeeper.observation entry
+    // exactly one graph_delta (a batched envelope) + one memkeeper.observation entry
     const graphDeltas = appended.filter((e) => e.type === "memkeeper.graph_delta");
     const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
     expect(graphDeltas).toHaveLength(1);
-    // the batched envelope carries the create_node in a `deltas` array
-    expect(Array.isArray((graphDeltas[0].data as { deltas?: unknown[] }).deltas)).toBe(true);
+    // the batched envelope carries the chunk's ops in live order: create_node
+    // immediately followed by its record_observation (replay re-executes the
+    // exact live sequence, so later Builder merges relocate the record)
+    const batch = (graphDeltas[0].data as { deltas?: Record<string, unknown>[] }).deltas;
+    expect(Array.isArray(batch)).toBe(true);
+    expect(batch?.map((d) => d.type)).toEqual(["create_node", "record_observation"]);
+    const wrapperDelta = batch?.[0] as unknown as { id: string };
+    const recordDelta = batch?.[1] as unknown as { obs: { parentNode: string } };
+    expect(recordDelta.obs.parentNode).toBe(wrapperDelta.id);
     expect(obsEntries).toHaveLength(1);
 
     // the single observation delta covers the whole unobserved range and carries

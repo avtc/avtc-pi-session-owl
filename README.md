@@ -109,7 +109,7 @@ The defaults are the token-cheapest profile and are provisional — tune the thr
 | `/mk:cat <id>` | Show a node (with its observations) or a single observation in full |
 | `/mk:find <query>` | Search memory (regex; non-obsolete) |
 | `/mk:find-all <query>` | Search memory (regex; all, including superseded) |
-| `/mk:rescan` | Discard the current memory graph and re-observe the entire session from the start (asks confirmation) |
+| `/mk:rescan` | Discard the current memory graph and re-observe the entire session from the start (asks confirmation). With `--reuse-observations`: rebuild the graph structure from the collected observations without re-observing |
 | `/mk:settings` | Open the settings UI |
 
 ## Full suite

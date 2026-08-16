@@ -365,7 +365,7 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(obs?.summary).not.toContain(ansiRed);
   });
 
-  it("persist the capture (observation entry + nGoal seed graph_delta)", async () => {
+  it("persist the capture (observation entry + nGoal seed + record_observation link deltas)", async () => {
     const branch = [userEntry("u1", "do the thing")];
     const { ctx, pi, appended } = makeCtx(branch);
     await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
@@ -374,10 +374,18 @@ describe("captureInitialPromptIfAbsent", () => {
     expect(obs.length).toBe(1);
     // coversUpToId = the first user entry (frontier advances past it)
     expect((obs[0][1] as { coversUpToId: string }).coversUpToId).toBe("u1");
-    // graph_delta log: create_node (nGoal seed) only — nGoal.summary is set by
-    // the goal-extract stage, not a capture-time set_meta.
+    // graph_delta log: create_node (nGoal seed) + record_observation (the
+    // oInitialPrompt link — replay re-executes the capture exactly). nGoal.summary
+    // is set by the goal-extract stage, not a capture-time set_meta.
     const deltas = appended.filter(([t]) => t === "memkeeper.graph_delta");
-    expect(deltas.length).toBe(1);
+    expect(deltas.length).toBe(2);
+    const create = deltas[0][1] as { delta: { type: string; id: string } };
+    const record = deltas[1][1] as { delta: { type: string; obs: { id: string; parentNode: string } } };
+    expect(create.delta.type).toBe("create_node");
+    expect(create.delta.id).toBe("nGoal");
+    expect(record.delta.type).toBe("record_observation");
+    expect(record.delta.obs.id).toBe("oInitialPrompt");
+    expect(record.delta.obs.parentNode).toBe("nGoal");
     const setMetas = deltas.filter(([, d]) => (d as { delta: { type: string } }).delta?.type === "set_meta");
     expect(setMetas.length).toBe(0);
   });

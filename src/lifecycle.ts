@@ -287,9 +287,16 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   });
   applyRecordObservation(graph, { obs });
 
+  // persist the link op: a record_observation delta, so replay re-executes the
+  // capture exactly (the fold links oInitialPrompt under the re-seeded nGoal —
+  // not inferred from the entry's capture-time parentNode). The record is a
+  // SNAPSHOT copy — the live object's parentNode mutates on later mv/merges.
+  appendGraphDelta(store, { type: "record_observation", obs: { ...obs } } as const);
+
   // persist the capture: the observation (content + provenance) as a
   // memkeeper.observation entry (coversUpToId = first user entry → frontier
-  // advances past it); the record_observation is NOT a graph_delta (the store never applies mutations).
+  // advances past it); the entry indexes the record's content — structural
+  // application happens only via the graph_delta above.
   const observationEntry: ObservationEntry = {
     coversFromId: null,
     coversUpToId: firstUser.id,

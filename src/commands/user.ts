@@ -29,9 +29,13 @@ import {
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
+import { acquireForCompaction } from "../runtime/run-lock.js";
 import { getGraphStore, resetGraphForRescan } from "../store/graph-store.js";
-import { onTurnEnd } from "../triggers.js";
+import { onTurnEnd, type RunFn } from "../triggers.js";
 import type { NodeId, ObsId } from "../types.js";
+import { O_INITIAL_PROMPT } from "../types.js";
+import type { WidgetController } from "../widget/tracker.js";
+import { runReuseRebuild } from "./reuse-rebuild.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -39,6 +43,7 @@ const VIEWER: RenderViewer = NON_BUILDER;
 const CHILD_DEPTH = 1;
 const EXCLUDE_SUPERSEDED: IncludeSuperseded = false;
 const INCLUDE_SUPERSEDED: IncludeSuperseded = true;
+const NO_OBSERVATIONS = 0;
 /** Trim a raw positional-args string into the single token (or null when
  *  blank/whitespace). Shared by the id commands (ls/cat) and the regex commands
  *  (find/find-all). */
@@ -206,6 +211,102 @@ export async function runMkFindAll(args: string, ctx: ExtensionCommandContext): 
   await runFind(args, ctx, INCLUDE_SUPERSEDED);
 }
 
+// --- /mk:rescan -----------------------------------------------------------
+
+/** The reuse-mode flag: rebuild the graph structure from the collected
+ *  observation records instead of re-observing the session (no Observer LLM). */
+const REUSE_FLAG = "--reuse-observations";
+
+/** Dependencies the rescan handler needs beyond the command ctx: the api
+ *  (entry appends), the widget (rebuild progress), the Builder stage run, and
+ *  an optional test hook collecting the fire-and-forget launch promise. */
+export interface RescanDeps {
+  pi: ExtensionAPI;
+  widget: WidgetController;
+  runBuilderStage: RunFn;
+  /** Test seam: receives the background launch promise (production omits). */
+  onLaunched?: (promise: Promise<void>) => void;
+}
+
+/** Count the collected observation records (everything but the verbatim
+ *  oInitialPrompt — that one re-seeds under nGoal mechanically). */
+function collectedCount(): number {
+  let count = 0;
+  for (const id of getGraphStore().graph.observations.keys()) {
+    if (id !== O_INITIAL_PROMPT) count += 1;
+  }
+  return count;
+}
+
+/** `/mk:rescan [--reuse-observations]` — discard the memory graph. Plain: void
+ *  everything and re-observe the entire session (Observer LLM). With the reuse
+ *  flag: void the STRUCTURE only and rebuild it from the collected records in
+ *  the background (batched re-wrap + Builder cadence; the ledger, frontier, and
+ *  usage are kept — no re-observing). */
+export async function runMkRescan(args: string, ctx: ExtensionCommandContext, deps: RescanDeps): Promise<void> {
+  const settings = getMemkeeperSettings();
+  if (!settings.enabled) {
+    notify(ctx, "memkeeper is disabled (enable it first).", "warning");
+    return;
+  }
+  const reuse = args.trim().includes(REUSE_FLAG);
+
+  if (reuse) {
+    const collected = collectedCount();
+    if (collected === NO_OBSERVATIONS) {
+      notify(ctx, "Nothing to rebuild — no collected observations yet.", "info");
+      return;
+    }
+    const ok = await ctx.ui.confirm(
+      "Rebuild memory",
+      `Discard the current graph structure and rebuild it from the ${collected} collected observations without re-observing the session? The observation ledger, frontier, and usage are kept. This cannot be undone.`,
+    );
+    if (!ok) return;
+    notify(ctx, `Rebuilding — re-wrapping ${collected} collected observations into a fresh graph…`, "info");
+    // fire-and-forget the rebuild under the run-lock (aborts + awaits any
+    // in-flight maintenance run, holds until done; the remainder parks on abort
+    // and a re-run continues)
+    const launch = (async () => {
+      const handle = await acquireForCompaction();
+      const signal = handle.abortController.signal;
+      try {
+        await runReuseRebuild({
+          ctx,
+          pi: deps.pi,
+          settings: getMemkeeperSettings(),
+          signal,
+          widget: deps.widget,
+          runBuilder: () =>
+            deps.runBuilderStage({ ctx, settings: getMemkeeperSettings(), signal, scope: null, unobserved: null }),
+        });
+      } catch (err) {
+        log.error("rescan --reuse-observations: rebuild failed", err);
+      } finally {
+        handle.release();
+      }
+    })();
+    deps.onLaunched?.(launch);
+    return;
+  }
+
+  const ok = await ctx.ui.confirm(
+    "Rescan memory",
+    "Discard the current memory graph (observations, nodes, selected tree) and re-observe the entire session from the start? This cannot be undone.",
+  );
+  if (!ok) return;
+  resetGraphForRescan(toStoreContext(deps.pi, ctx));
+  notify(ctx, "Rescanning — observing the session from the start…", "info");
+  // fire-and-forget the Observer catch-up (frontier is now null → the whole
+  // branch is unobserved); the chained Builder/Selector fire after per mode.
+  void (async () => {
+    try {
+      await onTurnEnd({ ctx, settings: getMemkeeperSettings() });
+    } catch (err) {
+      log.error("rescan: observer catch-up failed", err);
+    }
+  })();
+}
+
 // --- registration ----------------------------------------------------------
 
 /** The registered command names. */
@@ -215,8 +316,9 @@ export const MK_FIND_COMMAND = "mk:find";
 export const MK_FIND_ALL_COMMAND = "mk:find-all";
 export const MK_RESCAN_COMMAND = "mk:rescan";
 
-/** Register all four `/mk:*` user browse commands. */
-export function registerUserCommands(pi: ExtensionAPI): void {
+/** Register all the `/mk:*` user browse commands. `deps` carries the widget +
+ *  the Builder stage run the rescan reuse-rebuild drives. */
+export function registerUserCommands(pi: ExtensionAPI, deps: RescanDeps): void {
   pi.registerCommand(MK_LS_COMMAND, {
     description: "List memory — roots, or a node's children. Usage: /mk:ls [nodeId]",
     handler: runMkLs,
@@ -234,29 +336,8 @@ export function registerUserCommands(pi: ExtensionAPI): void {
     handler: runMkFindAll,
   });
   pi.registerCommand(MK_RESCAN_COMMAND, {
-    description: "Discard the current memory graph and re-observe the entire session from the start.",
-    handler: async (_args: string, ctx: ExtensionCommandContext): Promise<void> => {
-      const settings = getMemkeeperSettings();
-      if (!settings.enabled) {
-        notify(ctx, "memkeeper is disabled (enable it first).", "warning");
-        return;
-      }
-      const ok = await ctx.ui.confirm(
-        "Rescan memory",
-        "Discard the current memory graph (observations, nodes, selected tree) and re-observe the entire session from the start? This cannot be undone.",
-      );
-      if (!ok) return;
-      resetGraphForRescan(toStoreContext(pi, ctx));
-      notify(ctx, "Rescanning — observing the session from the start…", "info");
-      // fire-and-forget the Observer catch-up (frontier is now null → the whole
-      // branch is unobserved); the chained Builder/Selector fire after per mode.
-      void (async () => {
-        try {
-          await onTurnEnd({ ctx, settings: getMemkeeperSettings() });
-        } catch (err) {
-          log.error("rescan: observer catch-up failed", err);
-        }
-      })();
-    },
+    description:
+      "Discard the memory graph and re-observe the session from the start. --reuse-observations rebuilds from collected observations.",
+    handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => runMkRescan(args, ctx, deps),
   });
 }

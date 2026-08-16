@@ -39,10 +39,11 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   // reads whatever graph state exists).
   pi.registerTool(makeMkRecallTool());
 
-  // The user's `/mk:*` browse commands (roots / cat / find / find-all). They
-  // render via ui.notify (zero agent-context cost) and read the source graph
-  // directly, so they are harmless even when memkeeper is disabled.
-  registerUserCommands(pi);
+  // The user's `/mk:*` browse commands (roots / cat / find / find-all / rescan).
+  // They render via ui.notify (zero agent-context cost) and read the source graph
+  // directly, so they are harmless even when memkeeper is disabled — except
+  // /mk:rescan, which gates on enabled itself. Registered AFTER the Builder
+  // stage run exists (the rescan reuse-rebuild drives it).
 
   // /mk:status — the user-facing status report (memory stats + per-phase usage).
   registerStatusCommand(pi);
@@ -51,6 +52,7 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   // Selector reads the avtc-pi-todo wiring LIVE (a todo extension appearing
   // mid-session is picked up at the next trigger).
   const runBuilderFn = makeBuilderRun(pi, widget, runBuilder);
+  registerUserCommands(pi, { pi, widget, runBuilderStage: runBuilderFn });
   setStageRuns({
     runObserver: makeObserverRun(pi, widget, runObserver, runBuilderFn),
     runBuilder: runBuilderFn,
