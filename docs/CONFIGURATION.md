@@ -35,7 +35,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `observerThresholdTokens` | number | `4000` | `on-threshold` gate: emit a batch when accumulated unobserved tokens reach this. |
 | `observerIncludeThinking` | boolean | `false` | Include non-redacted thinking blocks in the chunks the Observer reads. |
 | `observerToolBlockCapTokens` | number | `400` | When capturing tool calls and results, trim each block to this many tokens (keeping the start and end). `null` = keep the whole block. |
-| `observerMaxTokens` | number | `8192` | Maximum output tokens per Observer LLM call. |
+| `observerMaxTokens` | number | `16384` | Maximum output tokens per Observer LLM call. |
 | `observerThinkingLevel` | thinking-level | `null` | Thinking level for the Observer. `null`/Inherit default = use `defaultThinkingLevel`; `off` = no thinking. |
 
 ## Builder

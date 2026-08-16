@@ -110,7 +110,7 @@ const RELOAD_KEEP_GLOBAL_DIR: string | undefined = undefined;
 const DEFAULT_FIND_TIMEOUT_MS = 30_000;
 const DEFAULT_LLM_CALL_TIMEOUT_MS = 600_000;
 const MIN_LLM_CALL_TIMEOUT_MS = 1000;
-const DEFAULT_OBSERVER_MAX_TOKENS = 8192;
+const DEFAULT_OBSERVER_MAX_TOKENS = 16384;
 const DEFAULT_STAGE_MAX_TOKENS = 65536;
 const MIN_MAX_TOKENS = 1;
 const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
@@ -193,7 +193,7 @@ const LLM_CALL_TIMEOUT_PRESETS: readonly PresetElement[] = [
   ["30m", 1_800_000],
   ["Infinite", NO_LIMIT],
 ];
-const MAX_TOKENS_PRESETS: readonly PresetElement[] = [8192, 32768, 65536, 131072, 262144];
+const MAX_TOKENS_PRESETS: readonly PresetElement[] = [16384, 32768, 65536, 131072, 262144];
 const TOOL_RESULT_TOKEN_BUDGET_PRESETS: readonly PresetElement[] = [2000, 4000, 6000, 8000, 12000];
 const OBSERVER_THRESHOLD_PRESETS: readonly PresetElement[] = [
   ["1K", 1000],
