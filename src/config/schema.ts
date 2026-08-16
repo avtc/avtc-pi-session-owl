@@ -110,7 +110,8 @@ const RELOAD_KEEP_GLOBAL_DIR: string | undefined = undefined;
 const DEFAULT_FIND_TIMEOUT_MS = 30_000;
 const DEFAULT_LLM_CALL_TIMEOUT_MS = 600_000;
 const MIN_LLM_CALL_TIMEOUT_MS = 1000;
-const DEFAULT_MAX_TOKENS = 8192;
+const DEFAULT_OBSERVER_MAX_TOKENS = 8192;
+const DEFAULT_STAGE_MAX_TOKENS = 65536;
 const MIN_MAX_TOKENS = 1;
 const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
 const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
@@ -136,7 +137,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   observerThresholdTokens: 4000,
   observerIncludeThinking: false,
   observerToolBlockCapTokens: 400,
-  observerMaxTokens: DEFAULT_MAX_TOKENS,
+  observerMaxTokens: DEFAULT_OBSERVER_MAX_TOKENS,
   observerThinkingLevel: NO_MODEL,
   // Builder
   builderModel: NO_MODEL,
@@ -145,14 +146,14 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   builderRootViewThreshold: 40000,
   builderSkipWithinBudget: DEFAULT_FAST_PATH,
   maxBuilderPasses: 3,
-  builderMaxTokens: DEFAULT_MAX_TOKENS,
+  builderMaxTokens: DEFAULT_STAGE_MAX_TOKENS,
   builderThinkingLevel: NO_MODEL,
   // Selector
   selectorModel: NO_MODEL,
   selectorSessionContextThresholdTokens: 200000,
   selectorRootViewThreshold: 20000,
   maxSelectorPasses: 3,
-  selectorMaxTokens: DEFAULT_MAX_TOKENS,
+  selectorMaxTokens: DEFAULT_STAGE_MAX_TOKENS,
   selectorThinkingLevel: NO_MODEL,
 } satisfies MemkeeperConfig);
 
@@ -192,7 +193,7 @@ const LLM_CALL_TIMEOUT_PRESETS: readonly PresetElement[] = [
   ["30m", 1_800_000],
   ["Infinite", NO_LIMIT],
 ];
-const MAX_TOKENS_PRESETS: readonly PresetElement[] = [2048, 4096, 8192, 16384];
+const MAX_TOKENS_PRESETS: readonly PresetElement[] = [8192, 32768, 65536, 131072, 262144];
 const TOOL_RESULT_TOKEN_BUDGET_PRESETS: readonly PresetElement[] = [2000, 4000, 6000, 8000, 12000];
 const OBSERVER_THRESHOLD_PRESETS: readonly PresetElement[] = [
   ["1K", 1000],
