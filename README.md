@@ -76,10 +76,10 @@ n5 · med · Scratch · 2obs · Jul 28 14:30 — Jul 29 09:15
 While memkeeper works, a footer line shows the active stage, its progress, and its token cost — hidden when idle:
 
 ```
-🦉 1005 obs → 95(-10) roots 35k(-10k)/40k #1 · 8.0k/262k · 3.4k tok
+🦉 1005(+11) obs 150/371 → 95 roots 35k/40k · 8.0k/262k · 3.4k tok · +3 obs
 ```
 
-(observation/node counts with deltas since the stage started · root-view tokens vs budget · context-window usage · streamed output tokens).
+(observation/node counts with deltas since the stage started · chunk batch N/M during an observe run · root-view tokens vs budget · context-window usage · streamed output tokens · observations accepted in the current chunk but not yet persisted — appears only while a chunk is actively recording).
 
 ## Configuration
 

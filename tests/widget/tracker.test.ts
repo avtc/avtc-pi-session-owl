@@ -279,3 +279,57 @@ describe("onEvent — message_start resets the streaming counter per prompt", ()
     expect(tracker.streamingOutputTokens).toBe(10);
   });
 });
+
+describe("onEvent — in-flight accepted observations (+N obs)", () => {
+  let tracker: ProgressTracker;
+
+  beforeEach(() => {
+    resetForNewSession();
+    tracker = createTracker();
+  });
+
+  /** A record_observations tool_execution_end with an accepted count. */
+  function recordEnd(accepted: number, isError: boolean): AgentEvent {
+    return {
+      type: "tool_execution_end",
+      toolCallId: "c1",
+      toolName: "record_observations",
+      result: { content: [], details: { accepted, rejected: 0 } },
+      isError,
+    } as unknown as AgentEvent;
+  }
+
+  it("accumulates accepted counts from record_observations tool results", () => {
+    tracker.startStage("observe", { batch: { done: 0, total: 5 } });
+    tracker.onEvent(recordEnd(3, false));
+    tracker.onEvent(recordEnd(2, false));
+    expect(tracker.inFlightObs).toBe(5);
+  });
+
+  it("ignores other tools and error results (a rejected call accepts nothing)", () => {
+    tracker.startStage("observe", { batch: { done: 0, total: 5 } });
+    tracker.onEvent({
+      type: "tool_execution_end",
+      toolCallId: "c2",
+      toolName: "ls",
+      result: { content: [], details: { accepted: 7 } },
+      isError: false,
+    } as unknown as AgentEvent);
+    tracker.onEvent(recordEnd(4, true)); // validation-error call — isError
+    expect(tracker.inFlightObs).toBe(0);
+  });
+
+  it("resets on setBatch (chunk boundary: the completed chunk persists, the next starts fresh)", () => {
+    tracker.startStage("observe", { batch: { done: 0, total: 5 } });
+    tracker.onEvent(recordEnd(3, false));
+    tracker.setBatch(1, 5);
+    expect(tracker.inFlightObs).toBe(0);
+  });
+
+  it("resets on startStage (run boundary / re-assert after a mid-run Builder)", () => {
+    tracker.startStage("observe", { batch: { done: 0, total: 5 } });
+    tracker.onEvent(recordEnd(3, false));
+    tracker.startStage("observe", { batch: { done: 1, total: 5 } });
+    expect(tracker.inFlightObs).toBe(0);
+  });
+});

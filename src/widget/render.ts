@@ -4,12 +4,13 @@
 // The widget line render. Pure over a WidgetSnapshot + Theme:
 // builds the colored one-line string the factory wraps in a pi-tui Text.
 //
-// Format: 🦉 {obs} → {roots} [#N] [→ {selected} #N] · {ctx/window} · {tok} tok
+// Format: 🦉 {obs} → {roots} [#N] [→ {selected} #N] · {ctx/window} · {tok} tok [· {+N obs}]
 // - obs section:   {count}{(+Δ)} obs   (+ inline N/M batch while a multi-chunk observe batch is in flight — observe or an interleaved build)
 // - roots section: {count}{(+Δ)} roots {viewTokens}{(+Δ)}/{threshold}   (#N pass on build)
 // - selected sect: {count}{(+Δ)} selected {viewTokens}{(+Δ)}/{threshold}  (#N pass on select; selected-root only)
-// - trailing:      {ctxUsed}/{contextWindow} · {tok} tok   (active only; joined to
-//                   the structural sections by ·, internally by ·)
+// - trailing:      {ctxUsed}/{contextWindow} · {tok} tok · {+N obs}   (active only; joined to
+//                   the structural sections by ·, internally by ·; the +N obs segment appears
+//                   only while the current chunk has accepted-but-unpersisted records)
 // Colors: counts=text (accent on the active stage's section); budgets/labels/→
 // separators/spaces=dim; deltas follow their parent count; trailing ctx/tok=muted.
 
@@ -28,6 +29,8 @@ const OWL = "🦉";
 const SEP = " → ";
 const MID = " · ";
 const PASS_PREFIX = " #";
+/** inFlightObs zero value (no accepted-but-unpersisted records). */
+const NO_IN_FLIGHT = 0;
 
 /** Format a signed integer delta as (+N) / (-N), or "" when zero. */
 function signedCount(delta: number): string {
@@ -93,18 +96,26 @@ function selectedSection(snap: WidgetSnapshot, theme: ThemeSeam): string | null 
   return `${count}${countDeltaColored}${label}${viewTokens}${tokenDeltaColored}${threshold}${pass}`;
 }
 
-/** The trailing runtime segments: {ctx/window} · {tok} tok (active only).
- *  Joined to the structural sections by `MID` (·) and internally by `MID` —
+/** The trailing runtime segments: {ctx/window} · {tok} tok [· {+N obs}] (active
+ *  only). Joined to the structural sections by `MID` (·) and internally by `·` —
  *  the runtime metrics read as one grouped cluster, distinct from the `→`
  *  structural breaks (obs → roots → selected).
  *  When contextWindow is null (getContextUsage() undefined) the whole context
- *  segment collapses to `?` (never `?/0`). */
+ *  segment collapses to `?` (never `?/0`).
+ *  The `+N obs` segment (observations accepted by record_observations in the
+ *  CURRENT chunk, not yet persisted) appears only when non-zero — the live
+ *  working-vs-stuck signal: it moving means the model is recording, even while
+ *  the obs total waits for the chunk to complete. */
 function trailingSection(snap: WidgetSnapshot, theme: ThemeSeam): string {
   const ctxPart = snap.contextTokens === null ? "?" : formatTokens(snap.contextTokens);
   const windowPart = snap.contextWindow === null ? "" : `/${formatTokens(snap.contextWindow)}`;
   const ctx = paint(theme, "muted", `${ctxPart}${windowPart}`);
   const tok = paint(theme, "muted", `${formatTokens(snap.streamingOutputTokens)} tok`);
-  return `${ctx}${paint(theme, "dim", MID)}${tok}`;
+  const parts = [ctx, tok];
+  if (snap.inFlightObs > NO_IN_FLIGHT) {
+    parts.push(paint(theme, "muted", `+${snap.inFlightObs} obs`));
+  }
+  return parts.join(paint(theme, "dim", MID));
 }
 
 /**

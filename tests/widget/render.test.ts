@@ -41,6 +41,7 @@ function snap(over: Partial<WidgetSnapshot>): WidgetSnapshot {
     selected: null,
     contextTokens: 0,
     contextWindow: 262_000,
+    inFlightObs: 0,
     ...over,
   } as WidgetSnapshot;
 }
@@ -70,6 +71,36 @@ describe("formatWidgetLine", () => {
     expect(text).toContain("45k(+5.0k)/40k");
     expect(text).toContain("12k/262k");
     expect(text).toContain("1.1k tok");
+  });
+
+  it("trailing cluster gains · +N obs while the current chunk has accepted records in flight", () => {
+    const { text } = render(
+      snap({
+        stage: "observe",
+        batch: { done: 150, total: 371 },
+        obs: { count: 5488, delta: 11 },
+        contextTokens: 37_000,
+        contextWindow: 262_000,
+        streamingOutputTokens: 223,
+        inFlightObs: 3,
+      }),
+    );
+    expect(text).toContain("37k/262k · 223 tok · +3 obs");
+  });
+
+  it("+N obs is absent while nothing is in flight (0)", () => {
+    const { text } = render(
+      snap({
+        stage: "observe",
+        contextTokens: 12_000,
+        contextWindow: 262_000,
+        streamingOutputTokens: 1100,
+        inFlightObs: 0,
+      }),
+    );
+    expect(text).toContain("12k/262k · 1.1k tok");
+    expect(text).not.toContain("obs ·");
+    expect(text).not.toContain("+0 obs");
   });
 
   it("separators: → between structural sections, · into + within the trailing runtime cluster", () => {

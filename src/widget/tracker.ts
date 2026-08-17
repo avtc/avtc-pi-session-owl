@@ -14,6 +14,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
 import { BUILDER } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
+import { RECORD_OBS_TOOL } from "../observer/run.js";
 import type { StageUsage } from "../runtime/agent-loop.js";
 import { deltaTextOf, deltaTokens, messageEndUsage, streamedOutputUsage } from "../runtime/streaming-tokens.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -47,6 +48,9 @@ export const WIDGET_PLACEMENT = "aboveEditor" as const;
  *  arg fails lint:bare-literals; pass this named constant to hide the line. */
 export const HIDE_WIDGET: undefined = undefined;
 
+/** inFlightObs zero value (no accepted-but-unpersisted records). */
+const NO_IN_FLIGHT_OBS = 0;
+
 const ZERO_USAGE: StageUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0, elapsedMs: 0 };
 
 // --- the snapshot the render formats (pure data; render.ts is pure over it) --
@@ -63,6 +67,10 @@ export interface WidgetSnapshot {
   selected: { count: number; countDelta: number; viewTokens: number; tokenDelta: number; threshold: number } | null;
   contextTokens: number | null;
   contextWindow: number | null;
+  /** Observations ACCEPTED by record_observations in the CURRENT chunk but not
+   *  yet persisted (the chunk's loop is still running) — the live `+N obs`
+   *  working-vs-stuck signal. Resets at each chunk boundary. */
+  inFlightObs: number;
 }
 
 /** The stage-control methods shared by the tracker + the controller surface
@@ -107,6 +115,10 @@ interface TrackerState {
   /** The background agent's model id (`message.model` from its last message_end)
    *  — used to resolve the context-window denominator via the model registry. */
   agentModelId: string | null;
+  /** Observations accepted by record_observations in the CURRENT chunk, not yet
+   *  persisted (persistence happens once per completed chunk) — the `+N obs`
+   *  signal. Reset at chunk (setBatch) and run (startStage) boundaries. */
+  inFlightObs: number;
 }
 
 /**
@@ -146,6 +158,7 @@ export function createTracker(): ProgressTracker {
     selectedBaseline: null,
     agentContextTokens: null,
     agentModelId: null,
+    inFlightObs: 0,
     fallbackTokens: 0,
     primaryTokens: 0,
     cachedRoots: null,
@@ -185,6 +198,9 @@ export function createTracker(): ProgressTracker {
     get agentModelId() {
       return state.agentModelId;
     },
+    get inFlightObs() {
+      return state.inFlightObs;
+    },
     startStage(stage, init) {
       state.stage = stage;
       state.pass = init?.pass ?? 1;
@@ -203,6 +219,7 @@ export function createTracker(): ProgressTracker {
       state.selectedBaseline = null;
       state.agentContextTokens = null;
       state.agentModelId = null;
+      state.inFlightObs = 0;
       state.cachedRoots = null;
     },
     setPass(pass) {
@@ -210,6 +227,9 @@ export function createTracker(): ProgressTracker {
     },
     setBatch(done, total) {
       state.batch = { done, total };
+      // a chunk boundary: the completed chunk persists (or wrote its empty
+      // verdict) — the in-flight counter belongs to the NEXT chunk
+      state.inFlightObs = 0;
     },
     setSelectedCounts(rootCount, rootViewTokens) {
       // capture the working-copy baseline on the first push of a Select stage.
@@ -279,6 +299,14 @@ export function createTracker(): ProgressTracker {
         // streaming and converges to accurate output when the provider reports it.
         state.streamingOutputTokens = Math.max(state.primaryTokens, state.fallbackTokens);
       } else if (event.type === "tool_execution_end") {
+        // record_observations accepted records for the CURRENT chunk (persisted
+        // only when the whole chunk completes — this is the live +N obs signal)
+        if (event.toolName === RECORD_OBS_TOOL && !event.isError) {
+          const accepted = (event.result?.details as { accepted?: number } | undefined)?.accepted;
+          if (typeof accepted === "number" && accepted > NO_IN_FLIGHT_OBS) {
+            state.inFlightObs += accepted;
+          }
+        }
         // a mutate happened → the cached root view is stale; rebuild on next snapshot.
         state.cachedRoots = null;
       }
@@ -372,6 +400,7 @@ export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): 
     selected,
     contextTokens,
     contextWindow,
+    inFlightObs: tracker.inFlightObs,
   };
 }
 
