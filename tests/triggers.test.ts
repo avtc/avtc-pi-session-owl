@@ -8,6 +8,7 @@ import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } 
 import { _resetRunLock, acquireOrSkip, inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
 import {
+  computeUncoveredRanges,
   computeUnobserved,
   evaluateBuilderTrigger,
   evaluateObserverTrigger,
@@ -98,6 +99,140 @@ afterEach(() => {
   resetForNewSession();
   resetStageRuns();
   _resetGetMemkeeperSettings();
+});
+
+// ===========================================================================
+describe("computeUncoveredRanges — zero-observation holes (closed territory only)", () => {
+  /** A `memkeeper.observation` custom entry over the given coverage. */
+  function obsEntry(id: string, coversFromId: string | null, coversUpToId: string, citedIds: string[]): FakeEntry {
+    return {
+      id,
+      type: "custom",
+      customType: "memkeeper.observation",
+      parentId: null,
+      timestamp: "2026-07-28T14:33:00.000Z",
+      data: {
+        coversFromId,
+        coversUpToId,
+        records: citedIds.map((srcId) => ({ sourceEntryIds: [srcId] })),
+        tokenCount: 0,
+      },
+    } as unknown as FakeEntry;
+  }
+
+  it("nothing observed yet (frontier null): the open tail is not repair territory", () => {
+    const entries = [userEntry("u1", "task"), assistantEntry("a1", "one"), assistantEntry("a2", "two")];
+    expect(computeUncoveredRanges(entries as unknown as SessionEntry[], null)).toEqual([]);
+  });
+
+  it("frontier id pruned off the branch: no closed holes remain repairable", () => {
+    const entries = [userEntry("u1", "task"), assistantEntry("a1", "one")];
+    expect(computeUncoveredRanges(entries as unknown as SessionEntry[], "pruned-frontier")).toEqual([]);
+  });
+
+  it("a jumped-over zero-record chunk between two record-bearing ones is a hole", () => {
+    const entries = [
+      userEntry("u1", "task"),
+      assistantEntry("a1", "recorded one"),
+      assistantEntry("a2", "recorded two"),
+      assistantEntry("a3", "skipped chunk — zero records"),
+      assistantEntry("a4", "recorded four"),
+      assistantEntry("a5", "recorded five"),
+      obsEntry("o1", "a1", "a2", ["a1", "a2"]),
+      obsEntry("o2", "a4", "a5", ["a4", "a5"]),
+    ];
+    const ranges = computeUncoveredRanges(entries as unknown as SessionEntry[], "a5");
+    expect(ranges.map((r) => r.entries.map((e) => e.id))).toEqual([["a3"]]);
+  });
+
+  it("the open tail after the frontier is NOT a range (normal triggers own it)", () => {
+    const entries = [
+      userEntry("u1", "task"),
+      assistantEntry("a1", "recorded"),
+      assistantEntry("a2", "recorded too"),
+      assistantEntry("a3", "tail one"),
+      assistantEntry("a4", "tail two"),
+      obsEntry("o1", "a1", "a2", ["a1"]),
+    ];
+    expect(computeUncoveredRanges(entries as unknown as SessionEntry[], "a2")).toEqual([]);
+  });
+
+  it("an empty-verdict entry (records: []) is itself a repairable hole", () => {
+    const entries = [
+      userEntry("u1", "task"),
+      assistantEntry("a1", "verdict-empty range"),
+      assistantEntry("a2", "verdict-empty range too"),
+      assistantEntry("a3", "recorded"),
+      obsEntry("o1", "a1", "a2", []), // empty verdict — zero observations
+      obsEntry("o2", "a3", "a3", ["a3"]),
+    ];
+    const ranges = computeUncoveredRanges(entries as unknown as SessionEntry[], "a3");
+    expect(ranges.map((r) => r.entries.map((e) => e.id))).toEqual([["a1", "a2"]]);
+  });
+
+  it("entries inside a record-bearing coverage interval are covered even when uncited (the model declined to record them)", () => {
+    const entries = [
+      userEntry("u1", "task"),
+      assistantEntry("a1", "cited"),
+      assistantEntry("a2", "declined — inside the interval"),
+      assistantEntry("a3", "declined — inside the interval"),
+      obsEntry("o1", "a1", "a3", ["a1"]),
+    ];
+    expect(computeUncoveredRanges(entries as unknown as SessionEntry[], "a3")).toEqual([]);
+  });
+
+  it("citations cover their sources even when the interval endpoints left the branch (compaction prune)", () => {
+    const entries = [
+      userEntry("u1", "task"),
+      assistantEntry("a1", "cited source"),
+      assistantEntry("a2", "uncited inside the pruned interval"),
+      obsEntry("o1", "pruned-id-not-on-branch", "a2", ["a1"]),
+    ];
+    const ranges = computeUncoveredRanges(entries as unknown as SessionEntry[], "a2");
+    expect(ranges.map((r) => r.entries.map((e) => e.id))).toEqual([["a2"]]);
+  });
+
+  it("a null coversFromId drops the interval; only citations cover", () => {
+    const entries = [
+      userEntry("u1", "task"),
+      assistantEntry("a1", "cited"),
+      assistantEntry("a2", "uncited"),
+      obsEntry("o1", null, "a2", ["a1"]),
+    ];
+    const ranges = computeUncoveredRanges(entries as unknown as SessionEntry[], "a2");
+    expect(ranges.map((r) => r.entries.map((e) => e.id))).toEqual([["a2"]]);
+  });
+
+  it("non-renderable entries inside an uncovered span neither split it nor join as sources", () => {
+    const entries = [
+      userEntry("u1", "task"),
+      assistantEntry("a1", "uncovered"),
+      modelChange("m1"),
+      assistantEntry("a2", "uncovered"),
+      obsEntry("o1", "a2", "a2", ["a2"]),
+    ];
+    const ranges = computeUncoveredRanges(entries as unknown as SessionEntry[], "a2");
+    expect(ranges.map((r) => r.entries.map((e) => e.id))).toEqual([["a1"]]);
+  });
+
+  it("no user message: no anchor, nothing to re-observe", () => {
+    const entries = [assistantEntry("a1", "no anchor yet"), obsEntry("o1", "a1", "a1", ["a1"])];
+    expect(computeUncoveredRanges(entries as unknown as SessionEntry[], "a1")).toEqual([]);
+  });
+
+  it("multiple holes before the frontier: one range per maximal contiguous uncovered run", () => {
+    const entries = [
+      userEntry("u1", "task"),
+      assistantEntry("a1", "hole one a"),
+      assistantEntry("a2", "hole one b"),
+      assistantEntry("a3", "covered"),
+      assistantEntry("a4", "covered too"),
+      assistantEntry("a5", "open tail — excluded"),
+      obsEntry("o1", "a3", "a4", ["a3", "a4"]),
+    ];
+    const ranges = computeUncoveredRanges(entries as unknown as SessionEntry[], "a4");
+    expect(ranges.map((r) => r.entries.map((e) => e.id))).toEqual([["a1", "a2"]]);
+  });
 });
 
 // ===========================================================================

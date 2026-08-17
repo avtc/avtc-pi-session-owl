@@ -443,6 +443,7 @@ describe("/mk:rescan", () => {
       pi: pi as unknown as Parameters<typeof runMkRescan>[2]["pi"],
       widget: NO_OP_WIDGET,
       runBuilderStage: async () => {},
+      runObserver: async () => {},
       onLaunched: (p: Promise<void>) => {
         launched.push(p);
       },

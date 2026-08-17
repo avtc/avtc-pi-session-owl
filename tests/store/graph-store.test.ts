@@ -190,6 +190,34 @@ describe("persist methods (PERSIST-ONLY)", () => {
     expect(getGraphStore().observerFrontier).toBe("e10");
   });
 
+  it("appendObservation advances the frontier forward only — an older coversUpToId (a re-observe of a skipped range) never regresses it", () => {
+    freshStore();
+    const fake = new FakeStore();
+    // branch: two source entries; the frontier already sits at the later one
+    fake.addCustomAt("src1", "custom", { marker: 1 });
+    fake.addCustomAt("src2", "custom", { marker: 2 });
+    getGraphStore().observerFrontier = "src2";
+    // a repair append covering the EARLIER range (src1..src1)
+    appendObservation(fake, {
+      coversFromId: "src1",
+      coversUpToId: "src1",
+      records: [
+        { id: "o1", summary: "fact", importance: "high", sourceEntryIds: ["src1"], timestamp: "t", parentNode: N_GOAL },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    expect(getGraphStore().observerFrontier).toBe("src2"); // held — not regressed
+    // a later append still advances normally
+    fake.addCustomAt("src3", "custom", { marker: 3 });
+    appendObservation(fake, {
+      coversFromId: "src3",
+      coversUpToId: "src3",
+      records: [],
+      tokenCount: 0,
+    } satisfies ObservationEntry);
+    expect(getGraphStore().observerFrontier).toBe("src3");
+  });
+
   it("appendGraphDelta persists a memkeeper.graph_delta envelope", () => {
     freshStore();
     const fake = new FakeStore();
@@ -327,6 +355,30 @@ describe("load reconstruction", () => {
     expect(store.graph.nodes.get("n2")?.state).toBe("active");
     // observerFrontier advanced to the last coversUpToId
     expect(store.observerFrontier).toBe("e7");
+  });
+
+  it("replay derives the frontier as the FURTHEST coverage — a later-in-file repair entry over an older range does not regress it", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("src1", "custom", { marker: 1 });
+    fake.addCustomAt("src2", "custom", { marker: 2 });
+    fake.addCustomAt("obs1", OBSERVATION_TYPE, {
+      coversFromId: "src1",
+      coversUpToId: "src2",
+      records: [],
+      tokenCount: 0,
+    } satisfies ObservationEntry);
+    // a repair append (later in file order) covering the OLDER src1 range
+    fake.addCustomAt("obs2", OBSERVATION_TYPE, {
+      coversFromId: "src1",
+      coversUpToId: "src1",
+      records: [],
+      tokenCount: 0,
+    } satisfies ObservationEntry);
+    fake.leafId = "obs2";
+    await load(fake);
+    // the frontier re-derives to the furthest coverage, not the last-in-file one
+    expect(getGraphStore().observerFrontier).toBe("src2");
   });
 
   it("reconstructs from deltas only when no valid compaction snapshot (empty base)", async () => {

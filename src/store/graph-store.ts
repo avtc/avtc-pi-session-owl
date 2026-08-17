@@ -158,9 +158,40 @@ export function clearEntryResolver(): void {
 /** Persist an observation batch. */
 export function appendObservation(ctx: StoreContext, entry: ObservationEntry): void {
   ctx.appendEntry(OBSERVATION_TYPE, entry);
-  // advance the frontier to this batch's coversUpToId (the Observer progress
-  // pointer; mirrors the in-memory cache refresh persistSelectedTree/appendUsage do)
-  getGraphStore().observerFrontier = entry.coversUpToId;
+  // advance the frontier to this batch's coversUpToId — FORWARD-ONLY: a
+  // re-observe of a skipped (zero-observation) range appends a coversUpToId
+  // that sits EARLIER on the branch than the current frontier; it must not
+  // regress the pointer past already-observed entries (they would re-observe
+  // and duplicate). Mirrors the in-memory cache refresh other persists do.
+  const branch = ctx.getBranch(ctx.getLeafId());
+  advanceFrontierForward(getGraphStore(), entry.coversUpToId, (id) => entryPosition(branch, id));
+}
+
+/** The entry's position on a branch (-1 = not present). */
+function entryPosition(branch: StoreEntry[], id: string): number {
+  return branch.findIndex((e) => e.id === id);
+}
+
+/** Advance `store.observerFrontier` to `coversUpToId` unless it resolves
+ *  EARLIER on the branch than the current frontier (a skipped-range re-observe
+ *  — hold the pointer). An unresolvable id keeps the legacy assign behavior
+ *  (fresh appends' sources are always the newest entries; only repair appends
+ *  target older ranges, and those always resolve). */
+function advanceFrontierForward(
+  store: { observerFrontier: string | null },
+  coversUpToId: string,
+  positionOf: (id: string) => number,
+): void {
+  const current = store.observerFrontier;
+  if (current === coversUpToId) return;
+  if (current !== null) {
+    const newPos = positionOf(coversUpToId);
+    if (newPos !== -1) {
+      const curPos = positionOf(current);
+      if (curPos !== -1 && newPos < curPos) return; // earlier on the branch — hold
+    }
+  }
+  store.observerFrontier = coversUpToId;
 }
 
 /** Persist a recorded graph delta (the caller already applied it in-memory). */
@@ -456,6 +487,9 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
   const storeState = getGraphStore();
   // reset the frontier — re-derived below from the replayed observation entries
   storeState.observerFrontier = null;
+  // id → position over the branch: O(1) frontier advancement during replay
+  const positionById = new Map<string, number>();
+  for (let i = 0; i < entries.length; i += 1) positionById.set(entries[i].id, i);
 
   // `/mk:rescan` markers: the latest of ANY mode voids structure at/before it;
   //  the latest PLAIN marker additionally voids the observation ledger +
@@ -498,7 +532,10 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
       const payload = e.data as ObservationEntry | undefined;
       if (payload === undefined) continue;
       if (typeof payload.coversUpToId === "string") {
-        storeState.observerFrontier = payload.coversUpToId;
+        // forward-only (same rule as appendObservation): a repair entry appended
+        // later in file order but covering an older range must not regress the
+        // re-derived frontier past already-observed entries
+        advanceFrontierForward(storeState, payload.coversUpToId, (id) => positionById.get(id) ?? -1);
       }
       if (!Array.isArray(payload.records)) continue;
       for (const rec of payload.records) {

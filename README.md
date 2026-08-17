@@ -110,6 +110,7 @@ The defaults are the token-cheapest profile and are provisional — tune the thr
 | `/mk:find <query>` | Search memory (regex; non-obsolete) |
 | `/mk:find-all <query>` | Search memory (regex; all, including superseded) |
 | `/mk:rescan` | Discard the current memory graph and re-observe the entire session from the start (asks confirmation). With `--reuse-observations`: rebuild the graph structure from the collected observations without re-observing |
+| `/mk:reobserve-0-obs-chunks` | Re-observe session ranges that were skipped with zero observations (repair after a degraded model run) |
 | `/mk:settings` | Open the settings UI |
 
 ## Full suite

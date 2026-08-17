@@ -9,9 +9,13 @@
 //
 // Persistence granularity: ONE `memkeeper.observation` entry PER CHUNK
 // (coversFromId = chunk's first entry, coversUpToId = chunk's last) plus ONE
-// `memkeeper.graph_delta` batch per chunk holding the chunk's ops in live order
-// ([create_node, record_observation] per wrapper), persisted immediately after
-// each chunk's agentLoop succeeds (per-chunk durability).
+// `memkeeper.graph_delta` batch per record-bearing chunk holding the chunk's ops
+// in live order ([create_node, record_observation] per wrapper), persisted
+// immediately after each chunk's agentLoop succeeds (per-chunk durability).
+// A 0-record chunk persists an EMPTY-VERDICT observation entry (records: [])
+// covering its range: every completed chunk advances the frontier, so a
+// zero-observation range is NEVER re-observed automatically —
+// /mk:reobserve-0-obs-chunks is the only retry path for it.
 // An abort loses only the in-flight chunk — completed chunks are durable and the
 // frontier has already advanced past them, so a re-run skips them (idempotent by
 // coverage range). Reverses the earlier accumulate-then-append (one delta per
@@ -52,9 +56,12 @@ import type { WidgetController } from "../widget/tracker.js";
 
 export const RECORD_OBS_TOOL = "record_observations";
 const OBSERVE_STAGE = "observe" as const;
-/** Consecutive no-progress turns (no accepted records AND no plain text)
+/** Consecutive no-progress turns (no accepted records; streamed text does NOT
+ *  count — a model pairing chatter with failing tool calls must stay bounded)
  *  allowed before a chunk's agentLoop is stopped. Normal chunks take 1–2 turns. */
 const OBSERVER_NO_PROGRESS_TURNS = 3;
+/** Log label for the Observer's no-progress stop warn line. */
+const OBSERVER_STOP_LABEL = "observer";
 const NO_SOURCE_ENTRY: SessionEntry | undefined = undefined;
 const EMPTY_GAP = 0;
 const EMPTY_RECORDS = 0;
@@ -93,11 +100,24 @@ interface RecordTool {
   readonly attempted: number;
 }
 
+/** A summary must carry at least one letter or digit to be substantive. A
+ *  degenerate model response (thinking-only garbage such as `!!!!!!`) that
+ *  happens to land in a valid tool call must not be written into the graph as
+ *  an observation — punctuation/symbol-only summaries are rejected per-record
+ *  (same mechanism as a foreign source id). */
+function isSubstantiveSummary(summary: string): boolean {
+  return SUBSTANTIVE_SUMMARY_TEST.test(summary);
+}
+
+/** At least one Unicode letter or digit anywhere in the summary. */
+const SUBSTANTIVE_SUMMARY_TEST = /\p{L}|\p{N}/u;
+
 /**
  * Build a fresh `record_observations` tool bound to one chunk's allowed-id set.
  * Each record is validated per-observation: every cited `sourceEntryId` must be
  * in `allowedIds` (a foreign id rejects that one record only, not the whole
- * batch). Valid records accumulate on `records`.
+ * batch) and the summary must be substantive. Valid records accumulate on
+ * `records`.
  */
 function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool {
   const records: RecordObservation[] = [];
@@ -112,7 +132,8 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
       let rejected = EMPTY_RECORDS;
       for (const raw of params.observations) {
         attempted += 1;
-        const valid = raw.sourceEntryIds.every((srcId: string) => allowedIds.has(srcId));
+        const valid =
+          isSubstantiveSummary(raw.summary) && raw.sourceEntryIds.every((srcId: string) => allowedIds.has(srcId));
         if (!valid) {
           rejected += 1;
           continue;
@@ -124,7 +145,7 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
         });
         accepted += 1;
       }
-      const ack = `recorded ${accepted}${rejected > EMPTY_RECORDS ? `, ${rejected} rejected for invalid ids` : ""}; continue or reply Done`;
+      const ack = `recorded ${accepted}${rejected > EMPTY_RECORDS ? `, ${rejected} rejected (invalid ids or non-substantive summary)` : ""}; continue or reply Done`;
       log.debug(`observer: record_observations accepted=${accepted} rejected=${rejected}`);
       return { content: [{ type: "text", text: ack }], details: { accepted, rejected } };
     },
@@ -253,10 +274,15 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         ),
         maxTurns: NO_TURN_LIMIT,
         // Degenerate-spiral bound: stop the chunk after 3 consecutive turns
-        // that neither accepted records nor emitted plain text (a failing
-        // tool-call retry loop would otherwise spin forever — maxTurns is
-        // NO_TURN_LIMIT and each LLM call completes under the call timeout).
-        stopAfterTurn: makeNoProgressTurnStop(OBSERVER_NO_PROGRESS_TURNS, () => recordTool.records.length),
+        // that accepted no records (streamed text does NOT reset the streak —
+        // a model pairing chatter with a failing tool call every turn would
+        // otherwise spin forever under NO_TURN_LIMIT; each call also completes
+        // well under the per-call timeout, so nothing else bounds it).
+        stopAfterTurn: makeNoProgressTurnStop(
+          OBSERVER_NO_PROGRESS_TURNS,
+          () => recordTool.records.length,
+          OBSERVER_STOP_LABEL,
+        ),
         maxTokens: input.settings.observerMaxTokens,
         timeoutMs: input.settings.llmCallTimeoutMs,
         onEvent: (event) => input.widget.onEvent(event),
@@ -288,11 +314,13 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       if (timedOut) {
         throw new StageTimeoutError("Observer", input.settings.llmCallTimeoutMs);
       }
-      // this chunk succeeded → wrap its records + persist IMMEDIATELY (per-chunk
-      // durability: an abort loses only the in-flight chunk; the frontier has
-      // already advanced past every prior record-bearing chunk). A 0-record
-      // chunk persists nothing — it is covered by the next record-bearing
-      // chunk's coversUpToId; trailing 0-record chunks re-observe next run.
+      // this chunk succeeded → persist IMMEDIATELY (per-chunk durability: an
+      // abort loses only the in-flight chunk; the frontier has already advanced
+      // past every prior chunk). A record-bearing chunk wraps + persists its
+      // records; a 0-record chunk persists an EMPTY-VERDICT entry covering its
+      // range — a completed chunk is never re-observed automatically (neither
+      // mid-run jumps nor the trailing treadmill); /mk:reobserve-0-obs-chunks
+      // is the only retry path for zero-observation ranges.
       const records = recordTool.records;
       if (records.length > EMPTY_RECORDS) {
         totalRecords += records.length;
@@ -314,6 +342,16 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
           if (input.signal.aborted) return;
           if (built) input.widget.startStage(OBSERVE_STAGE, { batch: { done, total: totalChunks } });
         }
+      } else {
+        // 0 records (model verdict, all-rejected, or a no-progress-stopped
+        // degenerate turn): persist the empty verdict so the frontier advances
+        // and no automatic trigger ever retries this range.
+        appendObservation(store, {
+          coversFromId: chunk.firstEntryId,
+          coversUpToId: chunk.lastEntryId,
+          records: [],
+          tokenCount: EMPTY_RECORDS,
+        });
       }
       // an all-bad chunk (model attempted records but every id was foreign) is
       // skipped — no records from it — and the user is warned.
@@ -330,9 +368,9 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     if (input.signal.aborted) return;
 
     if (totalRecords === EMPTY_RECORDS) {
-      // every chunk yielded nothing worth keeping. Completed chunks already
-      // advanced the frontier past their range (via the next record-bearing
-      // chunk, or trailing re-observe next run); nothing else to do.
+      // every chunk yielded nothing worth keeping — each persisted an empty
+      // verdict covering itself (no automatic retry; the repair command is the
+      // only re-observe path for them).
       notify(input.ctx, "Observer returned no observations", "warning");
     }
   } catch (cause) {

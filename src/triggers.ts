@@ -19,6 +19,7 @@ import { BUILDER } from "./format/render.js";
 import { measureRootViewTokens } from "./graph/read-tools.js";
 import { log } from "./log.js";
 import { acquireOrSkip, inFlight, type StageName } from "./runtime/run-lock.js";
+import { OBSERVATION_TYPE, type ObservationEntry } from "./store/codecs.js";
 import { getGraphStore } from "./store/graph-store.js";
 import { estimateContentTokens } from "./types.js";
 
@@ -87,6 +88,81 @@ function estimateUnobservedTokens(unobserved: SessionEntry[], settings: Memkeepe
   };
   const blocks = renderBlocks(unobserved, options);
   return blocks.reduce((sum, block) => sum + estimateContentTokens(block.text), 0);
+}
+
+// --- uncovered (zero-observation) ranges -----------------------------------
+
+/** A maximal contiguous run of renderable entries that NO observation entry
+ *  covers — the zero-observation HOLES: chunks the frontier jumped over (a
+ *  0-record chunk followed by a record-bearing one) and empty-verdict chunks
+ *  (a completed chunk persisted with `records: []`). NOT the open tail after
+ *  the frontier — that belongs to the normal observe triggers. Each hole is a
+ *  re-observe unit for /mk:reobserve-0-obs-chunks. */
+export interface UncoveredRange {
+  entries: SessionEntry[];
+}
+
+/** Compute the zero-observation holes on a branch, CLOSED territory only:
+ *  entries at/behind `lastCoveredId` (the Observer frontier — the furthest
+ *  coversUpToId). Everything after it is the open tail and is excluded. An
+ *  entry is COVERED when it lies inside some RECORD-BEARING observation entry's
+ *  coverage interval (both endpoints resolvable, `coversFromId` may be null) or
+ *  is cited by a record's `sourceEntryIds` (citation survives even when the
+ *  interval endpoints were pruned by compaction). Empty-verdict entries
+ *  (`records: []`) deliberately cover NOTHING — their ranges stay repairable.
+ *  A null/unresolvable `lastCoveredId` yields no holes (nothing observed yet,
+ *  or the boundary was pruned with everything behind it). Pure over the branch. */
+export function computeUncoveredRanges(
+  entries: readonly SessionEntry[],
+  lastCoveredId: string | null,
+): UncoveredRange[] {
+  const positionById = new Map<string, number>();
+  for (let i = 0; i < entries.length; i += 1) positionById.set(entries[i].id, i);
+
+  // the closed-territory boundary: nothing after the frontier is repairable
+  const frontierPos = lastCoveredId === null ? -1 : (positionById.get(lastCoveredId) ?? -1);
+  if (frontierPos === -1) return [];
+
+  // anchor: strictly after the first user message (mirrors computeUnobserved —
+  // the verbatim initial prompt is captured mechanically, never a source)
+  const firstUserIndex = entries.findIndex(isUserMessageEntry);
+  const anchor = firstUserIndex === -1 ? entries.length : firstUserIndex + 1;
+
+  const covered = new Set<number>();
+  for (const entry of entries) {
+    if (entry.type !== "custom" || entry.customType !== OBSERVATION_TYPE) continue;
+    const payload = entry.data as ObservationEntry | undefined;
+    if (payload === undefined) continue;
+    const recordBearing = Array.isArray(payload.records) && payload.records.length > 0;
+    const from = payload.coversFromId === null ? undefined : positionById.get(payload.coversFromId);
+    const to = positionById.get(payload.coversUpToId);
+    if (recordBearing && from !== undefined && to !== undefined && to >= from) {
+      for (let i = from; i <= to; i += 1) covered.add(i);
+    }
+    if (Array.isArray(payload.records)) {
+      for (const record of payload.records) {
+        for (const srcId of record?.sourceEntryIds ?? []) {
+          const pos = positionById.get(srcId);
+          if (pos !== undefined) covered.add(pos);
+        }
+      }
+    }
+  }
+
+  const ranges: UncoveredRange[] = [];
+  let current: SessionEntry[] = [];
+  for (let i = anchor; i <= frontierPos && i < entries.length; i += 1) {
+    if (covered.has(i)) {
+      if (current.length > 0) {
+        ranges.push({ entries: current });
+        current = [];
+      }
+      continue;
+    }
+    if (isRenderableEntry(entries[i])) current.push(entries[i]);
+  }
+  if (current.length > 0) ranges.push({ entries: current });
+  return ranges;
 }
 
 // --- Observer trigger ------------------------------------------------------

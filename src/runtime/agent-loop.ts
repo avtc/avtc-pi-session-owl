@@ -206,27 +206,33 @@ export function makeTurnCap(
 export type TurnPredicate = (turn: Parameters<NonNullable<AgentLoopConfig["shouldStopAfterTurn"]>>[0]) => boolean;
 
 /** Build a `shouldStopAfterTurn` that stops after `maxSequential` consecutive
- *  NO-PROGRESS turns — a turn that neither advanced `progress()` (e.g. accepted
- *  records count) nor emitted any plain text. A turn with text or progress
- *  resets the streak. Bounds the degenerate retry spiral (model emits a
- *  failing tool call every turn, never valid work, never a terminal plain-text
- *  message) that would otherwise loop forever under `NO_TURN_LIMIT`. */
-export function makeNoProgressTurnStop(maxSequential: number, progress: () => number): TurnPredicate {
+ *  NO-PROGRESS turns — a turn that did not advance `progress()` (e.g. accepted
+ *  records count). Only an ADVANCE resets the streak: streamed text does not
+ *  (a model pairing a hallucinated tool call with chatter every turn — the
+ *  failure this guard exists to bound — must not reset it; a text-only turn
+ *  ends the loop by itself anyway, carrying no tool calls to continue it).
+ *  Bounds the degenerate retry spiral (model emits a failing tool call every
+ *  turn, never valid work) that would otherwise loop forever under
+ *  `NO_TURN_LIMIT`. Fires a warn log (`label`) when it stops a run — the
+ *  spiral is otherwise silent, each turn completing well under the per-call
+ *  timeout. */
+export function makeNoProgressTurnStop(maxSequential: number, progress: () => number, label: string): TurnPredicate {
   let streak = 0;
   let lastProgress = progress();
-  return (turn) => {
+  return () => {
     const now = progress();
     const advanced = now > lastProgress;
     lastProgress = now;
-    const hasText = turn.message.content.some(
-      (block) => block.type === "text" && block.text.trim().length > EMPTY_TEXT.length,
-    );
-    if (advanced || hasText) {
+    if (advanced) {
       streak = 0;
       return false;
     }
     streak += 1;
-    return streak >= maxSequential;
+    if (streak >= maxSequential) {
+      log.warn(`${label}: stopped after ${maxSequential} consecutive no-progress turns`);
+      return true;
+    }
+    return false;
   };
 }
 

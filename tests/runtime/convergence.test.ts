@@ -21,6 +21,13 @@ function endEvent(toolName: string, ok: boolean, isError: boolean): AgentEvent {
   } as unknown as AgentEvent;
 }
 
+/** A shouldStopAfterTurn payload with a fabricated assistant message (no text). */
+function stopTurn(_text: string | null): Parameters<NonNullable<StageRunInput["stopAfterTurn"]>>[0] {
+  return { message: { role: "assistant", content: [] } } as unknown as Parameters<
+    NonNullable<StageRunInput["stopAfterTurn"]>
+  >[0];
+}
+
 describe("makeConvergenceTracker", () => {
   it("counts applied mutates (ok, not error) for tools in the mutate set", () => {
     const { outcome, onEvent } = makeConvergenceTracker(() => {}, NAMES);
@@ -163,6 +170,49 @@ describe("runConvergencePass", () => {
       runStageFn,
     });
     expect(receivedHook).toBe(sink);
+  });
+
+  it("wires a no-progress turn stop over applied mutates (bounds a degenerate pass)", async () => {
+    const { outcome, onEvent } = makeConvergenceTracker(() => {}, NAMES);
+    let received: StageRunInput["stopAfterTurn"];
+    const runStageFn = async (input: StageRunInput): Promise<StageRunResult> => {
+      received = input.stopAfterTurn;
+      return {
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+    await runConvergencePass({ ...BASE, stageLabel: "build", onEvent, outcome, runStageFn });
+    expect(typeof received).toBe("function");
+    const stop = received as NonNullable<StageRunInput["stopAfterTurn"]>;
+    // hallucinated-tool turns apply no mutates: six consecutive stop on the 6th
+    for (let i = 1; i < 6; i += 1) expect(stop(stopTurn(null))).toBe(false);
+    expect(stop(stopTurn(null))).toBe(true);
+  });
+
+  it("the no-progress stop resets when a mutate applies mid-pass", async () => {
+    const { outcome, onEvent } = makeConvergenceTracker(() => {}, NAMES);
+    let received: StageRunInput["stopAfterTurn"];
+    const runStageFn = async (input: StageRunInput): Promise<StageRunResult> => {
+      received = input.stopAfterTurn;
+      return {
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+    await runConvergencePass({ ...BASE, stageLabel: "build", onEvent, outcome, runStageFn });
+    const stop = received as NonNullable<StageRunInput["stopAfterTurn"]>;
+    for (let i = 1; i < 6; i += 1) stop(stopTurn(null)); // streak 5
+    onEvent(endEvent(MKDIR_TOOL, true, false)); // a mutate applied -> progress
+    expect(stop(stopTurn(null))).toBe(false); // advance observed -> reset
+    for (let i = 1; i < 6; i += 1) expect(stop(stopTurn(null))).toBe(false); // streak 5 again
+    expect(stop(stopTurn(null))).toBe(true); // 6th consecutive -> stop
   });
 
   it("forwards a per-stage affinity id derived from the session base + stage label", async () => {

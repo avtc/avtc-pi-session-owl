@@ -12,7 +12,7 @@ import type {
   Usage,
 } from "@earendil-works/pi-ai";
 import { EventStream } from "@earendil-works/pi-ai";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { _setBaseLoggerForTest } from "../../src/log.js";
 import {
@@ -629,9 +629,18 @@ function npTurn(text: string | null): Parameters<ReturnType<typeof makeNoProgres
 }
 
 describe("makeNoProgressTurnStop", () => {
+  const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  beforeEach(() => {
+    _setBaseLoggerForTest(sink);
+    sink.warn.mockClear();
+  });
+  afterAll(() => {
+    _setBaseLoggerForTest(null);
+  });
+
   it("stops on the Nth consecutive no-progress turn (no records, no text)", () => {
     const count = 0;
-    const stop = makeNoProgressTurnStop(3, () => count);
+    const stop = makeNoProgressTurnStop(3, () => count, "observer");
     expect(stop(npTurn(null))).toBe(false); // failed attempt 1
     expect(stop(npTurn(null))).toBe(false); // failed attempt 2
     expect(stop(npTurn(null))).toBe(true); // 3rd consecutive -> stop
@@ -639,27 +648,25 @@ describe("makeNoProgressTurnStop", () => {
 
   it("never stops while the progress counter advances each turn", () => {
     let count = 0;
-    const stop = makeNoProgressTurnStop(3, () => count);
+    const stop = makeNoProgressTurnStop(3, () => count, "observer");
     for (let i = 0; i < 10; i += 1) {
       count += 1;
       expect(stop(npTurn(null))).toBe(false);
     }
+    expect(sink.warn).not.toHaveBeenCalled();
   });
 
-  it("plain text output resets the streak", () => {
+  it("plain text does NOT reset the streak (text beside failing calls is not progress)", () => {
     const count = 0;
-    const stop = makeNoProgressTurnStop(3, () => count);
-    expect(stop(npTurn(null))).toBe(false);
-    expect(stop(npTurn(null))).toBe(false);
-    expect(stop(npTurn("working…"))).toBe(false); // text resets
-    expect(stop(npTurn(null))).toBe(false);
-    expect(stop(npTurn(null))).toBe(false);
-    expect(stop(npTurn(null))).toBe(true); // 3 consecutive after the reset
+    const stop = makeNoProgressTurnStop(3, () => count, "observer");
+    expect(stop(npTurn(null))).toBe(false); // streak 1
+    expect(stop(npTurn("working…"))).toBe(false); // text alone is not progress -> streak 2
+    expect(stop(npTurn("still working…"))).toBe(true); // streak 3 -> stop
   });
 
   it("a progress advance resets the streak", () => {
     let count = 0;
-    const stop = makeNoProgressTurnStop(3, () => count);
+    const stop = makeNoProgressTurnStop(3, () => count, "observer");
     expect(stop(npTurn(null))).toBe(false);
     expect(stop(npTurn(null))).toBe(false);
     count += 1;
@@ -667,6 +674,15 @@ describe("makeNoProgressTurnStop", () => {
     expect(stop(npTurn(null))).toBe(false);
     expect(stop(npTurn(null))).toBe(false);
     expect(stop(npTurn(null))).toBe(true);
+  });
+
+  it("warns with the stage label when the stop fires (the spiral is otherwise silent)", () => {
+    const count = 0;
+    const stop = makeNoProgressTurnStop(3, () => count, "observer");
+    stop(npTurn(null));
+    stop(npTurn(null));
+    stop(npTurn(null));
+    expect(sink.warn).toHaveBeenCalledWith("observer: stopped after 3 consecutive no-progress turns");
   });
 });
 
@@ -747,7 +763,7 @@ describe("runStage — stopAfterTurn override", () => {
       queueMicrotask(() => stream.push(agentEnd([])));
       return stream;
     };
-    const probe = makeNoProgressTurnStop(3, () => 0);
+    const probe = makeNoProgressTurnStop(3, () => 0, "probe");
     await runStage(baseInput({ loopFn: spy, stopAfterTurn: probe }));
     expect(received).toHaveLength(1);
     expect(received[0]).toBe(probe);

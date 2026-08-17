@@ -13,6 +13,7 @@ import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { TRY_FINISH_TOOL } from "../graph/read-tools.js";
 import { log } from "../log.js";
 import {
+  makeNoProgressTurnStop,
   NO_LOOP_OVERRIDE,
   NO_TURN_LIMIT,
   type StageRunInput,
@@ -24,6 +25,15 @@ import { getStageAffinityId } from "./session-affinity.js";
 /** Shared loop sentinels used by the Builder + Selector convergence runs. */
 export const NO_MUTATES = 0;
 export const FIRST_PASS = 1;
+
+/** Consecutive zero-mutate turns allowed before a convergence pass is stopped.
+ *  Builder/Selector passes legitimately interleave read-only turns (ls, view
+ *  scouting) between mutates, so this is looser than the Observer's 3: six
+ *  consecutive turns with zero applied mutates is a degenerate spiral (e.g.
+ *  hallucinated tool names under a degraded local model), not work — each turn
+ *  completes well under the per-call timeout, so nothing else bounds the pass
+ *  (maxTurns is NO_TURN_LIMIT). */
+export const CONVERGENCE_NO_PROGRESS_TURNS = 6;
 
 /** A per-pass outcome: applied mutate count + whether try_finish converged. */
 export interface ConvergenceOutcome {
@@ -102,6 +112,11 @@ export async function runConvergencePass(args: ConvergencePassArgs): Promise<voi
     signal: args.signal,
     reasoning: args.reasoning,
     maxTurns: NO_TURN_LIMIT,
+    // Degenerate-spiral bound: stop the pass after CONVERGENCE_NO_PROGRESS_TURNS
+    // consecutive turns that applied no mutates (streamed text does not reset —
+    // a degraded model pairing chatter with failing tool calls every turn would
+    // otherwise spin forever under NO_TURN_LIMIT).
+    stopAfterTurn: makeNoProgressTurnStop(CONVERGENCE_NO_PROGRESS_TURNS, () => args.outcome.mutates, args.stageLabel),
     maxTokens: args.maxTokens,
     timeoutMs: args.timeoutMs,
     onEvent: args.onEvent,

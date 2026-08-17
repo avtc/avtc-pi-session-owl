@@ -29,12 +29,14 @@ import {
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
+import type { ObserverRunInput } from "../observer/run.js";
 import { acquireForCompaction } from "../runtime/run-lock.js";
 import { getGraphStore, resetGraphForRescan } from "../store/graph-store.js";
 import { onTurnEnd, type RunFn } from "../triggers.js";
 import type { NodeId, ObsId } from "../types.js";
 import { O_INITIAL_PROMPT } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
+import { MK_REOBSERVE_COMMAND, runMkReobserve } from "./reobserve.js";
 import { runReuseRebuild } from "./reuse-rebuild.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
@@ -224,6 +226,9 @@ export interface RescanDeps {
   pi: ExtensionAPI;
   widget: WidgetController;
   runBuilderStage: RunFn;
+  /** The raw Observer run (no mid-run Builder) — the re-observe repair command
+   *  drives it per uncovered range; recovered roots fold via normal triggers. */
+  runObserver: (input: ObserverRunInput) => Promise<void>;
   /** Test seam: receives the background launch promise (production omits). */
   onLaunched?: (promise: Promise<void>) => void;
 }
@@ -316,8 +321,9 @@ export const MK_FIND_COMMAND = "mk:find";
 export const MK_FIND_ALL_COMMAND = "mk:find-all";
 export const MK_RESCAN_COMMAND = "mk:rescan";
 
-/** Register all the `/mk:*` user browse commands. `deps` carries the widget +
- *  the Builder stage run the rescan reuse-rebuild drives. */
+/** Register all the `/mk:*` user browse commands. `deps` carries the widget,
+ *  the Builder stage run the rescan reuse-rebuild drives, and the raw Observer
+ *  run the re-observe repair command drives. */
 export function registerUserCommands(pi: ExtensionAPI, deps: RescanDeps): void {
   pi.registerCommand(MK_LS_COMMAND, {
     description: "List memory — roots, or a node's children. Usage: /mk:ls [nodeId]",
@@ -339,5 +345,10 @@ export function registerUserCommands(pi: ExtensionAPI, deps: RescanDeps): void {
     description:
       "Discard the memory graph and re-observe the session from the start. --reuse-observations rebuilds from collected observations.",
     handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => runMkRescan(args, ctx, deps),
+  });
+  pi.registerCommand(MK_REOBSERVE_COMMAND, {
+    description:
+      "Re-observe session ranges that were skipped with zero observations (repair after a degraded model run). Usage: /mk:reobserve-0-obs-chunks",
+    handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => runMkReobserve(args, ctx, deps),
   });
 }

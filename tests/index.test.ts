@@ -127,14 +127,22 @@ describe("memkeeperExtension (activate wiring)", () => {
     expect(tool.name).toBe("mk_recall");
   });
 
-  it("registers the /mk:* user commands (browse + rescan + status)", () => {
+  it("registers the /mk:* user commands (browse + rescan + reobserve + status)", () => {
     const pi = makeFakePi() as unknown as ExtensionAPI & { registerCommand: ReturnType<typeof vi.fn> };
     memkeeperExtension(pi);
     const names = pi.registerCommand.mock.calls.map((c) => c[0] as string);
     expect(names).toEqual(
-      expect.arrayContaining(["mk:ls", "mk:cat", "mk:find", "mk:find-all", "mk:rescan", "mk:status"]),
+      expect.arrayContaining([
+        "mk:ls",
+        "mk:cat",
+        "mk:find",
+        "mk:find-all",
+        "mk:rescan",
+        "mk:reobserve-0-obs-chunks",
+        "mk:status",
+      ]),
     );
-    expect(pi.registerCommand).toHaveBeenCalledTimes(6);
+    expect(pi.registerCommand).toHaveBeenCalledTimes(7);
   });
 
   it("wires all three stage runs (Observer + Builder + Selector) into the background trigger layer — no Selector stub", () => {

@@ -52,7 +52,7 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   // Selector reads the avtc-pi-todo wiring LIVE (a todo extension appearing
   // mid-session is picked up at the next trigger).
   const runBuilderFn = makeBuilderRun(pi, widget, runBuilder);
-  registerUserCommands(pi, { pi, widget, runBuilderStage: runBuilderFn });
+  registerUserCommands(pi, { pi, widget, runBuilderStage: runBuilderFn, runObserver });
   setStageRuns({
     runObserver: makeObserverRun(pi, widget, runObserver, runBuilderFn),
     runBuilder: runBuilderFn,

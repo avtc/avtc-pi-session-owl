@@ -309,6 +309,36 @@ describe("runObserver", () => {
     expect((obsEntries[0].data as { records: unknown[] }).records).toHaveLength(1);
   });
 
+  it("rejects a non-substantive summary (no letters/digits) per-observation (good record still recorded)", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [
+      userEntry("u1", "initial prompt captured mechanically"),
+      assistantEntry("a1", "keep build green; chose vitest"),
+    ];
+    // a degenerate model turn (thinking-only garbage) must not reach the graph
+    const script = scriptedRunStage([
+      [
+        { summary: "Every commit must keep the build green.", importance: "crit", sourceEntryIds: ["a1"] }, // good
+        { summary: "!!!!!!", importance: "med", sourceEntryIds: ["a1"] }, // symbols only
+        { summary: "  ...", importance: "low", sourceEntryIds: ["a1"] }, // punctuation only
+      ],
+    ]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    // only the good record wrapped; the ack reports 1 recorded, 2 rejected
+    const graph = getGraphStore().graph;
+    const newNodes = [...graph.nodes.values()].filter((n) => n.state === "new");
+    expect(newNodes).toHaveLength(1);
+    expect(script.acks[0]).toMatch(/recorded 1/i);
+    expect(script.acks[0]).toMatch(/reject/i);
+    // one observation entry with exactly one record (the garbage was dropped)
+    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    expect(obsEntries).toHaveLength(1);
+    expect((obsEntries[0].data as { records: unknown[] }).records).toHaveLength(1);
+  });
+
   it("skips a chunk whose every record is rejected: no delta, notify, run continues", async () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
@@ -327,7 +357,8 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn, thresholdTokens: 50 }));
 
-    // chunk 2's good record was recorded
+    // chunk 2's good record was recorded; chunk 1 (all-rejected) persists an
+    // empty-verdict entry covering itself — never auto-retried
     const newNodes = [...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new");
     expect(newNodes).toHaveLength(1);
     expect(newNodes[0].importance).toBe("high");
@@ -522,7 +553,7 @@ describe("runObserver", () => {
     expect(wrapper?.state).toBe("new");
   });
 
-  it("records nothing and notifies when the model returns no observations", async () => {
+  it("records nothing but persists an EMPTY-VERDICT entry covering the chunk — automatic triggers never retry it", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
     ctx.ui = { notify: (..._a: unknown[]) => {} } as unknown as ExtensionContext["ui"];
@@ -536,8 +567,17 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
 
-    expect(appended).toHaveLength(0);
-    expect(getGraphStore().observerFrontier).toBeNull();
+    // no records, no wrapper nodes — but ONE empty observation entry covering the
+    // chunk advances the frontier past it (a completed chunk is never re-observed
+    // automatically; /mk:reobserve-0-obs-chunks is the only retry)
+    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    expect(obsEntries).toHaveLength(1);
+    const entry = obsEntries[0].data as { coversFromId: string | null; coversUpToId: string; records: unknown[] };
+    expect(entry.coversFromId).toBe("u1");
+    expect(entry.coversUpToId).toBe("a1");
+    expect(entry.records).toEqual([]);
+    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
+    expect(getGraphStore().observerFrontier).toBe("a1");
     expect(notify).toHaveBeenCalled();
   });
 
@@ -909,7 +949,7 @@ describe("runObserver — no-progress turn stop", () => {
     setClock(null);
   });
 
-  it("wires a per-chunk stopAfterTurn: 3 consecutive no-progress turns stop, text resets", async () => {
+  it("wires a per-chunk stopAfterTurn: 3 consecutive no-progress turns stop; text does not reset", async () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
@@ -942,7 +982,8 @@ describe("runObserver — no-progress turn stop", () => {
     expect(stop(stopTurn(null))).toBe(false); // streak 1
     expect(stop(stopTurn(null))).toBe(false); // streak 2
     expect(stop(stopTurn(null))).toBe(true); // streak 3 -> stop
-    // a fresh chunk's rule resets on text: second run, no records accepted
+    // a fresh chunk's rule: no records accepted — text beside failing calls is
+    // NOT progress, so the streak keeps growing through the text turn
     const fn2 = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
       seen = input.stopAfterTurn ?? null;
       stops.push(seen);
@@ -956,12 +997,9 @@ describe("runObserver — no-progress turn stop", () => {
     };
     await runObserver(makeArgs({ pi: makeFakePi().pi, ctx: makeFakeCtx(), unobserved, runStageFn: fn2 }));
     const stop2 = seen as unknown as TurnPredicate;
-    expect(stop2(stopTurn(null))).toBe(false);
-    expect(stop2(stopTurn(null))).toBe(false);
-    expect(stop2(stopTurn("all rejected — retrying smaller"))).toBe(false); // text resets
-    expect(stop2(stopTurn(null))).toBe(false);
-    expect(stop2(stopTurn(null))).toBe(false);
-    expect(stop2(stopTurn(null))).toBe(true);
+    expect(stop2(stopTurn(null))).toBe(false); // streak 1
+    expect(stop2(stopTurn(null))).toBe(false); // streak 2
+    expect(stop2(stopTurn("all rejected — retrying smaller"))).toBe(true); // text ≠ progress -> streak 3 -> stop
     expect(stops.length).toBeGreaterThanOrEqual(2);
   });
 });
