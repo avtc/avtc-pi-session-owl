@@ -6,6 +6,7 @@
 // compaction summary.
 
 import type { Node, Observation } from "../types.js";
+import { formatTokens } from "./tokens.js";
 
 export type RenderViewer = "builder" | "nonBuilder";
 
@@ -214,6 +215,61 @@ export function directObsSizeHint<T extends SizeHintObservation>(
     tokens += obs.detailsTokens ?? 0;
   }
   return { lines, tokens };
+}
+
+/** The graph shape renderTreeTotal reads: the full node + observation maps. */
+export interface TreeTotalGraph {
+  nodes: ReadonlyMap<string, RenderableNode>;
+  observations: ReadonlyMap<string, SizeHintObservation>;
+}
+
+/** Max tree depth in levels (roots = 1), via BFS over child links. Nodes not
+ *  reachable from a root count as their own level-1 tree (tolerant — structure
+ *  invariants normally make them impossible). */
+function treeLevels(nodes: ReadonlyMap<string, RenderableNode>): number {
+  const depth = new Map<string, number>();
+  const queue: RenderableNode[] = [];
+  for (const node of nodes.values()) {
+    if (node.parentNode !== null && nodes.has(node.parentNode)) continue;
+    depth.set(node.id, 1);
+    queue.push(node);
+  }
+  let max = queue.length > 0 ? 1 : 0;
+  while (queue.length > 0) {
+    const node = queue.shift() as RenderableNode;
+    for (const cid of node.childNodeIds) {
+      const child = nodes.get(cid);
+      if (child === undefined || depth.has(cid)) continue;
+      const level = (depth.get(node.id) ?? 1) + 1;
+      depth.set(cid, level);
+      if (level > max) max = level;
+      queue.push(child);
+    }
+  }
+  return max;
+}
+
+/** Render the source-tree totals block — a `---` divider plus the one-line
+ *  tree scale shown under every root view (the compaction summary's active
+ *  set, the Builder's per-pass root snapshot, the Selector's working tree):
+ *  node count + depth, observation count, the summed verbatim details size
+ *  (the same lines/tokens units as the per-node size hints; observations
+ *  without captured counts contribute 0), and the session's compaction count
+ *  (how much of the session lives only in memory). */
+export function renderTreeTotal(graph: TreeTotalGraph, compactionCount: number): string {
+  let lines = 0;
+  let tokens = 0;
+  for (const obs of graph.observations.values()) {
+    lines += obs.detailsLines ?? 0;
+    tokens += obs.detailsTokens ?? 0;
+  }
+  const levels = treeLevels(graph.nodes);
+  return (
+    `---\nSource tree total: ${graph.nodes.size} nodes (${levels} level${levels === 1 ? "" : "s"}) · ` +
+    `${graph.observations.size} observations · ` +
+    `${formatTokens(lines)} lines ${formatTokens(tokens)} tokens of details · ` +
+    `${compactionCount} compaction${compactionCount === 1 ? "" : "s"}`
+  );
 }
 
 interface LineOptions {

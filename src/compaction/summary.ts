@@ -14,6 +14,7 @@ import {
   NON_BUILDER,
   RENDER_LEGEND,
   type RenderableNode,
+  renderTreeTotal,
   type SizeHintObservation,
 } from "../format/render.js";
 import { orderedNonObsoleteRoots } from "../graph/read-tools.js";
@@ -46,6 +47,8 @@ export interface RenderSummaryArgs {
   renderMode: SummaryRenderMode;
   /** Recently-touched files (already extracted + deduped). */
   touchedFiles: readonly TouchedFile[];
+  /** Compactions so far this session (the tree-total footer's maturity signal). */
+  compactionCount: number;
 }
 
 const MEMORY_HEADING = "# Memory";
@@ -59,6 +62,7 @@ const NO_TOUCHED_PLACEHOLDER = "(none)";
 
 const TOUCHED_HEADING = "## Recently touched";
 const NO_INITIAL_PROMPT = "(none captured yet)";
+const NO_NODES = 0;
 
 /** Stand-in observations map when the caller passes no observation access —
  *  direct-obs size lookups simply miss (no size segments). */
@@ -85,6 +89,12 @@ export function renderSummary(args: RenderSummaryArgs): string {
   const sizeHints = args.graph.observations ?? EMPTY_OBSERVATIONS;
   for (const root of activeSetRoots(args)) {
     lines.push(formatNodeLine(root, { viewer: NON_BUILDER, obsSize: directObsSizeHint(root, sizeHints) }));
+  }
+  // The tree-total footer: the scale of everything retained (the source graph,
+  // incl. obsolete) behind this top level. Skipped when the tree is empty
+  // (nothing to total).
+  if (args.graph.nodes.size > NO_NODES) {
+    lines.push(renderTreeTotal({ nodes: args.graph.nodes, observations: sizeHints }, args.compactionCount));
   }
   lines.push("");
 

@@ -78,6 +78,7 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
       oInitialPrompt: PROMPT,
       renderMode: "observations-root",
       touchedFiles: [],
+      compactionCount: 0,
     });
     expect(out).toContain("# Memory");
     expect(out).toContain(RENDER_LEGEND);
@@ -91,6 +92,7 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
       oInitialPrompt: PROMPT,
       renderMode: "observations-root",
       touchedFiles: [],
+      compactionCount: 0,
     });
     expect(out).toContain("## Initial prompt");
     expect(out).toContain("Design the memkeeper extension. Brand-new; no 3rd-party reuse.");
@@ -103,6 +105,7 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
       oInitialPrompt: null,
       renderMode: "observations-root",
       touchedFiles: [],
+      compactionCount: 0,
     });
     expect(out).toContain("## Initial prompt");
     expect(out).toContain("(none captured yet)");
@@ -115,6 +118,7 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
       oInitialPrompt: PROMPT,
       renderMode: "observations-root",
       touchedFiles: TOUCHED,
+      compactionCount: 0,
     });
     expect(out).toContain("## Recently touched");
     expect(out).toContain("28 14:30 write designs/x.md");
@@ -129,6 +133,7 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
       oInitialPrompt: PROMPT,
       renderMode: "observations-root",
       touchedFiles: TOUCHED,
+      compactionCount: 0,
     });
     const headerIdx = out.indexOf("# Memory");
     const promptIdx = out.indexOf("## Initial prompt");
@@ -179,6 +184,7 @@ describe("renderSummary — observations-root", () => {
       oInitialPrompt: PROMPT,
       renderMode: "observations-root",
       touchedFiles: [],
+      compactionCount: 0,
     });
     const activeSet = out.split("## Active set")[1];
     expect(activeSet).toContain("nGoal");
@@ -201,6 +207,7 @@ describe("renderSummary — observations-root", () => {
       oInitialPrompt: PROMPT,
       renderMode: "observations-root",
       touchedFiles: [],
+      compactionCount: 0,
     });
     const activeSet = out.split("## Active set")[1];
     expect(activeSet).toContain("📦"); // archived glyph
@@ -225,6 +232,7 @@ describe("renderSummary — selected-root", () => {
       oInitialPrompt: PROMPT,
       renderMode: "selected-root",
       touchedFiles: [],
+      compactionCount: 0,
     });
     const activeSet = out.split("## Active set")[1];
     expect(activeSet).toContain("nGoal");
@@ -249,6 +257,7 @@ describe("renderSummary — selected-root", () => {
       oInitialPrompt: PROMPT,
       renderMode: "selected-root",
       touchedFiles: [],
+      compactionCount: 0,
     });
     const activeSet = out.split("## Active set")[1];
     expect(activeSet).toContain("nGoal");
@@ -280,11 +289,49 @@ describe("renderSummary — selected-root", () => {
       oInitialPrompt: PROMPT,
       renderMode: "selected-root",
       touchedFiles: [],
+      compactionCount: 0,
     });
     const activeSet = out.split("## Active set")[1];
     expect(activeSet).toContain("n7 · high · Selector spec · 1obs · 2lines 15tokens · ");
     expect(activeSet).toContain("nDec · med · Decisions · 2obs · 13lines 251tokens · ");
     // 0-obs root shows no size segment
     expect(activeSet).toMatch(/nGoal · crit · Build the extension · 0obs · /);
+  });
+
+  it("renders the tree-total footer after the roots, skipped for an empty tree", () => {
+    const out = renderSummary({
+      graph: {
+        nodes: nodeGraph([
+          sNode("nGoal", { id: N_GOAL, summary: "Build the extension", importance: "crit", observationIds: ["o5"] }),
+          sNode("n7", { summary: "Selector spec", importance: "high", observationIds: ["o1", "o2"] }),
+        ]).nodes,
+        observations: new Map([
+          ["o5", { detailsLines: 2, detailsTokens: 15 }],
+          ["o1", { detailsLines: 3, detailsTokens: 40 }],
+          ["o2", { detailsLines: 10, detailsTokens: 211 }],
+        ]),
+      },
+      selectedTree: null,
+      oInitialPrompt: PROMPT,
+      renderMode: "observations-root",
+      touchedFiles: [],
+      compactionCount: 2,
+    });
+    // after the last root, before the touched section; totals over the source graph
+    const footer =
+      "Source tree total: 2 nodes (1 level) · 3 observations · 15 lines 266 tokens of details · 2 compactions";
+    expect(out).toContain(`---\n${footer}`);
+    expect(out.indexOf(footer)).toBeGreaterThan(out.lastIndexOf("n7 · high · Selector spec"));
+    expect(out.indexOf(footer)).toBeLessThan(out.indexOf("## Recently touched"));
+
+    const empty = renderSummary({
+      graph: emptyGraph(),
+      selectedTree: null,
+      oInitialPrompt: PROMPT,
+      renderMode: "observations-root",
+      touchedFiles: [],
+      compactionCount: 0,
+    });
+    expect(empty).not.toContain("Source tree total");
   });
 });

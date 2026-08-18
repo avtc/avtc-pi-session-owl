@@ -11,6 +11,8 @@ import {
   formatTimestamp,
   formatTimestampRange,
   RENDER_LEGEND,
+  type RenderableNode,
+  renderTreeTotal,
   toStoredTimestamp,
 } from "../../src/format/render.js";
 import type { Node, Observation } from "../../src/types.js";
@@ -282,6 +284,64 @@ describe("directObsSizeHint", () => {
       observationIds: ["o1" as Observation["id"], "oLegacy" as Observation["id"], "oMissing" as Observation["id"]],
     });
     expect(directObsSizeHint(node, observations)).toEqual({ lines: 3, tokens: 9 });
+  });
+});
+
+describe("renderTreeTotal", () => {
+  const nodesOf = (list: RenderableNode[]) => new Map(list.map((n) => [n.id, n]));
+
+  it("renders counts, depth, summed sizes, and compactions (the footer block)", () => {
+    const nodes = nodesOf([
+      makeNode({
+        id: "n1",
+        summary: "root",
+        importance: "med",
+        childNodeIds: ["n2"],
+        observationIds: ["o1" as Observation["id"]],
+      }),
+      makeNode({
+        id: "n2",
+        summary: "mid",
+        importance: "med",
+        parentNode: "n1",
+        childNodeIds: ["n3"],
+        observationIds: ["oLegacy" as Observation["id"]],
+      }),
+      makeNode({
+        id: "n3",
+        summary: "leaf",
+        importance: "low",
+        parentNode: "n2",
+        observationIds: ["o2" as Observation["id"]],
+      }),
+    ]);
+    const observations = new Map<string, { detailsLines?: number; detailsTokens?: number }>([
+      ["o1", { detailsLines: 10100, detailsTokens: 576000 }],
+      ["o2", { detailsLines: 10, detailsTokens: 211 }],
+      ["oLegacy", {}],
+    ]);
+    // depth 3 (n1→n2→n3); legacy obs contributes 0; k-rounded totals (one
+    // decimal below 10k, integer k above).
+    expect(renderTreeTotal({ nodes, observations }, 11)).toBe(
+      "---\nSource tree total: 3 nodes (3 levels) · 3 observations · 10k lines 576k tokens of details · 11 compactions",
+    );
+  });
+
+  it("handles sibling roots (max depth), singular level, and singular compaction", () => {
+    const nodes = nodesOf([
+      makeNode({ id: "n1", summary: "a", importance: "med", childNodeIds: ["n2"] }),
+      makeNode({ id: "n2", summary: "b", importance: "med", parentNode: "n1" }),
+      makeNode({ id: "n3", summary: "c", importance: "med" }),
+    ]);
+    expect(renderTreeTotal({ nodes, observations: new Map() }, 1)).toBe(
+      "---\nSource tree total: 3 nodes (2 levels) · 0 observations · 0 lines 0 tokens of details · 1 compaction",
+    );
+  });
+
+  it("renders an empty graph as zeroed totals", () => {
+    expect(renderTreeTotal({ nodes: new Map(), observations: new Map() }, 0)).toBe(
+      "---\nSource tree total: 0 nodes (0 levels) · 0 observations · 0 lines 0 tokens of details · 0 compactions",
+    );
   });
 });
 

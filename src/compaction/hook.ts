@@ -32,6 +32,7 @@ import type { ObserverRunInput } from "../observer/run.js";
 import { runObserver as realRunObserver } from "../observer/run.js";
 import { acquireForCompaction } from "../runtime/run-lock.js";
 import { runSelector as realRunSelector, type SelectorRunInput } from "../selector/run.js";
+import { countCompactions } from "../status/command.js";
 import { sinceLastCompaction, snapshotAtCompaction } from "../status/usage-ledger.js";
 import { cloneLedger, encodeDetails } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
@@ -211,6 +212,7 @@ export async function compactionHook(
       oInitialPrompt: oInitialPromptObs,
       renderMode: settings.renderMode,
       touchedFiles,
+      compactionCount: countCompactions(ctx.sessionManager),
     });
     // capture the compaction baseline so post-compaction /mk:status "since last
     // compaction" arithmetic is correct (deep copy — later stage activity must

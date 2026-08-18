@@ -18,7 +18,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
-import { NON_BUILDER } from "../format/render.js";
+import { NON_BUILDER, renderTreeTotal } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
@@ -35,6 +35,7 @@ import type { ConvergenceOutcome } from "../runtime/convergence.js";
 import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify, resolveStageReasoning } from "../runtime/model.js";
+import { countCompactions } from "../status/command.js";
 // jscpd:ignore-end
 import { encodeSelection } from "../store/codecs.js";
 import { type GraphStore, getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
@@ -128,6 +129,10 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   // legends) is stable, so only the working-tree section is re-rendered per pass
   // (it mutates across passes).
   const { contextView, workingCopy } = buildInputView(graphStore.graph, input);
+  // The source-tree totals (computed once — the source graph + session branch
+  // are stable across passes; only the working copy mutates): the scale the
+  // Selector curates from, shown with the working tree each pass.
+  const treeTotal = renderTreeTotal(graphStore.graph, countCompactions(input.ctx.sessionManager));
 
   let stageOpened = false;
   let pass = FIRST_PASS;
@@ -163,6 +168,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
         tools,
         runStageFn,
         pass,
+        treeTotal,
         ledger.onStageEnd,
       );
 
@@ -228,10 +234,11 @@ async function runPass(
   tools: ReturnType<typeof makeSelectorTools>,
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>,
   pass: number,
+  treeTotal: string,
   onStageEnd: (usage: StageUsage) => void,
 ): Promise<{ outcome: ConvergenceOutcome }> {
   const { outcome, onEvent } = makeSelectorPassTracker((event) => input.widget.onEvent(event));
-  const messages = passMessages(working, contextView, pass);
+  const messages = passMessages(working, contextView, pass, treeTotal);
   await runConvergencePass({
     systemPrompt: SELECTOR_SYSTEM,
     messages,
@@ -257,12 +264,20 @@ async function runPass(
 
 /** Build the per-pass user message: the task + the pass number + the CURRENT
  *  working-tree render (re-rendered each pass — the working copy mutates across
- *  passes) + the stable context (tail/todo/touched/legends). */
-function passMessages(working: SelectorInputView["workingCopy"], contextView: string, pass: number): AgentMessage[] {
+ *  passes) + the stable context (tail/todo/touched/legends). The tree-total
+ *  block (computed once per run from the SOURCE graph) rides with the working
+ *  tree: the scale it curates from, which the pass's copy mutations don't
+ *  change. */
+function passMessages(
+  working: SelectorInputView["workingCopy"],
+  contextView: string,
+  pass: number,
+  treeTotal: string,
+): AgentMessage[] {
   const workingTree = renderWorkingRoots(working);
   const text =
     `Shape the active-set for the current task (pass ${pass}). Promote what matters, demote what doesn't into nIrrelevant, consolidate and condense to fit the budget.\n\n` +
-    `Working tree\n\n${workingTree}\n\n${contextView}`;
+    `Working tree\n\n${workingTree}\n${treeTotal}\n\n${contextView}`;
   return [{ role: "user", content: text } as AgentMessage];
 }
 

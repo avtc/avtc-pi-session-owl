@@ -16,7 +16,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
-import { BUILDER } from "../format/render.js";
+import { BUILDER, renderTreeTotal } from "../format/render.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
@@ -33,6 +33,7 @@ import type { ConvergenceOutcome } from "../runtime/convergence.js";
 import { FIRST_PASS, makeConvergenceTracker, NO_MUTATES, runConvergencePass } from "../runtime/convergence.js";
 import { makeLedgerHook, persistLedger } from "../runtime/ledger-hook.js";
 import { resolveStageModelOrNotify, resolveStageReasoning } from "../runtime/model.js";
+import { countCompactions } from "../status/command.js";
 // jscpd:ignore-end
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import type { MemkeeperGraph, NodeId } from "../types.js";
@@ -139,6 +140,9 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
     input.widget.startStage(BUILD_STAGE, { pass });
     stageOpened = true;
     const tools = makeBuilderTools(graph, store, input.settings);
+    // computed once per run — the source graph + the session branch are stable
+    // across passes (only the working graph mutates).
+    const compactionCount = countCompactions(input.ctx.sessionManager);
     // convergence loop — bounded by the break conditions below (budget met / no-op / context limit / signal)
     while (true) {
       if (input.signal.aborted) {
@@ -146,8 +150,16 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
         break;
       }
 
-      const { outcome } = await runPass(input, graph, resolved, tools, runStageFn, pass, ledger.onStageEnd);
-
+      const { outcome } = await runPass(
+        input,
+        graph,
+        resolved,
+        tools,
+        runStageFn,
+        pass,
+        compactionCount,
+        ledger.onStageEnd,
+      );
       // persist the cumulative usage ledger PER PASS so an interrupted run keeps
       // the usage tally for every completed pass — matching the per-mutate
       // durability of the graph deltas (the two stay consistent).
@@ -207,10 +219,11 @@ async function runPass(
   tools: ReturnType<typeof makeBuilderTools>,
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>,
   pass: number,
+  compactionCount: number,
   onStageEnd: (usage: StageUsage) => void,
 ): Promise<{ outcome: ConvergenceOutcome }> {
   const { outcome, onEvent } = makeBuilderPassTracker((event) => input.widget.onEvent(event));
-  const messages = passMessages(graph, pass);
+  const messages = passMessages(graph, pass, compactionCount);
   await runConvergencePass({
     systemPrompt: BUILDER_SYSTEM,
     messages,
@@ -234,12 +247,13 @@ async function runPass(
   return { outcome };
 }
 
-/** Build the per-pass user message: the task + the current root view snapshot. */
-function passMessages(graph: MemkeeperGraph, pass: number): AgentMessage[] {
+/** Build the per-pass user message: the task + the current root view snapshot
+ *  + the source-tree totals (the scale behind the view). */
+function passMessages(graph: MemkeeperGraph, pass: number, compactionCount: number): AgentMessage[] {
   const rootView = renderRootView(graph, BUILDER) || EMPTY_ROOT_VIEW;
   const text =
     "Organize the memory graph. Process the new arrivals and consolidate the root view to fit the budget.\n\n" +
-    `Current root view (pass ${pass}):\n${rootView}`;
+    `Current root view (pass ${pass}):\n${rootView}\n${renderTreeTotal(graph, compactionCount)}`;
   return [{ role: "user", content: text } as AgentMessage];
 }
 

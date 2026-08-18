@@ -125,6 +125,21 @@ export async function runMkStatus(_args: string, ctx: ExtensionCommandContext): 
   }
 }
 
+/** Count the compaction entries on the active branch — shared by the status
+ *  report, the compaction summary's tree-total footer, and the Builder/Selector
+ *  pass views. */
+export function countCompactions(sessionManager: {
+  getBranch(fromId?: string): { timestamp: string; type: string }[];
+  getLeafId(): string | null;
+}): number {
+  const branch = sessionManager.getBranch(sessionManager.getLeafId() ?? undefined);
+  let count = 0;
+  for (const entry of branch) {
+    if (entry.type === "compaction") count += 1;
+  }
+  return count;
+}
+
 /** Read the session-start timestamp + compaction count from the active branch. */
 function readSessionBounds(sessionManager: {
   getBranch(fromId?: string): { timestamp: string; type: string }[];
@@ -133,11 +148,10 @@ function readSessionBounds(sessionManager: {
   const branch = sessionManager.getBranch(sessionManager.getLeafId() ?? undefined);
   const first = branch[0];
   const sessionStartMs = first === undefined ? Date.now() : Date.parse(first.timestamp);
-  let compactionCount = 0;
-  for (const entry of branch) {
-    if (entry.type === "compaction") compactionCount += 1;
-  }
-  return { sessionStartMs: Number.isNaN(sessionStartMs) ? Date.now() : sessionStartMs, compactionCount };
+  return {
+    sessionStartMs: Number.isNaN(sessionStartMs) ? Date.now() : sessionStartMs,
+    compactionCount: countCompactions(sessionManager),
+  };
 }
 
 /** Gather all /mk:status data sources from the live store (the session-derived

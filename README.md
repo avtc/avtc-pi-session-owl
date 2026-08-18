@@ -42,6 +42,8 @@ n12 · high · Auth flow redesign · 1obs · 2lines 15tokens · Jul 28 14:30 —
 n8 · high · Decisions · 5obs · 214lines 5100tokens · Jul 28 14:30 — Jul 29 09:15
 n6 · 📦low · Old login form · 2obs · 96lines 2300tokens · Jul 27 09:00 — Jul 27 18:00
 nIrrelevant · med · Irrelevant · 4obs · 12lines 260tokens · Jul 28 14:30 — Jul 29 09:15
+---
+Source tree total: 237 nodes (4 levels) · 273 observations · 10k lines 576k tokens of details · 3 compactions
 
 ## Recently touched
 Jul 29 09:10 read src/auth/middleware.ts:1-40,120-180
