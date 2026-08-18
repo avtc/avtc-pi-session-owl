@@ -14,6 +14,7 @@ import { Type } from "typebox";
 import { getMemkeeperSettings } from "../config/schema.js";
 import { renderDetails } from "../format/details.js";
 import {
+  directObsSizeHint,
   formatNodeLine,
   formatObservationLine,
   indent,
@@ -21,7 +22,6 @@ import {
   type RenderableNode,
   type RenderableObservation,
   type RenderViewer,
-  singleDirectObs,
   singleLine,
 } from "../format/render.js";
 import {
@@ -579,7 +579,7 @@ async function buildSearchCandidates(
         line: formatNodeLine(node, {
           viewer: VIEWER,
           showParent: node.parentNode ?? undefined,
-          singleObs: singleDirectObs(node, target.observations),
+          obsSize: directObsSizeHint(node, target.observations),
         }),
       });
     }
@@ -619,7 +619,7 @@ function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean):
   return ordered.map((node) => ({
     id: node.id,
     key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
-    line: formatNodeLine(node, { viewer: VIEWER, singleObs: singleDirectObs(node, target.observations) }),
+    line: formatNodeLine(node, { viewer: VIEWER, obsSize: directObsSizeHint(node, target.observations) }),
   }));
 }
 

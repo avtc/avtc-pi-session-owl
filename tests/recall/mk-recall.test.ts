@@ -485,7 +485,7 @@ describe("mk_recall", () => {
   });
 
   describe("node-list size hint", () => {
-    it("browse: a 1-obs node line carries that observation's size after the counts", async () => {
+    it("browse: a node line carries its direct observations' summed size after the counts", async () => {
       seedSource();
       const out = text(await recall(tool(), {}));
       // n7's only direct obs is o5 (1line 7tokens); the segment qualifies 1obs.

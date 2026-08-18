@@ -9,12 +9,12 @@
 // truncated (bounded by the Selector/Builder try_finish, not here).
 
 import {
+  directObsSizeHint,
   formatNodeLine,
   NON_BUILDER,
   RENDER_LEGEND,
   type RenderableNode,
   type SizeHintObservation,
-  singleDirectObs,
 } from "../format/render.js";
 import { orderedNonObsoleteRoots } from "../graph/read-tools.js";
 import type { SerializedObservation, SerializedSelection } from "../store/codecs.js";
@@ -27,10 +27,10 @@ export type SummaryRenderMode = "selected-root" | "observations-root";
  *  observations-root mode + the selected-root null-tree fallback). */
 export interface SummaryGraph {
   nodes: ReadonlyMap<string, RenderableNode>;
-  /** Observations by id — the single-observation size hints for the root
-   *  one-liners resolve here (both modes: the selected tree carries structure
-   *  only, its observation ids belong to the source graph). Omitted when the
-   *  caller has no access (no size segments then). */
+  /** Observations by id — the root one-liners' direct-obs size hints resolve
+   *  here (both modes: the selected tree carries structure only, its observation
+   *  ids belong to the source graph). Omitted when the caller has no access
+   *  (no size segments then). */
   observations?: ReadonlyMap<string, SizeHintObservation>;
 }
 
@@ -61,7 +61,7 @@ const TOUCHED_HEADING = "## Recently touched";
 const NO_INITIAL_PROMPT = "(none captured yet)";
 
 /** Stand-in observations map when the caller passes no observation access —
- *  single-obs size lookups simply miss (no size segments). */
+ *  direct-obs size lookups simply miss (no size segments). */
 const EMPTY_OBSERVATIONS: ReadonlyMap<string, SizeHintObservation> = new Map();
 
 /**
@@ -84,7 +84,7 @@ export function renderSummary(args: RenderSummaryArgs): string {
   lines.push(ACTIVE_SET_HEADING);
   const sizeHints = args.graph.observations ?? EMPTY_OBSERVATIONS;
   for (const root of activeSetRoots(args)) {
-    lines.push(formatNodeLine(root, { viewer: NON_BUILDER, singleObs: singleDirectObs(root, sizeHints) }));
+    lines.push(formatNodeLine(root, { viewer: NON_BUILDER, obsSize: directObsSizeHint(root, sizeHints) }));
   }
   lines.push("");
 

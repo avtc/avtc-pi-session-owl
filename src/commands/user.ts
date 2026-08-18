@@ -15,12 +15,12 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings } from "../config/schema.js";
 import {
+  directObsSizeHint,
   formatNodeLine,
   formatObservationLine,
   indent,
   NON_BUILDER,
   type RenderViewer,
-  singleDirectObs,
 } from "../format/render.js";
 import {
   buildCatUnits,
@@ -119,7 +119,7 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
     // roots: non-obsolete only (obsolete hidden by default — use /mk:find-all).
     for (const node of orderActiveSetRoots(nonObsoleteRoots(graph))) {
       lines.push(
-        formatNodeLine(node, { ...nodeLineOptions(VIEWER), singleObs: singleDirectObs(node, graph.observations) }),
+        formatNodeLine(node, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(node, graph.observations) }),
       );
     }
     const { text } = formatList(lines, resolveCap());
@@ -134,13 +134,13 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
   }
   // parent header at depth 0; children indented at depth 1.
   lines.push(
-    formatNodeLine(parent, { ...nodeLineOptions(VIEWER), singleObs: singleDirectObs(parent, graph.observations) }),
+    formatNodeLine(parent, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(parent, graph.observations) }),
   );
   const { nodes, observations } = directChildren(graph, parent);
   for (const node of nodes) {
     lines.push(
       indent(
-        formatNodeLine(node, { ...nodeLineOptions(VIEWER), singleObs: singleDirectObs(node, graph.observations) }),
+        formatNodeLine(node, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(node, graph.observations) }),
         CHILD_DEPTH,
       ),
     );

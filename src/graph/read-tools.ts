@@ -15,6 +15,7 @@ import { Type } from "typebox";
 import { getMemkeeperSettings } from "../config/schema.js";
 import { renderDetails } from "../format/details.js";
 import {
+  directObsSizeHint,
   formatNodeLine,
   formatObservationLine,
   indent,
@@ -22,7 +23,6 @@ import {
   type RenderableNode,
   type RenderViewer,
   type SizeHintObservation,
-  singleDirectObs,
 } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
 import { PageSchema } from "../schema.js";
@@ -384,7 +384,7 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
           id: node.id,
           render: formatNodeLine(node, {
             ...nodeLineOptions(viewer),
-            singleObs: singleDirectObs(node, graph.observations),
+            obsSize: directObsSizeHint(node, graph.observations),
           }),
         }));
         const out = renderTerseWindow(rendered, budget, more, remaining);
@@ -397,7 +397,7 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
       }
       // header is the parent itself at depth 0; children indented at depth 1.
       const headerLine = indent(
-        formatNodeLine(parent, { ...nodeLineOptions(viewer), singleObs: singleDirectObs(parent, graph.observations) }),
+        formatNodeLine(parent, { ...nodeLineOptions(viewer), obsSize: directObsSizeHint(parent, graph.observations) }),
         ROOT_DEPTH,
       );
       const { nodes, observations } = directChildren(graph, parent);
@@ -405,7 +405,7 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
         ...nodes.map((n) => ({
           id: n.id,
           depth: 1,
-          render: formatNodeLine(n, { ...nodeLineOptions(viewer), singleObs: singleDirectObs(n, graph.observations) }),
+          render: formatNodeLine(n, { ...nodeLineOptions(viewer), obsSize: directObsSizeHint(n, graph.observations) }),
         })),
         ...observations.map((o) => ({ id: o.id, depth: 1, render: formatObservationLine(o, { viewer }) })),
       ];
@@ -848,7 +848,7 @@ export async function collectFindMatches(
         render: formatNodeLine(node, {
           ...nodeLineOptions(viewer),
           showParent: node.parentNode ?? undefined,
-          singleObs: singleDirectObs(node, graph.observations),
+          obsSize: directObsSizeHint(node, graph.observations),
         }),
       });
     }
@@ -983,7 +983,7 @@ export function renderRootViewFromRoots(
   observations: ReadonlyMap<string, SizeHintObservation>,
 ): string {
   if (roots.length === 0) return "";
-  return roots.map((n) => formatNodeLine(n, { viewer, singleObs: singleDirectObs(n, observations) })).join("\n");
+  return roots.map((n) => formatNodeLine(n, { viewer, obsSize: directObsSizeHint(n, observations) })).join("\n");
 }
 
 /** Token-estimate of the non-obsolete root view (chars/4), rendered for

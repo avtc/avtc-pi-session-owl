@@ -164,9 +164,9 @@ describe("Builder read tools", () => {
       expect(out).toMatch(/\+\d+ more/);
     });
 
-    it("carries the single observation's size on a 1-obs root line", async () => {
+    it("carries the direct observations' summed size on a root line", async () => {
       // n7's only direct observation is o5 (1line 7tokens) — its root line
-      // qualifies the 1obs count with that size; multi/zero-obs roots (nGoal,
+      // qualifies the 1obs count with the summed size; the 0-obs roots (nGoal,
       // n12) show none.
       const out = textOf(await callTool(tools(), "ls", {}));
       expect(out).toMatch(/n7 · high · [^·]+ · 1node 1obs · 1line 7tokens · /);

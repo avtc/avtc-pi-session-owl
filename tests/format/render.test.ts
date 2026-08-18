@@ -3,13 +3,14 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  COUNTS_SIZE_LEGEND,
+  directObsSizeHint,
   formatDayTime,
   formatNodeLine,
   formatObservationLine,
   formatTimestamp,
   formatTimestampRange,
   RENDER_LEGEND,
-  singleDirectObs,
   toStoredTimestamp,
 } from "../../src/format/render.js";
 import type { Node, Observation } from "../../src/types.js";
@@ -222,11 +223,11 @@ describe("formatNodeLine", () => {
     );
   });
 
-  it("shows the single observation's size after the counts when singleObs is passed", () => {
+  it("shows the direct observations' summed size after the counts when obsSize is passed", () => {
     const node = makeNode({ id: "n12", summary: "wrapper", importance: "med", observationIds: ["o31"] });
     const line = formatNodeLine(node, {
       viewer: "nonBuilder",
-      singleObs: { detailsLines: 2, detailsTokens: 15 },
+      obsSize: { lines: 2, tokens: 15 },
     });
     expect(line).toBe("n12 · med · wrapper · 1obs · 2lines 15tokens · Jul 29 09:00");
   });
@@ -239,46 +240,48 @@ describe("formatNodeLine", () => {
       observationIds: ["o31"],
       childNodeIds: ["n8"],
     });
-    expect(formatNodeLine(node, { viewer: "nonBuilder", singleObs: { detailsLines: 2, detailsTokens: 15 } })).toContain(
+    expect(formatNodeLine(node, { viewer: "nonBuilder", obsSize: { lines: 2, tokens: 15 } })).toContain(
       "1node 1obs · 2lines 15tokens",
     );
   });
 
-  it("omits the node size segment when the observation lacks counts", () => {
-    const node = makeNode({ id: "n12", summary: "wrapper", importance: "med", observationIds: ["o31"] });
-    expect(formatNodeLine(node, { viewer: "nonBuilder", singleObs: {} })).toBe(
-      "n12 · med · wrapper · 1obs · Jul 29 09:00",
-    );
+  it("omits the size segment when no obsSize is passed (zero-obs node)", () => {
+    const node = makeNode({ id: "n12", summary: "wrapper", importance: "med", observationIds: [] });
+    expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe("n12 · med · wrapper · 0obs · Jul 29 09:00");
   });
 });
 
-describe("singleDirectObs", () => {
-  const obs = { detailsLines: 3, detailsTokens: 9 };
-  const observations = new Map([
-    ["o1", obs],
+describe("directObsSizeHint", () => {
+  const observations = new Map<string, { detailsLines?: number; detailsTokens?: number }>([
+    ["o1", { detailsLines: 3, detailsTokens: 9 }],
     ["o2", { detailsLines: 1, detailsTokens: 1 }],
+    // legacy: no captured counts
+    ["oLegacy", {}],
   ]);
 
-  it("returns the observation for a node with exactly one direct observation", () => {
+  it("sums a multi-obs node's direct observations (the fullDetails drill cost)", () => {
+    const node = makeNode({ id: "n1", summary: "s", importance: "med", observationIds: ["o1", "o2"] });
+    expect(directObsSizeHint(node, observations)).toEqual({ lines: 4, tokens: 10 });
+  });
+
+  it("returns a single observation's size as-is", () => {
     const node = makeNode({ id: "n1", summary: "s", importance: "med", observationIds: ["o1"] });
-    expect(singleDirectObs(node, observations)).toBe(obs);
+    expect(directObsSizeHint(node, observations)).toEqual({ lines: 3, tokens: 9 });
   });
 
-  it("returns undefined for zero or multiple observations (no single size)", () => {
-    const none = makeNode({ id: "n1", summary: "s", importance: "med", observationIds: [] });
-    const many = makeNode({ id: "n1", summary: "s", importance: "med", observationIds: ["o1", "o2"] });
-    expect(singleDirectObs(none, observations)).toBeUndefined();
-    expect(singleDirectObs(many, observations)).toBeUndefined();
+  it("returns undefined for a zero-obs node (no size to show)", () => {
+    const node = makeNode({ id: "n1", summary: "s", importance: "med", observationIds: [] });
+    expect(directObsSizeHint(node, observations)).toBeUndefined();
   });
 
-  it("returns undefined when the id is missing from the map (tolerant)", () => {
+  it("treats observations without counts (legacy) or missing from the map as 0", () => {
     const node = makeNode({
       id: "n1",
       summary: "s",
       importance: "med",
-      observationIds: ["oMissing" as Observation["id"]],
+      observationIds: ["o1" as Observation["id"], "oLegacy" as Observation["id"], "oMissing" as Observation["id"]],
     });
-    expect(singleDirectObs(node, observations)).toBeUndefined();
+    expect(directObsSizeHint(node, observations)).toEqual({ lines: 3, tokens: 9 });
   });
 });
 
@@ -345,7 +348,14 @@ describe("formatObservationLine", () => {
 describe("RENDER_LEGEND", () => {
   it("is the canonical one-line shared legend (non-Builder; no Builder-only glyph)", () => {
     expect(RENDER_LEGEND).toBe(
-      "n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete",
+      "n.. node · o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · " +
+        COUNTS_SIZE_LEGEND,
+    );
+  });
+
+  it("COUNTS_SIZE_LEGEND is the shared verbatim tail (no per-surface drift)", () => {
+    expect(COUNTS_SIZE_LEGEND).toBe(
+      "2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size)",
     );
   });
 });

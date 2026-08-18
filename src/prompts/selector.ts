@@ -4,6 +4,7 @@
 // The Selector's system prompt — approved protected text. Brand-new house
 // voice; positive intent only. Any change requires re-approval.
 
+import { COUNTS_SIZE_LEGEND } from "../format/render.js";
 import { IMPORTANCE_GLOSS } from "./shared.js";
 
 export const SELECTOR_SYSTEM = `You build the active-set — the task-focused memory the agent continues its work from
@@ -11,8 +12,9 @@ after a compaction. The active-set top level becomes the summary, so it must rea
 clearly and fit the budget.
 
 Legend — the working tree uses these marks:
-n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived
+n.. node · o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived
 (no mark = active)
+${COUNTS_SIZE_LEGEND}
 ${IMPORTANCE_GLOSS} Set it when you make a node (\`mkdir\`/\`merge\`) or re-rate it (\`set_meta\`).
 The recent tail is tagged blocks: <USER> · <ASSISTANT> · <THINKING> ·
 <TOOLCALL:name> · <TOOLRESULT>.

@@ -255,20 +255,26 @@ describe("renderSummary — selected-root", () => {
     expect(activeSet).toContain("n5 ·");
   });
 
-  it("carries a 1-obs root's size on its line, resolving tree refs against the source observations", () => {
-    // the selected tree carries structure only; n7's single obs (o5, 2lines
-    // 15tokens) lives in the source graph — the line qualifies the 1obs count.
+  it("carries a root's summed direct-obs size on its line, resolving tree refs against the source observations", () => {
+    // the selected tree carries structure only; the roots' observations live in
+    // the source graph — the line qualifies the Nobs count with the summed size
+    // (n7: one obs; nDec: two, summed — the fullDetails drill cost).
     const tree = selection(
       [
         sNode("nGoal", { id: N_GOAL, summary: "Build the extension", importance: "crit" }),
         sNode("n7", { summary: "Selector spec", importance: "high", observationIds: ["o5"] }),
+        sNode("nDec", { summary: "Decisions", importance: "med", observationIds: ["o1", "o2"] }),
       ],
       PROMPT,
     );
     const out = renderSummary({
       graph: {
         nodes: new Map(),
-        observations: new Map([["o5", { detailsLines: 2, detailsTokens: 15 }]]),
+        observations: new Map([
+          ["o5", { detailsLines: 2, detailsTokens: 15 }],
+          ["o1", { detailsLines: 3, detailsTokens: 40 }],
+          ["o2", { detailsLines: 10, detailsTokens: 211 }],
+        ]),
       },
       selectedTree: tree,
       oInitialPrompt: PROMPT,
@@ -277,6 +283,7 @@ describe("renderSummary — selected-root", () => {
     });
     const activeSet = out.split("## Active set")[1];
     expect(activeSet).toContain("n7 · high · Selector spec · 1obs · 2lines 15tokens · ");
+    expect(activeSet).toContain("nDec · med · Decisions · 2obs · 13lines 251tokens · ");
     // 0-obs root shows no size segment
     expect(activeSet).toMatch(/nGoal · crit · Build the extension · 0obs · /);
   });

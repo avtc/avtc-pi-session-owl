@@ -14,11 +14,19 @@ export type RenderViewer = "builder" | "nonBuilder";
 export const BUILDER: RenderViewer = "builder";
 export const NON_BUILDER: RenderViewer = "nonBuilder";
 
+/** The counts+size legend segment — the tail shared verbatim by every legend
+ *  (RENDER_LEGEND, the Builder and Selector prompts, README): the child-count
+ *  segment and the size segment (the direct observations' full-details size)
+ *  explained once, in one place. */
+export const COUNTS_SIZE_LEGEND =
+  "2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size)";
+
 /** The canonical one-line legend for the shared render format (non-Builder
  *  consumers — compaction summary, commands; the Builder's own prompt carries
  *  its own legend including the Builder-only 🆕new glyph). */
 export const RENDER_LEGEND =
-  "n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete";
+  "n.. node · o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · " +
+  COUNTS_SIZE_LEGEND;
 
 const MONTH_ABBREVIATIONS = [
   "Jan",
@@ -168,32 +176,53 @@ function childCounts(node: RenderableNode): string {
  *  guess. */
 function observationSize(detailsLines: number | undefined, detailsTokens: number | undefined): string | null {
   if (detailsLines === undefined || detailsTokens === undefined) return null;
-  return `${pluralize(detailsLines, "line", "lines")} ${pluralize(detailsTokens, "token", "tokens")}`;
+  return formatSize(detailsLines, detailsTokens);
+}
+
+/** Render a line/token count pair as the size segment (`2lines 15tokens`). */
+function formatSize(lines: number, tokens: number): string {
+  return `${pluralize(lines, "line", "lines")} ${pluralize(tokens, "token", "tokens")}`;
 }
 
 /** The minimal observation shape the node-line size hint reads. */
 export type SizeHintObservation = Pick<RenderableObservation, "detailsLines" | "detailsTokens">;
 
-/** Resolve a node's single direct observation for the node-line size hint: a
- *  node with exactly one direct observation carries that observation's size on
- *  its list line (the verbatim-source drill cost), qualifying its `1obs` count;
- *  any other observation count has no single size to show. Returns undefined
- *  when the id is absent from the map (tolerant — no size segment). */
-export function singleDirectObs<T extends SizeHintObservation>(
+/** The summed verbatim-source size of a node's direct observations — the cost
+ *  of the node's fullDetails drill, which renders every direct observation's
+ *  full text. */
+export interface SizeHint {
+  readonly lines: number;
+  readonly tokens: number;
+}
+
+/** Sum a node's direct observations' verbatim-source sizes for the node-line
+ *  size hint (qualifying the Nobs count — the same observations a node drill
+ *  expands; child nodes' observations are not included). An observation without
+ *  captured counts (legacy) contributes 0; a node with no direct observations
+ *  has no size to show. */
+export function directObsSizeHint<T extends SizeHintObservation>(
   node: RenderableNode,
   observations: ReadonlyMap<string, T>,
-): T | undefined {
-  if (node.observationIds.length !== 1) return undefined;
-  return observations.get(node.observationIds[0]);
+): SizeHint | undefined {
+  if (node.observationIds.length === 0) return undefined;
+  let lines = 0;
+  let tokens = 0;
+  for (const id of node.observationIds) {
+    const obs = observations.get(id);
+    if (obs === undefined) continue;
+    lines += obs.detailsLines ?? 0;
+    tokens += obs.detailsTokens ?? 0;
+  }
+  return { lines, tokens };
 }
 
 interface LineOptions {
   viewer: RenderViewer;
   showParent?: string;
-  /** The node's single direct observation (caller-resolved via singleDirectObs) —
-   *  renders that observation's size segment after the child counts. Node lines
-   *  only; observation lines ignore this. */
-  singleObs?: SizeHintObservation;
+  /** The summed size of the node's direct observations (caller-resolved via
+   *  directObsSizeHint) — renders as the size segment after the child counts.
+   *  Node lines only; observation lines ignore this. */
+  obsSize?: SizeHint;
   /** Transform (or omit) the observation content line. Default: `singleLine`.
    *  Return "" to render a content-free header. Node lines ignore this. */
   formatContent?: (content: string) => string;
@@ -240,9 +269,8 @@ export function formatNodeLine(node: RenderableNode, options: LineOptions): stri
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
   if (node.state === "obsolete" && node.supersededBy !== null) parts.push(`→ ${node.supersededBy}`);
   parts.push(childCounts(node));
-  if (options.singleObs !== undefined) {
-    const size = observationSize(options.singleObs.detailsLines, options.singleObs.detailsTokens);
-    if (size !== null) parts.push(size);
+  if (options.obsSize !== undefined) {
+    parts.push(formatSize(options.obsSize.lines, options.obsSize.tokens));
   }
   parts.push(formatTimestampRange(node.timestamps.rangeStart, node.timestamps.rangeEnd));
   return parts.join(" · ");
