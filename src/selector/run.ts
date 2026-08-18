@@ -7,8 +7,8 @@
 //
 // The Selector mutates a TRANSIENT working copy (never the source graph) and
 // persists only once at run completion — so the store's selectedTree is stale
-// mid-run; per pass the run pushes working-copy counts to the widget so it can
-// render live `selected` deltas.
+// mid-run; the run registers a live working-copy counts provider with the
+// widget so it renders `selected` deltas as each mutate applies.
 //
 // The run honors `signal` and owns NO run-lock (the caller — the compaction hook
 // or a background trigger — owns the lifecycle). Partial work from a failing
@@ -40,7 +40,7 @@ import { encodeSelection } from "../store/codecs.js";
 import { type GraphStore, getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
 import type { TodoBridge, TodoContext } from "../todo/types.js";
 import { estimateContentTokens, type MemkeeperGraph as Graph, O_INITIAL_PROMPT } from "../types.js";
-import type { WidgetController } from "../widget/tracker.js";
+import type { SelectedCountsProvider, WidgetController } from "../widget/tracker.js";
 import { buildSelectorInputView, renderWorkingRoots, type SelectorInputView, type TailBoundary } from "./input-view.js";
 import { makeSelectorTools, SELECTOR_MUTATE_TOOL_NAMES } from "./tools.js";
 
@@ -133,7 +133,14 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   let pass = FIRST_PASS;
   const ledger = makeLedgerHook(SELECT_STAGE);
   try {
-    input.widget.startStage(SELECT_STAGE, { pass });
+    // Register the live working-copy counts provider at stage start: the widget
+    // anchors its `selected` baseline on the pristine copy now, then re-pulls
+    // after every tool_execution_end — per-mutate live `selected` updates,
+    // mirroring the Builder's live source-graph roots.
+    input.widget.startStage(SELECT_STAGE, {
+      pass,
+      selectedCounts: makeSelectedCountsProvider(workingCopy.graph),
+    });
     stageOpened = true;
     // Build the toolset once (operates on the working copy for the whole run).
     const tools = makeSelectorTools({
@@ -142,8 +149,6 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
       ctx: input.ctx,
       todoBridge: input.todoBridge,
     });
-    // Push the initial working-copy counts (the live delta source).
-    pushSelectedCounts(input.widget, workingCopy.graph);
     // convergence loop — bounded by the break conditions below (budget met / no-op / context limit / signal)
     while (true) {
       if (input.signal.aborted) {
@@ -160,7 +165,6 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
         pass,
         ledger.onStageEnd,
       );
-      pushSelectedCounts(input.widget, workingCopy.graph);
 
       // persist the cumulative usage ledger PER PASS so an interrupted run keeps
       // the usage tally for every completed pass — matching the per-mutate
@@ -323,12 +327,14 @@ function persistResult(store: StoreContext, graphStore: GraphStore, workingGraph
 
 // --- widget counts ---------------------------------------------------------
 
-/** Push the working copy's current root counts to the widget (live deltas).
- *  Single-pass: collect+sort the roots ONCE, then derive both the count and the
- *  rendered view tokens from that same array (mirrors the widget's
- *  `rootViewCounts`). */
-function pushSelectedCounts(widget: WidgetController, workingGraph: Graph): void {
-  const roots = nonObsoleteRoots(workingGraph);
-  const rootViewTokens = estimateContentTokens(renderRootViewFromRoots(roots, NON_BUILDER));
-  widget.setSelectedCounts(roots.length, rootViewTokens);
+/** Build the live selected-counts provider over the working copy: non-obsolete
+ *  root count + rendered view tokens derived from ONE collected+sorted roots
+ *  array per pull (mirrors the widget's `rootViewCounts`). The widget pulls per
+ *  render — its cache is invalidated on every tool_execution_end — so each
+ *  applied mutate shows immediately, like the Builder's source-graph roots. */
+function makeSelectedCountsProvider(workingGraph: Graph): SelectedCountsProvider {
+  return () => {
+    const roots = nonObsoleteRoots(workingGraph);
+    return { count: roots.length, viewTokens: estimateContentTokens(renderRootViewFromRoots(roots, NON_BUILDER)) };
+  };
 }

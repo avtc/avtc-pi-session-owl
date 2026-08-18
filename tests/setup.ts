@@ -92,7 +92,6 @@ const STUB_NO_OP_WIDGET = Object.freeze({
   startStage: () => {},
   setPass: () => {},
   setBatch: () => {},
-  setSelectedCounts: () => {},
   endStage: () => {},
   onEvent: () => {},
 });

@@ -19,7 +19,7 @@ import {
   type StoreEntry,
 } from "../../src/store/graph-store.js";
 import { makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
-import type { WidgetController } from "../../src/widget/tracker.js";
+import type { SelectedCountsProvider, WidgetController } from "../../src/widget/tracker.js";
 import { NO_OP_WIDGET, recordingWidget, scriptRunStage, scriptRunStageWithError } from "../builder/run-helpers.js";
 
 const NOW = "2026-07-30T12:00:00.000Z";
@@ -138,29 +138,29 @@ function selectionEntries(appended: { type: string; data: unknown }[]): unknown[
   return appended.filter((e) => e.type === SELECTION_TYPE);
 }
 
-/** A widget that records setSelectedCounts calls (and keeps the recording
- *  widget's stage/pass/end tracking via delegation). */
+/** A widget that records the selected-counts provider registered at startStage
+ *  (and keeps the recording widget's stage/pass/end tracking via delegation). */
 function selectionWidget(): WidgetController & {
-  selectedCalls: Array<{ count: number; tokens: number }>;
+  selectedProvider: SelectedCountsProvider | null;
   calls: string[];
 } {
-  const selectedCalls: Array<{ count: number; tokens: number }> = [];
   const base = recordingWidget();
+  let selectedProvider: SelectedCountsProvider | null = null;
   return {
     setCtx: base.setCtx,
     clearCtx: base.clearCtx,
     render: base.render,
-    startStage: base.startStage,
+    startStage(stage, init) {
+      selectedProvider = init?.selectedCounts ?? null;
+      base.startStage(stage, init);
+    },
     setPass: base.setPass,
     setBatch: base.setBatch,
-    setSelectedCounts(count: number, tokens: number) {
-      selectedCalls.push({ count, tokens });
-    },
     endStage: base.endStage,
     onEvent: base.onEvent,
     invalidateRoots: base.invalidateRoots,
-    get selectedCalls() {
-      return selectedCalls;
+    get selectedProvider() {
+      return selectedProvider;
     },
     get calls() {
       return base.calls;
@@ -222,8 +222,54 @@ describe("runSelector", () => {
     // the widget opened/closed the select stage
     expect(widget.calls[0]).toBe("start:select:1");
     expect(widget.calls[widget.calls.length - 1]).toBe("end");
-    // setSelectedCounts was pushed at least once per pass (live deltas)
-    expect(widget.selectedCalls.length).toBeGreaterThanOrEqual(1);
+    // the run registered a live selected-counts provider over the working copy
+    // (per-mutate live `selected` deltas — no per-pass pushes)
+    expect(widget.selectedProvider).not.toBeNull();
+    expect(widget.selectedProvider?.().count).toBeGreaterThan(0);
+  });
+
+  it("registers a live provider over the working copy: counts drop as a real mutate applies", async () => {
+    // The provider must read the LIVE working copy: demoting a root via the real
+    // mv tool drops the non-obsolete root count on the provider's next pull —
+    // the per-mutate `selected` update source (the widget invalidates its cache
+    // on every tool_execution_end, then pulls this provider fresh).
+    seedGraph([{ id: "n3", summary: "demote me", state: "active" }]);
+    const widget = selectionWidget();
+    const counts: number[] = [];
+    const scripted = scriptRunStage({
+      passes: [
+        {
+          tools: [
+            { name: MV_TOOL, ok: true },
+            { name: TRY_FINISH_TOOL, ok: true },
+          ],
+        },
+      ],
+    });
+    const countingRunStage = async (input: StageRunInput): Promise<StageRunResult> => {
+      if (widget.selectedProvider !== null) counts.push(widget.selectedProvider().count);
+      const mv = input.tools.find((t) => t.name === MV_TOOL);
+      if (mv !== undefined) {
+        await mv.execute("c-mv", { sourceIds: ["n3"], destId: "nIrrelevant" });
+      }
+      if (widget.selectedProvider !== null) counts.push(widget.selectedProvider().count);
+      return scripted(input);
+    };
+    await runSelector({
+      ctx: makeFakeCtx(),
+      pi: recordingPi().pi,
+      settings: settings({ selectorRootViewThreshold: 0, maxSelectorPasses: 5 }),
+      signal: new AbortController().signal,
+      widget,
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: countingRunStage,
+    });
+    // before the mutate the provider sees the pristine copy; after it, the
+    // demoted root is gone from the non-obsolete roots (count drops by exactly 1)
+    expect(counts[0]).toBeGreaterThan(0);
+    expect(counts[1]).toBe(counts[0] - 1);
   });
 
   it("re-renders the working tree each pass (pass 2 sees pass 1's mutations, not a stale view)", async () => {

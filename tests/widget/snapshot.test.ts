@@ -131,10 +131,17 @@ describe("buildSnapshot", () => {
     expect(snap.contextWindow).toBeNull(); // registry miss → null, never 0
   });
 
-  it("selected section deltas measured from the working-copy baseline (first push)", () => {
-    tracker.startStage("select");
-    tracker.setSelectedCounts(95, 35_000); // first push → baseline
-    tracker.setSelectedCounts(20, 15_000); // current
+  it("selected section deltas measured from the working-copy baseline (captured at stage start)", () => {
+    let counts = { count: 95, viewTokens: 35_000 };
+    tracker.startStage("select", { selectedCounts: () => counts }); // baseline: the pristine copy
+    counts = { count: 20, viewTokens: 15_000 }; // mutates applied to the copy
+    tracker.onEvent({
+      type: "tool_execution_end",
+      toolCallId: "c1",
+      toolName: "mv",
+      result: {},
+      isError: false,
+    } as unknown as AgentEvent); // a mutate ended → re-pull the provider
     const snap = buildSnapshot(tracker, makeCtx());
     expect(snap.selected).not.toBeNull();
     expect(snap.selected?.count).toBe(20);
@@ -144,20 +151,19 @@ describe("buildSnapshot", () => {
     expect(snap.selected?.threshold).toBe(20_000); // DEFAULT_CONFIG.selectorRootViewThreshold
   });
 
-  it("selected section is null outside a Select stage", () => {
+  it("selected section is null outside a Select stage (provider cleared on stage reset)", () => {
+    tracker.startStage("select", { selectedCounts: () => ({ count: 20, viewTokens: 15_000 }) });
     tracker.startStage("build", { pass: 1 });
-    tracker.setSelectedCounts(20, 15_000);
     const snap = buildSnapshot(tracker, makeCtx());
     expect(snap.selected).toBeNull();
   });
 
   it("selected section is null in observations-root renderMode even during Select", () => {
-    // Exercises the renderMode arm of the gate: stage IS select and counts ARE
-    // pushed, but renderMode is observations-root → the selected section is
-    // suppressed (observations-root has no curated selected tree).
+    // Exercises the renderMode arm of the gate: stage IS select and a provider
+    // IS registered, but renderMode is observations-root → the selected section
+    // is suppressed (observations-root has no curated selected tree).
     _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, renderMode: "observations-root" }));
-    tracker.startStage("select");
-    tracker.setSelectedCounts(20, 15_000);
+    tracker.startStage("select", { selectedCounts: () => ({ count: 20, viewTokens: 15_000 }) });
     const snap = buildSnapshot(tracker, makeCtx());
     expect(snap.selected).toBeNull();
   });

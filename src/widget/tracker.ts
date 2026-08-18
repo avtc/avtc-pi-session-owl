@@ -40,6 +40,19 @@ export interface Baseline {
   rootsViewTokens: number;
 }
 
+/** Live counts over the Selector's working copy (non-obsolete roots + rendered
+ *  view tokens) — what the `selected` widget section shows. */
+export interface SelectedCounts {
+  count: number;
+  viewTokens: number;
+}
+
+/** A pull-based source of live selected counts over the Selector's transient
+ *  working copy. The run registers one at select startStage; the widget pulls
+ *  per render (its cache invalidated on every tool_execution_end), so each
+ *  applied mutate shows immediately — mirroring the Builder's live roots. */
+export type SelectedCountsProvider = () => SelectedCounts;
+
 /** The widget key + placement. */
 export const WIDGET_KEY = "memkeeper_progress";
 export const WIDGET_PLACEMENT = "aboveEditor" as const;
@@ -74,16 +87,19 @@ export interface WidgetSnapshot {
 }
 
 /** The stage-control methods shared by the tracker + the controller surface
- *  (startStage/setPass/setBatch/setSelectedCounts/endStage/onEvent). */
+ *  (startStage/setPass/setBatch/endStage/onEvent). */
 export interface StageController {
   /** Begin a stage, optionally seeding its pass/batch; snapshots the baseline.
    *  An omitted batch preserves an in-flight observe batch (an interleaved
    *  stage — the mid-catch-up Builder — runs inside the observe run that owns
-   *  the batch). */
-  startStage(stage: WidgetStage, init?: { pass?: number; batch?: BatchProgress }): void;
+   *  the batch). `selectedCounts` (Select) registers the live working-copy
+   *  counts provider the `selected` section renders from. */
+  startStage(
+    stage: WidgetStage,
+    init?: { pass?: number; batch?: BatchProgress; selectedCounts?: SelectedCountsProvider },
+  ): void;
   setPass(pass: number): void;
   setBatch(done: number, total: number): void;
-  setSelectedCounts(rootCount: number, rootViewTokens: number): void;
   /** End the stage (idle → the line hides); clears any in-flight batch. */
   endStage(): void;
   /** Consume one agent event (message_end → usage; message_update → streaming tokens). */
@@ -104,9 +120,6 @@ interface TrackerState {
   baseline: Baseline | null;
   usage: StageUsage;
   streamingOutputTokens: number;
-  selectedCount: number | null;
-  selectedViewTokens: number | null;
-  selectedBaseline: { count: number; viewTokens: number } | null;
   /** The background agent's latest context-window consumption (its last
    *  `message_end` usage.totalTokens) — the per-agent context-usage figure the
    *  widget surfaces (NOT the main session's usage). Null until the first
@@ -115,6 +128,11 @@ interface TrackerState {
   /** The background agent's model id (`message.model` from its last message_end)
    *  — used to resolve the context-window denominator via the model registry. */
   agentModelId: string | null;
+  /** Working-copy counts baseline captured at select stage start (the pristine
+   *  copy, before any mutate) — the `selected` deltas are measured from it, NOT
+   *  from the source-graph baseline (the working copy is rebuilt each run and
+   *  carries an injected nIrrelevant root). */
+  selectedBaseline: SelectedCounts | null;
   /** Observations accepted by record_observations in the CURRENT chunk, not yet
    *  persisted (persistence happens once per completed chunk) — the `+N obs`
    *  signal. Reset at chunk (setBatch) and run (startStage) boundaries. */
@@ -123,8 +141,8 @@ interface TrackerState {
 
 /**
  * Pure state object for one widget run. Updated by the runs
- * (startStage/setPass/setBatch/setSelectedCounts/endStage) and the agent event
- * stream (onEvent). The render reads a snapshot via `buildSnapshot`.
+ * (startStage/setPass/setBatch/endStage) and the agent event stream (onEvent).
+ * The render reads a snapshot via `buildSnapshot`.
  */
 export interface ProgressTracker extends StageController, TrackerState {
   /** Cached non-obsolete root count + view tokens for the widget render. The
@@ -132,6 +150,12 @@ export interface ProgressTracker extends StageController, TrackerState {
    *  tool_execution_end, so this reuses the cache across message_update deltas
    *  (invalidated on startStage and tool_execution_end). */
   rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number };
+
+  /** Live selected counts over the Selector's working copy: pulled from the
+   *  stage-registered provider and cached across renders (recomputed after a
+   *  tool_execution_end — a mutate may have changed the copy). Null when no
+   *  provider is registered (non-Select stages). */
+  selectedCounts(): SelectedCounts | null;
 }
 
 // --- streaming-token helpers (two-tier) -------------------------------------
@@ -146,6 +170,14 @@ export function createTracker(): ProgressTracker {
     fallbackTokens: number;
     primaryTokens: number;
     cachedRoots: { count: number; viewTokens: number } | null;
+    /** The Select run's live working-copy counts provider (registered at select
+     *  startStage; null on other stages). Internal — surfaced via
+     *  `selectedCounts()`. */
+    selectedProvider: SelectedCountsProvider | null;
+    /** Cached `selectedProvider()` result — invalidated on every
+     *  tool_execution_end (a mutate may have changed the working copy) and
+     *  re-pulled lazily at render time. */
+    cachedSelected: SelectedCounts | null;
   } = {
     stage: null,
     pass: 1,
@@ -153,8 +185,6 @@ export function createTracker(): ProgressTracker {
     baseline: null,
     usage: { ...ZERO_USAGE },
     streamingOutputTokens: 0,
-    selectedCount: null,
-    selectedViewTokens: null,
     selectedBaseline: null,
     agentContextTokens: null,
     agentModelId: null,
@@ -162,6 +192,8 @@ export function createTracker(): ProgressTracker {
     fallbackTokens: 0,
     primaryTokens: 0,
     cachedRoots: null,
+    selectedProvider: null,
+    cachedSelected: null,
   };
 
   return {
@@ -182,12 +214,6 @@ export function createTracker(): ProgressTracker {
     },
     get streamingOutputTokens() {
       return state.streamingOutputTokens;
-    },
-    get selectedCount() {
-      return state.selectedCount;
-    },
-    get selectedViewTokens() {
-      return state.selectedViewTokens;
     },
     get selectedBaseline() {
       return state.selectedBaseline;
@@ -212,11 +238,14 @@ export function createTracker(): ProgressTracker {
       state.streamingOutputTokens = 0;
       state.fallbackTokens = 0;
       state.primaryTokens = 0;
-      // selected counts + baseline are per-Select-run; a fresh stage start
-      // re-anchors the selected baseline on the next first push.
-      state.selectedCount = null;
-      state.selectedViewTokens = null;
-      state.selectedBaseline = null;
+      // selected counts are per-Select-run: register the run's provider (null
+      // on other stages) and capture the baseline from the PRISTINE copy at
+      // stage start — before any mutate — so the deltas anchor to the copy as
+      // the run received it. The baseline doubles as the initial cache (the
+      // copy cannot have mutated before the first render).
+      state.selectedProvider = init?.selectedCounts ?? null;
+      state.selectedBaseline = state.selectedProvider?.() ?? null;
+      state.cachedSelected = state.selectedBaseline;
       state.agentContextTokens = null;
       state.agentModelId = null;
       state.inFlightObs = 0;
@@ -231,14 +260,6 @@ export function createTracker(): ProgressTracker {
       // verdict) — the in-flight counter belongs to the NEXT chunk
       state.inFlightObs = 0;
     },
-    setSelectedCounts(rootCount, rootViewTokens) {
-      // capture the working-copy baseline on the first push of a Select stage.
-      if (state.selectedBaseline === null) {
-        state.selectedBaseline = { count: rootCount, viewTokens: rootViewTokens };
-      }
-      state.selectedCount = rootCount;
-      state.selectedViewTokens = rootViewTokens;
-    },
     endStage() {
       state.stage = null;
       // the owning run ended → its batch must not leak into a later
@@ -248,6 +269,11 @@ export function createTracker(): ProgressTracker {
     rootViewCounts(graph) {
       if (state.cachedRoots === null) state.cachedRoots = rootViewCounts(graph);
       return state.cachedRoots;
+    },
+    selectedCounts() {
+      if (state.selectedProvider === null) return null;
+      if (state.cachedSelected === null) state.cachedSelected = state.selectedProvider();
+      return state.cachedSelected;
     },
     invalidateRoots() {
       state.cachedRoots = null;
@@ -309,6 +335,9 @@ export function createTracker(): ProgressTracker {
         }
         // a mutate happened → the cached root view is stale; rebuild on next snapshot.
         state.cachedRoots = null;
+        // the Selector's working copy mutates inside its tool calls too → the
+        // cached selected counts are stale; re-pull from the provider.
+        state.cachedSelected = null;
       }
     },
   };
@@ -368,17 +397,20 @@ export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): 
   const contextWindow = resolveContextWindow(ctx, tracker.agentModelId);
 
   // selected section: shown only in selected-root renderMode AND during Select.
-  // deltas measured from the working-copy baseline (first push of the stage),
+  // counts are PULLED from the run's working-copy provider (cached across
+  // renders, refreshed after each tool_execution_end — per-mutate live updates);
+  // deltas measured from the working-copy baseline captured at stage start,
   // NOT the source-graph baseline (the working copy is rebuilt each Select run).
   const inSelect = tracker.stage === "select" && settings.renderMode === "selected-root";
+  const selectedCounts = inSelect ? tracker.selectedCounts() : null;
   const selectedBaseline = tracker.selectedBaseline;
   const selected =
-    inSelect && tracker.selectedCount !== null && tracker.selectedViewTokens !== null
+    selectedCounts !== null
       ? {
-          count: tracker.selectedCount,
-          countDelta: selectedBaseline === null ? 0 : tracker.selectedCount - selectedBaseline.count,
-          viewTokens: tracker.selectedViewTokens,
-          tokenDelta: selectedBaseline === null ? 0 : tracker.selectedViewTokens - selectedBaseline.viewTokens,
+          count: selectedCounts.count,
+          countDelta: selectedBaseline === null ? 0 : selectedCounts.count - selectedBaseline.count,
+          viewTokens: selectedCounts.viewTokens,
+          tokenDelta: selectedBaseline === null ? 0 : selectedCounts.viewTokens - selectedBaseline.viewTokens,
           threshold: settings.selectorRootViewThreshold,
         }
       : null;
@@ -425,7 +457,6 @@ export const NO_OP_WIDGET: WidgetController = {
   startStage: NO_OP,
   setPass: NO_OP,
   setBatch: NO_OP,
-  setSelectedCounts: NO_OP,
   endStage: NO_OP,
   onEvent: NO_OP,
   invalidateRoots: NO_OP,
@@ -481,9 +512,6 @@ export function initWidget(): WidgetController {
     invalidateRoots() {
       tracker.invalidateRoots();
       scheduleRender();
-    },
-    setSelectedCounts(rootCount, rootViewTokens) {
-      tracker.setSelectedCounts(rootCount, rootViewTokens);
     },
     endStage() {
       tracker.endStage();

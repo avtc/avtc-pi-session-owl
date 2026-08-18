@@ -105,7 +105,6 @@ export const NO_OP_WIDGET: WidgetController = {
   startStage: () => {},
   setPass: () => {},
   setBatch: () => {},
-  setSelectedCounts: () => {},
   endStage: () => {},
   onEvent: () => {},
   invalidateRoots: () => {},
@@ -127,7 +126,6 @@ export function recordingWidget(): WidgetController & {
       calls.push(`pass:${pass}`);
     },
     setBatch: () => {},
-    setSelectedCounts: () => {},
     endStage: () => {
       calls.push("end");
     },

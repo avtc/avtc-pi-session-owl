@@ -60,6 +60,17 @@ function thinkingDeltaEvent(delta: string): AgentEvent {
   } as unknown as AgentEvent;
 }
 
+/** A successful mutate tool_execution_end (the per-mutate selected invalidation). */
+function mutateEndEvent(): AgentEvent {
+  return {
+    type: "tool_execution_end",
+    toolCallId: "c-mv",
+    toolName: "mv",
+    result: { content: [], details: { ok: true } },
+    isError: false,
+  } as unknown as AgentEvent;
+}
+
 describe("ProgressTracker state", () => {
   let tracker: ProgressTracker;
 
@@ -128,7 +139,7 @@ describe("ProgressTracker state", () => {
     });
   });
 
-  describe("setPass / setBatch / setSelectedCounts", () => {
+  describe("setPass / setBatch / selectedCounts provider", () => {
     it("setPass updates the pass number", () => {
       tracker.startStage("build", { pass: 1 });
       tracker.setPass(3);
@@ -141,28 +152,39 @@ describe("ProgressTracker state", () => {
       expect(tracker.batch).toEqual({ done: 3, total: 7 });
     });
 
-    it("setSelectedCounts stores working-copy selected counts (Select-only push)", () => {
-      tracker.setSelectedCounts(20, 15_000);
-      expect(tracker.selectedCount).toBe(20);
-      expect(tracker.selectedViewTokens).toBe(15_000);
+    it("selectedCounts pulls from the provider registered at select startStage", () => {
+      tracker.startStage("select", { selectedCounts: () => ({ count: 20, viewTokens: 15_000 }) });
+      expect(tracker.selectedCounts()).toEqual({ count: 20, viewTokens: 15_000 });
     });
 
-    it("startStage(select) clears any prior selected baseline so the first push re-anchors", () => {
-      tracker.startStage("select");
-      tracker.setSelectedCounts(95, 35_000); // first push → baseline
-      tracker.setSelectedCounts(20, 15_000); // second push
-      // the selected baseline is the first push after the select stage start
-      expect(tracker.selectedBaseline).toEqual({ count: 95, viewTokens: 35_000 });
-      expect(tracker.selectedCount).toBe(20);
-      expect(tracker.selectedViewTokens).toBe(15_000);
-    });
-
-    it("startStage(reset) on a non-select stage clears the selected counts + baseline", () => {
-      tracker.startStage("select");
-      tracker.setSelectedCounts(95, 35_000);
+    it("selectedCounts is null without a provider (non-Select stages register none)", () => {
       tracker.startStage("build", { pass: 1 });
-      expect(tracker.selectedCount).toBeNull();
-      expect(tracker.selectedViewTokens).toBeNull();
+      expect(tracker.selectedCounts()).toBeNull();
+    });
+
+    it("the selected baseline is captured at stage start (the pristine copy) and never re-anchors", () => {
+      let count = 95;
+      tracker.startStage("select", { selectedCounts: () => ({ count, viewTokens: count * 100 }) });
+      count = 20; // mutates applied to the copy after the anchor
+      tracker.onEvent(mutateEndEvent()); // invalidate → the next pull is fresh
+      expect(tracker.selectedBaseline).toEqual({ count: 95, viewTokens: 9_500 });
+      expect(tracker.selectedCounts()).toEqual({ count: 20, viewTokens: 2_000 });
+    });
+
+    it("caches the provider result and recomputes only after a tool_execution_end (per-mutate live updates)", () => {
+      let count = 20;
+      tracker.startStage("select", { selectedCounts: () => ({ count, viewTokens: count * 100 }) });
+      expect(tracker.selectedCounts()?.count).toBe(20);
+      count = 19; // a mutate applied to the copy — no invalidation event yet
+      expect(tracker.selectedCounts()?.count).toBe(20); // cached across renders
+      tracker.onEvent(mutateEndEvent());
+      expect(tracker.selectedCounts()?.count).toBe(19); // re-pulled after the tool end
+    });
+
+    it("startStage(reset) on a non-select stage clears the provider + baseline", () => {
+      tracker.startStage("select", { selectedCounts: () => ({ count: 95, viewTokens: 35_000 }) });
+      tracker.startStage("build", { pass: 1 });
+      expect(tracker.selectedCounts()).toBeNull();
       expect(tracker.selectedBaseline).toBeNull();
     });
   });
