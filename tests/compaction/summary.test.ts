@@ -145,6 +145,39 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
   });
 });
 
+describe("renderSummary — active-set line format", () => {
+  it("active-set lines carry the node kind icon, one line per root (no list markers)", () => {
+    const out = renderSummary({
+      graph: nodeGraph([
+        sNode(N_GOAL, { id: N_GOAL, summary: "Build the extension", importance: "crit" }),
+        sNode("n7", { summary: "Selector spec", importance: "high" }),
+      ]),
+      selectedTree: null,
+      oInitialPrompt: PROMPT,
+      renderMode: "observations-root",
+      touchedFiles: TOUCHED,
+      compactionCount: 1,
+    });
+    const activeBlock = out
+      .split("## Active set")[1]
+      .split("---")[0]
+      .split("\n")
+      .filter((l) => l.trim() !== "");
+    expect(activeBlock.length).toBe(2);
+    for (const line of activeBlock) {
+      expect(line.startsWith("📁 ")).toBe(true);
+    }
+    const touchedBlock = out
+      .split("## Recently touched")[1]
+      .split("\n")
+      .filter((l) => l.trim() !== "");
+    expect(touchedBlock.length).toBe(3);
+    for (const line of touchedBlock) {
+      expect(line.startsWith("📁 ")).toBe(false);
+    }
+  });
+});
+
 describe("renderSummary — observations-root", () => {
   function graphWith(nodes: SerializedNode[]) {
     return nodeGraph(nodes);
@@ -317,10 +350,11 @@ describe("renderSummary — selected-root", () => {
       touchedFiles: [],
       compactionCount: 2,
     });
-    // after the last root, before the touched section; totals over the source graph
+    // after the last root, before the touched section; totals over the source graph.
+    // the blank line before --- keeps it a thematic break, not a setext heading underline
     const footer =
       "Source tree total: 2 nodes (1 level) · 3 observations · 15 lines 266 tokens of details · 2 compactions";
-    expect(out).toContain(`---\n${footer}`);
+    expect(out).toContain(`\n\n---\n${footer}`);
     expect(out.indexOf(footer)).toBeGreaterThan(out.lastIndexOf("n7 · high · Selector spec"));
     expect(out.indexOf(footer)).toBeLessThan(out.indexOf("## Recently touched"));
 

@@ -305,8 +305,8 @@ describe("mk_recall", () => {
       expect(out).toContain("n8");
       expect(out).toContain("o5");
       // child n8 + o5 are indented (2-space) under the header
-      expect(lines.some((l) => l.startsWith("  n8"))).toBe(true);
-      expect(lines.some((l) => l.startsWith("  o5"))).toBe(true);
+      expect(lines.some((l) => l.startsWith("  📁 n8"))).toBe(true);
+      expect(lines.some((l) => l.startsWith("  📄 o5"))).toBe(true);
     });
 
     it("returns an observation's full content", async () => {

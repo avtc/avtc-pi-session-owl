@@ -454,16 +454,16 @@ describe("Builder read tools", () => {
       const page2 = textOf(await callTool(tools(), "ls", { page: { take: 2, afterId } }));
       // page2 returns real next content (at least one root line, not the stale-cursor message)
       expect(page2).not.toContain("Cursor");
-      const page2RootLines = page2.split("\n").filter((l) => /^n\S+/.test(l));
+      const page2RootLines = page2.split("\n").filter((l) => /^📁 n\S+/.test(l));
       expect(page2RootLines.length).toBeGreaterThan(0);
       // page1 roots must NOT reappear on page2 (no duplicate re-delivery)
       const page1Ids = page1
         .split("\n")
-        .map((l) => l.match(/^(n\S+)/))
+        .map((l) => l.match(/^📁 (n\S+)/))
         .filter((m): m is RegExpMatchArray => m !== null)
         .map((m) => m[1]);
       for (const id of page1Ids) {
-        const asLine = page2.split("\n").some((l) => l.startsWith(`${id} `));
+        const asLine = page2.split("\n").some((l) => l.startsWith(`📁 ${id} `));
         expect(asLine).toBe(false);
       }
     });

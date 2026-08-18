@@ -190,8 +190,8 @@ describe("/mk:* user commands", () => {
       // child node n8 + observation o5 present
       expect(text).toContain("n8");
       expect(text).toContain("o5");
-      // n8/o5 indented under the parent (leading spaces)
-      expect(text).toMatch(/^\s*n8/m);
+      // n8/o5 indented under the parent (leading spaces, icon after the indent)
+      expect(text).toMatch(/^\s*📁 n8/m);
     });
 
     it("unknown nodeId → error notify naming the id", async () => {

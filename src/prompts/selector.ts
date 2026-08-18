@@ -12,7 +12,7 @@ after a compaction. The active-set top level becomes the summary, so it must rea
 clearly and fit the budget.
 
 Legend — the working tree uses these marks:
-n.. node · o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived
+📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived
 (no mark = active)
 ${COUNTS_SIZE_LEGEND}
 ${IMPORTANCE_GLOSS} Set it when you make a node (\`mkdir\`/\`merge\`) or re-rate it (\`set_meta\`).

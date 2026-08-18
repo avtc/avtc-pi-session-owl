@@ -31,17 +31,17 @@ At compaction, the active set is rendered into the compaction summary that pi in
 ```
 # Memory
 Your session memory. Each item cites an id — use mk_recall for detail.
-Legend: n.. node · o.. observation · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete
+Legend: 📁 n.. node · 📄 o.. observation · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete
 
 ## Initial prompt
 Redesign the auth flow: move JWT validation to middleware and drop the legacy login form.
 
 ## Active set
-nGoal · crit · Redesign auth flow (JWT middleware, drop legacy login) · 3nodes 1obs · 2lines 45tokens · Jul 28 14:30 — Jul 29 09:15
-n12 · high · Auth flow redesign · 1obs · 2lines 15tokens · Jul 28 14:30 — Jul 29 09:15
-n8 · high · Decisions · 5obs · 214lines 5100tokens · Jul 28 14:30 — Jul 29 09:15
-n6 · 📦low · Old login form · 2obs · 96lines 2300tokens · Jul 27 09:00 — Jul 27 18:00
-nIrrelevant · med · Irrelevant · 4obs · 12lines 260tokens · Jul 28 14:30 — Jul 29 09:15
+📁 nGoal · crit · Redesign auth flow (JWT middleware, drop legacy login) · 3nodes 1obs · 2lines 45tokens · Jul 28 14:30 — Jul 29 09:15
+📁 n12 · high · Auth flow redesign · 1obs · 2lines 15tokens · Jul 28 14:30 — Jul 29 09:15
+📁 n8 · high · Decisions · 5obs · 214lines 5100tokens · Jul 28 14:30 — Jul 29 09:15
+📁 n6 · 📦low · Old login form · 2obs · 96lines 2300tokens · Jul 27 09:00 — Jul 27 18:00
+📁 nIrrelevant · med · Irrelevant · 4obs · 12lines 260tokens · Jul 28 14:30 — Jul 29 09:15
 ---
 Source tree total: 237 nodes (4 levels) · 273 observations · 10k lines 576k tokens of details · 3 compactions
 
@@ -58,16 +58,16 @@ After compaction the agent continues with this summary alongside pi's own recent
 The graph is a containment tree of **nodes** (folders) holding **observations** (leaves). It renders the same way everywhere — the agent's `mk_recall`, the Builder and Selector tools, and the `/mk:ls`/`/mk:cat`/`/mk:find` commands:
 
 ```
-nGoal · crit · The session goal · 4nodes 1obs · 2lines 45tokens · Jul 28 14:30
-  n12 · high · Auth flow redesign · 1obs · 2lines 15tokens · Jul 28 14:30 — Jul 29 09:15
-    o31 · med · JWT validation moved to middleware · 2lines 15tokens · Jul 28 14:30
-  n8 · high · Decisions · 5obs · 214lines 5100tokens · Jul 28 14:30 — Jul 29 09:15
-  n6 · 📦low · Old login form · 2obs · 96lines 2300tokens · Jul 27 09:00 — Jul 27 18:00
-  n3 · 🪦med · YAML config · → n8 · 1obs · 1line 12tokens · Jul 27 09:00
-n5 · med · Scratch · 2obs · 38lines 900tokens · Jul 28 14:30 — Jul 29 09:15
+📁 nGoal · crit · The session goal · 4nodes 1obs · 2lines 45tokens · Jul 28 14:30
+  📁 n12 · high · Auth flow redesign · 1obs · 2lines 15tokens · Jul 28 14:30 — Jul 29 09:15
+    📄 o31 · med · JWT validation moved to middleware · 2lines 15tokens · Jul 28 14:30
+  📁 n8 · high · Decisions · 5obs · 214lines 5100tokens · Jul 28 14:30 — Jul 29 09:15
+  📁 n6 · 📦low · Old login form · 2obs · 96lines 2300tokens · Jul 27 09:00 — Jul 27 18:00
+  📁 n3 · 🪦med · YAML config · → n8 · 1obs · 1line 12tokens · Jul 27 09:00
+📁 n5 · med · Scratch · 2obs · 38lines 900tokens · Jul 28 14:30 — Jul 29 09:15
 ```
 
-(*n..* node · *o..* observation (obs); importance *crit*/*high*/*med*/*low* (how much it matters if lost); state glyphs *📦* archived · *🪦* obsolete · *🆕* new, Builder view only; 2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size).)
+(*📁* *n..* node · *📄* *o..* observation (obs); importance *crit*/*high*/*med*/*low* (how much it matters if lost); state glyphs *📦* archived · *🪦* obsolete · *🆕* new, Builder view only; 2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size).)
 
 **How the agent operates it.** The Builder and Selector navigate and edit the graph with filesystem-style tools — `ls`, `cat`, `find` to read; `mkdir`, `mv`, `merge`, `supersede` (Builder-only), `set_meta` to reorganize; `try_finish` to converge the root view on its budget. The Builder maintains the source graph; the Selector builds a curated copy (the active set) for the summary. The agent itself uses the read-only `mk_recall` to fetch and search on demand.
 

@@ -34,15 +34,18 @@ describe("docs/CONFIGURATION.md parity with MEMKEEPER_SCHEMA", () => {
 });
 
 describe("README render-format example parity", () => {
-  it("uses the current text-based render format, not the stale emoji-icon format", () => {
+  it("uses the current render format: kind icons, word counts, text importance", () => {
     const text = readFileSync(README_PATH, "utf8");
     // current format: grammar-correct child/size counts in words
     expect(text).toMatch(/\dnodes \d+obs/);
     expect(text).toMatch(/\dlines? \d+tokens?/);
     // importance rendered as text words, not the dropped colored-dot circles
     expect(text).toMatch(/crit|high|med|low/);
-    // the dropped kind icons must not reappear in the render example
-    expect(text).not.toContain("📁 n");
-    expect(text).not.toContain("📄 o");
+    // node/observation lines carry the kind icons after any indent
+    expect(text).toContain("📁 nGoal");
+    expect(text).toContain("  📁 n12");
+    expect(text).toContain("    📄 o31");
+    // the dropped importance circles must not reappear
+    expect(text).not.toMatch(/🔴|🟠|🟡|⚪/);
   });
 });

@@ -30,7 +30,7 @@ describe("BUILDER_SYSTEM prompt", () => {
         "and stay within budget.",
         "",
         "Legend — graph listings use these marks:",
-        "n.. node · o.. observation (obs) · importance crit high med low (how much it matters if lost) · 🆕new 📦archived 🪦obsolete",
+        "📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 🆕new 📦archived 🪦obsolete",
         "(no mark = active; obsolete hidden unless searched)",
         "2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size)",
         "Importance is how much a node matters if lost: crit — a hard, persistent constraint or correction; high — a decision, choice, or unresolved blocker; med — meaningful context, not itself a decision or constraint; low — routine activity or minor detail. Set it when you make a node (`mkdir`/`merge`) and re-rate it (`set_meta`) as the graph matures.",

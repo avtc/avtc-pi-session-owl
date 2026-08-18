@@ -92,7 +92,7 @@ describe("formatNodeLine", () => {
       rangeEnd: "2026-07-29T09:15:00.000Z",
     });
     expect(formatNodeLine(node, { viewer: "builder" })).toBe(
-      "n7 · high · Auth migration to JWT · 3nodes 12obs · Jul 28 14:30 — Jul 29 09:15",
+      "📁 n7 · high · Auth migration to JWT · 3nodes 12obs · Jul 28 14:30 — Jul 29 09:15",
     );
   });
 
@@ -141,7 +141,7 @@ describe("formatNodeLine", () => {
       importance: "med",
       timestamp: "2026-07-28T14:30:00.000Z",
     });
-    expect(formatObservationLine(obs, { viewer: "builder" })).toBe("o3 · med · a fact · Jul 28 14:30");
+    expect(formatObservationLine(obs, { viewer: "builder" })).toBe("📄 o3 · med · a fact · Jul 28 14:30");
   });
 
   it("counts a trailing newline as a terminator, not an extra line", () => {
@@ -160,12 +160,12 @@ describe("formatNodeLine", () => {
 
   it("omits the child count when the node has only observations", () => {
     const node = makeNode({ id: "nGoal", summary: "the goal", importance: "crit", observationIds: repeatObs(2) });
-    expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe("nGoal · crit · the goal · 2obs · Jul 29 09:00");
+    expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe("📁 nGoal · crit · the goal · 2obs · Jul 29 09:00");
   });
 
   it("renders an archived node with the 📦 glyph", () => {
     const node = makeNode({ id: "n3", summary: "old branch", importance: "low", state: "archived" });
-    expect(formatNodeLine(node, { viewer: "builder" })).toBe("n3 · 📦low · old branch · 0obs · Jul 29 09:00");
+    expect(formatNodeLine(node, { viewer: "builder" })).toBe("📁 n3 · 📦low · old branch · 0obs · Jul 29 09:00");
   });
 
   it("renders an obsolete node with the 🪦 glyph and the → supersededBy link", () => {
@@ -176,7 +176,9 @@ describe("formatNodeLine", () => {
       state: "obsolete",
       supersededBy: "n7",
     });
-    expect(formatNodeLine(node, { viewer: "builder" })).toBe("n2 · 🪦med · YAML config · → n7 · 0obs · Jul 29 09:00");
+    expect(formatNodeLine(node, { viewer: "builder" })).toBe(
+      "📁 n2 · 🪦med · YAML config · → n7 · 0obs · Jul 29 09:00",
+    );
   });
 
   it("emits the 🆕 glyph for a new node only when the viewer is the Builder", () => {
@@ -188,7 +190,7 @@ describe("formatNodeLine", () => {
       observationIds: repeatObs(1),
     });
     expect(formatNodeLine(node, { viewer: "builder" })).toBe(
-      "n12 · 🆕med · Build failed: TS2322 · 1obs · Jul 29 09:00",
+      "📁 n12 · 🆕med · Build failed: TS2322 · 1obs · Jul 29 09:00",
     );
   });
 
@@ -201,7 +203,7 @@ describe("formatNodeLine", () => {
       observationIds: repeatObs(1),
     });
     expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe(
-      "n12 · med · Build failed: TS2322 · 1obs · Jul 29 09:00",
+      "📁 n12 · med · Build failed: TS2322 · 1obs · Jul 29 09:00",
     );
   });
 
@@ -215,13 +217,13 @@ describe("formatNodeLine", () => {
       state: "new",
       observationIds: repeatObs(1),
     });
-    expect(formatNodeLine(node, { viewer: "builder" })).toBe("n15 · 🆕med · 1obs · Jul 29 09:00");
+    expect(formatNodeLine(node, { viewer: "builder" })).toBe("📁 n15 · 🆕med · 1obs · Jul 29 09:00");
   });
 
   it("appends 'in <parent>' when showParent is set", () => {
     const node = makeNode({ id: "n20", summary: "leaf branch", importance: "high", observationIds: repeatObs(1) });
     expect(formatNodeLine(node, { viewer: "builder", showParent: "n7" })).toBe(
-      "n20 · high · leaf branch · in n7 · 1obs · Jul 29 09:00",
+      "📁 n20 · high · leaf branch · in n7 · 1obs · Jul 29 09:00",
     );
   });
 
@@ -231,7 +233,7 @@ describe("formatNodeLine", () => {
       viewer: "nonBuilder",
       obsSize: { lines: 2, tokens: 15 },
     });
-    expect(line).toBe("n12 · med · wrapper · 1obs · 2lines 15tokens · Jul 29 09:00");
+    expect(line).toBe("📁 n12 · med · wrapper · 1obs · 2lines 15tokens · Jul 29 09:00");
   });
 
   it("keeps child counts adjacent to the size when the node also has child nodes", () => {
@@ -249,7 +251,7 @@ describe("formatNodeLine", () => {
 
   it("omits the size segment when no obsSize is passed (zero-obs node)", () => {
     const node = makeNode({ id: "n12", summary: "wrapper", importance: "med", observationIds: [] });
-    expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe("n12 · med · wrapper · 0obs · Jul 29 09:00");
+    expect(formatNodeLine(node, { viewer: "nonBuilder" })).toBe("📁 n12 · med · wrapper · 0obs · Jul 29 09:00");
   });
 });
 
@@ -323,7 +325,7 @@ describe("renderTreeTotal", () => {
     // depth 3 (n1→n2→n3); legacy obs contributes 0; k-rounded totals (one
     // decimal below 10k, integer k above).
     expect(renderTreeTotal({ nodes, observations }, 11)).toBe(
-      "---\nSource tree total: 3 nodes (3 levels) · 3 observations · 10k lines 576k tokens of details · 11 compactions",
+      "\n---\nSource tree total: 3 nodes (3 levels) · 3 observations · 10k lines 576k tokens of details · 11 compactions",
     );
   });
 
@@ -334,13 +336,13 @@ describe("renderTreeTotal", () => {
       makeNode({ id: "n3", summary: "c", importance: "med" }),
     ]);
     expect(renderTreeTotal({ nodes, observations: new Map() }, 1)).toBe(
-      "---\nSource tree total: 3 nodes (2 levels) · 0 observations · 0 lines 0 tokens of details · 1 compaction",
+      "\n---\nSource tree total: 3 nodes (2 levels) · 0 observations · 0 lines 0 tokens of details · 1 compaction",
     );
   });
 
   it("renders an empty graph as zeroed totals", () => {
     expect(renderTreeTotal({ nodes: new Map(), observations: new Map() }, 0)).toBe(
-      "---\nSource tree total: 0 nodes (0 levels) · 0 observations · 0 lines 0 tokens of details · 0 compactions",
+      "\n---\nSource tree total: 0 nodes (0 levels) · 0 observations · 0 lines 0 tokens of details · 0 compactions",
     );
   });
 });
@@ -356,7 +358,7 @@ describe("formatObservationLine", () => {
       detailsTokens: 7,
     });
     expect(formatObservationLine(obs, { viewer: "builder" })).toBe(
-      "o5 · high · Chose JWT for stateless auth · 1line 7tokens · Jul 28 14:30",
+      "📄 o5 · high · Chose JWT for stateless auth · 1line 7tokens · Jul 28 14:30",
     );
   });
 
@@ -370,7 +372,7 @@ describe("formatObservationLine", () => {
       detailsTokens: 2,
     });
     expect(formatObservationLine(obs, { viewer: "nonBuilder", showParent: "n7" })).toBe(
-      "o5 · low · a fact · in n7 · 1line 2tokens · Jul 28 14:30",
+      "📄 o5 · low · a fact · in n7 · 1line 2tokens · Jul 28 14:30",
     );
   });
 
@@ -385,7 +387,7 @@ describe("formatObservationLine", () => {
     });
     const upper = (c: string) => c.toUpperCase();
     expect(formatObservationLine(obs, { viewer: "nonBuilder", formatContent: upper })).toBe(
-      "o5 · low · A FACT · 1line 2tokens · Jul 28 14:30",
+      "📄 o5 · low · A FACT · 1line 2tokens · Jul 28 14:30",
     );
   });
 
@@ -400,7 +402,7 @@ describe("formatObservationLine", () => {
     });
     const none = () => "";
     expect(formatObservationLine(obs, { viewer: "nonBuilder", showParent: "n7", formatContent: none })).toBe(
-      "o5 · low · in n7 · 1line 2tokens · Jul 28 14:30",
+      "📄 o5 · low · in n7 · 1line 2tokens · Jul 28 14:30",
     );
   });
 });
@@ -408,7 +410,7 @@ describe("formatObservationLine", () => {
 describe("RENDER_LEGEND", () => {
   it("is the canonical one-line shared legend (non-Builder; no Builder-only glyph)", () => {
     expect(RENDER_LEGEND).toBe(
-      "n.. node · o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · " +
+      "📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · " +
         COUNTS_SIZE_LEGEND,
     );
   });
@@ -448,7 +450,7 @@ describe("singleLine rendering", () => {
     const node = makeNode({ id: "n1", summary: "", importance: "med", observationIds: repeatObs(1) });
     const line = formatNodeLine(node, { viewer: "nonBuilder" });
     expect(line).not.toContain("·  ·");
-    expect(line).toBe("n1 · med · 1obs · Jul 29 09:00");
+    expect(line).toBe("📁 n1 · med · 1obs · Jul 29 09:00");
   });
 });
 

@@ -26,7 +26,7 @@ export const COUNTS_SIZE_LEGEND =
  *  consumers — compaction summary, commands; the Builder's own prompt carries
  *  its own legend including the Builder-only 🆕new glyph). */
 export const RENDER_LEGEND =
-  "n.. node · o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · " +
+  "📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · " +
   COUNTS_SIZE_LEGEND;
 
 const MONTH_ABBREVIATIONS = [
@@ -249,9 +249,12 @@ function treeLevels(nodes: ReadonlyMap<string, RenderableNode>): number {
   return max;
 }
 
-/** Render the source-tree totals block — a `---` divider plus the one-line
- *  tree scale shown under every root view (the compaction summary's active
- *  set, the Builder's per-pass root snapshot, the Selector's working tree):
+/** Render the source-tree totals block — a blank line, a `---` divider, and
+ *  the one-line tree scale shown under every root view (the compaction
+ *  summary's active set, the Builder's per-pass root snapshot, the Selector's
+ *  working tree). The blank line is required: under markdown a `---` directly
+ *  after paragraph text parses as a setext heading underline (styling the
+ *  whole block above as a heading) instead of a thematic break. Contents:
  *  node count + depth, observation count, the summed verbatim details size
  *  (the same lines/tokens units as the per-node size hints; observations
  *  without captured counts contribute 0), and the session's compaction count
@@ -265,7 +268,7 @@ export function renderTreeTotal(graph: TreeTotalGraph, compactionCount: number):
   }
   const levels = treeLevels(graph.nodes);
   return (
-    `---\nSource tree total: ${graph.nodes.size} nodes (${levels} level${levels === 1 ? "" : "s"}) · ` +
+    `\n---\nSource tree total: ${graph.nodes.size} nodes (${levels} level${levels === 1 ? "" : "s"}) · ` +
     `${graph.observations.size} observations · ` +
     `${formatTokens(lines)} lines ${formatTokens(tokens)} tokens of details · ` +
     `${compactionCount} compaction${compactionCount === 1 ? "" : "s"}`
@@ -317,7 +320,7 @@ export interface RenderableObservation {
 
 /** Render one node as a line (no indent — callers apply depth indentation). */
 export function formatNodeLine(node: RenderableNode, options: LineOptions): string {
-  const parts: string[] = [`${node.id} · ${stateGlyph(node, options.viewer)}${node.importance}`];
+  const parts: string[] = [`📁 ${node.id} · ${stateGlyph(node, options.viewer)}${node.importance}`];
   const summary = singleLine(node.summary);
   if (summary !== "") {
     parts.push(summary);
@@ -334,7 +337,7 @@ export function formatNodeLine(node: RenderableNode, options: LineOptions): stri
 
 /** Render one observation as a line (no indent — callers apply depth indentation). */
 export function formatObservationLine(obs: RenderableObservation, options: LineOptions): string {
-  const parts: string[] = [`${obs.id} · ${obs.importance}`];
+  const parts: string[] = [`📄 ${obs.id} · ${obs.importance}`];
   const formatContent = options.formatContent ?? singleLine;
   const content = formatContent(obs.summary);
   if (content !== "") parts.push(content);
