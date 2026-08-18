@@ -229,10 +229,8 @@ describe("DEFAULT_CONFIG parity with schema defaults", () => {
   });
 
   it("offers 10m/20m/30m/Infinite LLM call timeout presets (no 3m)", () => {
-    const s = MEMKEEPER_SCHEMA.settings.find((x) => x.id === "llmCallTimeoutMs")!;
-    const labels = (s as { presets: readonly (readonly [string, number | null])[] }).presets.map(
-      (p) => p[0],
-    );
+    const s = MEMKEEPER_SCHEMA.settings.find((x) => x.id === "llmCallTimeoutMs");
+    const labels = ((s?.presets ?? []) as readonly (readonly [string, number | null])[]).map((p) => p[0]);
     expect(labels).toEqual(["10m", "20m", "30m", "Infinite"]);
   });
 });
