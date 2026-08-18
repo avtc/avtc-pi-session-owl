@@ -225,6 +225,15 @@ describe("DEFAULT_CONFIG parity with schema defaults", () => {
     expect(DEFAULT_CONFIG.observerMaxTokens).toBe(16384);
     expect(DEFAULT_CONFIG.builderMaxTokens).toBe(65536);
     expect(DEFAULT_CONFIG.selectorMaxTokens).toBe(65536);
+    expect(DEFAULT_CONFIG.llmCallTimeoutMs).toBe(1_200_000);
+  });
+
+  it("offers 10m/20m/30m/Infinite LLM call timeout presets (no 3m)", () => {
+    const s = MEMKEEPER_SCHEMA.settings.find((x) => x.id === "llmCallTimeoutMs")!;
+    const labels = (s as { presets: readonly (readonly [string, number | null])[] }).presets.map(
+      (p) => p[0],
+    );
+    expect(labels).toEqual(["10m", "20m", "30m", "Infinite"]);
   });
 });
 
