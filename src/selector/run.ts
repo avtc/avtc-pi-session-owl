@@ -335,6 +335,9 @@ function persistResult(store: StoreContext, graphStore: GraphStore, workingGraph
 function makeSelectedCountsProvider(workingGraph: Graph): SelectedCountsProvider {
   return () => {
     const roots = nonObsoleteRoots(workingGraph);
-    return { count: roots.length, viewTokens: estimateContentTokens(renderRootViewFromRoots(roots, NON_BUILDER)) };
+    return {
+      count: roots.length,
+      viewTokens: estimateContentTokens(renderRootViewFromRoots(roots, NON_BUILDER, workingGraph.observations)),
+    };
   };
 }

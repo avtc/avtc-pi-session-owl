@@ -8,6 +8,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, type MemkeeperConfig } from "../../src/config/schema.js";
+import type { SizeHintObservation } from "../../src/format/render.js";
 import { renderRootViewFromRoots } from "../../src/graph/read-tools.js";
 import { buildStatusReport, gatherStatusInput, runMkStatus, type StatusInput } from "../../src/status/command.js";
 import type { UsageLedger } from "../../src/store/codecs.js";
@@ -15,6 +16,10 @@ import { cloneLedger, EMPTY_LEDGER, encodeSelection } from "../../src/store/code
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import type { Node, Observation, ObsId } from "../../src/types.js";
 import { estimateContentTokens } from "../../src/types.js";
+
+/** Empty size-hint map — no single-obs segments (the render under measure
+ *  matches the fixture, which carries no observations). */
+const EMPTY_SIZE_HINTS: ReadonlyMap<string, SizeHintObservation> = new Map();
 
 function settings(over: Partial<MemkeeperConfig>): MemkeeperConfig {
   return { ...DEFAULT_CONFIG, ...over };
@@ -323,6 +328,7 @@ describe("gatherStatusInput", () => {
           node({ id: "n2", summary: "obsolete root", summaryTokens: 40 }),
         ],
         "nonBuilder",
+        EMPTY_SIZE_HINTS,
       ),
     );
     expect(gathered.selectedViewTokens).toBeLessThan(withObsolete);

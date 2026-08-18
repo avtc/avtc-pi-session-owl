@@ -119,6 +119,8 @@ function buildGraph(): MemkeeperGraph {
       sourceEntryIds: ["2"],
       timestamp: T1,
       parentNode: "n7",
+      detailsLines: 1,
+      detailsTokens: 7,
     }),
   });
 
@@ -479,6 +481,21 @@ describe("mk_recall", () => {
       const out = text(await recall(tool(), { includeSuperseded: true }));
       expect(out).toContain("n99");
       expect(out).toContain("🪦");
+    });
+  });
+
+  describe("node-list size hint", () => {
+    it("browse: a 1-obs node line carries that observation's size after the counts", async () => {
+      seedSource();
+      const out = text(await recall(tool(), {}));
+      // n7's only direct obs is o5 (1line 7tokens); the segment qualifies 1obs.
+      expect(out).toMatch(/n7 · high · [^·]+ · 1node 1obs · 1line 7tokens · /);
+    });
+
+    it("search: a matching 1-obs node's result line carries the size too", async () => {
+      seedSource();
+      const out = text(await recall(tool(), { query: "JWT" }));
+      expect(out).toMatch(/n7[^\n]*· 1node 1obs · 1line 7tokens · /);
     });
   });
 

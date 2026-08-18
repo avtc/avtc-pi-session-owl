@@ -37,8 +37,8 @@ Legend: n.. node · o.. observation · importance crit high med low (how much it
 Redesign the auth flow: move JWT validation to middleware and drop the legacy login form.
 
 ## Active set
-nGoal · crit · Redesign auth flow (JWT middleware, drop legacy login) · 3nodes 1obs · Jul 28 14:30 — Jul 29 09:15
-n12 · high · Auth flow redesign · 1obs · Jul 28 14:30 — Jul 29 09:15
+nGoal · crit · Redesign auth flow (JWT middleware, drop legacy login) · 3nodes 1obs · 2lines 45tokens · Jul 28 14:30 — Jul 29 09:15
+n12 · high · Auth flow redesign · 1obs · 2lines 15tokens · Jul 28 14:30 — Jul 29 09:15
 n8 · high · Decisions · 5obs · Jul 28 14:30 — Jul 29 09:15
 n6 · 📦low · Old login form · 2obs · Jul 27 09:00 — Jul 27 18:00
 nIrrelevant · med · Irrelevant · 4obs · Jul 28 14:30 — Jul 29 09:15
@@ -56,12 +56,12 @@ After compaction the agent continues with this summary alongside pi's own recent
 The graph is a containment tree of **nodes** (folders) holding **observations** (leaves). It renders the same way everywhere — the agent's `mk_recall`, the Builder and Selector tools, and the `/mk:ls`/`/mk:cat`/`/mk:find` commands:
 
 ```
-nGoal · crit · The session goal · 4nodes 1obs · Jul 28 14:30
-  n12 · high · Auth flow redesign · 1obs · Jul 28 14:30 — Jul 29 09:15
+nGoal · crit · The session goal · 4nodes 1obs · 2lines 45tokens · Jul 28 14:30
+  n12 · high · Auth flow redesign · 1obs · 2lines 15tokens · Jul 28 14:30 — Jul 29 09:15
     o31 · med · JWT validation moved to middleware · 2lines 15tokens · Jul 28 14:30
   n8 · high · Decisions · 5obs · Jul 28 14:30 — Jul 29 09:15
   n6 · 📦low · Old login form · 2obs · Jul 27 09:00 — Jul 27 18:00
-  n3 · 🪦med · YAML config · → n8 · 1obs · Jul 27 09:00
+  n3 · 🪦med · YAML config · → n8 · 1obs · 1line 12tokens · Jul 27 09:00
 n5 · med · Scratch · 2obs · Jul 28 14:30 — Jul 29 09:15
 ```
 

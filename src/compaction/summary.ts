@@ -8,7 +8,14 @@
 // files. Non-Builder viewer (new→active, no 🆕); obsolete roots excluded; never
 // truncated (bounded by the Selector/Builder try_finish, not here).
 
-import { formatNodeLine, NON_BUILDER, RENDER_LEGEND, type RenderableNode } from "../format/render.js";
+import {
+  formatNodeLine,
+  NON_BUILDER,
+  RENDER_LEGEND,
+  type RenderableNode,
+  type SizeHintObservation,
+  singleDirectObs,
+} from "../format/render.js";
 import { orderedNonObsoleteRoots } from "../graph/read-tools.js";
 import type { SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { renderTouchedFiles, type TouchedFile } from "./touched-files.js";
@@ -20,9 +27,11 @@ export type SummaryRenderMode = "selected-root" | "observations-root";
  *  observations-root mode + the selected-root null-tree fallback). */
 export interface SummaryGraph {
   nodes: ReadonlyMap<string, RenderableNode>;
-  /** Observation content by id (used to render a bare `new` node's first obs
-   *  line in observations-root mode). Omitted when the caller has no access. */
-  observations?: ReadonlyMap<string, { readonly summary: string }>;
+  /** Observations by id — the single-observation size hints for the root
+   *  one-liners resolve here (both modes: the selected tree carries structure
+   *  only, its observation ids belong to the source graph). Omitted when the
+   *  caller has no access (no size segments then). */
+  observations?: ReadonlyMap<string, SizeHintObservation>;
 }
 
 /** Inputs to renderSummary. */
@@ -51,6 +60,10 @@ const NO_TOUCHED_PLACEHOLDER = "(none)";
 const TOUCHED_HEADING = "## Recently touched";
 const NO_INITIAL_PROMPT = "(none captured yet)";
 
+/** Stand-in observations map when the caller passes no observation access —
+ *  single-obs size lookups simply miss (no size segments). */
+const EMPTY_OBSERVATIONS: ReadonlyMap<string, SizeHintObservation> = new Map();
+
 /**
  * Render the compaction summary text. Mechanical, never truncated. The
  * active-set roots: selected-root mode renders the selected tree (falling back
@@ -69,8 +82,9 @@ export function renderSummary(args: RenderSummaryArgs): string {
   lines.push("");
 
   lines.push(ACTIVE_SET_HEADING);
+  const sizeHints = args.graph.observations ?? EMPTY_OBSERVATIONS;
   for (const root of activeSetRoots(args)) {
-    lines.push(formatNodeLine(root, { viewer: NON_BUILDER }));
+    lines.push(formatNodeLine(root, { viewer: NON_BUILDER, singleObs: singleDirectObs(root, sizeHints) }));
   }
   lines.push("");
 

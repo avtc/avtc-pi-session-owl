@@ -7,6 +7,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
+import type { SizeHintObservation } from "../format/render.js";
 import { BUILDER, NON_BUILDER } from "../format/render.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
 import { nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
@@ -63,7 +64,7 @@ export function buildStatusReport(input: StatusInput): string {
   // --- Memory section (counts with separators; columns aligned: labels +
   //  counts right-aligned so the token column lines up) ---
   const obsCount = input.observations.length;
-  const rawTokens = sum(input.observations, (o) => o.detailsTokens); // verbatim source size
+  const rawTokens = sum(input.observations, (o) => o.detailsTokens ?? 0); // verbatim source size
   const summarizedTokens = sum(input.observations, (o) => o.summaryTokens) + sum(input.nodes, (n) => n.summaryTokens); // node + obs summaries
   const nodeCount = input.nodes.length;
   const LABEL_WIDTH = 12; // "observations" is the longest label
@@ -151,8 +152,12 @@ export function gatherStatusInput(
   const nodes = [...graph.nodes.values()];
   const observations = [...graph.observations.values()];
   const nonObsoleteRoots = nonObsoleteRootsOf(nodes);
-  const rootsViewTokens = estimateContentTokens(renderRootViewFromRoots(nonObsoleteRoots, BUILDER));
-  const selectedViewTokens = measureSelectedViewTokens(config.renderMode, store.selectedTree?.nodes ?? null);
+  const rootsViewTokens = estimateContentTokens(renderRootViewFromRoots(nonObsoleteRoots, BUILDER, graph.observations));
+  const selectedViewTokens = measureSelectedViewTokens(
+    config.renderMode,
+    store.selectedTree?.nodes ?? null,
+    graph.observations,
+  );
   return {
     enabled: config.enabled,
     settings: {
@@ -172,15 +177,18 @@ export function gatherStatusInput(
 }
 
 /** Decode a persisted selected tree's roots + measure the rendered view tokens.
- *  Returns null when there is no tree or renderMode is observations-root. */
+ *  Returns null when there is no tree or renderMode is observations-root. The
+ *  tree carries structure only — the single-obs size hints resolve against the
+ *  source graph's observations. */
 function measureSelectedViewTokens(
   renderMode: "selected-root" | "observations-root",
   serializedNodes: SerializedNode[] | null,
+  observations: ReadonlyMap<string, SizeHintObservation>,
 ): number | null {
   if (renderMode !== "selected-root" || serializedNodes === null) return null;
   const decoded = nonObsoleteRootsOf(serializedNodes.map(decodeNode).filter((n): n is Node => n !== null));
   if (decoded.length === 0) return null;
-  return estimateContentTokens(renderRootViewFromRoots(decoded, NON_BUILDER));
+  return estimateContentTokens(renderRootViewFromRoots(decoded, NON_BUILDER, observations));
 }
 
 // --- registration ----------------------------------------------------------

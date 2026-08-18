@@ -9,10 +9,11 @@ import {
   formatTimestamp,
   formatTimestampRange,
   RENDER_LEGEND,
+  singleDirectObs,
   toStoredTimestamp,
 } from "../../src/format/render.js";
 import type { Node, Observation } from "../../src/types.js";
-import { countLines, estimateContentTokens, N_GOAL } from "../../src/types.js";
+import { estimateContentTokens, N_GOAL } from "../../src/types.js";
 
 const FIXED_NOW = "2026-07-29T09:00:00.000Z";
 
@@ -109,8 +110,10 @@ describe("formatNodeLine", () => {
       summary: "line one\nline two\nline three",
       importance: "high",
       timestamp: "2026-07-28T14:30:00.000Z",
+      detailsLines: 3,
+      detailsTokens: 7,
     });
-    // 3 lines (3line, plural) + ceil(28/4)=7 tokens (7tokens, plural)
+    // 3 lines (3lines, plural) + 7 tokens (7tokens, plural)
     expect(formatObservationLine(obs, { viewer: "builder" })).toContain("3lines 7tokens");
   });
 
@@ -120,8 +123,22 @@ describe("formatNodeLine", () => {
       summary: "",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
+      detailsLines: 0,
+      detailsTokens: 0,
     });
     expect(formatObservationLine(obs, { viewer: "builder" })).toContain("0lines 0tokens");
+  });
+
+  it("omits the size segment when the capture counts are absent", () => {
+    // legacy snapshots / source-unavailable captures carry no counts — the
+    // render shows no size segment rather than a summary-derived guess.
+    const obs = makeObservation({
+      id: "o3",
+      summary: "a fact",
+      importance: "med",
+      timestamp: "2026-07-28T14:30:00.000Z",
+    });
+    expect(formatObservationLine(obs, { viewer: "builder" })).toBe("o3 · med · a fact · Jul 28 14:30");
   });
 
   it("counts a trailing newline as a terminator, not an extra line", () => {
@@ -130,6 +147,8 @@ describe("formatNodeLine", () => {
       summary: "a single line with a trailing newline\n",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
+      detailsLines: 1,
+      detailsTokens: 10,
     });
     // one line of content + a terminator newline → 1line, not 2lines
     expect(formatObservationLine(obs, { viewer: "builder" })).toContain("1line ");
@@ -202,6 +221,65 @@ describe("formatNodeLine", () => {
       "n20 · high · leaf branch · in n7 · 1obs · Jul 29 09:00",
     );
   });
+
+  it("shows the single observation's size after the counts when singleObs is passed", () => {
+    const node = makeNode({ id: "n12", summary: "wrapper", importance: "med", observationIds: ["o31"] });
+    const line = formatNodeLine(node, {
+      viewer: "nonBuilder",
+      singleObs: { detailsLines: 2, detailsTokens: 15 },
+    });
+    expect(line).toBe("n12 · med · wrapper · 1obs · 2lines 15tokens · Jul 29 09:00");
+  });
+
+  it("keeps child counts adjacent to the size when the node also has child nodes", () => {
+    const node = makeNode({
+      id: "n12",
+      summary: "wrapper",
+      importance: "med",
+      observationIds: ["o31"],
+      childNodeIds: ["n8"],
+    });
+    expect(formatNodeLine(node, { viewer: "nonBuilder", singleObs: { detailsLines: 2, detailsTokens: 15 } })).toContain(
+      "1node 1obs · 2lines 15tokens",
+    );
+  });
+
+  it("omits the node size segment when the observation lacks counts", () => {
+    const node = makeNode({ id: "n12", summary: "wrapper", importance: "med", observationIds: ["o31"] });
+    expect(formatNodeLine(node, { viewer: "nonBuilder", singleObs: {} })).toBe(
+      "n12 · med · wrapper · 1obs · Jul 29 09:00",
+    );
+  });
+});
+
+describe("singleDirectObs", () => {
+  const obs = { detailsLines: 3, detailsTokens: 9 };
+  const observations = new Map([
+    ["o1", obs],
+    ["o2", { detailsLines: 1, detailsTokens: 1 }],
+  ]);
+
+  it("returns the observation for a node with exactly one direct observation", () => {
+    const node = makeNode({ id: "n1", summary: "s", importance: "med", observationIds: ["o1"] });
+    expect(singleDirectObs(node, observations)).toBe(obs);
+  });
+
+  it("returns undefined for zero or multiple observations (no single size)", () => {
+    const none = makeNode({ id: "n1", summary: "s", importance: "med", observationIds: [] });
+    const many = makeNode({ id: "n1", summary: "s", importance: "med", observationIds: ["o1", "o2"] });
+    expect(singleDirectObs(none, observations)).toBeUndefined();
+    expect(singleDirectObs(many, observations)).toBeUndefined();
+  });
+
+  it("returns undefined when the id is missing from the map (tolerant)", () => {
+    const node = makeNode({
+      id: "n1",
+      summary: "s",
+      importance: "med",
+      observationIds: ["oMissing" as Observation["id"]],
+    });
+    expect(singleDirectObs(node, observations)).toBeUndefined();
+  });
 });
 
 describe("formatObservationLine", () => {
@@ -211,6 +289,8 @@ describe("formatObservationLine", () => {
       summary: "Chose JWT for stateless auth",
       importance: "high",
       timestamp: "2026-07-28T14:30:00.000Z",
+      detailsLines: 1,
+      detailsTokens: 7,
     });
     expect(formatObservationLine(obs, { viewer: "builder" })).toBe(
       "o5 · high · Chose JWT for stateless auth · 1line 7tokens · Jul 28 14:30",
@@ -223,6 +303,8 @@ describe("formatObservationLine", () => {
       summary: "a fact",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
+      detailsLines: 1,
+      detailsTokens: 2,
     });
     expect(formatObservationLine(obs, { viewer: "nonBuilder", showParent: "n7" })).toBe(
       "o5 · low · a fact · in n7 · 1line 2tokens · Jul 28 14:30",
@@ -235,6 +317,8 @@ describe("formatObservationLine", () => {
       summary: "a fact",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
+      detailsLines: 1,
+      detailsTokens: 2,
     });
     const upper = (c: string) => c.toUpperCase();
     expect(formatObservationLine(obs, { viewer: "nonBuilder", formatContent: upper })).toBe(
@@ -248,6 +332,8 @@ describe("formatObservationLine", () => {
       summary: "a fact",
       importance: "low",
       timestamp: "2026-07-28T14:30:00.000Z",
+      detailsLines: 1,
+      detailsTokens: 2,
     });
     const none = () => "";
     expect(formatObservationLine(obs, { viewer: "nonBuilder", showParent: "n7", formatContent: none })).toBe(
@@ -336,8 +422,8 @@ function makeObservation(
     id: overrides.id,
     summary,
     summaryTokens: estimateContentTokens(summary),
-    detailsLines: overrides.detailsLines ?? countLines(summary),
-    detailsTokens: overrides.detailsTokens ?? estimateContentTokens(summary),
+    detailsLines: overrides.detailsLines,
+    detailsTokens: overrides.detailsTokens,
     importance: overrides.importance,
     sourceEntryIds: overrides.sourceEntryIds ?? ["1"],
     timestamp: overrides.timestamp,

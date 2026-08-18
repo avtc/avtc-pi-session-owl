@@ -75,6 +75,8 @@ function buildGraph(): MemkeeperGraph {
       sourceEntryIds: ["2"],
       timestamp: NOW,
       parentNode: "n7",
+      detailsLines: 1,
+      detailsTokens: 7,
     }),
   });
 
@@ -160,6 +162,14 @@ describe("Builder read tools", () => {
       const out = textOf(await callTool(tools(), "ls", { page: { take: 2 } }));
       expect(out).toContain("afterId=");
       expect(out).toMatch(/\+\d+ more/);
+    });
+
+    it("carries the single observation's size on a 1-obs root line", async () => {
+      // n7's only direct observation is o5 (1line 7tokens) — its root line
+      // qualifies the 1obs count with that size; multi/zero-obs roots (nGoal,
+      // n12) show none.
+      const out = textOf(await callTool(tools(), "ls", {}));
+      expect(out).toMatch(/n7 · high · [^·]+ · 1node 1obs · 1line 7tokens · /);
     });
 
     it("take=0 returns all non-obsolete roots with no pagination footer", async () => {

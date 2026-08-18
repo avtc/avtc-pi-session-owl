@@ -471,7 +471,7 @@ function persistChunk(
   // subsumes any intervening 0-record chunks).
   let tokenCount = 0;
   const serializedRecords = pairs.map((pair) => {
-    tokenCount += pair.obs.detailsTokens; // verbatim source size processed this batch
+    tokenCount += pair.obs.detailsTokens ?? 0; // verbatim source size processed this batch
     return encodeObservation(pair.obs);
   });
   const entry: ObservationEntry = {

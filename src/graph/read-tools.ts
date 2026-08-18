@@ -21,6 +21,8 @@ import {
   NON_BUILDER,
   type RenderableNode,
   type RenderViewer,
+  type SizeHintObservation,
+  singleDirectObs,
 } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
 import { PageSchema } from "../schema.js";
@@ -380,7 +382,10 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
         }
         const rendered = window.map((node) => ({
           id: node.id,
-          render: formatNodeLine(node, nodeLineOptions(viewer)),
+          render: formatNodeLine(node, {
+            ...nodeLineOptions(viewer),
+            singleObs: singleDirectObs(node, graph.observations),
+          }),
         }));
         const out = renderTerseWindow(rendered, budget, more, remaining);
         return { content: [{ type: "text", text: out.text }], details: { count: out.count, more: out.more } };
@@ -391,10 +396,17 @@ function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<type
         return { content: [{ type: "text", text: `No node with id ${params.nodeId}.` }], details: { error: true } };
       }
       // header is the parent itself at depth 0; children indented at depth 1.
-      const headerLine = indent(formatNodeLine(parent, nodeLineOptions(viewer)), ROOT_DEPTH);
+      const headerLine = indent(
+        formatNodeLine(parent, { ...nodeLineOptions(viewer), singleObs: singleDirectObs(parent, graph.observations) }),
+        ROOT_DEPTH,
+      );
       const { nodes, observations } = directChildren(graph, parent);
       const combined = [
-        ...nodes.map((n) => ({ id: n.id, depth: 1, render: formatNodeLine(n, nodeLineOptions(viewer)) })),
+        ...nodes.map((n) => ({
+          id: n.id,
+          depth: 1,
+          render: formatNodeLine(n, { ...nodeLineOptions(viewer), singleObs: singleDirectObs(n, graph.observations) }),
+        })),
         ...observations.map((o) => ({ id: o.id, depth: 1, render: formatObservationLine(o, { viewer }) })),
       ];
       const { window, more, remaining, stale } = paginate(combined, page);
@@ -833,7 +845,11 @@ export async function collectFindMatches(
       nodeMatches.push({
         id: node.id,
         node,
-        render: formatNodeLine(node, { ...nodeLineOptions(viewer), showParent: node.parentNode ?? undefined }),
+        render: formatNodeLine(node, {
+          ...nodeLineOptions(viewer),
+          showParent: node.parentNode ?? undefined,
+          singleObs: singleDirectObs(node, graph.observations),
+        }),
       });
     }
   }
@@ -955,15 +971,19 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
  *  `viewer`. Shared by try_finish (budget gate), the run's fast-path, and the
  *  per-pass user-message state snapshot. */
 export function renderRootView(graph: MemkeeperGraph, viewer: RenderViewer): string {
-  return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer);
+  return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer, graph.observations);
 }
 
 /** Render an already-collected set of non-obsolete roots for `viewer`. Lets a
  *  caller that already needs the roots list (e.g. the widget, which reads both
  *  the count and the view tokens) avoid recomputing `nonObsoleteRoots`. */
-export function renderRootViewFromRoots(roots: Node[], viewer: RenderViewer): string {
+export function renderRootViewFromRoots(
+  roots: Node[],
+  viewer: RenderViewer,
+  observations: ReadonlyMap<string, SizeHintObservation>,
+): string {
   if (roots.length === 0) return "";
-  return roots.map((n) => formatNodeLine(n, { viewer })).join("\n");
+  return roots.map((n) => formatNodeLine(n, { viewer, singleObs: singleDirectObs(n, observations) })).join("\n");
 }
 
 /** Token-estimate of the non-obsolete root view (chars/4), rendered for

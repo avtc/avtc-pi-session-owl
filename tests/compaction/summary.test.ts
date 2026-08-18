@@ -254,4 +254,30 @@ describe("renderSummary — selected-root", () => {
     expect(activeSet).toContain("nGoal");
     expect(activeSet).toContain("n5 ·");
   });
+
+  it("carries a 1-obs root's size on its line, resolving tree refs against the source observations", () => {
+    // the selected tree carries structure only; n7's single obs (o5, 2lines
+    // 15tokens) lives in the source graph — the line qualifies the 1obs count.
+    const tree = selection(
+      [
+        sNode("nGoal", { id: N_GOAL, summary: "Build the extension", importance: "crit" }),
+        sNode("n7", { summary: "Selector spec", importance: "high", observationIds: ["o5"] }),
+      ],
+      PROMPT,
+    );
+    const out = renderSummary({
+      graph: {
+        nodes: new Map(),
+        observations: new Map([["o5", { detailsLines: 2, detailsTokens: 15 }]]),
+      },
+      selectedTree: tree,
+      oInitialPrompt: PROMPT,
+      renderMode: "selected-root",
+      touchedFiles: [],
+    });
+    const activeSet = out.split("## Active set")[1];
+    expect(activeSet).toContain("n7 · high · Selector spec · 1obs · 2lines 15tokens · ");
+    // 0-obs root shows no size segment
+    expect(activeSet).toMatch(/nGoal · crit · Build the extension · 0obs · /);
+  });
 });

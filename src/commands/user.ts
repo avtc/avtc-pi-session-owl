@@ -14,7 +14,14 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings } from "../config/schema.js";
-import { formatNodeLine, formatObservationLine, indent, NON_BUILDER, type RenderViewer } from "../format/render.js";
+import {
+  formatNodeLine,
+  formatObservationLine,
+  indent,
+  NON_BUILDER,
+  type RenderViewer,
+  singleDirectObs,
+} from "../format/render.js";
 import {
   buildCatUnits,
   collectFindMatches,
@@ -111,7 +118,9 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
   if (idArg === null) {
     // roots: non-obsolete only (obsolete hidden by default — use /mk:find-all).
     for (const node of orderActiveSetRoots(nonObsoleteRoots(graph))) {
-      lines.push(formatNodeLine(node, nodeLineOptions(VIEWER)));
+      lines.push(
+        formatNodeLine(node, { ...nodeLineOptions(VIEWER), singleObs: singleDirectObs(node, graph.observations) }),
+      );
     }
     const { text } = formatList(lines, resolveCap());
     await notifyInfo(ctx, text === "" ? "No memory yet." : text);
@@ -124,10 +133,17 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
     return;
   }
   // parent header at depth 0; children indented at depth 1.
-  lines.push(formatNodeLine(parent, nodeLineOptions(VIEWER)));
+  lines.push(
+    formatNodeLine(parent, { ...nodeLineOptions(VIEWER), singleObs: singleDirectObs(parent, graph.observations) }),
+  );
   const { nodes, observations } = directChildren(graph, parent);
   for (const node of nodes) {
-    lines.push(indent(formatNodeLine(node, nodeLineOptions(VIEWER)), CHILD_DEPTH));
+    lines.push(
+      indent(
+        formatNodeLine(node, { ...nodeLineOptions(VIEWER), singleObs: singleDirectObs(node, graph.observations) }),
+        CHILD_DEPTH,
+      ),
+    );
   }
   for (const obs of observations) {
     lines.push(indent(formatObservationLine(obs, { viewer: VIEWER }), CHILD_DEPTH));

@@ -5,7 +5,7 @@
 // Builder ls/find, the Selector, mk_recall, the user /mk:* commands, and the
 // compaction summary.
 
-import { countLines, estimateContentTokens, type Node, type Observation } from "../types.js";
+import type { Node, Observation } from "../types.js";
 
 export type RenderViewer = "builder" | "nonBuilder";
 
@@ -161,19 +161,39 @@ function childCounts(node: RenderableNode): string {
 
 /** The size fragment for an observation: the verbatim-source line count +
  *  estimated token count (detailsLines/detailsTokens, computed at capture from
- *  the record's sourceEntryIds). Always shown — lets the agent gauge the cost
- *  of expanding (fullDetails) before drilling, and pick a `lines` window.
- *  Falls back to a summary-derived estimate when the counts are null (legacy
- *  snapshots predating the cached size hint). */
-function observationSize(summary: string, detailsLines: number | null, detailsTokens: number | null): string {
-  const lines = detailsLines ?? countLines(summary);
-  const tokens = detailsTokens ?? estimateContentTokens(summary);
-  return `${pluralize(lines, "line", "lines")} ${pluralize(tokens, "token", "tokens")}`;
+ *  the record's sourceEntryIds). Shown when both counts exist — lets the agent
+ *  gauge the cost of expanding (fullDetails) before drilling, and pick a
+ *  `lines` window. Returns null when the counts are absent (legacy snapshots /
+ *  source-unavailable captures) — no size segment, never a summary-derived
+ *  guess. */
+function observationSize(detailsLines: number | undefined, detailsTokens: number | undefined): string | null {
+  if (detailsLines === undefined || detailsTokens === undefined) return null;
+  return `${pluralize(detailsLines, "line", "lines")} ${pluralize(detailsTokens, "token", "tokens")}`;
+}
+
+/** The minimal observation shape the node-line size hint reads. */
+export type SizeHintObservation = Pick<RenderableObservation, "detailsLines" | "detailsTokens">;
+
+/** Resolve a node's single direct observation for the node-line size hint: a
+ *  node with exactly one direct observation carries that observation's size on
+ *  its list line (the verbatim-source drill cost), qualifying its `1obs` count;
+ *  any other observation count has no single size to show. Returns undefined
+ *  when the id is absent from the map (tolerant — no size segment). */
+export function singleDirectObs<T extends SizeHintObservation>(
+  node: RenderableNode,
+  observations: ReadonlyMap<string, T>,
+): T | undefined {
+  if (node.observationIds.length !== 1) return undefined;
+  return observations.get(node.observationIds[0]);
 }
 
 interface LineOptions {
   viewer: RenderViewer;
   showParent?: string;
+  /** The node's single direct observation (caller-resolved via singleDirectObs) —
+   *  renders that observation's size segment after the child counts. Node lines
+   *  only; observation lines ignore this. */
+  singleObs?: SizeHintObservation;
   /** Transform (or omit) the observation content line. Default: `singleLine`.
    *  Return "" to render a content-free header. Node lines ignore this. */
   formatContent?: (content: string) => string;
@@ -201,8 +221,8 @@ export interface RenderableObservation {
   importance: Observation["importance"];
   timestamp: string;
   /** Verbatim-source size hint (frozen at capture) — the drill cost. Optional:
-   *  legacy snapshots lack it; the render falls back to a summary-derived
-   *  estimate. */
+   *  legacy snapshots / source-unavailable captures lack it; the render then
+   *  omits the size segment. */
   detailsLines?: number;
   detailsTokens?: number;
   /** Source entry ids — the verbatim-source provenance, used to re-render the
@@ -220,6 +240,10 @@ export function formatNodeLine(node: RenderableNode, options: LineOptions): stri
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
   if (node.state === "obsolete" && node.supersededBy !== null) parts.push(`→ ${node.supersededBy}`);
   parts.push(childCounts(node));
+  if (options.singleObs !== undefined) {
+    const size = observationSize(options.singleObs.detailsLines, options.singleObs.detailsTokens);
+    if (size !== null) parts.push(size);
+  }
   parts.push(formatTimestampRange(node.timestamps.rangeStart, node.timestamps.rangeEnd));
   return parts.join(" · ");
 }
@@ -231,7 +255,8 @@ export function formatObservationLine(obs: RenderableObservation, options: LineO
   const content = formatContent(obs.summary);
   if (content !== "") parts.push(content);
   if (options.showParent !== undefined) parts.push(`in ${options.showParent}`);
-  parts.push(observationSize(obs.summary, obs.detailsLines ?? null, obs.detailsTokens ?? null));
+  const size = observationSize(obs.detailsLines, obs.detailsTokens);
+  if (size !== null) parts.push(size);
   parts.push(formatTimestamp(obs.timestamp));
   return parts.join(" · ");
 }

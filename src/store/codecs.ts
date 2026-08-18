@@ -108,7 +108,7 @@ export interface SerializedObservation {
   id: string;
   summary: string;
   /** Verbatim-source size hint, frozen at capture (additive — legacy snapshots
-   *  predate this; decodeObservation falls back to a summary-derived estimate).
+   *  predate this; without it the render omits the size segment).
    *  summaryTokens is NOT stored (recomputed on decode). */
   detailsLines?: number;
   detailsTokens?: number;
@@ -243,8 +243,9 @@ export function decodeObservation(raw: unknown): Observation | null {
     return null;
   }
   // detailsLines/detailsTokens/summaryTokens are additive (tolerant reader):
-  // legacy snapshots lack them; makeObservation's summary-derived fallback fills
-  // the details hints and recomputes summaryTokens when they are absent.
+  // legacy snapshots lack them; the detail hints then stay undefined and the
+  // render omits the size segment. summaryTokens is recomputed by
+  // makeObservation when absent.
   return makeObservation({
     id: id as ObsId,
     summary: text,

@@ -21,6 +21,7 @@ import {
   type RenderableNode,
   type RenderableObservation,
   type RenderViewer,
+  singleDirectObs,
   singleLine,
 } from "../format/render.js";
 import {
@@ -575,7 +576,11 @@ async function buildSearchCandidates(
       candidates.push({
         id: node.id,
         key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
-        line: formatNodeLine(node, { viewer: VIEWER, showParent: node.parentNode ?? undefined }),
+        line: formatNodeLine(node, {
+          viewer: VIEWER,
+          showParent: node.parentNode ?? undefined,
+          singleObs: singleDirectObs(node, target.observations),
+        }),
       });
     }
   }
@@ -614,7 +619,7 @@ function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean):
   return ordered.map((node) => ({
     id: node.id,
     key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
-    line: formatNodeLine(node, { viewer: VIEWER }),
+    line: formatNodeLine(node, { viewer: VIEWER, singleObs: singleDirectObs(node, target.observations) }),
   }));
 }
 

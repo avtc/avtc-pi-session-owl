@@ -97,10 +97,13 @@ export interface Observation {
   readonly summary: string;
   /** Cached chars/4 of the one-line summary, frozen at capture. Feeds summarized-tokens. */
   readonly summaryTokens: number;
-  /** Line count of the verbatim source render (the "full detail"), frozen at capture. The terse size hint. */
-  readonly detailsLines: number;
-  /** chars/4 of the verbatim source render, frozen at capture. raw-tokens total sums this. */
-  readonly detailsTokens: number;
+  /** Line count of the verbatim source render (the "full detail"), frozen at capture.
+   *  The terse size hint. Optional: legacy snapshots / source-unavailable captures
+   *  lack it — the render then omits the size segment (never a summary-derived guess). */
+  readonly detailsLines?: number;
+  /** chars/4 of the verbatim source render, frozen at capture. raw-tokens total
+   *  sums this. Optional, paired with detailsLines. */
+  readonly detailsTokens?: number;
   readonly importance: Importance;
   /** Provenance — real session-entry ids. */
   readonly sourceEntryIds: string[];
@@ -134,10 +137,10 @@ export function nowStoredTimestamp(): string {
 }
 
 /** Construct an observation, freezing `summaryTokens` from `summary`. The
- *  `detailsLines`/`detailsTokens` are the verbatim-source size hint, normally
- *  computed at capture from the record's sourceEntryIds (computeDetailsAndCache)
- *  and passed in; when omitted (test fixtures / source-unavailable) they fall
- *  back to a summary-derived estimate so the size hint stays non-zero. */
+ *  `detailsLines`/`detailsTokens` are the verbatim-source size hint, computed
+ *  at capture from the record's sourceEntryIds (computeDetailsAndCache) and
+ *  passed through as-is — when omitted (test fixtures / source-unavailable /
+ *  legacy snapshots) they stay undefined and the render shows no size segment. */
 export function makeObservation(args: {
   id: ObsId;
   summary: string;
@@ -145,9 +148,9 @@ export function makeObservation(args: {
   sourceEntryIds: string[];
   timestamp: string;
   parentNode: NodeId;
-  /** Verbatim-source line count (capture-computed); omitted -> summary-derived. */
+  /** Verbatim-source line count (capture-computed); omitted -> no size hint. */
   detailsLines?: number;
-  /** Verbatim-source token count (capture-computed); omitted -> summary-derived. */
+  /** Verbatim-source token count (capture-computed); omitted -> no size hint. */
   detailsTokens?: number;
 }): Observation {
   const summaryTokens = estimateContentTokens(args.summary);
@@ -155,8 +158,8 @@ export function makeObservation(args: {
     id: args.id,
     summary: args.summary,
     summaryTokens,
-    detailsLines: args.detailsLines ?? countLines(args.summary),
-    detailsTokens: args.detailsTokens ?? summaryTokens,
+    detailsLines: args.detailsLines,
+    detailsTokens: args.detailsTokens,
     importance: args.importance,
     sourceEntryIds: args.sourceEntryIds,
     timestamp: args.timestamp,

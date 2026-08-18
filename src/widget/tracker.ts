@@ -354,7 +354,7 @@ const WIDGET_ROOTS_VIEWER = BUILDER;
  *  share one roots computation, not two). */
 function rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number } {
   const roots = nonObsoleteRoots(graph);
-  const viewTokens = estimateContentTokens(renderRootViewFromRoots(roots, WIDGET_ROOTS_VIEWER));
+  const viewTokens = estimateContentTokens(renderRootViewFromRoots(roots, WIDGET_ROOTS_VIEWER, graph.observations));
   return { count: roots.length, viewTokens };
 }
 
