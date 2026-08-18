@@ -28,6 +28,7 @@
 import { afterAll, beforeEach, vi } from "vitest";
 import { _resetMemkeeperSettingsHandle, _setRegisterSettingsCommand } from "../src/config/schema.js";
 import { _setBaseLoggerForTest } from "../src/log.js";
+import { _resetSessionAffinity } from "../src/runtime/session-affinity.js";
 import { resetForNewSession } from "../src/store/graph-store.js";
 
 // Tests must NEVER write to the real production log file (~/.pi/logs/...). The
@@ -223,6 +224,7 @@ afterAll(() => {
   vi.useRealTimers();
   _resetMemkeeperSettingsHandle();
   _setRegisterSettingsCommand(null);
+  _resetSessionAffinity();
   resetForNewSession();
   globalThis.__mxStubFlags = undefined;
   // Clear every flag-gated forwarder's call log AND queued mock returns, then
