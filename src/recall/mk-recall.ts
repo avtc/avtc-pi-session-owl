@@ -698,7 +698,7 @@ const MK_RECALL_PARAMS = Type.Object({
 });
 
 const MK_RECALL_DESCRIPTION =
-  "Recall the session memory preserved across compactions. Fetch the detail behind any id in the memory summary, search all captured memory by regex, or filter by time.";
+  "Browse the full memory tree preserved across compactions — the memory summary shows only the top level. Fetch the detail behind any id (a node, its observations, their verbatim source lines), search all captured memory by regex, or filter by time. Use it proactively: before redoing work or assuming a decision, check how it was done earlier.";
 
 // --- execute ---------------------------------------------------------------
 

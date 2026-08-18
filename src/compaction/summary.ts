@@ -40,7 +40,8 @@ export interface RenderSummaryArgs {
 }
 
 const MEMORY_HEADING = "# Memory";
-const PREAMBLE = "Your session memory. Each item cites an id — use mk_recall for detail.";
+const PREAMBLE =
+  "Your session memory — the top level of a tree; each id opens deeper detail via mk_recall. Before redoing or assuming something about earlier work, search memory for it — past decisions, approaches, and results live there.";
 const LEGEND_PREFIX = "Legend: ";
 const INITIAL_PROMPT_HEADING = "## Initial prompt";
 const ACTIVE_SET_HEADING = "## Active set";
