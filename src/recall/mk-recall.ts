@@ -64,6 +64,15 @@ const CHILD_DEPTH = 1;
 const COLLAPSED_LINE_LIMIT = 12;
 /** Appended under a truncated collapsed render — expanding shows the full text. */
 const EXPAND_HINT = "(Ctrl+O to expand)";
+/** Call-line cap: ids shown before collapsing into "+N more". */
+const CALL_IDS_SHOWN = 4;
+/** Call-line cap: a query/grep pattern longer than this is cut with an ellipsis. */
+const CALL_TEXT_LIMIT = 60;
+
+/** Clip a call-line pattern to CALL_TEXT_LIMIT chars with an ellipsis. */
+function truncateCallText(text: string): string {
+  return text.length <= CALL_TEXT_LIMIT ? text : `${text.slice(0, CALL_TEXT_LIMIT)}${TRUNCATION_ELLIPSIS}`;
+}
 /** Named undefined for an observation block's showParent (no bare literals). */
 const NO_PARENT: string | undefined = undefined;
 /** Named undefined for the pre-computed grep excerpts arg (no bare literals). */
@@ -736,6 +745,9 @@ export function makeMkRecallTool(): ToolDefinition<typeof MK_RECALL_PARAMS> {
         details: result.error ? { error: true } : { ok: true },
       };
     },
+    renderCall(args, theme) {
+      return renderRecallCall(args as MkRecallParams, theme);
+    },
     renderResult(result, options, theme) {
       return renderRecallResult(result, options, theme);
     },
@@ -769,6 +781,47 @@ function renderRecallResult(result: RenderableToolResult, options: { expanded?: 
   }
   const truncated = lines.slice(0, COLLAPSED_LINE_LIMIT).join("\n");
   return new Text(theme.fg("toolOutput", `${truncated}\n${EXPAND_HINT}`), 0, 0);
+}
+
+/** Call-line render: `mk_recall <action>[ · <qualifier…]` — bold name, dim
+ *  rest (the todo-tools convention). Action mirrors executeRecall's dispatch:
+ *  ids lookup > regex search > grep-only > root browse (no filters). Qualifiers
+ *  echo the params that survive into the result: pagination (take/after) apply
+ *  everywhere; lines only works on an ids target; from/to/superseded/query/
+ *  grep are ignored on the ids path, so they are not shown there. Tolerates
+ *  partial/unknown args (streaming) — anything unreadable degrades to the bare
+ *  bold name. */
+function renderRecallCall(params: MkRecallParams, theme: Theme): Text {
+  const name = theme.fg("toolTitle", theme.bold("mk_recall "));
+  const args = params ?? {};
+  const ids = Array.isArray(args.ids) ? args.ids.filter((id) => typeof id === "string" && id !== "") : [];
+  const query = typeof args.query === "string" && args.query !== "" ? args.query : undefined;
+  const grep = typeof args.contentPattern === "string" && args.contentPattern !== "" ? args.contentPattern : undefined;
+  const parts: string[] = [];
+  if (ids.length > 0) {
+    const shown = ids.slice(0, CALL_IDS_SHOWN).join(", ");
+    const more = ids.length > CALL_IDS_SHOWN ? ` +${ids.length - CALL_IDS_SHOWN} more` : "";
+    parts.push(`ids: ${shown}${more}`);
+    if (typeof args.lines === "string" && args.lines !== "") parts.push(`lines ${args.lines}`);
+  } else {
+    if (query !== undefined) {
+      parts.push(`search: ${truncateCallText(query)}`);
+      if (grep !== undefined) parts.push(`grep: ${truncateCallText(grep)}`);
+    } else if (grep !== undefined) {
+      parts.push(`grep: ${truncateCallText(grep)}`);
+    } else {
+      parts.push("browse");
+    }
+    if (typeof args.from === "string" && args.from !== "") parts.push(`from ${args.from}`);
+    if (typeof args.to === "string" && args.to !== "") parts.push(`to ${args.to}`);
+    if (args.includeSuperseded === true) parts.push("superseded");
+  }
+  if (typeof args.contextLines === "number" && args.contextLines !== 2) parts.push(`ctx ${args.contextLines}`);
+  if (args.fullDetails === true) parts.push("full");
+  if (args.take !== undefined) parts.push(args.take === 0 ? "take all" : `take ${args.take}`);
+  if (typeof args.afterId === "string" && args.afterId !== "") parts.push(`after ${args.afterId}`);
+  if (parts.length === 0) return new Text(name, 0, 0);
+  return new Text(name + theme.fg("dim", parts.join(" · ")), 0, 0);
 }
 
 /** A recall result: the rendered text + whether it is a hard error (invalid

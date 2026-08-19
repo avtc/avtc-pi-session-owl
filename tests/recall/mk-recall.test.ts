@@ -1149,6 +1149,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
 /** A fake theme: wraps text in markers so assertions can see color classes. */
 const renderTheme = {
   fg: (cls: string, s: string) => `<${cls}>${s}</${cls}>`,
+  bold: (s: string) => `<bold>${s}</bold>`,
 } as unknown as Parameters<NonNullable<ReturnType<typeof makeMkRecallTool>["renderResult"]>>[2];
 
 /** The mk_recall tool definition's renderResult, if registered. */
@@ -1156,6 +1157,21 @@ function renderResultOf(): NonNullable<ReturnType<typeof makeMkRecallTool>["rend
   const def = makeMkRecallTool();
   if (def.renderResult === undefined) throw new Error("mk_recall has no renderResult");
   return def.renderResult;
+}
+
+/** The mk_recall tool definition's renderCall, if registered. */
+function renderCallOf(): NonNullable<ReturnType<typeof makeMkRecallTool>["renderCall"]> {
+  const def = makeMkRecallTool();
+  if (def.renderCall === undefined) throw new Error("mk_recall has no renderCall");
+  return def.renderCall;
+}
+
+type RenderCallFn = ReturnType<typeof renderCallOf>;
+
+/** Invoke the call renderer (pi's 3-arg signature → 2-arg test call). */
+function renderCallWith(args: unknown): string {
+  const out = renderCallOf()(args as Parameters<RenderCallFn>[0], renderTheme, NO_CONTEXT);
+  return (out as unknown as { text: string }).text;
 }
 
 type RenderResultFn = ReturnType<typeof renderResultOf>;
@@ -1216,5 +1232,74 @@ describe("mk_recall renderResult (collapsed transcript render)", () => {
     const out = render(resultOver(many, true), COLLAPSED);
     expect(out).toContain("line 20");
     expect(out).not.toContain("Ctrl+O to expand");
+  });
+});
+
+// --- renderCall (transcript call line) --------------------------------------
+
+describe("mk_recall renderCall (transcript call line)", () => {
+  it("bold name + dim action: every part renders after the toolTitle name", () => {
+    const out = renderCallWith({ query: "renderResult" });
+    expect(out).toBe("<toolTitle><bold>mk_recall </bold></toolTitle><dim>search: renderResult</dim>");
+  });
+
+  it("ids lookup renders the ids; lines rides along, ignored filters do not", () => {
+    expect(renderCallWith({ ids: ["n23", "o5"] })).toContain("ids: n23, o5");
+    expect(renderCallWith({ ids: ["o5"], lines: "40-60" })).toContain("lines 40-60");
+    // query/from/to/superseded are ignored on the ids path — never shown there
+    const out = renderCallWith({ ids: ["n23"], query: "x", from: "2026-01-01 00:00", includeSuperseded: true });
+    expect(out).toContain("ids: n23");
+    expect(out).not.toContain("search:");
+    expect(out).not.toContain("from");
+    expect(out).not.toContain("superseded");
+  });
+
+  it("more than four ids collapse to +N more", () => {
+    const out = renderCallWith({ ids: ["a", "b", "c", "d", "e", "f", "g"] });
+    expect(out).toContain("ids: a, b, c, d +3 more");
+    expect(out).not.toContain(", e");
+  });
+
+  it("no params (or only empty strings) renders browse — the root view", () => {
+    expect(renderCallWith({})).toContain("browse");
+    expect(renderCallWith({ ids: [], query: "", contentPattern: "" })).toContain("browse");
+  });
+
+  it("time-only filters render browse + from/to qualifiers", () => {
+    const out = renderCallWith({ from: "2026-04-01 00:00", to: "2026-04-30 00:00" });
+    expect(out).toContain("browse");
+    expect(out).toContain("from 2026-04-01 00:00");
+    expect(out).toContain("to 2026-04-30 00:00");
+  });
+
+  it("query + grep + ctx render search with grep and ctx qualifiers", () => {
+    const out = renderCallWith({ query: "mk_recall", contentPattern: "budget", contextLines: 5 });
+    expect(out).toContain("search: mk_recall");
+    expect(out).toContain("grep: budget");
+    expect(out).toContain("ctx 5");
+  });
+
+  it("contentPattern alone renders grep as the action", () => {
+    expect(renderCallWith({ contentPattern: "toolResultTokenBudget" })).toContain("grep: toolResultTokenBudget");
+  });
+
+  it("modifiers: full, superseded, take, take all, after", () => {
+    expect(renderCallWith({ ids: ["o5"], fullDetails: true })).toContain("full");
+    expect(renderCallWith({ includeSuperseded: true })).toContain("superseded");
+    expect(renderCallWith({ take: 10 })).toContain("take 10");
+    expect(renderCallWith({ take: 0 })).toContain("take all");
+    expect(renderCallWith({ query: "x", afterId: "n40" })).toContain("after n40");
+  });
+
+  it("long patterns truncate at 60 chars with an ellipsis", () => {
+    const long = "a".repeat(80);
+    const out = renderCallWith({ query: long });
+    expect(out).toContain(`search: ${"a".repeat(60)}…`);
+    expect(out).not.toContain("a".repeat(61));
+  });
+
+  it("partial/unreadable args degrade to browse — never crash", () => {
+    expect(renderCallWith(undefined)).toContain("browse");
+    expect(renderCallWith({ ids: "not-an-array" })).toContain("browse");
   });
 });
