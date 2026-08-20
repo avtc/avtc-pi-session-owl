@@ -9,7 +9,7 @@
 // yet). Read-only; never mutates.
 
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { type Component, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { getMemkeeperSettings } from "../config/schema.js";
 import { renderDetails } from "../format/details.js";
@@ -56,23 +56,12 @@ import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, typ
 
 export const MK_RECALL_TOOL = "mk_recall";
 const VIEWER: RenderViewer = NON_BUILDER;
-/** Single-line content cap for terse results (full content shows in fullDetails). */
-const TERSE_CONTENT_MAX = 120;
-const TRUNCATION_ELLIPSIS = "…";
 const CHILD_DEPTH = 1;
-/** Maximum lines a collapsed (non-expanded) transcript render shows. */
+/** Maximum word-wrapped screen rows a collapsed (non-expanded) transcript
+ *  render shows; the expand-hint row rides below them. */
 const COLLAPSED_LINE_LIMIT = 12;
 /** Appended under a truncated collapsed render — expanding shows the full text. */
 const EXPAND_HINT = "(Ctrl+O to expand)";
-/** Call-line cap: ids shown before collapsing into "+N more". */
-const CALL_IDS_SHOWN = 4;
-/** Call-line cap: a query/grep pattern longer than this is cut with an ellipsis. */
-const CALL_TEXT_LIMIT = 60;
-
-/** Clip a call-line pattern to CALL_TEXT_LIMIT chars with an ellipsis. */
-function truncateCallText(text: string): string {
-  return text.length <= CALL_TEXT_LIMIT ? text : `${text.slice(0, CALL_TEXT_LIMIT)}${TRUNCATION_ELLIPSIS}`;
-}
 /** Named undefined for an observation block's showParent (no bare literals). */
 const NO_PARENT: string | undefined = undefined;
 /** Named undefined for the pre-computed grep excerpts arg (no bare literals). */
@@ -369,16 +358,6 @@ function importanceRankOf(level: Importance): number {
   return IMPORTANCE_RANK[level];
 }
 
-// --- terse truncation ------------------------------------------------------
-
-/** Collapse a string to one line and cap its length, appending an ellipsis when
- *  truncated. Terse results stay compact; fullDetails shows the raw content. */
-function terseSingleLine(text: string): string {
-  const oneLine = singleLine(text);
-  if (oneLine.length <= TERSE_CONTENT_MAX) return oneLine;
-  return `${oneLine.slice(0, TERSE_CONTENT_MAX - TRUNCATION_ELLIPSIS.length)}${TRUNCATION_ELLIPSIS}`;
-}
-
 // --- time-range normalization ----------------------------------------------
 
 /** Parse a from/to bound the agent supplies (YYYY-MM-DD HH:mm, wall-clock)
@@ -486,10 +465,11 @@ function renderObservationBlock(
 }
 
 /** A terse observation line: delegates to the shared formatObservationLine with
- *  terse (truncated) content, so the prefix stays byte-identical to every other
- *  observation line. */
+ *  its default singleLine content — the full summary whitespace-collapsed onto
+ *  one line, never length-truncated — so the line stays byte-compatible with
+ *  every other observation line. */
 function terseObservationLine(obs: RenderableObservation, showParent: string | undefined): string {
-  return formatObservationLine(obs, { viewer: VIEWER, showParent, formatContent: terseSingleLine });
+  return formatObservationLine(obs, { viewer: VIEWER, showParent });
 }
 
 /** An observation header carrying no content: the shared format with content
@@ -684,7 +664,7 @@ const MK_RECALL_PARAMS = Type.Object({
   fullDetails: Type.Optional(
     Type.Boolean({
       description:
-        "false (default): terse one-line results; long observation text is truncated. true: full untruncated observation content — use it to read one item in full rather than surveying many.",
+        "false (default): summaries shown; true: full observed session entries shown — user and agent messages, agent thinking and tool calls.",
     }),
   ),
   contentPattern: Type.Optional(
@@ -761,11 +741,36 @@ interface RenderableToolResult {
   readonly details?: unknown;
 }
 
+/** The collapsed-view transcript component: caps the word-wrapped text at
+ *  COLLAPSED_LINE_LIMIT screen rows, with the expand-hint row below. The wrap
+ *  width is only known at render time, so the fits/doesn't-fit decision happens
+ *  per render — a text that fits within the limit renders whole, with no hint. */
+class CollapsedOutput implements Component {
+  private readonly inner: Text;
+  private readonly hint: string;
+
+  constructor(inner: Text, hint: string) {
+    this.inner = inner;
+    this.hint = hint;
+  }
+
+  render(width: number): string[] {
+    const rows = this.inner.render(width);
+    if (rows.length <= COLLAPSED_LINE_LIMIT) return rows;
+    return [...rows.slice(0, COLLAPSED_LINE_LIMIT), this.hint];
+  }
+
+  invalidate(): void {
+    this.inner.invalidate();
+  }
+}
+
 /** Transcript render for mk_recall results. The default fallback prints the
  *  whole text — a browse or fullDetails read would flood the visible transcript.
- *  Collapsed shows the first COLLAPSED_LINE_LIMIT lines + the expand hint;
- *  expanded (Ctrl+O) and error results render in full. */
-function renderRecallResult(result: RenderableToolResult, options: { expanded?: boolean }, theme: Theme): Text {
+ *  Collapsed caps the output at COLLAPSED_LINE_LIMIT word-wrapped screen rows
+ *  plus the expand-hint row; expanded (Ctrl+O) and error results render in
+ *  full. */
+function renderRecallResult(result: RenderableToolResult, options: { expanded?: boolean }, theme: Theme): Component {
   const textBlocks = result.content?.filter((block) => block.type === "text") ?? [];
   const last = textBlocks.length > 0 ? (textBlocks[textBlocks.length - 1]?.text ?? "") : "";
   const isError =
@@ -775,12 +780,7 @@ function renderRecallResult(result: RenderableToolResult, options: { expanded?: 
   if (options.expanded === true || isError) {
     return new Text(theme.fg("toolOutput", last), 0, 0);
   }
-  const lines = last.split("\n");
-  if (lines.length <= COLLAPSED_LINE_LIMIT) {
-    return new Text(theme.fg("toolOutput", last), 0, 0);
-  }
-  const truncated = lines.slice(0, COLLAPSED_LINE_LIMIT).join("\n");
-  return new Text(theme.fg("toolOutput", `${truncated}\n${EXPAND_HINT}`), 0, 0);
+  return new CollapsedOutput(new Text(theme.fg("toolOutput", last), 0, 0), theme.fg("toolOutput", EXPAND_HINT));
 }
 
 /** Call-line render: `mk_recall <action>[ · <qualifier…]` — bold name, dim
@@ -799,16 +799,14 @@ function renderRecallCall(params: MkRecallParams, theme: Theme): Text {
   const grep = typeof args.contentPattern === "string" && args.contentPattern !== "" ? args.contentPattern : undefined;
   const parts: string[] = [];
   if (ids.length > 0) {
-    const shown = ids.slice(0, CALL_IDS_SHOWN).join(", ");
-    const more = ids.length > CALL_IDS_SHOWN ? ` +${ids.length - CALL_IDS_SHOWN} more` : "";
-    parts.push(`ids: ${shown}${more}`);
+    parts.push(`ids: ${ids.join(", ")}`);
     if (typeof args.lines === "string" && args.lines !== "") parts.push(`lines ${args.lines}`);
   } else {
     if (query !== undefined) {
-      parts.push(`search: ${truncateCallText(query)}`);
-      if (grep !== undefined) parts.push(`grep: ${truncateCallText(grep)}`);
+      parts.push(`search: ${query}`);
+      if (grep !== undefined) parts.push(`grep: ${grep}`);
     } else if (grep !== undefined) {
-      parts.push(`grep: ${truncateCallText(grep)}`);
+      parts.push(`grep: ${grep}`);
     } else {
       parts.push("browse");
     }

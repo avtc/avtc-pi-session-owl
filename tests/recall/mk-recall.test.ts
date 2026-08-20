@@ -593,7 +593,7 @@ describe("mk_recall", () => {
   });
 
   describe("fullDetails", () => {
-    it("shows full content; terse truncates; no sourceEntryIds in either", async () => {
+    it("shows full source content; terse shows the one-line summary; no sourceEntryIds in either", async () => {
       resetForNewSession();
       setClock(() => T0);
       const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
@@ -626,8 +626,8 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       const terse = text(await recall(tool(), { ids: ["oLong"] }));
       const full = text(await recall(tool(), { ids: ["oLong"], fullDetails: true }));
 
-      // terse collapses to a single line and truncates (first line exceeds the
-      // terse cap on its own, so the second line never appears)
+      // terse collapses the summary to a single line; the details body (with
+      // its multi-line continuation) is not shown — that is fullDetails' job
       expect(terse).not.toContain("Second line with more detail");
       // fullDetails shows the full multi-line content (all three lines intact)
       expect(full).toContain("First line of a long observation that continues");
@@ -638,6 +638,41 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       expect(terse).not.toContain("sourceEntryIds");
       expect(full).not.toContain("e2");
       expect(full).not.toContain("sourceEntryIds");
+    });
+
+    it("terse shows the full summary — no length cap, no ellipsis", async () => {
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(g, {
+        id: "n1",
+        summary: "Node one",
+        importance: "high",
+        parentNode: null,
+        state: "active",
+      });
+      // a summary far past any one-line cap, with a distinctive tail
+      const tail = "the very end of a long summary that must survive terse rendering intact";
+      applyRecordObservation(g, {
+        obs: makeObservation({
+          id: "oLong" as ObsId,
+          summary: `Long observation summary ${"with many words ".repeat(12)}${tail}`,
+          importance: "high",
+          sourceEntryIds: ["e1"],
+          timestamp: T1,
+          parentNode: "n1",
+        }),
+      });
+      setClock(null);
+      getGraphStore().graph = g;
+
+      const terse = text(await recall(tool(), { ids: ["oLong"] }));
+
+      // whitespace-collapsed onto one line, but never length-truncated
+      const itemLine = terse.split("\n").find((l) => l.startsWith("📄 oLong"));
+      expect(itemLine).toBeDefined();
+      expect(itemLine).toContain(tail);
+      expect(terse).not.toContain("…");
     });
   });
 
@@ -1181,13 +1216,17 @@ const NO_CONTEXT = undefined as unknown as Parameters<RenderResultFn>[3];
 const COLLAPSED = { expanded: false, isPartial: false } as const;
 const EXPANDED = { expanded: true, isPartial: false } as const;
 
-/** Invoke the renderer (4-arg pi signature → 3-arg test call). */
+/** Invoke the renderer (4-arg pi signature → 3-arg test call), rendered at a
+ *  fixed viewport width so the tests see the wrapped screen rows the collapsed
+ *  cap counts. */
+const TEST_RENDER_WIDTH = 80;
+
 function render(result: unknown, options: { expanded: boolean; isPartial: boolean }): string {
   return renderedText(renderResultOf()(result as Parameters<RenderResultFn>[0], options, renderTheme, NO_CONTEXT));
 }
 
 function renderedText(out: unknown): string {
-  return (out as unknown as { text: string }).text;
+  return (out as unknown as { render: (width: number) => string[] }).render(TEST_RENDER_WIDTH).join("\n");
 }
 
 function resultOver(
@@ -1200,12 +1239,25 @@ function resultOver(
 describe("mk_recall renderResult (collapsed transcript render)", () => {
   const many = Array.from({ length: 20 }, (_, i) => `n${i + 1} · line ${i + 1}`);
 
-  it("collapsed: a >12-line result truncates to 12 lines + expand hint", () => {
+  it("collapsed: a result over the row cap truncates to 12 rows + expand hint", () => {
     const out = render(resultOver(many, false), COLLAPSED);
     const lines = out.split("\n");
-    expect(lines).toHaveLength(13); // 12 content + hint
+    expect(lines).toHaveLength(13); // 12 content rows + hint
     expect(lines[12]).toContain("(Ctrl+O to expand)");
     expect(out).not.toContain("line 13");
+  });
+
+  it("collapsed: the cap counts word-wrapped screen rows, not logical lines", () => {
+    // 5 logical lines, each wrapping to 3+ rows at width 80 — the collapsed
+    // view must still show exactly 12 content rows + hint, cutting mid-item.
+    const lines = ["a", "b", "c", "d", "e"].map((c) => c.repeat(200));
+    const out = render(resultOver(lines, false), COLLAPSED);
+    const rows = out.split("\n");
+    expect(rows).toHaveLength(13);
+    expect(rows[12]).toContain("(Ctrl+O to expand)");
+    // the 5th logical line never appears on screen (no "eeee" anywhere; the
+    // hint text itself contains no "eeee")
+    expect(out).not.toContain("eeee");
   });
 
   it("expanded: the full text renders with no hint", () => {
@@ -1214,14 +1266,14 @@ describe("mk_recall renderResult (collapsed transcript render)", () => {
     expect(out).not.toContain("Ctrl+O to expand");
   });
 
-  it("collapsed: a result fitting in 12 lines renders whole (no hint)", () => {
+  it("collapsed: a result fitting in 12 rows renders whole (no hint)", () => {
     const few = many.slice(0, 12);
     const out = render(resultOver(few, false), COLLAPSED);
     expect(out).toContain("line 12");
     expect(out).not.toContain("Ctrl+O to expand");
   });
 
-  it("boundary: exactly 13 lines truncates; 12 does not", () => {
+  it("boundary: exactly 13 rows truncates; 12 does not", () => {
     const thirteen = render(resultOver(many.slice(0, 13), false), COLLAPSED);
     expect(thirteen).toContain("(Ctrl+O to expand)");
     const twelve = render(resultOver(many.slice(0, 12), false), COLLAPSED);
@@ -1254,10 +1306,9 @@ describe("mk_recall renderCall (transcript call line)", () => {
     expect(out).not.toContain("superseded");
   });
 
-  it("more than four ids collapse to +N more", () => {
+  it("all ids render — no +N more collapse", () => {
     const out = renderCallWith({ ids: ["a", "b", "c", "d", "e", "f", "g"] });
-    expect(out).toContain("ids: a, b, c, d +3 more");
-    expect(out).not.toContain(", e");
+    expect(out).toContain("ids: a, b, c, d, e, f, g");
   });
 
   it("no params (or only empty strings) renders browse — the root view", () => {
@@ -1291,11 +1342,11 @@ describe("mk_recall renderCall (transcript call line)", () => {
     expect(renderCallWith({ query: "x", afterId: "n40" })).toContain("after n40");
   });
 
-  it("long patterns truncate at 60 chars with an ellipsis", () => {
+  it("long patterns render in full — no clip, no ellipsis", () => {
     const long = "a".repeat(80);
     const out = renderCallWith({ query: long });
-    expect(out).toContain(`search: ${"a".repeat(60)}…`);
-    expect(out).not.toContain("a".repeat(61));
+    expect(out).toContain(`search: ${long}`);
+    expect(out).not.toContain("…");
   });
 
   it("partial/unreadable args degrade to browse — never crash", () => {
