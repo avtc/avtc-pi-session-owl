@@ -223,7 +223,7 @@ describe("DEFAULT_CONFIG parity with schema defaults", () => {
     expect(DEFAULT_CONFIG.selectorMode).toBe("on-compaction");
     expect(DEFAULT_CONFIG.renderMode).toBe("selected-root");
     expect(DEFAULT_CONFIG.observerMaxTokens).toBe(16384);
-    expect(DEFAULT_CONFIG.builderMaxTokens).toBe(65536);
+    expect(DEFAULT_CONFIG.builderMaxTokens).toBe(32768);
     expect(DEFAULT_CONFIG.selectorMaxTokens).toBe(65536);
     expect(DEFAULT_CONFIG.llmCallTimeoutMs).toBe(1_200_000);
   });

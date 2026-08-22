@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
+import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import { makeBuilderTools } from "../../src/builder/tools.js";
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
@@ -523,15 +524,17 @@ describe("Builder mutate tools", () => {
     // TypeBox value checker (a future Type.Optional regression on mkdir
     // importance would otherwise pass the suite).
     it("mkdir rejects a params object missing importance", () => {
-      const { Check } = require("typebox/value") as { Check: (schema: unknown, value: unknown) => boolean };
       // importance is required on mkdir — omitting it must fail validation.
+      // (Check is imported statically so it shares the module realm that BUILT
+      // the schemas — a require() here resolves through a separate interop
+      // realm whose Check leniently passes foreign [Kind] symbols, flaking
+      // this assertion under isolate:false.)
       expect(Check(MKDIR_PARAMS, { summary: "a node" })).toBe(false);
       // providing it passes.
       expect(Check(MKDIR_PARAMS, { summary: "a node", importance: "high" })).toBe(true);
     });
 
     it("merge treats importance as optional (schema-permit, runtime-required on destId:null)", () => {
-      const { Check } = require("typebox/value") as { Check: (schema: unknown, value: unknown) => boolean };
       // importance is optional on the merge schema (required only at runtime
       // when destId === null); an existing-dest merge without importance is valid.
       expect(Check(MERGE_PARAMS, { sourceIds: ["n8"], destId: "n7", newSummary: "merged" })).toBe(true);

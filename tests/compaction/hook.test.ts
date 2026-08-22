@@ -240,7 +240,7 @@ describe("compactionHook", () => {
 
     await compactionHook(compactEvent({}), makeFakeCtx([], NO_NOTIFY), makeFakePi(), NO_OP_WIDGET, TODO_ABSENT);
     // the hook no longer pre-gates; runBuilder is always called and does the
-    // fast-path (flush `new` + skip LLM passes) itself when under threshold.
+    // fast-path (skip LLM passes; preserve `new`) itself when under threshold.
     expect(calls.builder).toBe(1);
   });
 

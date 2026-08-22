@@ -4,7 +4,7 @@
 // The Selector toolset — operates on the deep-copied WORKING COPY (never the
 // source graph). Composition:
 //   - graph read tools (ls/cat/find) — reused from graph/read-tools with the
-//     "nonBuilder" viewer (new→active, no 🆕 glyph);
+//     "nonBuilder" viewer (a `new` node renders like active — no 🆕 glyph);
 //   - graph mutate tools (mkdir/mv/merge/set_meta) — the shared factories from
 //     graph/mutate-tools bound to a workingCopy MutateContext (policy `workingCopy`
 //     — skips the nGoal/oInitialPrompt rejections; the Selector freely rearranges

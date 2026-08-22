@@ -5,9 +5,10 @@
 // BUILDER_TOOLS, with an ensure-ready fast-path. Each pass is one agentLoop;
 // the pass ends when the Builder calls try_finish (converged) or the loop stops
 // (no-op / context-limit / turn cap). try_finish gates the non-obsolete root
-// view against builderRootViewThreshold. At stage-end every remaining `new`
-// node flushes to `active` (a flush_new graph_delta) so non-Builder consumers
-// never see `new`.
+// view against builderRootViewThreshold. `new` nodes flush to `active` only
+// after a run that actually consolidated (converged or ≥1 applied mutate); a
+// no-op or fast-path-skipped run preserves them for the next trigger (🆕 is a
+// Builder-only glyph — non-Builder consumers never render it).
 //
 // The run honors `signal` and owns NO run-lock (the caller — background trigger
 // or compaction hook — owns the lifecycle). Partial work from a failing pass is
@@ -81,14 +82,17 @@ export interface BuilderRunInput {
 
 /**
  * Run the Builder: ensure-ready fast-path, then a multi-pass convergence loop
- * over the source graph, then a stage-end flush of `new` nodes.
+ * over the source graph, then a conditional stage-end flush of `new` nodes.
  *
- * Flush semantics: `new` nodes flush to `active` only on a NORMAL
- * stage-end — fast-path skip (render-ready), try_finish convergence, no-op,
- * max-passes, or context-limit. On an ABNORMAL end (signal abort, or an error
- * that ends the run) `new` nodes STAY `new` so the next run / ensure-ready gate
- * re-processes them (the Builder didn't finish its chance). A model-unavailable
- * run never starts, so `new` nodes stay `new` there too.
+ * Flush semantics: `new` nodes flush to `active` only when the run ended
+ * NORMALLY and actually consolidated — try_finish convergence or ≥1 applied
+ * mutate (covers max-passes / context-limit runs that did work). A no-op run
+ * (0 mutates, not converged), a fast-path skip (builderSkipWithinBudget, root
+ * view under threshold), an ABNORMAL end (signal abort, or an error that ends
+ * the run), and a model-unavailable skip all PRESERVE `new` — a build that
+ * folded nothing must not discharge the each-N trigger's pending arrivals;
+ * they retry on the next fire. `new` renders as 🆕 for the Builder viewer only,
+ * so the Selector and the compaction summary are unaffected either way.
  *
  * Honors `signal`; persists applied mutates + flush_new at call time. Never
  * throws — a model-unavailable skip notifies the user; a run-ending error logs
@@ -113,8 +117,9 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
 
   // Ensure-ready fast-path (opt-in via builderSkipWithinBudget): when the
   // root view is already under the threshold it is render-ready — skip the
-  // LLM passes entirely, just flush `new` arrivals so they never linger as
-  // stale glyphs. A deliberate skip IS a normal stage-end for flush purposes.
+  // LLM passes entirely and PRESERVE `new` arrivals (no flush: nothing was
+  // folded, so the each-N trigger keeps its pending work and retries on the
+  // next fire — a skip must not silently discharge the consolidation duty).
   // No stage is opened (no startStage). Default off — the Builder always runs
   // at least one pass. Re-check abort after the model-resolution await:
   // compaction may have signalled during it, and abort must preserve `new`
@@ -124,7 +129,6 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
     input.settings.builderSkipWithinBudget &&
     measureRootViewTokens(graph, BUILDER) < input.settings.builderRootViewThreshold
   ) {
-    flushNew(input.widget, store);
     return;
   }
 
@@ -135,6 +139,8 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   let normalEnd = true;
   let stageOpened = false;
   let pass = FIRST_PASS;
+  let totalMutates = NO_MUTATES;
+  let converged = false;
   const ledger = makeLedgerHook(BUILD_STAGE);
   try {
     input.widget.startStage(BUILD_STAGE, { pass });
@@ -160,13 +166,17 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
         compactionCount,
         ledger.onStageEnd,
       );
+      totalMutates += outcome.mutates;
       // persist the cumulative usage ledger PER PASS so an interrupted run keeps
       // the usage tally for every completed pass — matching the per-mutate
       // durability of the graph deltas (the two stay consistent).
       if (ledger.hasUsage()) persistLedger(store);
 
       // try_finish success → converged, stop (normal end).
-      if (outcome.converged) break;
+      if (outcome.converged) {
+        converged = true;
+        break;
+      }
       // a per-LLM-call timeout — a stage-stopping error: THROW so the compaction
       // hook cancels compaction + surfaces a visible error (a slow/oversized
       // Builder call must not silently produce a partial/wrong summary).
@@ -192,8 +202,11 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
     // escape (the never-throws teardown contract). `endStage` always runs when a
     // stage opened so the widget never gets stuck showing a stage.
     try {
-      // Flush `new`→`active` only on a normal stage-end; abort/error preserve it.
-      if (normalEnd) flushNew(input.widget, store);
+      // Flush `new`→`active` only when the run ended normally AND actually
+      // consolidated (converged via try_finish, or ≥1 applied mutate). A no-op
+      // run folded nothing — its arrivals stay `new` and retry on the next
+      // trigger; abort/error preserve `new` as before.
+      if (normalEnd && (converged || totalMutates > NO_MUTATES)) flushNew(input.widget, store);
     } catch (cleanupErr) {
       log.error("builder stage teardown cleanup failed", cleanupErr);
     }

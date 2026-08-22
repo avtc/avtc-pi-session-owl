@@ -48,7 +48,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `builderRootViewThreshold` | number | `40000` | Target size (in tokens) for the root view of the memory graph. Also: the trigger for `on-root-view-threshold` mode, and the budget `builderSkipWithinBudget` checks. |
 | `builderSkipWithinBudget` | boolean | `false` | Skip the Builder when the root view is already within budget. Off = the Builder always runs at least once. |
 | `maxBuilderPasses` | number | `3` | Max passes per Builder run. |
-| `builderMaxTokens` | number | `65536` | Maximum output tokens per Builder LLM call. |
+| `builderMaxTokens` | number | `32768` | Maximum output tokens per Builder LLM call. |
 | `builderThinkingLevel` | thinking-level | `null` | Thinking level for the Builder. `null`/Inherit default = use `defaultThinkingLevel`; `off` = no thinking. |
 
 ## Selector

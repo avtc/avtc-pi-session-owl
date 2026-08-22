@@ -111,7 +111,8 @@ const DEFAULT_FIND_TIMEOUT_MS = 30_000;
 const DEFAULT_LLM_CALL_TIMEOUT_MS = 1_200_000;
 const MIN_LLM_CALL_TIMEOUT_MS = 1000;
 const DEFAULT_OBSERVER_MAX_TOKENS = 16384;
-const DEFAULT_STAGE_MAX_TOKENS = 65536;
+const DEFAULT_BUILDER_MAX_TOKENS = 32768;
+const DEFAULT_SELECTOR_MAX_TOKENS = 65536;
 const MIN_MAX_TOKENS = 1;
 const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
 const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
@@ -146,14 +147,14 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   builderRootViewThreshold: 40000,
   builderSkipWithinBudget: DEFAULT_FAST_PATH,
   maxBuilderPasses: 3,
-  builderMaxTokens: DEFAULT_STAGE_MAX_TOKENS,
+  builderMaxTokens: DEFAULT_BUILDER_MAX_TOKENS,
   builderThinkingLevel: NO_MODEL,
   // Selector
   selectorModel: NO_MODEL,
   selectorSessionContextThresholdTokens: 200000,
   selectorRootViewThreshold: 20000,
   maxSelectorPasses: 3,
-  selectorMaxTokens: DEFAULT_STAGE_MAX_TOKENS,
+  selectorMaxTokens: DEFAULT_SELECTOR_MAX_TOKENS,
   selectorThinkingLevel: NO_MODEL,
 } satisfies MemkeeperConfig);
 

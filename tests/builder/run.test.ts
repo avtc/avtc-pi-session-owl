@@ -197,7 +197,7 @@ describe("runBuilder", () => {
   });
   afterAll(() => setClock(null));
 
-  it("fast-path: skips passes when under threshold but still flushes new nodes (no stage)", async () => {
+  it("fast-path: skips passes and PRESERVES new nodes (no stage, no flush)", async () => {
     const g = seedGraph([{ id: "n3", summary: "fresh arrival" }]);
     expect(g.nodes.get("n3")?.state).toBe("new");
     const cap = makeFakePi();
@@ -211,9 +211,10 @@ describe("runBuilder", () => {
       scope: null,
       runStageFn: scriptRunStage({ passes: [] }),
     });
-    // new node flushed to active even though no pass ran
-    expect(g.nodes.get("n3")?.state).toBe("active");
-    expect(flushNewCount(cap.appended)).toBeGreaterThanOrEqual(1);
+    // nothing was folded → the arrival stays `new` (the each-N trigger keeps
+    // its pending work and retries on the next fire) and no flush_new persists
+    expect(g.nodes.get("n3")?.state).toBe("new");
+    expect(flushNewCount(cap.appended)).toBe(0);
     // fast-path opens NO stage (no startStage/endStage) — balanced widget contract
     expect(widget.calls).toEqual([]);
   });
@@ -317,8 +318,9 @@ describe("runBuilder", () => {
     expect(widget.calls[widget.calls.length - 1]).toBe("end");
   });
 
-  it("stops after a no-op pass (0 mutates)", async () => {
-    seedGraph([{ id: "n3", summary: "a" }]);
+  it("stops after a no-op pass (0 mutates) and PRESERVES new nodes (no flush)", async () => {
+    const g = seedGraph([{ id: "n3", summary: "a" }]);
+    const cap = makeFakePi();
     let passCount = 0;
     const scripted = scriptRunStage({
       passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: false }] }],
@@ -328,7 +330,7 @@ describe("runBuilder", () => {
       return scripted(input);
     };
     await runBuilder({
-      pi: makeFakePi().pi,
+      pi: cap.pi,
       ctx: makeFakeCtx(),
       settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
       signal: new AbortController().signal,
@@ -337,6 +339,9 @@ describe("runBuilder", () => {
       runStageFn: countingRunStage,
     });
     expect(passCount).toBe(1); // no-op → stop after pass 1
+    // the run folded nothing → arrivals stay `new` (retry on the next trigger)
+    expect(g.nodes.get("n3")?.state).toBe("new");
+    expect(flushNewCount(cap.appended)).toBe(0);
   });
 
   it("throws StageTimeoutError on a per-LLM-call timeout (propagates to cancel compaction)", async () => {
@@ -426,7 +431,8 @@ describe("runBuilder", () => {
   });
 
   it("stops at maxBuilderPasses without convergence", async () => {
-    seedGraph([{ id: "n3", summary: "a" }]);
+    const g = seedGraph([{ id: "n3", summary: "a" }]);
+    const cap = makeFakePi();
     let passCount = 0;
     const aPass = {
       tools: [
@@ -442,7 +448,7 @@ describe("runBuilder", () => {
       return scripted(input);
     };
     await runBuilder({
-      pi: makeFakePi().pi,
+      pi: cap.pi,
       ctx: makeFakeCtx(),
       settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 2 }),
       signal: new AbortController().signal,
@@ -451,6 +457,9 @@ describe("runBuilder", () => {
       runStageFn: countingRunStage,
     });
     expect(passCount).toBe(2); // never converged, hit max
+    // every pass applied a mutate (mkdir) → the run consolidated → flush runs
+    expect(g.nodes.get("n3")?.state).toBe("active");
+    expect(flushNewCount(cap.appended)).toBeGreaterThanOrEqual(1);
   });
 
   it("aborts before start: preserves new nodes (run ended early)", async () => {

@@ -166,8 +166,8 @@ export async function compactionHook(
     }
 
     // (b) Builder — always called; it owns the internal fast-path (root view
-    // under threshold → flush `new` nodes and skip LLM passes). Processing all
-    // `new` nodes across the whole graph (no firstKeptEntryId filtering).
+    // under threshold → skip LLM passes; `new` arrivals stay `new` — nothing was
+    // folded). Processing all `new` nodes across the whole graph (no firstKeptEntryId filtering).
     log.info("compaction: builder start");
     await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget });
     log.info("compaction: builder end");

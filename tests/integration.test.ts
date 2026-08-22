@@ -15,39 +15,44 @@ import type {
   SessionEntry,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// Fake the LLM stage-runner: the real Observer/Builder/Selector orchestration
-// runs; only the agentLoop step is scripted (per-scenario via
-// `vi.mocked(runStage).mockImplementation`).
-vi.mock("../src/runtime/agent-loop.js", () => ({
-  runStage: vi.fn(),
-  NO_REASONING: null,
-  NO_TURN_LIMIT: null,
-  NO_EVENT_SINK: null,
-  NO_STAGE_END_HOOK: null,
-  NO_LOOP_OVERRIDE: null,
-  SEQUENTIAL: "sequential",
-  // the mock never stops on no-progress (turn-stop logic is unit-tested for real)
-  makeNoProgressTurnStop: (): (() => boolean) => (): boolean => false,
-}));
-
-import {
-  _resetGetMemkeeperSettings,
-  _resetMemkeeperSettingsHandle,
-  _setGetMemkeeperSettings,
-  DEFAULT_CONFIG,
-} from "../src/config/schema.js";
-import { validateGraph } from "../src/graph/invariants.js";
-import memkeeperExtension from "../src/index.js";
-import { runStage, type StageRunResult } from "../src/runtime/agent-loop.js";
-import { _resetRunLock, inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
-import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { SUPERSEDE_TOOL } from "../src/builder/tools.js";
+import { DEFAULT_CONFIG } from "../src/config/schema.js";
+import { MKDIR_TOOL } from "../src/graph/mutate-tools.js";
+import type { StageRunInput, StageRunResult } from "../src/runtime/agent-loop.js";
 import { N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
 
-/** A no-op agent-loop result (no messages, zero usage). The default per-scenario
- *  runStage script; the module mock in this file delegates to a script set via
- *  `vi.mocked(runStage).mockImplementation`. */
+// Fake only cross-boundary I/O: the LLM stage-runner (`runStage`, scripted per
+// scenario below) and the settings registration (a fake avtc-pi-settings-ui
+// handle reading the settings holder). Both are file-scoped via the
+// sibling-repo pattern (avtc-pi-portrait cache-refresh): vi.resetModules()
+// drops the shared module cache, vi.doMock registers the mocks for the freshly
+// re-evaluated graph, and dynamic imports (beforeAll) bind that graph —
+// deterministic deep application, no per-file hoisted vi.mock (racy under
+// isolate:false: whichever file loads first decides for the whole process).
+// The doMock'd turn predicate never stops on no-progress (the turn-stop logic
+// is unit-tested for real in observer/convergence tests).
+
+// The scripted stage-runner + the live settings the fresh graph reads.
+const agentLoopStub = {
+  // The default no-op script is armed in beforeEach (EMPTY_RESULT is defined
+  // below the holder; the vi.fn default here returns the same shape).
+  runStage: vi.fn(
+    async (_input: StageRunInput): Promise<StageRunResult> =>
+      ({
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      }) satisfies StageRunResult,
+  ),
+};
+const settingsHolder: { config: typeof DEFAULT_CONFIG } = { config: { ...DEFAULT_CONFIG } };
+
+/** A no-op agent-loop result (no messages, zero usage) — the default
+ *  per-scenario runStage script (armed in beforeEach; individual tests
+ *  re-script via `agentLoopStub.runStage.mockImplementation`). */
 const EMPTY_RESULT: StageRunResult = {
   messages: [],
   usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
@@ -179,34 +184,31 @@ function makeFakePi(): ExtensionAPI {
 
 // --- script the LLM runStage per scenario ---------------------------------
 
+beforeAll(async () => {
+  await bootFreshGraph();
+});
+afterAll(() => {
+  for (const path of MOCKED_PATHS) vi.doUnmock(path);
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   resetForNewSession();
-  _resetGetMemkeeperSettings();
-  _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG }));
+  settingsHolder.config = { ...DEFAULT_CONFIG };
   // default script: a no-op runStage (no observations, no mutations).
-  vi.mocked(runStage).mockImplementation(async () => EMPTY_RESULT);
+  agentLoopStub.runStage.mockImplementation(async () => EMPTY_RESULT);
 });
 
 afterEach(async () => {
-  _resetGetMemkeeperSettings();
   // Defensive reset of the run-lock singleton between tests — the green path
   // always releases (background launches are awaited, compaction acquires+
   // releases), so this is not a current defect, but without a reset a future
   // test change or a real hang would cascade-lock the whole suite.
-  _resetRunLock();
+  resetRunLock();
   // Drain any fire-and-forget goal-extract call queued by a session_start /
   // turn_end capture this test, so its pending runStage call can't land in a
   // later test and contaminate that test's runStage call counts.
   await new Promise((r) => setTimeout(r, 0));
-});
-
-// activate sets the module `handle` via initMemkeeperSettings (the REAL
-// registerSettingsCommand against the fake pi). Clear it so it does not leak to
-// later test files under isolate:false (the exact leak class the worth-notes
-// warned about — schema.test.ts does the same in its file-level afterAll).
-afterAll(() => {
-  _resetMemkeeperSettingsHandle();
 });
 
 /** Parse the `entry=<id>` citation markers out of a chunk's text (the Observer's
@@ -223,10 +225,36 @@ function parseChunkIds(text: string): string[] {
 }
 
 /** Script the LLM runStage to record one observation per Observer chunk,
- *  citing the chunk's first valid id. Returns the count of recorded chunks. */
-function scriptObserverRecordsOnePerChunk(): { recorded: number } {
-  const state = { recorded: 0 };
-  vi.mocked(runStage).mockImplementation(async (input) => {
+ *  citing the chunk's first valid id — and to apply one real mkdir mutate on
+ *  the Builder's first pass (so a Builder run consolidates and its stage-end
+ *  flush_new fires). Returns the counts. */
+function scriptObserverRecordsOnePerChunk(): { recorded: number; mkdirs: number } {
+  const state = { recorded: 0, mkdirs: 0 };
+  agentLoopStub.runStage.mockImplementation(async (input) => {
+    // Builder pass (supersede is Builder-only): apply one container mutate on
+    // the first Builder call only — later passes no-op so the loop stops after pass 2.
+    const names = new Set(input.tools.map((t) => t.name));
+    const mkdir = input.tools.find((t) => t.name === MKDIR_TOOL) as unknown as
+      | {
+          execute: (id: string, args: unknown) => Promise<unknown>;
+        }
+      | undefined;
+    if (names.has(SUPERSEDE_TOOL)) {
+      if (state.mkdirs === 0 && typeof mkdir?.execute === "function") {
+        await mkdir.execute("call-mkdir", { summary: "grouped arrivals", importance: "med" });
+        state.mkdirs += 1;
+        // emit the mutate through the event stream — the convergence tracker
+        // counts mutates from tool_execution_end events, not from direct calls
+        input.onEvent?.({
+          type: "tool_execution_end",
+          toolCallId: "call-mkdir",
+          toolName: MKDIR_TOOL,
+          result: { content: [], details: { ok: true } },
+          isError: false,
+        });
+      }
+      return EMPTY_RESULT;
+    }
     const tool = input.tools[0] as unknown as { execute: (id: string, args: unknown) => Promise<unknown> };
     const raw = input.messages[0] as { content?: unknown } | undefined;
     const text = typeof raw?.content === "string" ? raw.content : "";
@@ -240,6 +268,50 @@ function scriptObserverRecordsOnePerChunk(): { recorded: number } {
     return EMPTY_RESULT;
   });
   return state;
+}
+
+// Fresh-graph bindings (assigned in beforeAll — the same re-evaluated graph the
+// doMocks target, so the singletons the assertions read are the ones the
+// extension actually wired).
+let memkeeperExtension: typeof import("../src/index.js").default;
+let getGraphStore: typeof import("../src/store/graph-store.js").getGraphStore;
+let resetForNewSession: typeof import("../src/store/graph-store.js").resetForNewSession;
+let runLockInFlight: typeof import("../src/runtime/run-lock.js").inFlight;
+let resetRunLock: typeof import("../src/runtime/run-lock.js")._resetRunLock;
+let validateGraph: typeof import("../src/graph/invariants.js").validateGraph;
+
+/** The doMock'd module paths (doUnmock'd in afterAll). */
+const MOCKED_PATHS = ["../src/runtime/agent-loop.js", "avtc-pi-settings-ui"] as const;
+
+/** Drop the shared cache, register the file-scoped mocks, re-evaluate the
+ *  extension graph against them, and bind this file's singleton aliases to
+ *  that fresh graph. */
+async function bootFreshGraph(): Promise<void> {
+  vi.resetModules();
+  vi.doMock("../src/runtime/agent-loop.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../src/runtime/agent-loop.js")>()),
+    runStage: agentLoopStub.runStage,
+    // never stops on no-progress (the turn-stop logic is unit-tested for real)
+    makeNoProgressTurnStop: (): (() => boolean) => (): boolean => false,
+  }));
+  vi.doMock("avtc-pi-settings-ui", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("avtc-pi-settings-ui")>()),
+    registerSettingsCommand: (() => ({
+      getSettings: (): typeof DEFAULT_CONFIG => ({ ...settingsHolder.config }),
+      updateSetting: () => {},
+      loadSettingsIntoMemory: () => {},
+    })) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand,
+  }));
+  const indexMod = await import("../src/index.js");
+  const storeMod = await import("../src/store/graph-store.js");
+  const lockMod = await import("../src/runtime/run-lock.js");
+  const invariantsMod = await import("../src/graph/invariants.js");
+  memkeeperExtension = indexMod.default;
+  getGraphStore = storeMod.getGraphStore;
+  resetForNewSession = storeMod.resetForNewSession;
+  runLockInFlight = lockMod.inFlight;
+  resetRunLock = lockMod._resetRunLock;
+  validateGraph = invariantsMod.validateGraph;
 }
 
 describe("memkeeperExtension end-to-end (default profile)", () => {
@@ -289,7 +361,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     ];
     const state: FakePiState = { branch, appendedEntries: [] };
     // low threshold so the Observer fires on this small gap.
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, observerThresholdTokens: 50 }));
+    settingsHolder.config = { ...DEFAULT_CONFIG, observerThresholdTokens: 50 };
     const script = scriptObserverRecordsOnePerChunk();
     const pi = makeFakePi() as FakePi;
     memkeeperExtension(pi);
@@ -327,16 +399,16 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
       assistantEntry("a2", "z".repeat(600)),
     ];
     const state: FakePiState = { branch, appendedEntries: [] };
-    _setGetMemkeeperSettings(() => ({
+    settingsHolder.config = {
       ...DEFAULT_CONFIG,
       observerThresholdTokens: 50,
-      // low Builder threshold → Builder RUNS (fast-path not taken) so its
-      // stage-end flush_new converts the catch-up `new` nodes to active. The
-      // first pass is a no-op (scripted runStage records nothing) → loop ends →
-      // flushNew fires. Selector builds regardless (no cached tree → build).
+      // low Builder threshold → Builder RUNS (fast-path not taken); the scripted
+      // pass applies one mkdir mutate → the run consolidated → its stage-end
+      // flush_new converts the catch-up `new` nodes to active (a no-op pass
+      // would preserve them). Selector builds regardless (no cached tree).
       builderRootViewThreshold: 1,
       selectorRootViewThreshold: 100000,
-    }));
+    };
     scriptObserverRecordsOnePerChunk();
     const pi = makeFakePi() as FakePi;
     memkeeperExtension(pi);
@@ -369,7 +441,8 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     expect(summary).toContain(N_GOAL);
 
     const graph = getGraphStore().graph;
-    // Builder flush_new ran (even on fast-path skip) → no `new` nodes remain.
+    // Builder applied ≥1 mutate → the run consolidated → flush_new ran → no
+    // `new` nodes remain.
     const newNodes = [...graph.nodes.values()].filter((n) => n.state === "new");
     expect(newNodes.length).toBe(0);
     // the selected tree was built + persisted (selected-root default).
@@ -379,11 +452,12 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     expect(() => validateGraph(getGraphStore().graph)).not.toThrow();
   });
 
-  it("compaction flushes new nodes to active even when the Builder fast-path skips LLM passes (root view under threshold)", async () => {
+  it("compaction fast-path Builder skip PRESERVES new nodes (no flush when nothing folded)", async () => {
     // In the default profile, when the root view stays under
     // builderRootViewThreshold at compaction, the Builder is fast-path-skipped
-    // — but its flush_new must STILL run so new wrapper nodes (from Observer
-    // catch-up) don't linger as state:'new' indefinitely.
+    // — and a skip flushes nothing: new wrapper nodes (from Observer catch-up)
+    // stay state:'new' so the each-N trigger retries them later (a build that
+    // folded nothing must not discharge the pending arrivals).
     const branch: FakeEntry[] = [
       userEntry("u1", "Fix the login bug"),
       assistantEntry("a1", "x".repeat(600)),
@@ -391,14 +465,15 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
       assistantEntry("a2", "z".repeat(600)),
     ];
     const state: FakePiState = { branch, appendedEntries: [] };
-    _setGetMemkeeperSettings(() => ({
+    settingsHolder.config = {
       ...DEFAULT_CONFIG,
       observerThresholdTokens: 50,
-      // HIGH threshold → Builder fast-path skips (root view well under it); the
-      // hook still calls runBuilder (no pre-gate) and runBuilder flushes new.
+      // HIGH threshold + skip-within-budget ON → the Builder takes the
+      // fast-path (no LLM pass); the skip preserves `new` (no flush).
+      builderSkipWithinBudget: true,
       builderRootViewThreshold: 1_000_000,
       selectorRootViewThreshold: 1_000_000,
-    }));
+    };
     scriptObserverRecordsOnePerChunk();
     const pi = makeFakePi() as FakePi;
     memkeeperExtension(pi);
@@ -421,14 +496,14 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     await pi.emit("session_before_compact", compactEvt, ctx);
     await new Promise((r) => setTimeout(r, 20));
 
-    // the Builder fast-path ran its flush_new even though it skipped LLM passes
-    // (root view under threshold) → no node remains state:'new'.
+    // the Builder fast-path skipped LLM passes AND flushed nothing → the
+    // catch-up arrivals are still state:'new' (retry on the next each-N fire).
     const stillNew = [...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new");
-    expect(stillNew).toHaveLength(0);
+    expect(stillNew.length).toBeGreaterThan(0);
   });
 
   it("enabled=false off-path: turn_end no-ops + compaction returns undefined (Pi native)", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    settingsHolder.config = { ...DEFAULT_CONFIG, enabled: false };
     const state: FakePiState = {
       branch: [userEntry("u1", "Fix the login bug"), assistantEntry("a1", "x".repeat(600))],
       appendedEntries: [],
@@ -467,11 +542,11 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
       branch: [userEntry("u1", "Fix the login bug"), assistantEntry("a1", "x".repeat(600))],
       appendedEntries: [],
     };
-    _setGetMemkeeperSettings(() => ({
+    settingsHolder.config = {
       ...DEFAULT_CONFIG,
       observerThresholdTokens: 50,
       builderRootViewThreshold: 1, // would force a Builder run if not aborted
-    }));
+    };
     const abort = new AbortController();
     abort.abort(); // Pi already gave up before we start
     const pi = makeFakePi() as FakePi;
@@ -482,7 +557,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     // (fire-and-forget); let it settle and drop its runStage call so the
     // assertion below targets only the compaction path.
     await new Promise((r) => setTimeout(r, 0));
-    vi.mocked(runStage).mockClear();
+    agentLoopStub.runStage.mockClear();
     const compactEvt: SessionBeforeCompactEvent = {
       type: "session_before_compact",
       preparation: { firstKeptEntryId: "a1", tokensBefore: 50000 } as SessionBeforeCompactEvent["preparation"],
@@ -498,7 +573,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     expect(result.cancel).toBe(true);
     expect(result.compaction).toBeUndefined();
     // no stages ran → runStage never called.
-    expect(vi.mocked(runStage)).not.toHaveBeenCalled();
+    expect(agentLoopStub.runStage).not.toHaveBeenCalled();
   });
 
   it("/new (session_start reason=new) reseeds an empty graph with nGoal", async () => {
@@ -564,12 +639,12 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
       assistantEntry("a2", "z".repeat(600)),
     ];
     const state: FakePiState = { branch, appendedEntries: [] };
-    _setGetMemkeeperSettings(() => ({
+    settingsHolder.config = {
       ...DEFAULT_CONFIG,
       observerThresholdTokens: 50,
       builderRootViewThreshold: 1,
       selectorRootViewThreshold: 100000,
-    }));
+    };
     scriptObserverRecordsOnePerChunk();
     const pi = makeFakePi() as FakePi;
     memkeeperExtension(pi);

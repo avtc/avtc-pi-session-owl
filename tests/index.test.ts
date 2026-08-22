@@ -7,43 +7,73 @@ import type {
   SessionBeforeCompactEvent,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_CONFIG, type MemkeeperConfig } from "../src/config/schema.js";
 
-// Mock the dependencies index.ts wires (isolate the activate WIRING from their
-// real implementations, which have their own tests).
-// avtc-pi-settings-ui is NOT vi.mock'd here. Under isolate:false that module
-// mock races against the many files that import schema.ts (loading the REAL
-// module), so the mock intermittently fails to apply → the real
-// registerSettingsCommand runs → it registers /mk:settings via pi.registerCommand
-// (a 6th command) AND a session_start reload handler (displacing [0]). Instead
-// schema.ts exposes the _setRegisterSettingsCommand seam; beforeEach injects a
-// fake that returns a handle yielding enabled:true WITHOUT touching
-// pi.registerCommand. settingsFilePaths is left real (the test ignores its paths).
+// Activate-wiring tests: assert what memkeeperExtension(pi) registers and which
+// stage/hook functions it wires — without running real graph/LLM work (those
+// have their own files). The wiring targets (lifecycle, triggers,
+// compaction/hook, widget/tracker, runtime/stages, todo/wiring) are stubbed via
+// the sibling-repo pattern (avtc-pi-portrait extension-idempotency /
+// cache-refresh): vi.resetModules() drops the shared module cache,
+// vi.doMock registers file-scoped module mocks for the freshly re-evaluated
+// graph, and a dynamic `await import("../src/index.js")` binds that graph —
+// deterministic deep application, no per-file hoisted vi.mock (which is racy
+// under isolate:false: whichever file loads first decides for the whole
+// process). avtc-pi-settings-ui is doMock'd the same way (importOriginal
+// preserved for settingsFilePaths) so initMemkeeperSettings gets a fake handle
+// reading the hoisted settings holder — no /mk:settings command or reload
+// handler registered against the fake pi.
 
-// The shared-module mocks (lifecycle, triggers, compaction/hook, widget/tracker,
-// runtime/stages, todo/wiring) live in tests/setup.ts as flag-gated forwarders
-// (avtc-pi-portrait pattern): under isolate:false a per-file vi.mock here would
-// race against the real imports in lifecycle.test.ts / triggers.test.ts / etc.
-// (whichever loads first wins for the process), surfacing as intermittent
-// "called 0 times" / double-registration flakes. This file opts into the stubs
-// via useStubs({...}) in beforeEach; the module exports it imports ARE the
-// gated vi.fns, so `.toHaveBeenCalledTimes` / `.mock` keep working.
-
-import { compactionHook } from "../src/compaction/hook.js";
-import {
-  _resetGetMemkeeperSettings,
-  _resetMemkeeperSettingsHandle,
-  _setGetMemkeeperSettings,
-  _setRegisterSettingsCommand,
-  DEFAULT_CONFIG,
-  type MemkeeperConfig,
-} from "../src/config/schema.js";
-import memkeeperExtension from "../src/index.js";
-import { captureInitialPromptAndExtract, onSessionShutdown, onSessionStart } from "../src/lifecycle.js";
-import { makeBuilderRun, makeObserverRun, makeSelectorRun } from "../src/runtime/stages.js";
-import { resetForNewSession } from "../src/store/graph-store.js";
-import { onTurnEnd, setStageRuns } from "../src/triggers.js";
-import { useStubs } from "./setup.js";
+// The wiring fns the doMock factories install (the extension graph binds THESE
+// vi.fns, so call/recording assertions below are identity-stable).
+const wiring = vi.hoisted(() => {
+  const marker = (name: string): (() => Promise<void>) => {
+    const run = async (): Promise<void> => {};
+    Object.defineProperty(run, "name", { value: name });
+    return run;
+  };
+  return {
+    onSessionStart: vi.fn(async () => {}),
+    onSessionShutdown: vi.fn(() => {}),
+    captureInitialPromptAndExtract: vi.fn(() => {}),
+    onTurnEnd: vi.fn(() => {}),
+    setStageRuns: vi.fn((_runs: { runObserver: unknown; runBuilder: unknown; runSelector: unknown }) => {}),
+    compactionHook: vi.fn(
+      async (
+        _event: unknown,
+        _ctx: unknown,
+        _pi: unknown,
+        _widget: unknown,
+        _todo: { context: unknown; bridge: unknown },
+      ): Promise<undefined> => undefined,
+    ),
+    initWidget: vi.fn(() => ({
+      setCtx: () => {},
+      clearCtx: () => {},
+      render: () => {},
+      startStage: () => {},
+      setPass: () => {},
+      setBatch: () => {},
+      endStage: () => {},
+      onEvent: () => {},
+      invalidateRoots: () => {},
+    })),
+    makeObserverRun: vi.fn(() => marker("observer-run")),
+    makeBuilderRun: vi.fn(() => marker("builder-run")),
+    makeSelectorRun: vi.fn(() => marker("selector-run")),
+    createTodoWiring: vi.fn(() => ({
+      getContext: () => ({ getInProgress: () => null, getPending: () => [] }),
+      getBridge: () => ({ getItems: (): unknown[] => [] }),
+    })),
+    // The live settings the fresh graph's getMemkeeperSettings() reads (the
+    // fake registerSettingsCommand handle returns this — the doMock stand-in
+    // for the _setGetMemkeeperSettings seam, scoped to the fresh graph).
+    // Seeded from DEFAULT_CONFIG in beforeEach (vi.hoisted runs before imports,
+    // so the frozen defaults are not referenceable here).
+    settings: { config: undefined as MemkeeperConfig | undefined },
+  };
+});
 
 /** A fake pi that records `on` registrations by event name. */
 function makeFakePi(): ExtensionAPI {
@@ -72,44 +102,78 @@ function makeCtx(): ExtensionContext {
   } as unknown as ExtensionContext;
 }
 
+/** The mocked module paths the doMock block registers (doUnmock'd in afterAll). */
+const MOCKED_PATHS = [
+  "../src/lifecycle.js",
+  "../src/triggers.js",
+  "../src/compaction/hook.js",
+  "../src/widget/tracker.js",
+  "../src/runtime/stages.js",
+  "../src/todo/wiring.js",
+  "avtc-pi-settings-ui",
+] as const;
+
+/** Drop the shared cache, register the file-scoped mocks, re-evaluate the
+ *  extension graph against them. Called once per describe (beforeAll) — the
+ *  tests share the mocked graph, matching the one-graph-per-process runtime. */
+async function importMockedExtension(): Promise<typeof import("../src/index.js")> {
+  vi.resetModules();
+  vi.doMock("../src/lifecycle.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../src/lifecycle.js")>()),
+    onSessionStart: wiring.onSessionStart,
+    onSessionShutdown: wiring.onSessionShutdown,
+    captureInitialPromptAndExtract: wiring.captureInitialPromptAndExtract,
+  }));
+  vi.doMock("../src/triggers.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../src/triggers.js")>()),
+    onTurnEnd: wiring.onTurnEnd,
+    setStageRuns: wiring.setStageRuns,
+  }));
+  vi.doMock("../src/compaction/hook.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../src/compaction/hook.js")>()),
+    compactionHook: wiring.compactionHook,
+  }));
+  vi.doMock("../src/widget/tracker.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../src/widget/tracker.js")>()),
+    initWidget: wiring.initWidget,
+  }));
+  vi.doMock("../src/runtime/stages.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../src/runtime/stages.js")>()),
+    makeObserverRun: wiring.makeObserverRun,
+    makeBuilderRun: wiring.makeBuilderRun,
+    makeSelectorRun: wiring.makeSelectorRun,
+  }));
+  vi.doMock("../src/todo/wiring.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../src/todo/wiring.js")>()),
+    createTodoWiring: wiring.createTodoWiring,
+  }));
+  vi.doMock("avtc-pi-settings-ui", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("avtc-pi-settings-ui")>()),
+    registerSettingsCommand: (() => ({
+      getSettings: (): MemkeeperConfig => ({ ...(wiring.settings.config ?? { ...DEFAULT_CONFIG, enabled: true }) }),
+      updateSetting: () => {},
+      loadSettingsIntoMemory: () => {},
+    })) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand,
+  }));
+  return import("../src/index.js");
+}
+
 describe("memkeeperExtension (activate wiring)", () => {
+  let memkeeperExtension: typeof import("../src/index.js").default;
+
+  beforeAll(async () => {
+    memkeeperExtension = (await importMockedExtension()).default;
+  });
+  afterAll(() => {
+    for (const path of MOCKED_PATHS) vi.doUnmock(path);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
-    resetForNewSession();
-    _resetGetMemkeeperSettings();
-    // Opt into ALL shared-module stubs for this file (activate-wiring tests
-    // assert call wiring, never real graph/LLM behavior).
-    useStubs({
-      lifecycle: true,
-      triggers: true,
-      compactionHook: true,
-      widget: true,
-      stages: true,
-      todoWiring: true,
-    });
-    // Pin the settings read to DEFAULT_CONFIG (override takes precedence over the
-    // real handle, so the default-path tests get enabled=true without depending on
-    // the real settings-ui storage read against the fake pi).
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG }));
-    // Inject a fake registerSettingsCommand via the schema.ts seam (NOT vi.mock of
-    // avtc-pi-settings-ui — see the file header) so initMemkeeperSettings returns
-    // a handle without the real settings-ui registering /mk:settings or a reload
-    // handler against the fake pi.
-    _setRegisterSettingsCommand((() => ({
-      getSettings: () => ({ ...DEFAULT_CONFIG, enabled: true }),
-      updateSetting: () => {},
-    })) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand);
+    wiring.settings.config = { ...DEFAULT_CONFIG, enabled: true };
     memkeeperExtension(makeFakePi());
   });
-  afterEach(() => _resetGetMemkeeperSettings());
-
-  // activate sets the module `handle` via initMemkeeperSettings; clear it so it
-  // does not leak to later test files under isolate:false (same leak class as
-  // schema.test.ts / integration.test.ts).
-  afterAll(() => _resetMemkeeperSettingsHandle());
 
   it("registers all four lifecycle hooks", () => {
-    // activate ran in beforeEach via a fresh pi; re-run to capture the handlers
     const pi = makeFakePi() as FakePiWithHandlers;
     memkeeperExtension(pi);
     const events = [...pi._handlers.keys()];
@@ -150,21 +214,21 @@ describe("memkeeperExtension (activate wiring)", () => {
     // `runSelector: async () => {}` stub (the “built but never wired” gap) must
     // not survive: setStageRuns receives each factory's real return.
     memkeeperExtension(makeFakePi());
-    expect(makeObserverRun).toHaveBeenCalled();
-    expect(makeBuilderRun).toHaveBeenCalled();
-    expect(makeSelectorRun).toHaveBeenCalled();
-    expect(setStageRuns).toHaveBeenCalled();
+    expect(wiring.makeObserverRun).toHaveBeenCalled();
+    expect(wiring.makeBuilderRun).toHaveBeenCalled();
+    expect(wiring.makeSelectorRun).toHaveBeenCalled();
+    expect(wiring.setStageRuns).toHaveBeenCalled();
     // The LAST setStageRuns call is THIS activate's wiring; each run is the
     // return value (a vi.fn) of its make*Run factory — never a bare
     // `async () => {}` stub.
-    const lastRuns = vi.mocked(setStageRuns).mock.calls.at(-1)?.[0] as {
+    const lastRuns = wiring.setStageRuns.mock.calls.at(-1)?.[0] as {
       runObserver: unknown;
       runBuilder: unknown;
       runSelector: unknown;
     };
-    const lastObserver = vi.mocked(makeObserverRun).mock.results.at(-1)?.value;
-    const lastBuilder = vi.mocked(makeBuilderRun).mock.results.at(-1)?.value;
-    const lastSelector = vi.mocked(makeSelectorRun).mock.results.at(-1)?.value;
+    const lastObserver = wiring.makeObserverRun.mock.results.at(-1)?.value;
+    const lastBuilder = wiring.makeBuilderRun.mock.results.at(-1)?.value;
+    const lastSelector = wiring.makeSelectorRun.mock.results.at(-1)?.value;
     expect(lastRuns.runObserver).toBe(lastObserver);
     expect(lastRuns.runBuilder).toBe(lastBuilder);
     expect(lastRuns.runSelector).toBe(lastSelector);
@@ -176,7 +240,7 @@ describe("memkeeperExtension (activate wiring)", () => {
     const handler = pi._handlers.get("session_start")?.[0];
     expect(handler).toBeDefined();
     await handler?.({ type: "session_start", reason: "startup" } as SessionStartEvent, makeCtx());
-    expect(onSessionStart).toHaveBeenCalledTimes(1);
+    expect(wiring.onSessionStart).toHaveBeenCalledTimes(1);
   });
 
   it("session_shutdown handler calls onSessionShutdown", () => {
@@ -184,17 +248,17 @@ describe("memkeeperExtension (activate wiring)", () => {
     memkeeperExtension(pi);
     const handler = pi._handlers.get("session_shutdown")?.[0];
     handler?.({ type: "session_shutdown", reason: "quit" }, makeCtx());
-    expect(onSessionShutdown).toHaveBeenCalledTimes(1);
+    expect(wiring.onSessionShutdown).toHaveBeenCalledTimes(1);
   });
 
   it("turn_end early-returns when enabled=false (no capture, no onTurnEnd)", () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    wiring.settings.config = { ...DEFAULT_CONFIG, enabled: false };
     const pi = makeFakePi() as FakePiWithHandlers;
     memkeeperExtension(pi);
     const handler = pi._handlers.get("turn_end")?.[0];
     handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx());
-    expect(captureInitialPromptAndExtract).not.toHaveBeenCalled();
-    expect(onTurnEnd).not.toHaveBeenCalled();
+    expect(wiring.captureInitialPromptAndExtract).not.toHaveBeenCalled();
+    expect(wiring.onTurnEnd).not.toHaveBeenCalled();
   });
 
   it("turn_end captures the initial prompt then fires onTurnEnd (enabled)", () => {
@@ -202,23 +266,23 @@ describe("memkeeperExtension (activate wiring)", () => {
     memkeeperExtension(pi);
     const handler = pi._handlers.get("turn_end")?.[0];
     handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx());
-    expect(captureInitialPromptAndExtract).toHaveBeenCalledTimes(1);
-    expect(onTurnEnd).toHaveBeenCalledTimes(1);
+    expect(wiring.captureInitialPromptAndExtract).toHaveBeenCalledTimes(1);
+    expect(wiring.onTurnEnd).toHaveBeenCalledTimes(1);
   });
 
   it("turn_end still fires onTurnEnd when capture throws (error isolation)", () => {
-    vi.mocked(captureInitialPromptAndExtract).mockImplementationOnce(() => {
+    wiring.captureInitialPromptAndExtract.mockImplementationOnce(() => {
       throw new Error("boom");
     });
     const pi = makeFakePi() as FakePiWithHandlers;
     memkeeperExtension(pi);
     const handler = pi._handlers.get("turn_end")?.[0];
     expect(() => handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx())).not.toThrow();
-    expect(onTurnEnd).toHaveBeenCalledTimes(1);
+    expect(wiring.onTurnEnd).toHaveBeenCalledTimes(1);
   });
 
   it("turn_end does not crash when onTurnEnd itself throws (trigger-eval isolation)", () => {
-    vi.mocked(onTurnEnd).mockImplementationOnce(() => {
+    wiring.onTurnEnd.mockImplementationOnce(() => {
       throw new Error("trigger boom");
     });
     const pi = makeFakePi() as FakePiWithHandlers;
@@ -228,8 +292,8 @@ describe("memkeeperExtension (activate wiring)", () => {
     // but the index.ts try/catch surfaces it in the memkeeper log and keeps the
     // handler returning normally.
     expect(() => handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx())).not.toThrow();
-    expect(captureInitialPromptAndExtract).toHaveBeenCalledTimes(1);
-    expect(onTurnEnd).toHaveBeenCalledTimes(1);
+    expect(wiring.captureInitialPromptAndExtract).toHaveBeenCalledTimes(1);
+    expect(wiring.onTurnEnd).toHaveBeenCalledTimes(1);
   });
 
   it("session_before_compact delegates to compactionHook", async () => {
@@ -238,9 +302,9 @@ describe("memkeeperExtension (activate wiring)", () => {
     const handler = pi._handlers.get("session_before_compact")?.[0];
     const event = { type: "session_before_compact" } as unknown as SessionBeforeCompactEvent;
     await handler?.(event, makeCtx());
-    expect(compactionHook).toHaveBeenCalledTimes(1);
+    expect(wiring.compactionHook).toHaveBeenCalledTimes(1);
     // the todo wiring (context + bridge from createTodoWiring) is threaded through
-    const callArgs = (compactionHook as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    const callArgs = wiring.compactionHook.mock.calls[0];
     const todoArg = callArgs?.[4] as { context: unknown; bridge: unknown };
     expect(todoArg).toBeDefined();
     expect(todoArg.context).toBeDefined();
@@ -248,39 +312,30 @@ describe("memkeeperExtension (activate wiring)", () => {
   });
 
   it("session_before_compact early-returns undefined when enabled=false (Pi native compaction)", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    wiring.settings.config = { ...DEFAULT_CONFIG, enabled: false };
     const pi = makeFakePi() as FakePiWithHandlers;
     memkeeperExtension(pi);
     const handler = pi._handlers.get("session_before_compact")?.[0];
     const event = { type: "session_before_compact" } as unknown as SessionBeforeCompactEvent;
     const result = await handler?.(event, makeCtx());
     expect(result).toBeUndefined();
-    expect(compactionHook).not.toHaveBeenCalled();
+    expect(wiring.compactionHook).not.toHaveBeenCalled();
   });
 });
 
 describe("memkeeperExtension :ready API (memkeeper:ready)", () => {
+  let memkeeperExtension: typeof import("../src/index.js").default;
+
+  beforeAll(async () => {
+    memkeeperExtension = (await importMockedExtension()).default;
+  });
+  afterAll(() => {
+    for (const path of MOCKED_PATHS) vi.doUnmock(path);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
-    resetForNewSession();
-    _resetGetMemkeeperSettings();
-    useStubs({
-      lifecycle: true,
-      triggers: true,
-      compactionHook: true,
-      widget: true,
-      stages: true,
-      todoWiring: true,
-    });
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG }));
-    _setRegisterSettingsCommand((() => ({
-      getSettings: () => ({ ...DEFAULT_CONFIG, enabled: true }),
-      updateSetting: () => {},
-      loadSettingsIntoMemory: () => {},
-    })) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand);
+    wiring.settings.config = { ...DEFAULT_CONFIG, enabled: true };
   });
-  afterEach(() => _resetGetMemkeeperSettings());
-  afterAll(() => _resetMemkeeperSettingsHandle());
 
   it("does NOT emit :ready at activate time (deferred to session_start)", () => {
     const pi = makeFakePi() as FakePiWithHandlers;
@@ -315,7 +370,7 @@ describe("memkeeperExtension :ready API (memkeeper:ready)", () => {
       [])[1] as {
       getConfig: () => MemkeeperConfig;
     };
-    // _setGetMemkeeperSettings (beforeEach) pinned the read to DEFAULT_CONFIG.
+    // The fake settings handle (beforeEach) pins the read to DEFAULT_CONFIG.
     expect(api.getConfig()).toEqual(DEFAULT_CONFIG);
   });
 });

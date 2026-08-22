@@ -5,7 +5,7 @@
 // text Pi injects post-compaction — the agent's memory. Sections: a # Memory
 // header + legend + mk_recall hint, the verbatim initial prompt, the active-set
 // root one-liners (selected tree or observations root), and recently-touched
-// files. Non-Builder viewer (new→active, no 🆕); obsolete roots excluded; never
+// files. Non-Builder viewer (a `new` node renders like active — no 🆕); obsolete roots excluded; never
 // truncated (bounded by the Selector/Builder try_finish, not here).
 
 import {

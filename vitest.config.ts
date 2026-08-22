@@ -7,6 +7,11 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     isolate: false,
+    // Absorb CPU-starvation spikes on loaded dev machines (the suite shares the
+    // box with live sessions): per-test work is ms-scale, so 30s still catches
+    // real hangs while a starved 5s default produced false timeout flakes
+    // (mirrors avtc-pi-portrait's timeout).
+    testTimeout: 30_000,
     // Centralized module-singleton resets between tests (settings handle/override,
     // GraphStore) — the isolate:false leak fix, mirroring the sibling-repo
     // setupFiles pattern (avtc-pi-portrait / avtc-pi-featyard).
