@@ -30,8 +30,11 @@ At compaction, the active set is rendered into the compaction summary that pi in
 
 ```
 # Memory
-Your session memory. Each item cites an id — use mk_recall for detail.
-Legend: 📁 n.. node · 📄 o.. observation · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete
+Your session memory — the top level of a tree; each id opens deeper detail via mk_recall.
+Legend: 📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · 2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size)
+
+## Memory use
+The root view is a navigation index into retained session memory: the lines name what exists; the detail, evidence, rationale, and results live in the tree behind them, across the whole session (see the totals). Recall before relying on session-derived understanding: search memory, or expand a visible related id — a complete-looking label still summarizes only the surface, and relevant context often sits deeper than the root. Use {"ids":["n23"]} to expand, {"query":"…"} to search, and add "fullDetails":true when exact messages, tool output, or rationale matter.
 
 ## Initial prompt
 Redesign the auth flow: move JWT validation to middleware and drop the legacy login form.

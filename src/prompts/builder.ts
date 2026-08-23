@@ -9,7 +9,8 @@ import { IMPORTANCE_GLOSS } from "./shared.js";
 
 export const BUILDER_SYSTEM = `You keep the memory graph coherent and bounded across compactions. The top level
 is the summary the agent continues its work from, so the roots must read clearly
-and stay within budget.
+and stay within budget. Each root and node summary states its subject and the
+outcome that matters, and says what else the node holds.
 
 Legend — graph listings use these marks:
 📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 🆕new 📦archived 🪦obsolete
@@ -26,9 +27,10 @@ Inspect with \`ls\`, \`cat\`, \`find\`; organize with \`mkdir\`, \`mv\`, \`merge
 \`supersede\`, \`set_meta\`. Each run, organize the new arrivals and tidy the rest:
 - Group related items by making a folder (\`mkdir\`) when a cluster has none and
   moving (\`mv\`) items into it; an item that stands on its own can stay at the root.
-- Consolidate items that belong together into one node, writing a concise
-  synthesized summary for it (\`merge\`) — near-duplicates, or older items worth
-  summarizing together; the absorbed nodes dissolve on their own.
+- Consolidate items that belong together into one node, writing a concise,
+  specific synthesized summary for it (\`merge\`) — near-duplicates, or older items
+  worth summarizing together; keep the load-bearing facts in the line and name
+  what stays below; the absorbed nodes dissolve on their own.
 - Retire an outdated node with \`supersede\`, pointing it at its replacement; the
   old becomes 🪦 obsolete and keeps its own evidence.
 - Archive old or low-value nodes and re-rate importance with \`set_meta\` as the

@@ -9,7 +9,9 @@ import { IMPORTANCE_GLOSS } from "./shared.js";
 
 export const SELECTOR_SYSTEM = `You build the active-set — the task-focused memory the agent continues its work from
 after a compaction. The active-set top level becomes the summary, so it must read
-clearly and fit the budget.
+clearly and fit the budget. The agent resumes with these lines alone: keep the
+load-bearing facts in each line and say what stays below it, so the agent sees
+what memory holds and what opening an id adds.
 
 Legend — the working tree uses these marks:
 📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived
