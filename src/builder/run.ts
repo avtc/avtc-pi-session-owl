@@ -2,7 +2,8 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // The Builder run: a multi-pass convergence loop over the source graph using
-// BUILDER_TOOLS, with an ensure-ready fast-path. Each pass is one agentLoop;
+// BUILDER_TOOLS, with a compaction-only ensure-ready fast-path. Each pass is
+// one agentLoop;
 // the pass ends when the Builder calls try_finish (converged) or the loop stops
 // (no-op / context-limit / turn cap). try_finish gates the non-obsolete root
 // view against builderRootViewThreshold. `new` nodes flush to `active` only
@@ -69,10 +70,11 @@ export interface BuilderRunInput {
   settings: MemkeeperConfig;
   signal: AbortSignal;
   widget: WidgetController;
-  /** The compaction cut; null at turn_end. Carried for contract completeness
-   *  (the Observer uses it for its gap-driven catch-up). The Builder ignores it:
-   *  at compaction it processes ALL `new` nodes across the whole graph, not just
-   *  the compacted block. */
+  /** The compaction cut; null at turn_end. Gates the compaction-only
+   *  builderSkipWithinBudget fast-path (a turn_end trigger that fired must
+   *  run). The Observer uses it for its gap-driven catch-up; the Builder
+   *  otherwise ignores it — in either scope it processes ALL `new` nodes across
+   *  the whole graph, not just the compacted block. */
   scope: { firstKeptEntryId: string | null } | null;
   /** Test seam — fake stage runner, or omitted for the real `runStage`. */
   runStageFn?: (input: StageRunInput) => Promise<StageRunResult>;
@@ -87,11 +89,11 @@ export interface BuilderRunInput {
  * Flush semantics: `new` nodes flush to `active` only when the run ended
  * NORMALLY and actually consolidated — try_finish convergence or ≥1 applied
  * mutate (covers max-passes / context-limit runs that did work). A no-op run
- * (0 mutates, not converged), a fast-path skip (builderSkipWithinBudget, root
- * view under threshold), an ABNORMAL end (signal abort, or an error that ends
- * the run), and a model-unavailable skip all PRESERVE `new` — a build that
- * folded nothing must not discharge the each-N trigger's pending arrivals;
- * they retry on the next fire. `new` renders as 🆕 for the Builder viewer only,
+ * (0 mutates, not converged), a compaction-only fast-path skip (the root view
+ * under builderRootViewThreshold), an ABNORMAL end (signal abort, or an error
+ * that ends the run), and a model-unavailable skip all PRESERVE `new` — a
+ * build that folded nothing must not discharge the each-N trigger's pending
+ * arrivals; they retry on the next fire. `new` renders as 🆕 for the Builder viewer only,
  * so the Selector and the compaction summary are unaffected either way.
  *
  * Honors `signal`; persists applied mutates + flush_new at call time. Never
@@ -115,17 +117,23 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   const graph = getGraphStore().graph;
   const runStageFn = input.runStageFn ?? runStage;
 
-  // Ensure-ready fast-path (opt-in via builderSkipWithinBudget): when the
-  // root view is already under the threshold it is render-ready — skip the
-  // LLM passes entirely and PRESERVE `new` arrivals (no flush: nothing was
-  // folded, so the each-N trigger keeps its pending work and retries on the
-  // next fire — a skip must not silently discharge the consolidation duty).
+  // Ensure-ready fast-path (opt-in via builderSkipWithinBudget, COMPACTION
+  // ONLY — scope !== null): when the root view is already under the threshold
+  // it is render-ready — skip the LLM passes entirely and PRESERVE `new`
+  // arrivals (no flush: nothing was folded, so the each-N trigger keeps its
+  // pending work and retries on the next fire — a skip must not silently
+  // discharge the consolidation duty). A turn_end run (scope === null) NEVER
+  // takes this skip: its trigger already decided to fire (each-N reached N,
+  // the session context crossed its threshold), so a budget skip there would
+  // starve the cadence into a fire→skip→retry loop; on-root-view-threshold
+  // mode needs no fast-path — its trigger decision itself skips under budget.
   // No stage is opened (no startStage). Default off — the Builder always runs
   // at least one pass. Re-check abort after the model-resolution await:
   // compaction may have signalled during it, and abort must preserve `new`
   // (mirrors the convergence-loop guard).
   if (input.signal.aborted) return;
   if (
+    input.scope !== null &&
     input.settings.builderSkipWithinBudget &&
     measureRootViewTokens(graph, BUILDER) < input.settings.builderRootViewThreshold
   ) {

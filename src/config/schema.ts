@@ -70,9 +70,10 @@ export interface MemkeeperConfig {
   builderEveryNObservations: number;
   builderSessionContextThresholdTokens: number;
   builderRootViewThreshold: number;
-  /** Skip the Builder's compaction fast-path: when the root view is already
-   *  under builderRootViewThreshold, skip the Builder run entirely. Default
-   *  false — the Builder always runs at least one pass. */
+  /** The compaction-only fast-path: at compaction, when the root view is
+   *  already under builderRootViewThreshold, skip the Builder run entirely
+   *  (turn_end trigger runs are never skipped by it — a fired trigger runs).
+   *  Default false — the Builder always runs at least one pass. */
   builderSkipWithinBudget: boolean;
   maxBuilderPasses: number;
   /** Maximum output tokens per Builder LLM call (per turn). */
@@ -431,7 +432,8 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("builderSkipWithinBudget", {
     label: "Skip when within budget",
     description:
-      "Skip the Builder when the root view is already within budget. Off = the Builder always runs at least once.",
+      "At compaction only: skip the Builder when the root view is within budget. Background triggers are never skipped. " +
+      "Off = the Builder always runs at least once.",
     type: "boolean",
     defaultValue: DEFAULT_CONFIG.builderSkipWithinBudget,
   }),

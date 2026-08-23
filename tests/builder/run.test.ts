@@ -197,7 +197,7 @@ describe("runBuilder", () => {
   });
   afterAll(() => setClock(null));
 
-  it("fast-path: skips passes and PRESERVES new nodes (no stage, no flush)", async () => {
+  it("fast-path (compaction scope): skips passes and PRESERVES new nodes (no stage, no flush)", async () => {
     const g = seedGraph([{ id: "n3", summary: "fresh arrival" }]);
     expect(g.nodes.get("n3")?.state).toBe("new");
     const cap = makeFakePi();
@@ -208,7 +208,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: true }),
       signal: new AbortController().signal,
       widget,
-      scope: null,
+      scope: { firstKeptEntryId: null },
       runStageFn: scriptRunStage({ passes: [] }),
     });
     // nothing was folded → the arrival stays `new` (the each-N trigger keeps
@@ -219,7 +219,7 @@ describe("runBuilder", () => {
     expect(widget.calls).toEqual([]);
   });
 
-  it("fast-path ON + over-budget: does NOT skip — runs passes (carried R21-1)", async () => {
+  it("fast-path ON + over-budget (compaction scope): does NOT skip — runs passes (carried R21-1)", async () => {
     seedGraph([{ id: "n3", summary: "fresh arrival" }]);
     const cap = makeFakePi();
     const widget = recordingWidget();
@@ -235,7 +235,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 1, builderSkipWithinBudget: true }),
       signal: new AbortController().signal,
       widget,
-      scope: null,
+      scope: { firstKeptEntryId: null },
       runStageFn: (input) => {
         passCount += 1;
         return scripted(input);
@@ -246,7 +246,38 @@ describe("runBuilder", () => {
     expect(widget.calls[0]).toBe("start:build:1");
   });
 
-  it("default (builderSkipWithinBudget off): runs at least one pass even when under threshold", async () => {
+  it("fast-path NEVER applies at turn_end (scope null): a fired trigger runs even under budget", async () => {
+    // each-N-observations fired at turn_end; the root view is far under budget
+    // and builderSkipWithinBudget is ON — the run must still take its pass (the
+    // budget skip is compaction-only; skipping here would starve the each-N
+    // cadence into a fire→skip→retry loop).
+    seedGraph([{ id: "n3", summary: "fresh arrival" }]);
+    const cap = makeFakePi();
+    const widget = recordingWidget();
+    let passCount = 0;
+    const scripted = scriptRunStage({
+      passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }],
+    });
+    await runBuilder({
+      pi: cap.pi,
+      ctx: makeFakeCtx(),
+      settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: true }),
+      signal: new AbortController().signal,
+      widget,
+      scope: null,
+      runStageFn: (input) => {
+        passCount += 1;
+        return scripted(input);
+      },
+    });
+    // the fast-path did not cancel the run — a pass ran and the stage opened
+    // (and the converged run flushed the arrival — the trigger's duty discharged).
+    expect(passCount).toBe(1);
+    expect(widget.calls[0]).toBe("start:build:1");
+    expect(flushNewCount(cap.appended)).toBe(1);
+  });
+
+  it("default (builderSkipWithinBudget off, compaction scope): runs at least one pass even when under threshold", async () => {
     seedGraph([{ id: "n3", summary: "fresh arrival" }]);
     const cap = makeFakePi();
     const widget = recordingWidget();
@@ -261,7 +292,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 1_000_000 }),
       signal: new AbortController().signal,
       widget,
-      scope: null,
+      scope: { firstKeptEntryId: null },
       runStageFn: (input) => {
         passCount += 1;
         return scripted(input);
