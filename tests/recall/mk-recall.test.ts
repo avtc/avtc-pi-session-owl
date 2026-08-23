@@ -1354,3 +1354,12 @@ describe("mk_recall renderCall (transcript call line)", () => {
     expect(renderCallWith({ ids: "not-an-array" })).toContain("browse");
   });
 });
+
+describe("mk_recall description — recall-before-relying close", () => {
+  it("carries the recall-first principle close (mirrors the ## Memory use section)", () => {
+    const description = String(makeMkRecallTool().description);
+    expect(description).toContain("recall before relying on session-derived understanding");
+    expect(description).toContain("fullDetails for exact source");
+    expect(description).not.toContain("before redoing work or assuming a decision");
+  });
+});

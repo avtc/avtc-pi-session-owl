@@ -369,3 +369,38 @@ describe("renderSummary — selected-root", () => {
     expect(empty).not.toContain("Source tree total");
   });
 });
+
+describe("renderSummary — ## Memory use section (recall-before-relying guidance)", () => {
+  it("renders the memory-use guidance between the legend and the initial prompt", () => {
+    const out = renderSummary({
+      graph: emptyGraph(),
+      selectedTree: null,
+      oInitialPrompt: PROMPT,
+      renderMode: "observations-root",
+      touchedFiles: [],
+      compactionCount: 0,
+    });
+    expect(out).toContain("## Memory use");
+    expect(out).toContain("navigation index into retained session memory");
+    expect(out).toContain("Recall before relying on session-derived understanding");
+    expect(out).toContain('"fullDetails":true');
+    const legendIdx = out.indexOf(RENDER_LEGEND);
+    const useIdx = out.indexOf("## Memory use");
+    const promptIdx = out.indexOf("## Initial prompt");
+    expect(legendIdx).toBeLessThan(useIdx);
+    expect(useIdx).toBeLessThan(promptIdx);
+  });
+
+  it("the preamble keeps only the tree sentence — the old redo/assume sentence is gone (subsumed)", () => {
+    const out = renderSummary({
+      graph: emptyGraph(),
+      selectedTree: null,
+      oInitialPrompt: PROMPT,
+      renderMode: "observations-root",
+      touchedFiles: [],
+      compactionCount: 0,
+    });
+    expect(out).toContain("Your session memory — the top level of a tree");
+    expect(out).not.toContain("Before redoing or assuming");
+  });
+});

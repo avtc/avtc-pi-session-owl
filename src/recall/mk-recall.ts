@@ -692,7 +692,7 @@ const MK_RECALL_PARAMS = Type.Object({
 });
 
 const MK_RECALL_DESCRIPTION =
-  "Browse the full memory tree preserved across compactions — the memory summary shows only the top level. Fetch the detail behind any id (a node, its observations, their verbatim source lines), search all captured memory by regex, or filter by time. Use it proactively: before redoing work or assuming a decision, check how it was done earlier.";
+  "Browse the full memory tree preserved across compactions — the memory summary shows only the top level. Fetch the detail behind any id (a node, its observations, their verbatim source lines), search all captured memory by regex, or filter by time. Use it proactively: recall before relying on session-derived understanding — search memory, expand a visible related id, add fullDetails for exact source.";
 
 // --- execute ---------------------------------------------------------------
 
