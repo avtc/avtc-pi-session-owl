@@ -7,7 +7,7 @@ import {
   _setGetMemkeeperSettings,
   type MemkeeperConfig,
 } from "../src/config/schema.js";
-import { _setBaseLoggerForTest, log } from "../src/log.js";
+import { _setBaseLoggerForTest, clearLogSessionScope, log, setLogSessionScope } from "../src/log.js";
 
 // Swap in a spy sink so we observe calls without touching the real log file.
 const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -22,6 +22,7 @@ describe("log", () => {
     sink.warn.mockClear();
     sink.error.mockClear();
     sink.debug.mockClear();
+    clearLogSessionScope();
   });
   afterAll(() => {
     _setBaseLoggerForTest(null); // restore the real logger
@@ -62,5 +63,29 @@ describe("log", () => {
     expect(sink.info).toHaveBeenCalledWith("i");
     expect(sink.warn).toHaveBeenCalledWith("w");
     expect(sink.error).toHaveBeenCalledWith("e", expect.any(Error));
+  });
+
+  it("tags every line with the session scope ([s-<first 6 chars>]) once set", () => {
+    _setBaseLoggerForTest(sink);
+    setLogSessionScope("01a02596-de2e-707b-8016-1df74d3f13ce");
+    settingsWith(false);
+    log.info("hello");
+    // the scope must not change the debug gating — debug stays suppressed
+    log.debug("suppressed");
+    expect(sink.debug).not.toHaveBeenCalled();
+    settingsWith(true);
+    log.debug("dbg");
+    expect(sink.info).toHaveBeenCalledWith("[s-01a025] hello");
+    expect(sink.debug).toHaveBeenCalledWith("[s-01a025] dbg");
+  });
+
+  it("clearLogSessionScope drops the tag; a short id is kept whole", () => {
+    _setBaseLoggerForTest(sink);
+    setLogSessionScope("abc");
+    log.info("short");
+    clearLogSessionScope();
+    log.info("plain");
+    expect(sink.info).toHaveBeenCalledWith("[s-abc] short");
+    expect(sink.info).toHaveBeenCalledWith("plain");
   });
 });

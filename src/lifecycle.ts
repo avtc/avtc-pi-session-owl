@@ -25,6 +25,7 @@ import { stripAnsi } from "./format/sanitize.js";
 import { abortGoalExtract, runGoalExtract } from "./goal-extract/run.js";
 import { applyCreateNode, applyRecordObservation } from "./graph/mutations.js";
 import { terminateRegexWorker } from "./graph/regex-runner.js";
+import { clearLogSessionScope, setLogSessionScope } from "./log.js";
 import { abortInFlight } from "./runtime/run-lock.js";
 import { clearMemkeeperSessionBase, setMemkeeperSessionBase } from "./runtime/session-affinity.js";
 import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
@@ -213,6 +214,10 @@ export async function onSessionStart(
   widget: WidgetController,
 ): Promise<void> {
   widget.setCtx(ctx);
+  // Tag every log line with this session's short id: parallel pi terminals
+  // share one log file, and the tag attributes lines without timestamp
+  // forensics (cleared on shutdown, re-set on the next session_start).
+  setLogSessionScope(ctx.sessionManager.getSessionId());
   // A fresh per-session affinity base so the maintenance stages' LLM calls route
   // consistently (and namespace their caches) for this session only. Cleared on
   // shutdown. Random per session instance — not content-derived — so a resumed
@@ -338,6 +343,7 @@ export function captureInitialPromptAndExtract(
 export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetController): void {
   abortInFlight();
   clearMemkeeperSessionBase();
+  clearLogSessionScope();
   abortGoalExtract();
   terminateRegexWorker();
   // Clear the resolver so recall never reads a dead session's manager.

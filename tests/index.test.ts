@@ -98,7 +98,12 @@ interface FakePiWithHandlers extends ExtensionAPI {
 
 function makeCtx(): ExtensionContext {
   return {
-    sessionManager: { getLeafId: () => null, getBranch: () => [], getEntry: () => undefined },
+    sessionManager: {
+      getLeafId: () => null,
+      getBranch: () => [],
+      getEntry: () => undefined,
+      getSessionId: () => "a1b2c3d4-0000-0000-0000-000000000000",
+    },
   } as unknown as ExtensionContext;
 }
 

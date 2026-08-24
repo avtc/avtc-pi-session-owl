@@ -129,6 +129,7 @@ function makeFakeCtx(state: FakePiState): ExtensionContext {
       getLeafId: () => "leaf-1",
       getBranch: () => [...state.branch],
       getEntry: (id: string) => state.branch.find((e) => e.id === id),
+      getSessionId: () => "a1b2c3d4-0000-0000-0000-000000000000",
     },
     modelRegistry: {
       find: () => fakeModel,

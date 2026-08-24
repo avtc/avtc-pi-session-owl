@@ -14,6 +14,7 @@ import {
   onSessionShutdown,
   onSessionStart,
 } from "../src/lifecycle.js";
+import { _setBaseLoggerForTest, clearLogSessionScope, log } from "../src/log.js";
 import { _resetRunLock, acquireOrSkip, type RunHandle } from "../src/runtime/run-lock.js";
 import { _resetSessionAffinity, getStageAffinityId, setMemkeeperSessionBase } from "../src/runtime/session-affinity.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
@@ -125,6 +126,7 @@ function makeCtx(branch: FakeEntry[]): {
       getLeafId: () => "leaf-1",
       getBranch: () => branch,
       getEntry: (id: string) => branch.find((e) => e.id === id),
+      getSessionId: () => "01a02596-de2e-707b-8016-1df74d3f13ce",
     },
   };
   return { ctx: ctx as unknown as ExtensionContext, appended, pi: pi as unknown as ExtensionAPI };
@@ -196,8 +198,12 @@ describe("onSessionStart", () => {
     resetForNewSession();
     _resetGetMemkeeperSettings();
     _resetSessionAffinity();
+    clearLogSessionScope();
   });
-  afterEach(() => _resetGetMemkeeperSettings());
+  afterEach(() => {
+    _resetGetMemkeeperSettings();
+    clearLogSessionScope();
+  });
 
   it("loads the store + seeds nGoal on an empty graph (no oInitialPrompt)", async () => {
     const { ctx, pi } = makeCtx([]); // empty branch -> empty graph after load
@@ -209,6 +215,19 @@ describe("onSessionStart", () => {
     expect(ngoal?.state).toBe("active");
     expect(ngoal?.summary).toBe("");
     expect(graph.hasInitialPrompt).toBe(false); // empty branch -> no user message to capture
+  });
+
+  it("tags log lines with the session's short id (set on start, cleared on shutdown)", async () => {
+    const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    _setBaseLoggerForTest(sink);
+    const { ctx, pi } = makeCtx([]);
+    await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
+    log.info("attributed");
+    expect(sink.info).toHaveBeenCalledWith("[s-01a025] attributed");
+    onSessionShutdown({ type: "session_shutdown", reason: "quit" }, noopWidget);
+    log.info("bare");
+    expect(sink.info).toHaveBeenCalledWith("bare");
+    _setBaseLoggerForTest(null);
   });
 
   it("does not re-seed nGoal when the graph already has it (reload)", async () => {
