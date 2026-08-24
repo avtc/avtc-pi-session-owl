@@ -2,7 +2,7 @@
 
 A working-memory extension for [pi](https://github.com/avtc/pi) — maintains a knowledge graph across context compactions and renders a task-relative summary into each compaction, so long sessions keep their goal, decisions, and important context without re-explaining themselves.
 
-![memkeeper](assets/images/<placeholder>.png)
+![memkeeper](assets/images/memkeeper-hero.webp)
 
 ## Features
 
@@ -76,8 +76,6 @@ The graph is a containment tree of **nodes** (folders) holding **observations** 
 
 ## Status widget
 
-![status widget](assets/images/<placeholder>.png)
-
 While memkeeper works, a footer line shows the active stage, its progress, and its token cost — hidden when idle:
 
 ```
@@ -93,11 +91,11 @@ Four independent mode axes, all live-toggleable mid-session:
 | Setting | Options | Default |
 |---|---|---|
 | `observerMode` | `on-threshold` · `on-compaction` | `on-threshold` |
-| `builderMode` | `on-compaction` · `each-N-observations` · `on-session-context-threshold` · `on-root-view-threshold` | `on-compaction` |
+| `builderMode` | `on-compaction` · `each-N-observations` · `on-session-context-threshold` · `on-root-view-threshold` | `each-N-observations` |
 | `selectorMode` | `on-compaction` · `on-session-context-threshold` | `on-compaction` |
-| `renderMode` | `selected-root` (Selector curates) · `observations-root` (Builder's root view, no Selector) | `selected-root` |
+| `renderMode` | `selected-root` (Selector curates) · `observations-root` (Builder's root view, no Selector) | `observations-root` |
 
-The defaults are the token-cheapest profile and are provisional — tune the thresholds to your model and workload. See [CONFIGURATION.md](docs/CONFIGURATION.md) for the full schema reference (every knob, defaults, per-component model presets).
+The defaults keep the observations graph in shape, so when a compaction is triggered the summary is immediately provided — tune the modes and thresholds to your model and workload. See [CONFIGURATION.md](docs/CONFIGURATION.md) for the full schema reference (every knob, defaults, per-component model presets).
 
 ## Tools
 
@@ -117,6 +115,10 @@ The defaults are the token-cheapest profile and are provisional — tune the thr
 | `/mk:rescan` | Discard the current memory graph and re-observe the entire session from the start (asks confirmation). With `--reuse-observations`: rebuild the graph structure from the collected observations without re-observing |
 | `/mk:reobserve-0-obs-chunks` | Re-observe session ranges that were skipped with zero observations (repair after a degraded model run) |
 | `/mk:settings` | Open the settings UI |
+
+`/mk:status` output:
+
+![mk:status](assets/images/mk-status.png)
 
 ## Full suite
 
