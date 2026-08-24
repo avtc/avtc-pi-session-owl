@@ -22,7 +22,7 @@ import { BUILDER, renderTreeTotal } from "../format/render.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
-import { BUILDER_SYSTEM } from "../prompts/builder.js";
+import { builderSystemPrompt } from "../prompts/builder.js";
 // jscpd:ignore-start — shared stage-run runtime surface (Builder + Selector import the same infra)
 import {
   runStage,
@@ -246,7 +246,7 @@ async function runPass(
   const { outcome, onEvent } = makeBuilderPassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(graph, pass, compactionCount);
   await runConvergencePass({
-    systemPrompt: BUILDER_SYSTEM,
+    systemPrompt: builderSystemPrompt(input.settings),
     messages,
     tools,
     model: resolved.model,

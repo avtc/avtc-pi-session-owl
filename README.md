@@ -118,7 +118,7 @@ Four independent mode axes, all live-toggleable mid-session:
 | `selectorMode` | `on-compaction` · `on-session-context-threshold` | `on-compaction` |
 | `renderMode` | `selected-root` (Selector curates) · `observations-root` (the Builder's root view) | `observations-root` |
 
-The defaults keep the observations graph in shape, so when a compaction is triggered the summary is immediately provided — tune the modes and thresholds to your model and workload. See [CONFIGURATION.md](docs/CONFIGURATION.md) for the full schema reference (every knob, defaults, per-component model presets).
+The defaults keep the observations graph in shape, so when a compaction is triggered the summary is immediately provided — tune the modes and thresholds to your model and workload. Two shape knobs — `rootViewTargetNodes` (how many roots to aim for; no target = the agent shapes the root view on its own) and `rootViewStrategy` (task · category · recency · importance · topic) — advise the Builder and Selector on the root view's organization. See [CONFIGURATION.md](docs/CONFIGURATION.md) for the full schema reference (every knob, defaults, per-component model presets).
 
 ## Full suite
 

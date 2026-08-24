@@ -2,48 +2,52 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import { SELECTOR_SYSTEM } from "../../src/prompts/selector.js";
+import { DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { builderSystemPrompt } from "../../src/prompts/builder.js";
+import type { RootShapeSettings } from "../../src/prompts/root-shape.js";
+import { selectorSystemPrompt } from "../../src/prompts/selector.js";
 
-describe("SELECTOR_SYSTEM prompt", () => {
-  it("is a non-empty string", () => {
-    expect(typeof SELECTOR_SYSTEM).toBe("string");
-    expect(SELECTOR_SYSTEM.length).toBeGreaterThan(0);
-  });
+const shape = (over: Partial<RootShapeSettings>): RootShapeSettings => ({ ...DEFAULT_CONFIG, ...over });
 
+describe("selectorSystemPrompt", () => {
   it("opens with the stakes framing the approved text carries", () => {
-    expect(SELECTOR_SYSTEM.startsWith("You build the active-set")).toBe(true);
+    expect(selectorSystemPrompt(shape({})).startsWith("You build the active-set")).toBe(true);
   });
 
   it("names the Selector tools (8 graph tools, no supersede)", () => {
+    const prompt = selectorSystemPrompt(shape({}));
     for (const tool of ["ls", "cat", "find", "mkdir", "mv", "merge", "set_meta", "try_finish"]) {
-      expect(SELECTOR_SYSTEM).toContain(tool);
+      expect(prompt).toContain(tool);
     }
     // supersede is Builder-only (excluded from the Selector toolset). The
     // Selector's set_meta edits importance + summary only (no archived/obsolete).
-    expect(SELECTOR_SYSTEM).not.toContain("supersede");
+    expect(prompt).not.toContain("supersede");
   });
 
   it("includes the fs_* file-read tool mention (the actionable-tasks sentence)", () => {
+    const prompt = selectorSystemPrompt(shape({}));
     for (const tool of ["fs_read", "fs_grep", "fs_find", "fs_ls"]) {
-      expect(SELECTOR_SYSTEM).toContain(tool);
+      expect(prompt).toContain(tool);
     }
   });
 
   it("includes the drill-in line", () => {
-    expect(SELECTOR_SYSTEM).toContain("Drill into any node to inspect its children and detail");
-    expect(SELECTOR_SYSTEM).toContain("ls");
-    expect(SELECTOR_SYSTEM).toContain("cat");
-    expect(SELECTOR_SYSTEM).toContain("find");
+    const prompt = selectorSystemPrompt(shape({}));
+    expect(prompt).toContain("Drill into any node to inspect its children and detail");
+    expect(prompt).toContain("ls");
+    expect(prompt).toContain("cat");
+    expect(prompt).toContain("find");
   });
 
-  // String-equality snapshot guard: the prompt is approved protected text from
-  // the design doc. Any change must be a deliberate re-approval, not a drift.
-  it("matches the approved text exactly (drift guard)", () => {
-    expect(SELECTOR_SYSTEM).toBe(
+  // String-equality snapshot guard: the no-advice baseline (null target,
+  // balanced strategy) is approved protected text. Any change must be a
+  // deliberate re-approval, not a drift.
+  it("matches the approved baseline exactly (null target + balanced, drift guard)", () => {
+    expect(selectorSystemPrompt(shape({}))).toBe(
       [
         "You build the active-set — the task-focused memory the agent continues its work from",
         "after a compaction. The active-set top level becomes the summary, so it must read",
-        "clearly and fit the budget. The agent resumes with these lines alone: keep the",
+        "clearly. The agent resumes with these lines alone: keep the",
         "load-bearing facts in each line and say what stays below it, so the agent sees",
         "what memory holds and what opening an id adds.",
         "",
@@ -90,5 +94,43 @@ describe("SELECTOR_SYSTEM prompt", () => {
         "  `mv` it into `nIrrelevant`.",
       ].join("\n"),
     );
+  });
+
+  it("no target → the lean/budget opening clause is dropped (agent shapes the root on its own)", () => {
+    const prompt = selectorSystemPrompt(shape({}));
+    expect(prompt).not.toContain("and fit the budget");
+    expect(prompt).not.toContain("Aim to have no more than");
+  });
+
+  it("a target → the approved count-hint sentence follows the opening clause", () => {
+    const prompt = selectorSystemPrompt(shape({ rootViewTargetNodes: 40 }));
+    expect(prompt).toContain("clearly. Aim to have no more than 40 nodes at root level. The agent resumes");
+    expect(prompt).not.toContain("and fit the budget");
+  });
+
+  it("balanced → no strategy paragraph", () => {
+    expect(selectorSystemPrompt(shape({}))).not.toContain("Organize roots by");
+    expect(selectorSystemPrompt(shape({}))).not.toContain("Scale granularity with");
+  });
+
+  it("a strategy → its clause sits between the shape bullets and Surface", () => {
+    const prompt = selectorSystemPrompt(shape({ rootViewStrategy: "by-category" }));
+    const clause = "Organize roots by category — group memory by the kind of thing it is.";
+    const bullets = prompt.indexOf("- Set the rest aside into `nIrrelevant` (`mv`).");
+    const at = prompt.indexOf(clause);
+    const surface = prompt.indexOf("Surface the durable context");
+    expect(at).toBeGreaterThan(bullets);
+    expect(surface).toBeGreaterThan(at);
+  });
+
+  it("builder and selector share the same strategy clause and count hint (one source)", () => {
+    const builder = builderSystemPrompt(shape({ rootViewTargetNodes: 80, rootViewStrategy: "by-recency" }));
+    const selector = selectorSystemPrompt(shape({ rootViewTargetNodes: 80, rootViewStrategy: "by-recency" }));
+    expect(selector).toContain("Aim to have no more than 80 nodes at root level.");
+    for (const p of [builder, selector]) {
+      expect(p).toContain(
+        "Organize roots by recency: the newest material keeps fine-grained roots; as observations age, fold their roots into coarser ones. The recent past stays granular; the distant past compacts.",
+      );
+    }
   });
 });

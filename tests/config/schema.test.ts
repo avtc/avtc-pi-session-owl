@@ -46,6 +46,8 @@ const EXPECTED_IDS = [
   "observerMode",
   "builderMode",
   "selectorMode",
+  "rootViewTargetNodes",
+  "rootViewStrategy",
   "commandResultCap",
   "findTimeoutMs",
   "llmCallTimeoutMs",
@@ -150,6 +152,8 @@ describe("MEMKEEPER_SCHEMA", () => {
       observerMode: "string",
       builderMode: "string",
       selectorMode: "string",
+      rootViewTargetNodes: "number",
+      rootViewStrategy: "string",
       commandResultCap: "number",
       findTimeoutMs: "duration",
       llmCallTimeoutMs: "duration",
@@ -222,6 +226,8 @@ describe("DEFAULT_CONFIG parity with schema defaults", () => {
     expect(DEFAULT_CONFIG.builderMode).toBe("each-N-observations");
     expect(DEFAULT_CONFIG.selectorMode).toBe("on-compaction");
     expect(DEFAULT_CONFIG.renderMode).toBe("observations-root");
+    expect(DEFAULT_CONFIG.rootViewTargetNodes).toBeNull();
+    expect(DEFAULT_CONFIG.rootViewStrategy).toBe("balanced");
     expect(DEFAULT_CONFIG.observerIncludeThinking).toBe(true);
     expect(DEFAULT_CONFIG.observerToolBlockCapTokens).toBeNull();
     expect(DEFAULT_CONFIG.builderSkipWithinBudget).toBe(true);

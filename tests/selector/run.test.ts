@@ -8,7 +8,7 @@ import { DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { MERGE_TOOL, MKDIR_TOOL, MV_TOOL, SELECTOR_SET_META_TOOL } from "../../src/graph/mutate-tools.js";
 import { applyCreateNode, applyRecordObservation, setClock } from "../../src/graph/mutations.js";
 import { TRY_FINISH_TOOL } from "../../src/graph/read-tools.js";
-import { SELECTOR_SYSTEM } from "../../src/prompts/selector.js";
+import { selectorSystemPrompt } from "../../src/prompts/selector.js";
 import type { StageRunInput, StageRunResult } from "../../src/runtime/agent-loop.js";
 import { makeSelectorPassTracker, runSelector } from "../../src/selector/run.js";
 import { encodeSelection, SELECTION_TYPE, USAGE_TYPE } from "../../src/store/codecs.js";
@@ -832,19 +832,21 @@ describe("runSelector", () => {
   });
 });
 
-// --- SELECTOR_SYSTEM sanity (cross-module: the run uses it) -----------------
+// --- selector system prompt sanity (cross-module: the run uses it) ----------
 
-describe("SELECTOR_SYSTEM (used by runSelector)", () => {
+describe("selectorSystemPrompt (used by runSelector)", () => {
   it("is non-empty and includes the drill-in line", () => {
-    expect(SELECTOR_SYSTEM.length).toBeGreaterThan(0);
-    expect(SELECTOR_SYSTEM).toContain("Drill into any node");
+    const prompt = selectorSystemPrompt(DEFAULT_CONFIG);
+    expect(prompt.length).toBeGreaterThan(0);
+    expect(prompt).toContain("Drill into any node");
   });
 
   it("names the budget levers (demote + condense), no 'remove' tool", () => {
     // The Selector's budget levers are demote (mv into nIrrelevant) + condense
     // (set_meta) — never remove (rollback risk).
-    expect(SELECTOR_SYSTEM).toContain("set_meta");
-    expect(SELECTOR_SYSTEM).toContain("nIrrelevant");
-    expect(SELECTOR_SYSTEM).not.toMatch(/\bremove\b/);
+    const prompt = selectorSystemPrompt(DEFAULT_CONFIG);
+    expect(prompt).toContain("set_meta");
+    expect(prompt).toContain("nIrrelevant");
+    expect(prompt).not.toMatch(/\bremove\b/);
   });
 });

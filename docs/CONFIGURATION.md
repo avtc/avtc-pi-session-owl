@@ -21,6 +21,8 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `observerMode` | string | `on-threshold` | When the Observer captures memory. `on-threshold` = throughout the session, after a turn once enough new text accumulates; `on-compaction` = all at once, at compaction time only. |
 | `builderMode` | string | `each-N-observations` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
 | `selectorMode` | string | `on-compaction` | When the Selector runs (only if `renderMode=selected-root`): `on-compaction` or `on-session-context-threshold`. |
+| `rootViewTargetNodes` | number | `null` | Advice for the Builder and Selector on how many roots to keep. A number = aim for about that many roots — a soft target, the token budget wins. No target = no advice; the agent shapes the root view on its own. |
+| `rootViewStrategy` | string | `balanced` | How the Builder and Selector organize roots. Balanced = organize arrivals and consolidate related; By task = one root per task, in order; By category = roots by kind (requests, decisions, code understanding, work state, pitfalls, environment — open list); By recency = granular recent, compact older; By importance = dedicated roots for crit/high; By topic = one root per distinct subject. |
 | `commandResultCap` | number | `50` | Max items a `/mk:*` command shows before a `... +N more` footer. `null` = show all. |
 | `findTimeoutMs` | duration | `30000` | Max duration a `find`/`mk_recall` search may run before it is stopped. |
 | `llmCallTimeoutMs` | duration | `1200000` | Aborts any Observer, Builder, or Selector LLM call that runs longer than this. `null` = no limit. |

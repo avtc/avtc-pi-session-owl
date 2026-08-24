@@ -2,32 +2,33 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import { BUILDER_SYSTEM } from "../../src/prompts/builder.js";
+import { DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { builderSystemPrompt } from "../../src/prompts/builder.js";
+import type { RootShapeSettings } from "../../src/prompts/root-shape.js";
 
-describe("BUILDER_SYSTEM prompt", () => {
-  it("is a non-empty string", () => {
-    expect(typeof BUILDER_SYSTEM).toBe("string");
-    expect(BUILDER_SYSTEM.length).toBeGreaterThan(0);
-  });
+const shape = (over: Partial<RootShapeSettings>): RootShapeSettings => ({ ...DEFAULT_CONFIG, ...over });
 
+describe("builderSystemPrompt", () => {
   it("opens with the stakes framing the approved text carries", () => {
-    expect(BUILDER_SYSTEM.startsWith("You keep the memory graph")).toBe(true);
+    expect(builderSystemPrompt(shape({})).startsWith("You keep the memory graph")).toBe(true);
   });
 
   it("names all nine Builder tools", () => {
+    const prompt = builderSystemPrompt(shape({}));
     for (const tool of ["ls", "cat", "find", "mkdir", "mv", "merge", "supersede", "set_meta", "try_finish"]) {
-      expect(BUILDER_SYSTEM).toContain(tool);
+      expect(prompt).toContain(tool);
     }
   });
 
-  // the approved text is pinned in the design doc. Any change must be a
+  // String-equality snapshot guard: the no-advice baseline (null target,
+  // balanced strategy) is approved protected text. Any change must be a
   // deliberate re-approval, not a drift.
-  it("matches the approved text exactly (drift guard)", () => {
-    expect(BUILDER_SYSTEM).toBe(
+  it("matches the approved baseline exactly (null target + balanced, drift guard)", () => {
+    expect(builderSystemPrompt(shape({}))).toBe(
       [
         "You keep the memory graph coherent and bounded across compactions. The top level",
-        "is the summary the agent continues its work from, so the roots must read clearly",
-        "and stay within budget. Each root and node summary states its subject and the",
+        "is the summary the agent continues its work from, so the roots must read clearly.",
+        "Each root and node summary states its subject and the",
         "outcome that matters, and says what else the node holds.",
         "",
         "Legend — graph listings use these marks:",
@@ -67,5 +68,32 @@ describe("BUILDER_SYSTEM prompt", () => {
         "  obsolete (hidden unless searched), pointing at the TOML node.",
       ].join("\n"),
     );
+  });
+
+  it("no target → the lean/budget opening clause is dropped (agent shapes the root on its own)", () => {
+    const prompt = builderSystemPrompt(shape({}));
+    expect(prompt).not.toContain("stay within budget");
+    expect(prompt).not.toContain("Aim to have no more than");
+  });
+
+  it("a target → the approved count-hint sentence follows the opening clause", () => {
+    const prompt = builderSystemPrompt(shape({ rootViewTargetNodes: 40 }));
+    expect(prompt).toContain("so the roots must read clearly. Aim to have no more than 40 nodes at root level.");
+    expect(prompt).not.toContain("stay within budget");
+  });
+
+  it("balanced → no strategy paragraph", () => {
+    expect(builderSystemPrompt(shape({}))).not.toContain("Organize roots by");
+    expect(builderSystemPrompt(shape({}))).not.toContain("Scale granularity with");
+  });
+
+  it("a strategy → its clause sits between the organize bullets and try_finish", () => {
+    const prompt = builderSystemPrompt(shape({ rootViewStrategy: "by-topic" }));
+    const clause = "Organize roots by topic — the distinct subjects the session works on";
+    const bullets = prompt.indexOf("  graph matures.");
+    const at = prompt.indexOf(clause);
+    const work = prompt.indexOf("Work until `try_finish` accepts");
+    expect(at).toBeGreaterThan(bullets);
+    expect(work).toBeGreaterThan(at);
   });
 });

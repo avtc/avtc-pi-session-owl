@@ -22,7 +22,7 @@ import { NON_BUILDER, renderTreeTotal } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
-import { SELECTOR_SYSTEM } from "../prompts/selector.js";
+import { selectorSystemPrompt } from "../prompts/selector.js";
 // jscpd:ignore-start — shared stage-run runtime surface (Builder + Selector import the same infra)
 import {
   runStage,
@@ -240,7 +240,7 @@ async function runPass(
   const { outcome, onEvent } = makeSelectorPassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(working, contextView, pass, treeTotal);
   await runConvergencePass({
-    systemPrompt: SELECTOR_SYSTEM,
+    systemPrompt: selectorSystemPrompt(input.settings),
     messages,
     tools,
     model: resolved.model,

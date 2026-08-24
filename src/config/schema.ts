@@ -30,6 +30,9 @@ export function _setRegisterSettingsCommand(fn: typeof registerSettingsCommand |
 /** The `model` settings resolve to a `provider/id` string, or `null` = fall through to
  *  defaultModel (then the session model). `commandResultCap` / `observerToolBlockCapTokens`
  *  allow `null` = no limit / no truncation (the "No limit" presets). */
+/** Root-view organization axis injected into the Builder and Selector prompts. */
+export type RootViewStrategy = "balanced" | "by-task" | "by-category" | "by-recency" | "by-importance" | "by-topic";
+
 export interface MemkeeperConfig {
   // General
   enabled: boolean;
@@ -41,6 +44,13 @@ export interface MemkeeperConfig {
   observerMode: "on-threshold" | "on-compaction";
   builderMode: "on-compaction" | "each-N-observations" | "on-session-context-threshold" | "on-root-view-threshold";
   selectorMode: "on-compaction" | "on-session-context-threshold";
+  /** Advice for the Builder/Selector on how many roots to keep. null = no advice
+   *  (the prompts' lean/budget wording is excised; the agent shapes the root on
+   *  its own — the mechanical try_finish budget still gates). A number = the
+   *  count hint replaces that wording. */
+  rootViewTargetNodes: number | null;
+  /** Organization axis for roots, injected into the Builder/Selector prompts. */
+  rootViewStrategy: RootViewStrategy;
   commandResultCap: number | null;
   /** Find/mk_recall search execution timeout. Runs in a worker thread; a
    *  pattern still running past this is stopped. */
@@ -101,6 +111,8 @@ const DEFAULT_RENDER_MODE = "observations-root";
 const DEFAULT_OBSERVER_MODE = "on-threshold";
 const DEFAULT_BUILDER_MODE = "each-N-observations";
 const DEFAULT_SELECTOR_MODE = "on-compaction";
+const DEFAULT_ROOT_VIEW_STRATEGY: RootViewStrategy = "balanced";
+const NO_TARGET: number | null = null;
 const NO_MODEL: string | null = null;
 const NO_LIMIT: number | null = null;
 /** loadSettingsIntoMemory args: `undefined` makes avtc-pi-settings-ui fall back to its
@@ -129,6 +141,8 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   observerMode: DEFAULT_OBSERVER_MODE,
   builderMode: DEFAULT_BUILDER_MODE,
   selectorMode: DEFAULT_SELECTOR_MODE,
+  rootViewTargetNodes: NO_TARGET,
+  rootViewStrategy: DEFAULT_ROOT_VIEW_STRATEGY,
   commandResultCap: 50,
   findTimeoutMs: DEFAULT_FIND_TIMEOUT_MS,
   llmCallTimeoutMs: DEFAULT_LLM_CALL_TIMEOUT_MS,
@@ -181,6 +195,15 @@ const SELECTOR_MODE_PRESETS: readonly PresetElement[] = [
   ["On compaction", "on-compaction"],
   ["On session context threshold", "on-session-context-threshold"],
 ];
+const ROOT_VIEW_STRATEGY_PRESETS: readonly PresetElement[] = [
+  ["Balanced", "balanced"],
+  ["By task", "by-task"],
+  ["By category", "by-category"],
+  ["By recency", "by-recency"],
+  ["By importance", "by-importance"],
+  ["By topic", "by-topic"],
+];
+const ROOT_VIEW_TARGET_PRESETS: readonly PresetElement[] = [["No target", NO_TARGET], 20, 40, 80, 160, 320];
 const COMMAND_RESULT_CAP_PRESETS: readonly PresetElement[] = [10, 25, 50, 100, ["No limit", NO_LIMIT]];
 const FIND_TIMEOUT_PRESETS: readonly PresetElement[] = [
   ["10s", 10_000],
@@ -309,6 +332,24 @@ const SETTINGS: readonly SettingSchema[] = [
     type: "string",
     defaultValue: DEFAULT_CONFIG.selectorMode,
     presets: SELECTOR_MODE_PRESETS,
+  }),
+  setting("rootViewTargetNodes", {
+    label: "Root view target nodes",
+    description:
+      "Advice for the Builder and Selector on how many roots to keep. A number = aim for about that many roots — a soft target, the token budget wins. No target = no advice; the agent shapes the root view on its own.",
+    type: "number",
+    defaultValue: DEFAULT_CONFIG.rootViewTargetNodes,
+    min: 1,
+    presets: ROOT_VIEW_TARGET_PRESETS,
+    supportsCustomValues: true,
+  }),
+  setting("rootViewStrategy", {
+    label: "Root view strategy",
+    description:
+      "How the Builder and Selector organize roots. Balanced = organize arrivals and consolidate related; By task = one root per task, in order; By category = roots by kind (requests, decisions, code understanding, work state, pitfalls, environment — open list); By recency = granular recent, compact older; By importance = dedicated roots for crit/high; By topic = one root per distinct subject.",
+    type: "string",
+    defaultValue: DEFAULT_CONFIG.rootViewStrategy,
+    presets: ROOT_VIEW_STRATEGY_PRESETS,
   }),
   setting("commandResultCap", {
     label: "Command result cap",
@@ -520,6 +561,8 @@ const TABS: readonly SettingsTabSchema[] = [
       "observerMode",
       "builderMode",
       "selectorMode",
+      "rootViewTargetNodes",
+      "rootViewStrategy",
       "commandResultCap",
       "findTimeoutMs",
       "llmCallTimeoutMs",
