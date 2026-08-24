@@ -7,8 +7,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
-import type { SizeHintObservation } from "../format/render.js";
-import { BUILDER, NON_BUILDER } from "../format/render.js";
+import { BUILDER, NON_BUILDER, type SizeHintObservation, treeLevels } from "../format/render.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
 import { nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { notify } from "../notify.js";
@@ -32,12 +31,16 @@ export interface StatusInput {
   /** Compaction entries on the active branch. */
   compactionCount: number;
   nodes: Node[];
-  observations: Pick<Observation, "summaryTokens" | "detailsTokens">[];
+  observations: Pick<Observation, "summaryTokens" | "detailsTokens" | "detailsLines">[];
+  /** Max tree depth in levels (roots = 1) — the same count the tree-total footer shows. */
+  levels: number;
+  /** Non-obsolete root count — the exact root set the Builder view renders. */
+  rootsCount: number;
   /** The non-obsolete root-view tokens (chars/4 of the rendered root view). */
   rootsViewTokens: number;
-  /** The selected-tree root-view tokens, or null when there is no selected tree
-   *  / renderMode is observations-root. */
-  selectedViewTokens: number | null;
+  /** The persisted selected tree's root count + view tokens, or null when there
+   *  is no selected tree / renderMode is observations-root. */
+  selectedView: { rootsCount: number; viewTokens: number } | null;
   usageLedger: UsageLedger;
   /** The last-compaction ledger baseline (null until the first compaction). */
   lastCompactionLedger: UsageLedger | null;
@@ -58,30 +61,34 @@ export function buildStatusReport(input: StatusInput): string {
   // --- Session line ---
   const durationMs = Date.now() - input.sessionStartMs;
   lines.push(
-    `Session  ${formatDuration(durationMs)} — ${formatCount(input.compactionCount)} compaction${input.compactionCount === 1 ? "" : "s"}`,
+    `Session  ${formatDuration(durationMs)} · ${formatCount(input.compactionCount)} compaction${input.compactionCount === 1 ? "" : "s"}`,
   );
 
-  // --- Memory section (counts with separators; columns aligned: labels +
-  //  counts right-aligned so the token column lines up) ---
+  // --- Memory section (labels padded into one column; Observations/Nodes
+  //  counts right-aligned so the two count columns line up; style mirrors the
+  //  root-view tree-total footer — plain counts, · separators) ---
   const obsCount = input.observations.length;
-  const rawTokens = sum(input.observations, (o) => o.detailsTokens ?? 0); // verbatim source size
-  const summarizedTokens = sum(input.observations, (o) => o.summaryTokens) + sum(input.nodes, (n) => n.summaryTokens); // node + obs summaries
   const nodeCount = input.nodes.length;
-  const LABEL_WIDTH = 12; // "observations" is the longest label
-  const obsCountStr = formatCount(obsCount);
-  const nodeCountStr = formatCount(nodeCount);
+  const rawTokens = sum(input.observations, (o) => o.detailsTokens ?? 0); // verbatim source size
+  const rawLines = sum(input.observations, (o) => o.detailsLines ?? 0);
+  const summarizedTokens = sum(input.observations, (o) => o.summaryTokens) + sum(input.nodes, (n) => n.summaryTokens); // node + obs summaries
+  const LABEL_WIDTH = 14; // "Selector roots" is the longest label
+  const obsCountStr = String(obsCount);
+  const nodeCountStr = String(nodeCount);
   const countWidth = Math.max(obsCountStr.length, nodeCountStr.length);
   lines.push("", "Memory");
-  lines.push(`  ${"observations".padStart(LABEL_WIDTH)}  ${obsCountStr.padStart(countWidth)}`);
-  lines.push(`  ${"nodes".padStart(LABEL_WIDTH)}  ${nodeCountStr.padStart(countWidth)}`);
-  lines.push(`  ${"Raw tokens".padStart(LABEL_WIDTH)}  ${formatTokens(rawTokens)} (verbatim source)`);
-  lines.push(`  ${"Summarized".padStart(LABEL_WIDTH)}  ${formatTokens(summarizedTokens)} (node + obs summaries)`);
+  lines.push(`  ${"Observations".padStart(LABEL_WIDTH)}  ${obsCountStr.padStart(countWidth)}`);
   lines.push(
-    `  roots view  ${formatTokens(input.rootsViewTokens)} / ${formatTokens(input.settings.builderRootViewThreshold)}`,
+    `  ${"Nodes".padStart(LABEL_WIDTH)}  ${nodeCountStr.padStart(countWidth)} (${input.levels} level${input.levels === 1 ? "" : "s"})`,
   );
-  if (input.settings.renderMode === "selected-root" && input.selectedViewTokens !== null) {
+  lines.push(`  ${"Details".padStart(LABEL_WIDTH)}  ${formatTokens(rawTokens)} tokens ${formatTokens(rawLines)} lines`);
+  lines.push(`  ${"Summaries".padStart(LABEL_WIDTH)}  ${formatTokens(summarizedTokens)} tokens (node + obs)`);
+  lines.push(
+    `  ${"Builder roots".padStart(LABEL_WIDTH)}  ${input.rootsCount} · ${formatTokens(input.rootsViewTokens)} / ${formatTokens(input.settings.builderRootViewThreshold)} tokens`,
+  );
+  if (input.settings.renderMode === "selected-root" && input.selectedView !== null) {
     lines.push(
-      `  selected view  ${formatTokens(input.selectedViewTokens)} / ${formatTokens(input.settings.selectorRootViewThreshold)}`,
+      `  ${"Selector roots".padStart(LABEL_WIDTH)}  ${input.selectedView.rootsCount} · ${formatTokens(input.selectedView.viewTokens)} / ${formatTokens(input.settings.selectorRootViewThreshold)} tokens`,
     );
   }
 
@@ -105,7 +112,7 @@ function appendPhaseLines(lines: string[], ledger: UsageLedger): void {
   for (const phase of PHASES) {
     const p = ledger[phase];
     lines.push(
-      `  ${phase.padEnd(PHASE_LABEL_WIDTH)}  in ${formatTokens(p.input)} — out ${formatTokens(p.output)} — cache ${formatTokens(p.cacheRead)} — ${formatCost(p.cost)} — ${formatDuration(p.elapsedMs)}`,
+      `  ${phase.padEnd(PHASE_LABEL_WIDTH)}  in ${formatTokens(p.input)} · out ${formatTokens(p.output)} · cache ${formatTokens(p.cacheRead)} · ${formatCost(p.cost)} · ${formatDuration(p.elapsedMs)}`,
     );
   }
 }
@@ -167,11 +174,7 @@ export function gatherStatusInput(
   const observations = [...graph.observations.values()];
   const nonObsoleteRoots = nonObsoleteRootsOf(nodes);
   const rootsViewTokens = estimateContentTokens(renderRootViewFromRoots(nonObsoleteRoots, BUILDER, graph.observations));
-  const selectedViewTokens = measureSelectedViewTokens(
-    config.renderMode,
-    store.selectedTree?.nodes ?? null,
-    graph.observations,
-  );
+  const selectedView = measureSelectedView(config.renderMode, store.selectedTree?.nodes ?? null, graph.observations);
   return {
     enabled: config.enabled,
     settings: {
@@ -183,8 +186,10 @@ export function gatherStatusInput(
     compactionCount: session.compactionCount,
     nodes,
     observations,
+    levels: treeLevels(graph.nodes),
+    rootsCount: nonObsoleteRoots.length,
     rootsViewTokens,
-    selectedViewTokens,
+    selectedView,
     usageLedger: store.usageLedger,
     lastCompactionLedger: store.lastCompactionLedger,
   };
@@ -194,15 +199,18 @@ export function gatherStatusInput(
  *  Returns null when there is no tree or renderMode is observations-root. The
  *  tree carries structure only — the single-obs size hints resolve against the
  *  source graph's observations. */
-function measureSelectedViewTokens(
+function measureSelectedView(
   renderMode: "selected-root" | "observations-root",
   serializedNodes: SerializedNode[] | null,
   observations: ReadonlyMap<string, SizeHintObservation>,
-): number | null {
+): { rootsCount: number; viewTokens: number } | null {
   if (renderMode !== "selected-root" || serializedNodes === null) return null;
   const decoded = nonObsoleteRootsOf(serializedNodes.map(decodeNode).filter((n): n is Node => n !== null));
   if (decoded.length === 0) return null;
-  return estimateContentTokens(renderRootViewFromRoots(decoded, NON_BUILDER, observations));
+  return {
+    rootsCount: decoded.length,
+    viewTokens: estimateContentTokens(renderRootViewFromRoots(decoded, NON_BUILDER, observations)),
+  };
 }
 
 // --- registration ----------------------------------------------------------

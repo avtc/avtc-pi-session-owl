@@ -50,11 +50,13 @@ function obs(
   content: string,
   summaryTokens: number,
   detailsTokens: number,
+  detailsLines: number,
 ): {
   id: ObsId;
   content: string;
   summaryTokens: number;
   detailsTokens: number;
+  detailsLines: number;
   importance: "med";
   sourceEntryIds: string[];
   timestamps: { createdAt: string };
@@ -64,6 +66,7 @@ function obs(
     content,
     summaryTokens,
     detailsTokens,
+    detailsLines,
     importance: "med",
     sourceEntryIds: [],
     timestamps: { createdAt: "2026-07-28T09:00:00.000Z" },
@@ -82,8 +85,10 @@ function input(over: Partial<StatusInput>): StatusInput {
     compactionCount: 0,
     nodes: [],
     observations: [],
+    levels: 0,
+    rootsCount: 0,
     rootsViewTokens: 0,
-    selectedViewTokens: null,
+    selectedView: null,
     usageLedger: cloneLedger(EMPTY_LEDGER),
     lastCompactionLedger: null,
     ...over,
@@ -100,48 +105,51 @@ describe("buildStatusReport", () => {
     const report = buildStatusReport(input({ sessionStartMs: Date.now() - 3 * 3600_000, compactionCount: 5 }));
     expect(report).toContain("🦉 memkeeper — status");
     expect(report).toContain("Session");
-    expect(report).toContain("5 compactions");
+    expect(report).toContain("· 5 compactions");
     expect(report).toContain("03:00:0"); // ~3h duration (seconds may vary by 1)
   });
 
-  it("Memory section: counts + raw (verbatim source) + summarized (node+obs) tokens", () => {
+  it("Memory section: counts + levels + details (tokens+lines) + summaries", () => {
     const report = buildStatusReport(
       input({
+        levels: 2,
+        rootsCount: 3,
+        rootsViewTokens: 8700,
         nodes: [node({ id: "n1", summaryTokens: 320 }), node({ id: "n2", summaryTokens: 80 })],
-        // obs summaries: 100 + 50 = 150; obs details (verbatim source): 4500 + 1500 = 6000
-        observations: [obs("o1", "x", 100, 4500), obs("o2", "y", 50, 1500)],
+        // obs summaries: 100 + 50 = 150; details: 4500+1500 = 6000 tokens, 300+100 = 400 lines
+        observations: [obs("o1", "x", 100, 4500, 300), obs("o2", "y", 50, 1500, 100)],
       }),
     );
     expect(report).toContain("Memory");
-    expect(report).toContain("observations");
-    expect(report).toContain("2");
-    // Raw tokens = Σ detailsTokens (verbatim source) = 6000 → "6.0k"
-    expect(report).toContain("Raw tokens");
-    expect(report).toContain("6.0k");
-    expect(report).toContain("(verbatim source)");
-    // Summarized tokens = Σ node.summaryTokens + Σ obs.summaryTokens = 400 + 150 = 550
-    expect(report).toContain("Summarized");
-    expect(report).toContain("550");
-    expect(report).toContain("(node + obs summaries)");
-    expect(report).toContain("nodes");
+    // exact approved lines (labels padded to one column, · separators)
+    expect(report).toContain("  Observations  2");
+    expect(report).toContain("         Nodes  2 (2 levels)");
+    expect(report).toContain("       Details  6.0k tokens 400 lines");
+    expect(report).toContain("     Summaries  550 tokens (node + obs)");
+    expect(report).toContain(" Builder roots  3 · 8.7k / 40k tokens");
   });
 
-  it("counts use thousands separators (formatCount) and the count column is right-aligned", () => {
+  it("singular level — (1 level)", () => {
+    const report = buildStatusReport(input({ nodes: [node({ id: "n1" })], levels: 1 }));
+    expect(report).toContain("1 (1 level)");
+  });
+
+  it("counts are plain (no thousands separators) and the count column is right-aligned", () => {
     const bigNodes: Node[] = [];
-    const bigObs: { summaryTokens: number; detailsTokens: number }[] = [];
-    for (let i = 0; i < 1245; i += 1) bigObs.push({ summaryTokens: 0, detailsTokens: 0 });
+    const bigObs: { summaryTokens: number; detailsTokens: number; detailsLines: number }[] = [];
+    for (let i = 0; i < 1245; i += 1) bigObs.push({ summaryTokens: 0, detailsTokens: 0, detailsLines: 0 });
     for (let i = 0; i < 95; i += 1) bigNodes.push(node({ id: `n${i}` as unknown as Node["id"], summaryTokens: 0 }));
     const report = buildStatusReport(input({ nodes: bigNodes, observations: bigObs }));
     const memoryLines = report
       .split("\n")
-      .filter((l) => l.includes("observations") || l.trimStart().startsWith("nodes"));
+      .filter((l) => l.includes("Observations") || l.trimStart().startsWith("Nodes"));
     expect(memoryLines.length).toBe(2);
-    // counts present with separators
-    expect(memoryLines[0]).toContain("1,245");
+    // plain counts, no separators
+    expect(memoryLines[0]).toContain("1245");
     expect(memoryLines[1]).toContain("95");
     // right-aligned counts: both count strings END at the same column (padStart
     // to the derived count width).
-    const obsEnd = memoryLines[0].indexOf("1,245") + "1,245".length;
+    const obsEnd = memoryLines[0].indexOf("1245") + "1245".length;
     const nodesEnd = memoryLines[1].indexOf("95") + "95".length;
     expect(obsEnd).toBe(nodesEnd);
   });
@@ -149,45 +157,44 @@ describe("buildStatusReport", () => {
   it("count column stays aligned even when counts exceed the typical width (100k+)", () => {
     // A fixed count width (e.g. 6 → max 99,999) would let 100,000 drift the
     // column. The width is derived from the actual counts, so it holds.
-    const bigObs: { summaryTokens: number; detailsTokens: number }[] = [];
-    for (let i = 0; i < 100_000; i += 1) bigObs.push({ summaryTokens: 0, detailsTokens: 0 });
+    const bigObs: { summaryTokens: number; detailsTokens: number; detailsLines: number }[] = [];
+    for (let i = 0; i < 100_000; i += 1) bigObs.push({ summaryTokens: 0, detailsTokens: 0, detailsLines: 0 });
     const report = buildStatusReport(input({ nodes: [node({ id: "n1", summaryTokens: 0 })], observations: bigObs }));
     const memoryLines = report
       .split("\n")
-      .filter((l) => l.includes("observations") || l.trimStart().startsWith("nodes"));
+      .filter((l) => l.includes("Observations") || l.trimStart().startsWith("Nodes"));
     expect(memoryLines.length).toBe(2);
-    expect(memoryLines[0]).toContain("100,000");
-    expect(memoryLines[1]).toContain("1");
+    expect(memoryLines[0]).toContain("100000");
+    expect(memoryLines[1]).toContain("1 ");
     // count column aligned regardless of the 6-digit count magnitude.
-    const obsEnd = memoryLines[0].indexOf("100,000") + "100,000".length;
-    const nodesEnd = memoryLines[1].indexOf("1") + "1".length;
+    const obsEnd = memoryLines[0].indexOf("100000") + "100000".length;
+    const nodesEnd = memoryLines[1].indexOf("1 ") + "1".length;
     expect(obsEnd).toBe(nodesEnd);
   });
 
-  it("roots view line shows viewTokens / builderRootViewThreshold", () => {
+  it("Builder roots line shows count · viewTokens / threshold tokens", () => {
     const report = buildStatusReport(
-      input({ rootsViewTokens: 35000, settings: settings({ builderRootViewThreshold: 40000 }) }),
+      input({ rootsCount: 42, rootsViewTokens: 35000, settings: settings({ builderRootViewThreshold: 40000 }) }),
     );
-    expect(report).toContain("roots view");
-    expect(report).toContain("35k"); // formatTokens(35000)
-    expect(report).toContain("40k"); // formatTokens(40000)
+    expect(report).toContain("Builder roots  42 · 35k / 40k tokens");
   });
 
-  it("selected view line only in selected-root renderMode", () => {
+  it("Selector roots line only in selected-root renderMode", () => {
     const withSelected = buildStatusReport(
       input({
-        selectedViewTokens: 15000,
+        selectedView: { rootsCount: 12, viewTokens: 15000 },
         settings: settings({ renderMode: "selected-root", selectorRootViewThreshold: 20000 }),
       }),
     );
-    expect(withSelected).toContain("selected view");
-    expect(withSelected).toContain("15k");
-    expect(withSelected).toContain("20k");
-    // observations-root → no selected view line
+    expect(withSelected).toContain("Selector roots  12 · 15k / 20k tokens");
+    // observations-root → no Selector roots line
     const noSelected = buildStatusReport(
-      input({ selectedViewTokens: 15000, settings: settings({ renderMode: "observations-root" }) }),
+      input({
+        selectedView: { rootsCount: 12, viewTokens: 15000 },
+        settings: settings({ renderMode: "observations-root" }),
+      }),
     );
-    expect(noSelected).not.toContain("selected view");
+    expect(noSelected).not.toContain("Selector roots");
   });
 
   it("Usage since session start + since last compaction sections (per-phase in/out/cache/$/time)", () => {
@@ -221,10 +228,7 @@ describe("buildStatusReport", () => {
     const startIdx = report.indexOf("Usage since session start");
     const sinceStartBlock = report.slice(startIdx, report.indexOf("Usage since last compaction"));
     expect(sinceStartBlock).toContain("observe");
-    expect(sinceStartBlock).toContain("45k");
-    expect(sinceStartBlock).toContain("4.0k");
-    expect(sinceStartBlock).toContain("30k");
-    expect(sinceStartBlock).toContain("$0.082");
+    expect(sinceStartBlock).toContain("in 45k · out 4.0k · cache 30k · $0.082");
     // elapsed = 90061000ms → 1d 01:01:01
     expect(sinceStartBlock).toContain("1d 01:01:01");
     // since-last-compaction observe line: 15k in (45k-30k) / 1.5k out / 8.0k cache / 01:01:01
@@ -269,7 +273,7 @@ describe("buildStatusReport", () => {
 });
 
 describe("gatherStatusInput", () => {
-  it("reads live store: nodes, observations, ledgers, roots view tokens", () => {
+  it("reads live store: nodes, observations, ledgers, levels, root counts, view tokens", () => {
     resetForNewSession();
     const graph = getGraphStore().graph;
     graph.nodes.set("n1", node({ id: "n1", summary: "root", parentNode: null, summaryTokens: 8 }));
@@ -295,13 +299,15 @@ describe("gatherStatusInput", () => {
     expect(gathered.observations.length).toBe(1);
     expect(gathered.compactionCount).toBe(2);
     expect(gathered.sessionStartMs).toBe(1000);
+    expect(gathered.levels).toBe(1); // single root, no children
+    expect(gathered.rootsCount).toBe(1);
     expect(gathered.rootsViewTokens).toBeGreaterThan(0);
-    expect(gathered.selectedViewTokens).toBeNull(); // no persisted selected tree
+    expect(gathered.selectedView).toBeNull(); // no persisted selected tree
     expect(gathered.usageLedger.observe.input).toBe(500);
     expect(gathered.lastCompactionLedger).toBeNull();
   });
 
-  it("measureSelectedViewTokens drops obsolete roots from the persisted tree", () => {
+  it("measureSelectedView drops obsolete roots from the persisted tree", () => {
     // the selected tree normally never holds obsolete roots (the Selector's working
     // copy excludes obsolete before persisting), but the filter must enforce it
     // explicitly rather than relying on the upstream invariant.
@@ -320,7 +326,8 @@ describe("gatherStatusInput", () => {
     });
     // only n1's render counts; n2 (obsolete) is dropped → the view is the single
     // active root line, NOT both.
-    expect(gathered.selectedViewTokens).not.toBeNull();
+    expect(gathered.selectedView).not.toBeNull();
+    expect(gathered.selectedView?.rootsCount).toBe(1); // obsolete n2 excluded from the count
     const withObsolete = estimateContentTokens(
       renderRootViewFromRoots(
         [
@@ -331,7 +338,7 @@ describe("gatherStatusInput", () => {
         EMPTY_SIZE_HINTS,
       ),
     );
-    expect(gathered.selectedViewTokens).toBeLessThan(withObsolete);
+    expect(gathered.selectedView?.viewTokens).toBeLessThan(withObsolete);
   });
 });
 

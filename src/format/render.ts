@@ -226,7 +226,7 @@ export interface TreeTotalGraph {
 /** Max tree depth in levels (roots = 1), via BFS over child links. Nodes not
  *  reachable from a root count as their own level-1 tree (tolerant — structure
  *  invariants normally make them impossible). */
-function treeLevels(nodes: ReadonlyMap<string, RenderableNode>): number {
+export function treeLevels(nodes: ReadonlyMap<string, RenderableNode>): number {
   const depth = new Map<string, number>();
   const queue: RenderableNode[] = [];
   for (const node of nodes.values()) {
