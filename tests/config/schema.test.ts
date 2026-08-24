@@ -128,19 +128,34 @@ describe("MEMKEEPER_SCHEMA", () => {
     expect(labels).toEqual(["General", "Observer", "Builder", "Selector"]);
   });
 
+  // A null preset element (bare or in a [label, value] pair) is the "no limit" /
+  // "no target" option — several number knobs carry one.
+  const hasNullPreset = (presets: unknown): boolean =>
+    Array.isArray(presets) &&
+    presets.some((el) => el === null || (Array.isArray(el) && el.length === 2 && el[1] === null));
+
   it("allows null on commandResultCap and observerToolBlockCapTokens (the 'no limit' presets)", () => {
     // Presets may mix bare values and [label, value] pairs; a null element (bare or in a pair)
     // is the "no limit" / "no truncation" option.
-    const hasNull = (presets: unknown): boolean =>
-      Array.isArray(presets) &&
-      presets.some((el) => el === null || (Array.isArray(el) && el.length === 2 && el[1] === null));
-
     const cap = MEMKEEPER_SCHEMA.settings.find((s) => s.id === "commandResultCap");
     expect(cap?.type).toBe("number");
-    expect(hasNull(cap?.presets), "commandResultCap needs a null preset").toBe(true);
+    expect(hasNullPreset(cap?.presets), "commandResultCap needs a null preset").toBe(true);
 
     const toolCap = MEMKEEPER_SCHEMA.settings.find((s) => s.id === "observerToolBlockCapTokens");
-    expect(hasNull(toolCap?.presets), "observerToolBlockCapTokens needs a null preset").toBe(true);
+    expect(hasNullPreset(toolCap?.presets), "observerToolBlockCapTokens needs a null preset").toBe(true);
+  });
+
+  it("declares the root-view shape knobs' presets (null pair, custom values, six strategies)", () => {
+    const target = MEMKEEPER_SCHEMA.settings.find((s) => s.id === "rootViewTargetNodes");
+    expect(target?.type).toBe("number");
+    expect(target?.min).toBe(1);
+    expect((target as { supportsCustomValues?: boolean } | undefined)?.supportsCustomValues).toBe(true);
+    expect(hasNullPreset(target?.presets), "rootViewTargetNodes needs a null preset").toBe(true);
+
+    const strategy = MEMKEEPER_SCHEMA.settings.find((s) => s.id === "rootViewStrategy");
+    expect(strategy?.type).toBe("string");
+    const values = ((strategy?.presets ?? []) as readonly (readonly [string, string])[]).map((p) => p[1]);
+    expect(values).toEqual(["balanced", "by-task", "by-category", "by-recency", "by-importance", "by-topic"]);
   });
 
   it("declares the correct `type` for every setting", () => {

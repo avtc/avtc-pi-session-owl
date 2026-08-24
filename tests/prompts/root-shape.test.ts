@@ -17,6 +17,8 @@ describe("rootCountSentence", () => {
 
   it("a target → the approved count-hint sentence", () => {
     expect(rootCountSentence(40)).toBe("Aim to have no more than 40 nodes at root level.");
+    // singular grammar at N=1 (the schema floor)
+    expect(rootCountSentence(1)).toBe("Aim to have no more than 1 node at root level.");
   });
 });
 

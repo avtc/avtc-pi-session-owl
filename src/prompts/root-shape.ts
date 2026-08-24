@@ -31,7 +31,8 @@ const STRATEGY_CLAUSES: Readonly<Record<Exclude<RootViewStrategy, "balanced">, s
  *  openings' lean/budget clause is dropped with it). */
 export function rootCountSentence(targetNodes: number | null): string | null {
   if (targetNodes === null) return null;
-  return `Aim to have no more than ${targetNodes} nodes at root level.`;
+  const SINGULAR = 1;
+  return `Aim to have no more than ${targetNodes} node${targetNodes === SINGULAR ? "" : "s"} at root level.`;
 }
 
 /** The strategy paragraph; null for balanced (no advice). */

@@ -18,6 +18,7 @@ import {
 } from "../../src/builder/tools.js";
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { applyCreateNode, applyRecordObservation, setClock } from "../../src/graph/mutations.js";
+import { builderSystemPrompt } from "../../src/prompts/builder.js";
 import { type StageRunInput, type StageRunResult, StageTimeoutError } from "../../src/runtime/agent-loop.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import type { MemkeeperGraph } from "../../src/types.js";
@@ -301,6 +302,31 @@ describe("runBuilder", () => {
     // fast-path NOT taken — a pass ran and the stage was opened.
     expect(passCount).toBe(1);
     expect(widget.calls[0]).toBe("start:build:1");
+  });
+
+  it("threads the root-view shape settings into the system prompt (run-level)", async () => {
+    seedGraph([{ id: "n3", summary: "fresh arrival" }]);
+    const cap = makeFakePi();
+    const widget = recordingWidget();
+    const cfg = settings({ builderRootViewThreshold: 0, rootViewTargetNodes: 40, rootViewStrategy: "by-topic" });
+    let seen: string | undefined;
+    const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
+    await runBuilder({
+      pi: cap.pi,
+      ctx: makeFakeCtx(),
+      settings: cfg,
+      signal: new AbortController().signal,
+      widget,
+      scope: { firstKeptEntryId: null },
+      runStageFn: (input) => {
+        seen = input.systemPrompt;
+        return scripted(input);
+      },
+    });
+    // the run passed the settings-derived prompt to the stage, verbatim
+    expect(seen).toBe(builderSystemPrompt(cfg));
+    expect(seen).toContain("Aim to have no more than 40 nodes at root level.");
+    expect(seen).toContain("Organize roots by topic — the distinct subjects the session works on");
   });
 
   it("runs multiple passes until try_finish succeeds (convergence)", async () => {

@@ -27,12 +27,12 @@ export function _setRegisterSettingsCommand(fn: typeof registerSettingsCommand |
 // MemkeeperConfig — the typed shape returned by getMemkeeperSettings()
 // ---------------------------------------------------------------------------
 
-/** The `model` settings resolve to a `provider/id` string, or `null` = fall through to
- *  defaultModel (then the session model). `commandResultCap` / `observerToolBlockCapTokens`
- *  allow `null` = no limit / no truncation (the "No limit" presets). */
 /** Root-view organization axis injected into the Builder and Selector prompts. */
 export type RootViewStrategy = "balanced" | "by-task" | "by-category" | "by-recency" | "by-importance" | "by-topic";
 
+/** The `model` settings resolve to a `provider/id` string, or `null` = fall through to
+ *  defaultModel (then the session model). `commandResultCap` / `observerToolBlockCapTokens`
+ *  allow `null` = no limit / no truncation (the "No limit" presets). */
 export interface MemkeeperConfig {
   // General
   enabled: boolean;

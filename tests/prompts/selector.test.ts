@@ -2,12 +2,11 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { builderSystemPrompt } from "../../src/prompts/builder.js";
-import type { RootShapeSettings } from "../../src/prompts/root-shape.js";
 import { selectorSystemPrompt } from "../../src/prompts/selector.js";
+import { shapeSettings } from "./run-helpers.js";
 
-const shape = (over: Partial<RootShapeSettings>): RootShapeSettings => ({ ...DEFAULT_CONFIG, ...over });
+const shape = shapeSettings;
 
 describe("selectorSystemPrompt", () => {
   it("opens with the stakes framing the approved text carries", () => {

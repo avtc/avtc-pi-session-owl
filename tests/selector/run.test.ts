@@ -319,6 +319,32 @@ describe("runSelector", () => {
     expect(capturedMessages[1]).not.toContain("keep me");
   });
 
+  it("threads the root-view shape settings into the system prompt (run-level)", async () => {
+    seedGraph([{ id: "n3", summary: "x" }]);
+    const cfg = settings({ selectorRootViewThreshold: 0, rootViewTargetNodes: 80, rootViewStrategy: "by-recency" });
+    let seen: string | undefined;
+    const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
+    const cap = recordingPi();
+    await runSelector({
+      ctx: makeFakeCtx(),
+      pi: cap.pi,
+      settings: cfg,
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: (input) => {
+        seen = input.systemPrompt;
+        return scripted(input);
+      },
+    });
+    // the run passed the settings-derived prompt to the stage, verbatim
+    expect(seen).toBe(selectorSystemPrompt(cfg));
+    expect(seen).toContain("Aim to have no more than 80 nodes at root level.");
+    expect(seen).toContain("Organize roots by recency:");
+  });
+
   it("persists a self-contained snapshot: nodes are deep copies (mutating source afterward doesn't change the snapshot)", async () => {
     seedGraph([{ id: "n3", summary: "original summary" }]);
     const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
