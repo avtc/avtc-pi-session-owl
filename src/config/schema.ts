@@ -73,7 +73,7 @@ export interface MemkeeperConfig {
   /** The compaction-only fast-path: at compaction, when the root view is
    *  already under builderRootViewThreshold, skip the Builder run entirely
    *  (turn_end trigger runs are never skipped by it — a fired trigger runs).
-   *  Default false — the Builder always runs at least one pass. */
+   *  Default true. */
   builderSkipWithinBudget: boolean;
   maxBuilderPasses: number;
   /** Maximum output tokens per Builder LLM call (per turn). */
@@ -97,9 +97,9 @@ export interface MemkeeperConfig {
 // Frozen so the `enabled=false` off-path and tests share one immutable copy.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_RENDER_MODE = "selected-root";
+const DEFAULT_RENDER_MODE = "observations-root";
 const DEFAULT_OBSERVER_MODE = "on-threshold";
-const DEFAULT_BUILDER_MODE = "on-compaction";
+const DEFAULT_BUILDER_MODE = "each-N-observations";
 const DEFAULT_SELECTOR_MODE = "on-compaction";
 const NO_MODEL: string | null = null;
 const NO_LIMIT: number | null = null;
@@ -117,7 +117,7 @@ const DEFAULT_SELECTOR_MAX_TOKENS = 65536;
 const MIN_MAX_TOKENS = 1;
 const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
 const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
-const DEFAULT_FAST_PATH = false;
+const DEFAULT_FAST_PATH = true;
 const DEBUG_LOG_DEFAULT = false;
 
 export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
@@ -137,8 +137,8 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   // Observer
   observerModel: NO_MODEL,
   observerThresholdTokens: 4000,
-  observerIncludeThinking: false,
-  observerToolBlockCapTokens: 400,
+  observerIncludeThinking: true,
+  observerToolBlockCapTokens: NO_LIMIT,
   observerMaxTokens: DEFAULT_OBSERVER_MAX_TOKENS,
   observerThinkingLevel: NO_MODEL,
   // Builder

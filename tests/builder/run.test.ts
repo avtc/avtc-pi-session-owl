@@ -277,7 +277,7 @@ describe("runBuilder", () => {
     expect(flushNewCount(cap.appended)).toBe(1);
   });
 
-  it("default (builderSkipWithinBudget off, compaction scope): runs at least one pass even when under threshold", async () => {
+  it("(builderSkipWithinBudget off, compaction scope): runs at least one pass even when under threshold", async () => {
     seedGraph([{ id: "n3", summary: "fresh arrival" }]);
     const cap = makeFakePi();
     const widget = recordingWidget();
@@ -288,8 +288,8 @@ describe("runBuilder", () => {
     await runBuilder({
       pi: cap.pi,
       ctx: makeFakeCtx(),
-      // builderSkipWithinBudget defaults false; root view under threshold.
-      settings: settings({ builderRootViewThreshold: 1_000_000 }),
+      // builderSkipWithinBudget off; root view under threshold.
+      settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: false }),
       signal: new AbortController().signal,
       widget,
       scope: { firstKeptEntryId: null },

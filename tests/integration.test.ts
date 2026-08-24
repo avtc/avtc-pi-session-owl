@@ -402,6 +402,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     const state: FakePiState = { branch, appendedEntries: [] };
     settingsHolder.config = {
       ...DEFAULT_CONFIG,
+      renderMode: "selected-root",
       observerThresholdTokens: 50,
       // low Builder threshold → Builder RUNS (fast-path not taken); the scripted
       // pass applies one mkdir mutate → the run consolidated → its stage-end
@@ -446,7 +447,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     // `new` nodes remain.
     const newNodes = [...graph.nodes.values()].filter((n) => n.state === "new");
     expect(newNodes.length).toBe(0);
-    // the selected tree was built + persisted (selected-root default).
+    // the selected tree was built + persisted (selected-root renderMode).
     expect(getGraphStore().selectedTree).not.toBeNull();
     // structural invariant: every observation under exactly one existing
     // node, containment tree acyclic + consistent, nGoal invariants hold.
@@ -642,6 +643,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     const state: FakePiState = { branch, appendedEntries: [] };
     settingsHolder.config = {
       ...DEFAULT_CONFIG,
+      renderMode: "selected-root",
       observerThresholdTokens: 50,
       builderRootViewThreshold: 1,
       selectorRootViewThreshold: 100000,

@@ -132,6 +132,7 @@ describe("buildSnapshot", () => {
   });
 
   it("selected section deltas measured from the working-copy baseline (captured at stage start)", () => {
+    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, renderMode: "selected-root" }));
     let counts = { count: 95, viewTokens: 35_000 };
     tracker.startStage("select", { selectedCounts: () => counts }); // baseline: the pristine copy
     counts = { count: 20, viewTokens: 15_000 }; // mutates applied to the copy

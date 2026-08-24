@@ -17,9 +17,9 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `enabled` | boolean | `true` | Master switch for memkeeper. Off = memkeeper stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected). |
 | `defaultModel` | model | `null` | One model for all components. `null`/unset uses the current session model. Per-component models override this. |
 | `defaultThinkingLevel` | thinking-level | `null` | Thinking level for all components. `null`/Session default = use the session's thinking level; `off` = no thinking. Per-component levels override this. |
-| `renderMode` | string | `selected-root` | What memkeeper injects after compaction (and what `/mk:*` recall reads). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the root view of the memory graph. |
+| `renderMode` | string | `observations-root` | What memkeeper injects after compaction (and what `/mk:*` recall reads). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the root view of the memory graph. |
 | `observerMode` | string | `on-threshold` | When the Observer captures memory. `on-threshold` = throughout the session, after a turn once enough new text accumulates; `on-compaction` = all at once, at compaction time only. |
-| `builderMode` | string | `on-compaction` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
+| `builderMode` | string | `each-N-observations` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
 | `selectorMode` | string | `on-compaction` | When the Selector runs (only if `renderMode=selected-root`): `on-compaction` or `on-session-context-threshold`. |
 | `commandResultCap` | number | `50` | Max items a `/mk:*` command shows before a `... +N more` footer. `null` = show all. |
 | `findTimeoutMs` | duration | `30000` | Max duration a `find`/`mk_recall` search may run before it is stopped. |
@@ -33,8 +33,8 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 |---|---|---|---|
 | `observerModel` | model | `null` | Overrides `defaultModel` for the Observer. |
 | `observerThresholdTokens` | number | `4000` | `on-threshold` gate: emit a batch when accumulated unobserved tokens reach this. |
-| `observerIncludeThinking` | boolean | `false` | Include non-redacted thinking blocks in the chunks the Observer reads. |
-| `observerToolBlockCapTokens` | number | `400` | When capturing tool calls and results, trim each block to this many tokens (keeping the start and end). `null` = keep the whole block. |
+| `observerIncludeThinking` | boolean | `true` | Include non-redacted thinking blocks in the chunks the Observer reads. |
+| `observerToolBlockCapTokens` | number | `null` | When capturing tool calls and results, trim each block to this many tokens (keeping the start and end). `null` = keep the whole block. |
 | `observerMaxTokens` | number | `16384` | Maximum output tokens per Observer LLM call. |
 | `observerThinkingLevel` | thinking-level | `null` | Thinking level for the Observer. `null`/Inherit default = use `defaultThinkingLevel`; `off` = no thinking. |
 
@@ -46,7 +46,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `builderEveryNObservations` | number | `40` | N for the `each-N-observations` `builderMode`. |
 | `builderSessionContextThresholdTokens` | number | `200000` | Threshold for the `on-session-context-threshold` `builderMode`. |
 | `builderRootViewThreshold` | number | `40000` | Target size (in tokens) for the root view of the memory graph. Also: the trigger for `on-root-view-threshold` mode, and the budget `builderSkipWithinBudget` checks. |
-| `builderSkipWithinBudget` | boolean | `false` | At compaction only: skip the Builder when the root view is within budget. Background triggers are never skipped. Off = the Builder always runs at least once. |
+| `builderSkipWithinBudget` | boolean | `true` | At compaction only: skip the Builder when the root view is within budget. Background triggers are never skipped. Off = the Builder always runs at least once. |
 | `maxBuilderPasses` | number | `3` | Max passes per Builder run. |
 | `builderMaxTokens` | number | `32768` | Maximum output tokens per Builder LLM call. |
 | `builderThinkingLevel` | thinking-level | `null` | Thinking level for the Builder. `null`/Inherit default = use `defaultThinkingLevel`; `off` = no thinking. |

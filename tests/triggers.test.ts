@@ -717,6 +717,7 @@ describe("onTurnEnd chained launch", () => {
         ctx,
         settings: {
           ...DEFAULT_CONFIG,
+          renderMode: "selected-root",
           observerThresholdTokens: 1,
           builderMode: "on-session-context-threshold",
           builderSessionContextThresholdTokens: 1,

@@ -203,7 +203,7 @@ describe("compactionHook", () => {
 
   it("passes Observer catch-up (gap-driven), Builder, Selector in order", async () => {
     // threshold 0 → Builder always passes (no fast-path skip) so the ordering is observable.
-    setCompactionSettingsGetter(() => settings({ builderRootViewThreshold: 0 }));
+    setCompactionSettingsGetter(() => settings({ builderRootViewThreshold: 0, renderMode: "selected-root" }));
     // entries after the frontier (null → starts after first user msg; no user msg
     // here so the gap is empty) — use entries that computeUnobserved treats as a
     // gap: set a branch with a user anchor first.
@@ -228,7 +228,7 @@ describe("compactionHook", () => {
     // Builder ran with the compaction scope.
     expect(calls.builder).toBe(1);
     expect(calls.builderScope[0]).toEqual({ firstKeptEntryId: "cut-1" });
-    // Selector ran (default renderMode = selected-root).
+    // Selector ran (explicit selected-root renderMode).
     expect(calls.selector).toBe(1);
     expect(calls.order).toEqual(["observer", "builder", "selector"]);
   });
@@ -489,6 +489,7 @@ describe("compactionHook", () => {
 
   it("returns compaction.usage (pi shape) aggregating THIS compaction's stage cost + per-stage breakdown in details", async () => {
     seedStoreGraph();
+    setCompactionSettingsGetter(() => settings({ renderMode: "selected-root" }));
     // a branch with a user anchor + assistant msg so the Observer catch-up gap is non-empty
     // (otherwise Observer is skipped and its stage fake never folds usage).
     const branch = [

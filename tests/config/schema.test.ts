@@ -219,9 +219,12 @@ describe("DEFAULT_CONFIG parity with schema defaults", () => {
   it("has the documented default profile", () => {
     expect(DEFAULT_CONFIG.enabled).toBe(true);
     expect(DEFAULT_CONFIG.observerMode).toBe("on-threshold");
-    expect(DEFAULT_CONFIG.builderMode).toBe("on-compaction");
+    expect(DEFAULT_CONFIG.builderMode).toBe("each-N-observations");
     expect(DEFAULT_CONFIG.selectorMode).toBe("on-compaction");
-    expect(DEFAULT_CONFIG.renderMode).toBe("selected-root");
+    expect(DEFAULT_CONFIG.renderMode).toBe("observations-root");
+    expect(DEFAULT_CONFIG.observerIncludeThinking).toBe(true);
+    expect(DEFAULT_CONFIG.observerToolBlockCapTokens).toBeNull();
+    expect(DEFAULT_CONFIG.builderSkipWithinBudget).toBe(true);
     expect(DEFAULT_CONFIG.observerMaxTokens).toBe(16384);
     expect(DEFAULT_CONFIG.builderMaxTokens).toBe(32768);
     expect(DEFAULT_CONFIG.selectorMaxTokens).toBe(65536);
