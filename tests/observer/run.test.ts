@@ -1036,4 +1036,39 @@ describe("runObserver — record_observations debug logging", () => {
     expect(line).toContain("accepted=1");
     expect(line).toContain("rejected=1");
   });
+
+  it("dumps the call's accepted summaries — numbered, 200-char cap, max 10 (+N more)", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    // 12 valid records: #1 over the 200-char cap (must collapse + truncate), the
+    // rest short; only the first 10 appear, 11–12 fold into (+2 more).
+    const batch: RecordObservationInput[] = Array.from({ length: 12 }, (_, i) =>
+      i === 0
+        ? { summary: "x".repeat(250), importance: "med", sourceEntryIds: ["a1"] }
+        : { summary: `Fact ${i}.`, importance: "med", sourceEntryIds: ["a1"] },
+    );
+    const script = scriptedRunStage([batch]);
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+    const line = sink.debug.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith("observer: recorded "));
+    expect(line).toBeDefined();
+    expect(line).toContain("recorded 12 —");
+    expect(line).toContain(`1. ${"x".repeat(199)}…`); // whitespace-collapsed + capped
+    expect(line).toContain("2. Fact 1.");
+    expect(line).toContain("10. Fact 9.");
+    expect(line).not.toContain("11. Fact 10.");
+    expect(line).toContain("(+2 more)");
+  });
+
+  it("logs a chunk-start line — index/total, coverage range, rendered token size", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = scriptedRunStage([[{ summary: "Chose vitest.", importance: "high", sourceEntryIds: ["a1"] }]]);
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+    const line = sink.debug.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith("observer: chunk "));
+    expect(line).toBeDefined();
+    expect(line).toContain("chunk 1/1 covers u1..a1");
+    expect(line).toMatch(/ tokens$/);
+  });
 });

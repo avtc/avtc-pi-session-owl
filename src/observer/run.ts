@@ -29,6 +29,7 @@ import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js"
 import { buildChunks, type ChunkOptions, type RenderedChunk } from "../format/chunk.js";
 import { computeDetailsAndCache, type EntryResolver } from "../format/details.js";
 import { toStoredTimestamp } from "../format/render.js";
+import { formatTokens } from "../format/tokens.js";
 import { applyCreateNode, applyRecordObservation, assertGraphStructure, type GraphDelta } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
@@ -49,7 +50,14 @@ import { getStageAffinityId } from "../runtime/session-affinity.js";
 import { ImportanceSchema } from "../schema.js";
 import { encodeObservation, type ObservationEntry } from "../store/codecs.js";
 import { appendGraphDeltaBatch, appendObservation, getGraphStore, type StoreContext } from "../store/graph-store.js";
-import { type Importance, makeObservation, type NodeId, nowStoredTimestamp, type ObsId } from "../types.js";
+import {
+  estimateContentTokens,
+  type Importance,
+  makeObservation,
+  type NodeId,
+  nowStoredTimestamp,
+  type ObsId,
+} from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
@@ -112,6 +120,32 @@ function isSubstantiveSummary(summary: string): boolean {
 /** At least one Unicode letter or digit anywhere in the summary. */
 const SUBSTANTIVE_SUMMARY_TEST = /\p{L}|\p{N}/u;
 
+// --- per-call record forensics (debug logging) ------------------------------
+
+/** Cap for one record summary inside the per-call debug dump. */
+const RECORD_LOG_CAP = 200;
+/** How many of a call's records the debug dump lists (the rest fold into +N). */
+const RECORD_LOG_MAX = 10;
+const ELLIPSIS = "…";
+
+/** Whitespace-collapse + cap one summary for the debug dump (the logger
+ *  sanitizes the assembled line itself; this keeps each record readable). */
+function capForRecordLog(summary: string): string {
+  const oneLine = summary.replace(/\s+/g, " ").trim();
+  if (oneLine.length <= RECORD_LOG_CAP) return oneLine;
+  return `${oneLine.slice(0, RECORD_LOG_CAP - ELLIPSIS.length)}${ELLIPSIS}`;
+}
+
+/** The numbered per-call record dump: `1. … 2. … (+K more)` — the record
+ *  content the accepted= counts cannot show. A model spinning on one chunk
+ *  (re-recording every turn) is only distinguishable from real work by WHAT it
+ *  records, so successful calls dump their summaries (up to RECORD_LOG_MAX). */
+function dumpRecordsForLog(summaries: readonly string[]): string {
+  const shown = summaries.slice(0, RECORD_LOG_MAX).map((s, i) => `${i + 1}. ${capForRecordLog(s)}`);
+  const more = summaries.length - shown.length;
+  return `${shown.join(" ")}${more > 0 ? ` (+${more} more)` : ""}`;
+}
+
 /**
  * Build a fresh `record_observations` tool bound to one chunk's allowed-id set.
  * Each record is validated per-observation: every cited `sourceEntryId` must be
@@ -130,6 +164,7 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
     async execute(_toolCallId, params) {
       let accepted = EMPTY_RECORDS;
       let rejected = EMPTY_RECORDS;
+      const callSummaries: string[] = [];
       for (const raw of params.observations) {
         attempted += 1;
         const valid =
@@ -144,9 +179,13 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
           sourceEntryIds: [...raw.sourceEntryIds],
         });
         accepted += 1;
+        callSummaries.push(raw.summary);
       }
       const ack = `recorded ${accepted}${rejected > EMPTY_RECORDS ? `, ${rejected} rejected (invalid ids or non-substantive summary)` : ""}; continue or reply Done`;
       log.debug(`observer: record_observations accepted=${accepted} rejected=${rejected}`);
+      if (accepted > EMPTY_RECORDS) {
+        log.debug(`observer: recorded ${accepted} — ${dumpRecordsForLog(callSummaries)}`);
+      }
       return { content: [{ type: "text", text: ack }], details: { accepted, rejected } };
     },
   };
@@ -260,6 +299,12 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         return;
       }
       const recordTool = makeRecordObservationsTool(chunk.allowedIds);
+      // chunk forensics: brackets the chunk's record_observations calls in the
+      // log (coverage range + rendered size — the sanity denominator for how
+      // many records a chunk can plausibly yield).
+      log.debug(
+        `observer: chunk ${chunkIndex + 1}/${totalChunks} covers ${chunk.firstEntryId}..${chunk.lastEntryId} ${formatTokens(estimateContentTokens(chunk.text))} tokens`,
+      );
       const stageInput: StageRunInput = {
         systemPrompt: OBSERVER_SYSTEM,
         messages: [{ role: "user", content: chunk.text } as AgentMessage],
