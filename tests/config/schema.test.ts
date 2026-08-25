@@ -53,6 +53,7 @@ const EXPECTED_IDS = [
   "llmCallTimeoutMs",
   "toolResultTokenBudget",
   "debugLog",
+  "debugDumpLimit",
   // Observer
   "observerModel",
   "observerThresholdTokens",
@@ -174,6 +175,7 @@ describe("MEMKEEPER_SCHEMA", () => {
       llmCallTimeoutMs: "duration",
       toolResultTokenBudget: "number",
       debugLog: "boolean",
+      debugDumpLimit: "number",
       observerModel: "model",
       observerThresholdTokens: "number",
       observerIncludeThinking: "boolean",

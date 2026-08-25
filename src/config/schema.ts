@@ -66,6 +66,8 @@ export interface MemkeeperConfig {
   /** Write debug-level trace logs (trigger decisions, per-stage stream start/end)
    *  to the log file. Off by default — enable to diagnose a stall. */
   debugLog: boolean;
+  /** Max stage dump files kept per stage under <cwd>/.pi/memkeeper/debug/ (0 = off). */
+  debugDumpLimit: number;
   // Observer
   observerModel: string | null;
   observerThresholdTokens: number;
@@ -148,6 +150,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   llmCallTimeoutMs: DEFAULT_LLM_CALL_TIMEOUT_MS,
   toolResultTokenBudget: DEFAULT_TOOL_RESULT_TOKEN_BUDGET,
   debugLog: DEBUG_LOG_DEFAULT,
+  debugDumpLimit: 0,
   // Observer
   observerModel: NO_MODEL,
   observerThresholdTokens: 4000,
@@ -390,6 +393,15 @@ const SETTINGS: readonly SettingSchema[] = [
     type: "boolean",
     defaultValue: DEFAULT_CONFIG.debugLog,
   }),
+  setting("debugDumpLimit", {
+    label: "Debug dump limit",
+    description:
+      "Maximum stage dump files kept under <cwd>/.pi/memkeeper/debug/ (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format.",
+    type: "number",
+    defaultValue: DEFAULT_CONFIG.debugDumpLimit,
+    min: 0,
+    presets: [0, 10, 50, 200],
+  }),
 
   // ── Observer ───────────────────────────────────────────────────────────────
   setting("observerModel", {
@@ -568,6 +580,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "llmCallTimeoutMs",
       "toolResultTokenBudget",
       "debugLog",
+      "debugDumpLimit",
     ],
   },
   {

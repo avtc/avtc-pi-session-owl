@@ -23,6 +23,8 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import { agentLoop } from "@earendil-works/pi-agent-core";
 import type { Api, CacheRetention, Message, Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import { appendDump, NO_DUMP } from "../debug-dump.js";
+import { renderAgentMessages } from "../format/chunk.js";
 import { log } from "../log.js";
 import { deltaTextOf, deltaTokens, messageEndUsage } from "./streaming-tokens.js";
 
@@ -130,6 +132,12 @@ export interface StageRunInput {
    *  stages (defaults to the provider's "short"). Set `"none"` for one-shot calls
    *  whose prefix never recurs (no wasted cache write). */
   cacheRetention?: CacheRetention;
+  /** Stage-dump file path (opened by the stage run via `openStageDump`), or
+   *  absent/null = dumps disabled. When set, `runStage` appends the `<input>`
+   *  section (the exact messages sent) before the call and the `<output>`
+   *  section (thinking/text/tool calls/results the model produced) after it —
+   *  full fidelity, tagged memory format. */
+  dumpPath?: string | null;
 }
 
 /** A stage run failure. The `onStageEnd` hook fires in `runStage`'s finally
@@ -245,6 +253,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
   const usage = emptyUsage();
   const startMs = Date.now();
   let fallbackTokens = 0;
+  const dumpPath = input.dumpPath ?? NO_DUMP;
 
   try {
     const context: AgentContext = {
@@ -304,6 +313,9 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
 
     const loop = input.loopFn ?? agentLoop;
     log.debug("runStage: starting agentLoop stream");
+    // Stage dump: the exact input messages, before the call runs (a run that
+    // dies mid-call still leaves the input record).
+    appendDump(dumpPath, `<input>\n${renderAgentMessages(input.messages)}\n</input>\n`);
     // pi 0.84.1 made `streamFn` a required `agentLoop` arg. Pass `undefined` (cast to the
     // required type) so pi-agent-core falls back to its process-global default streamFn,
     // which pi-coding-agent installs at startup — that default dispatches through the
@@ -361,6 +373,9 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
 
       const messages = await stream.result();
       log.debug(`runStage: agentLoop stream done (${usage.turns} turns)`);
+      // Stage dump: the full output record (thinking/text/tool calls+results),
+      // even for a run that then surfaces a model error below.
+      appendDump(dumpPath, `<output>\n${renderAgentMessages(messages)}\n</output>\n`);
       // A terminal model failure: surface it instead of returning a clean
       // no-record result (which would let the stage caller proceed and Pi prune
       // an unobserved gap). The outer catch re-throws StageModelError unwrapped.
@@ -384,6 +399,12 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       input.signal.removeEventListener("abort", forwardAbort);
     }
   } catch (cause) {
+    // Stage dump: record why the call produced nothing (stream/loop failure —
+    // the model-error case already dumped its output messages above).
+    if (!(cause instanceof StageModelError)) {
+      const reason = cause instanceof Error ? cause.message : String(cause);
+      appendDump(dumpPath, `<output error>\n${reason}\n</output>\n`);
+    }
     // StageModelError is a DETECTED terminal model failure (stopReason "error"),
     // not an unexpected throw — re-throw it as-is so its type/message survive to
     // callers and logs (a generic StageRunError wrap would hide the cause).

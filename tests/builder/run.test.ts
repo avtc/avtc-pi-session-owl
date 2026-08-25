@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeBuilderPassTracker, runBuilder } from "../../src/builder/run.js";
 import {
   CAT_TOOL,
@@ -327,6 +330,47 @@ describe("runBuilder", () => {
     expect(seen).toBe(builderSystemPrompt(cfg));
     expect(seen).toContain("Aim to have no more than 40 nodes at root level.");
     expect(seen).toContain("Organize roots by topic — the distinct subjects the session works on");
+  });
+
+  it("debugDumpLimit > 0: writes a builder dump (header, pass, input/output, footer) (run-level)", async () => {
+    seedGraph([{ id: "n3", summary: "fresh arrival" }]);
+    const cap = makeFakePi();
+    const widget = recordingWidget();
+    const cfg = settings({ builderRootViewThreshold: 0, debugDumpLimit: 5 });
+    // route the default dump root (<cwd>/.pi/memkeeper/debug) to a temp dir so
+    // the test never litters the repo
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-builder-dump-"));
+    let seenDumpPath: string | null | undefined;
+    const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    try {
+      await runBuilder({
+        pi: cap.pi,
+        ctx: makeFakeCtx(),
+        settings: cfg,
+        signal: new AbortController().signal,
+        widget,
+        scope: { firstKeptEntryId: null },
+        // capture the dumpPath the run threads into runStage (the sections
+        // themselves are appended inside runStage — covered by agent-loop tests)
+        runStageFn: (input) => {
+          seenDumpPath = input.dumpPath;
+          return scripted(input);
+        },
+      });
+    } finally {
+      cwdSpy.mockRestore();
+    }
+    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "debug"));
+    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "debug");
+    const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("build-"));
+    expect(files.length).toBe(1);
+    const text = fs.readFileSync(path.join(debugDir, files[0] as string), "utf8");
+    expect(text.startsWith('<dump stage="build" started="')).toBe(true);
+    expect(text).toContain(`<system-prompt>\n${builderSystemPrompt(cfg)}\n</system-prompt>\n`);
+    expect(text).toContain('<pass n="1">\n');
+    expect(text).toContain("</pass>\n");
+    expect(text.trimEnd().endsWith("</dump>")).toBe(true);
   });
 
   it("runs multiple passes until try_finish succeeds (convergence)", async () => {

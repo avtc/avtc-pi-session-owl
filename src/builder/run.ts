@@ -18,6 +18,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
+import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { BUILDER, renderTreeTotal } from "../format/render.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
@@ -150,10 +151,22 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   let totalMutates = NO_MUTATES;
   let converged = false;
   const ledger = makeLedgerHook(BUILD_STAGE);
+  // Stage dump (debugDumpLimit): opened before the loop so the finally can
+  // close it; the file itself appears only when the header is written (a
+  // startStage/tools throw leaves nothing behind).
+  const dumpPath = openStageDump(BUILD_STAGE, input.settings.debugDumpLimit, DEFAULT_DUMP_BASE);
+  let dumpHeaderWritten = false;
   try {
     input.widget.startStage(BUILD_STAGE, { pass });
     stageOpened = true;
     const tools = makeBuilderTools(graph, store, input.settings);
+    if (dumpPath !== null) {
+      appendDump(
+        dumpPath,
+        stageDumpHeader(BUILD_STAGE, new Date().toISOString(), builderSystemPrompt(input.settings), tools),
+      );
+      dumpHeaderWritten = true;
+    }
     // computed once per run — the source graph + the session branch are stable
     // across passes (only the working graph mutates).
     const compactionCount = countCompactions(input.ctx.sessionManager);
@@ -164,6 +177,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
         break;
       }
 
+      appendDump(dumpPath, `<pass n="${pass}">\n`);
       const { outcome } = await runPass(
         input,
         graph,
@@ -173,7 +187,9 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
         pass,
         compactionCount,
         ledger.onStageEnd,
+        dumpPath,
       );
+      appendDump(dumpPath, "</pass>\n");
       totalMutates += outcome.mutates;
       // persist the cumulative usage ledger PER PASS so an interrupted run keeps
       // the usage tally for every completed pass — matching the per-mutate
@@ -206,6 +222,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
     log.error("builder run failed", cause);
     throw cause;
   } finally {
+    if (dumpHeaderWritten) appendDump(dumpPath, DUMP_FOOTER);
     // Best-effort teardown: a throw in one cleanup must not skip the others or
     // escape (the never-throws teardown contract). `endStage` always runs when a
     // stage opened so the widget never gets stuck showing a stage.
@@ -242,6 +259,7 @@ async function runPass(
   pass: number,
   compactionCount: number,
   onStageEnd: (usage: StageUsage) => void,
+  dumpPath: string | null,
 ): Promise<{ outcome: ConvergenceOutcome }> {
   const { outcome, onEvent } = makeBuilderPassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(graph, pass, compactionCount);
@@ -264,6 +282,7 @@ async function runPass(
     outcome,
     runStageFn,
     stageLabel: BUILD_STAGE,
+    dumpPath,
   });
   return { outcome };
 }

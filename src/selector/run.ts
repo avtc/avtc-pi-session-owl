@@ -18,6 +18,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
+import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { NON_BUILDER, renderTreeTotal } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
@@ -137,6 +138,11 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
   let stageOpened = false;
   let pass = FIRST_PASS;
   const ledger = makeLedgerHook(SELECT_STAGE);
+  // Stage dump (debugDumpLimit): opened before the loop so the finally can
+  // close it; the file itself appears only when the header is written (a
+  // startStage/tools throw leaves nothing behind).
+  const dumpPath = openStageDump(SELECT_STAGE, input.settings.debugDumpLimit, DEFAULT_DUMP_BASE);
+  let dumpHeaderWritten = false;
   try {
     // Register the live working-copy counts provider at stage start: the widget
     // anchors its `selected` baseline on the pristine copy now, then re-pulls
@@ -154,12 +160,20 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
       ctx: input.ctx,
       todoBridge: input.todoBridge,
     });
+    if (dumpPath !== null) {
+      appendDump(
+        dumpPath,
+        stageDumpHeader(SELECT_STAGE, new Date().toISOString(), selectorSystemPrompt(input.settings), tools),
+      );
+      dumpHeaderWritten = true;
+    }
     // convergence loop — bounded by the break conditions below (budget met / no-op / context limit / signal)
     while (true) {
       if (input.signal.aborted) {
         break; // abort → run ended early
       }
 
+      appendDump(dumpPath, `<pass n="${pass}">\n`);
       const { outcome } = await runPass(
         input,
         workingCopy,
@@ -170,7 +184,9 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
         pass,
         treeTotal,
         ledger.onStageEnd,
+        dumpPath,
       );
+      appendDump(dumpPath, "</pass>\n");
 
       // persist the cumulative usage ledger PER PASS so an interrupted run keeps
       // the usage tally for every completed pass — matching the per-mutate
@@ -198,6 +214,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
     log.error("selector run failed", cause);
     throw cause;
   } finally {
+    if (dumpHeaderWritten) appendDump(dumpPath, DUMP_FOOTER);
     // Best-effort teardown: a throw in one cleanup must not skip the others or
     // escape (the never-throws teardown contract). `endStage` always runs when a
     // stage opened so the widget never gets stuck showing a stage.
@@ -236,6 +253,7 @@ async function runPass(
   pass: number,
   treeTotal: string,
   onStageEnd: (usage: StageUsage) => void,
+  dumpPath: string | null,
 ): Promise<{ outcome: ConvergenceOutcome }> {
   const { outcome, onEvent } = makeSelectorPassTracker((event) => input.widget.onEvent(event));
   const messages = passMessages(working, contextView, pass, treeTotal);
@@ -258,6 +276,7 @@ async function runPass(
     outcome,
     runStageFn,
     stageLabel: SELECT_STAGE,
+    dumpPath,
   });
   return { outcome };
 }

@@ -17,6 +17,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { CacheRetention } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MemkeeperConfig } from "../config/schema.js";
+import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, NO_DUMP, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { stripAnsi } from "../format/sanitize.js";
 import { applySetMeta, MUTATE_SOURCE } from "../graph/mutations.js";
 import { log } from "../log.js";
@@ -47,6 +48,9 @@ const GOAL_MAX_TOKENS = 512;
 /** One-shot extraction: its prefix never recurs, so disable prompt-cache writes
  *  (no wasted cache write that is never read). No session-affinity id either. */
 const GOAL_CACHE_RETENTION: CacheRetention = "none";
+/** Stage-dump label for the goal-extract one-shot (no widget stage — the run
+ *  is fire-and-forget and invisible; the dump is its only trace). */
+const GOAL_DUMP_STAGE = "goal-extract";
 
 /** Input to `runGoalExtract`. The run honors its own abort controller (aborted
  *  on shutdown); it takes no run-lock. */
@@ -92,6 +96,11 @@ export async function runGoalExtract(input: GoalExtractInput): Promise<void> {
   if (active !== null) active.abort();
   const controller = new AbortController();
   active = controller;
+  // Stage dump (debugDumpLimit): opened inside the try after the skips (an
+  // aborted / model-gap one-shot leaves no file); the footer closes it in the
+  // finally.
+  let dumpPath: string | null = NO_DUMP;
+  let dumpHeaderWritten = false;
   try {
     if (controller.signal.aborted) return;
 
@@ -106,6 +115,11 @@ export async function runGoalExtract(input: GoalExtractInput): Promise<void> {
     }
     if (controller.signal.aborted) return;
 
+    dumpPath = openStageDump(GOAL_DUMP_STAGE, input.settings.debugDumpLimit, DEFAULT_DUMP_BASE);
+    if (dumpPath !== null) {
+      appendDump(dumpPath, stageDumpHeader(GOAL_DUMP_STAGE, new Date().toISOString(), GOAL_EXTRACT_SYSTEM, []));
+      dumpHeaderWritten = true;
+    }
     const run = input.runStageFn ?? runStage;
     const result = await run({
       systemPrompt: GOAL_EXTRACT_SYSTEM,
@@ -123,6 +137,7 @@ export async function runGoalExtract(input: GoalExtractInput): Promise<void> {
       loopFn: NO_LOOP_OVERRIDE,
       // One-shot: the prefix never recurs, so skip cache writes (and no affinity id).
       cacheRetention: GOAL_CACHE_RETENTION,
+      dumpPath,
     });
     if (result.aborted) return;
 
@@ -146,6 +161,7 @@ export async function runGoalExtract(input: GoalExtractInput): Promise<void> {
     // (the Builder backstop covers an empty summary). Log and move on.
     log.error("goal extract run failed", cause);
   } finally {
+    if (dumpHeaderWritten) appendDump(dumpPath, DUMP_FOOTER);
     if (active === controller) active = null;
   }
 }

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
   Api,
@@ -14,6 +17,7 @@ import type {
 import { EventStream } from "@earendil-works/pi-ai";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { openStageDump } from "../../src/debug-dump.js";
 import { _setBaseLoggerForTest } from "../../src/log.js";
 import {
   makeNoProgressTurnStop,
@@ -819,5 +823,50 @@ describe("runStage — tool-call debug logging", () => {
     const events = [toolExecutionEnd("record_observations", false, "recorded 1"), agentEnd([])];
     await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
     expect(sink.debug).not.toHaveBeenCalled();
+  });
+});
+
+describe("runStage — stage dump seam", () => {
+  it("writes <input> before and <output> after the loop when dumpPath is set", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mk-stagedump-"));
+    const dump = openStageDump("builder", 5, dir);
+    const inMsg = [{ role: "user", content: "organize", timestamp: 0 }] as unknown as AgentMessage[];
+    const outMsg = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        api: "openai",
+        provider: "openai",
+        model: "test-model",
+        usage: NO_USAGE,
+        stopReason: "stop",
+        timestamp: 0,
+      },
+    ] as unknown as AgentMessage[];
+    const events = [messageEnd(NO_USAGE), agentEnd(outMsg)];
+    await runStage(baseInput({ messages: inMsg, loopFn: makeFakeLoop({ events, messages: outMsg }), dumpPath: dump }));
+    const text = fs.readFileSync(dump as string, "utf8");
+    expect(text).toContain("<input>\n<USER>organize</USER>\n</input>\n");
+    expect(text).toContain("<output>\n<ASSISTANT>done</ASSISTANT>\n</output>\n");
+    expect(text.indexOf("<input>")).toBeLessThan(text.indexOf("<output>"));
+  });
+
+  it("accepts an absent dumpPath (dumps off) and runs unchanged", async () => {
+    const events = [agentEnd([])];
+    const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
+    expect(result.messages).toEqual([]);
+  });
+
+  it("a throwing loop writes an <output error> section, then StageRunError propagates", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mk-stagedump-"));
+    const dump = openStageDump("builder", 5, dir);
+    const badLoop = (() => {
+      throw new Error("boom");
+    }) as unknown as typeof import("@earendil-works/pi-agent-core").agentLoop;
+    await expect(runStage(baseInput({ loopFn: badLoop, dumpPath: dump }))).rejects.toThrow(StageRunError);
+    const text = fs.readFileSync(dump as string, "utf8");
+    expect(text).toContain("<input>");
+    expect(text).toContain("<output error>");
+    expect(text).toContain("boom");
   });
 });

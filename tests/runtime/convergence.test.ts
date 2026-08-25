@@ -108,6 +108,7 @@ describe("runConvergencePass", () => {
     reasoning: null,
     onStageEnd: null as ((usage: StageUsage) => void) | null,
     stageLabel: "test",
+    dumpPath: null,
   } as const;
 
   it("resolves normally when the stage succeeds", async () => {

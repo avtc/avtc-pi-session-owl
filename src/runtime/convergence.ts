@@ -95,6 +95,10 @@ export interface ConvergencePassArgs {
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>;
   /** Stage label for log lines (e.g. "builder" / "selector"). */
   stageLabel: string;
+  /** Stage-dump path for this pass (the run-opened dump file), or null =
+   *  dumps disabled. Forwarded to runStage, which appends the pass's
+   *  `<input>`/`<output>` sections. */
+  dumpPath: string | null;
 }
 
 /**
@@ -125,6 +129,7 @@ export async function runConvergencePass(args: ConvergencePassArgs): Promise<voi
     // Per-stage affinity so a session's Builder/Selector passes route consistently
     // and share a cache namespace (null outside an active session — no header).
     sessionId: getStageAffinityId(args.stageLabel) ?? undefined,
+    dumpPath: args.dumpPath,
   };
   try {
     const result = await args.runStageFn(stageInput);

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import type { AssistantMessage, TextContent, ToolCall } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage, TextContent, ToolCall, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type {
   BranchSummaryEntry,
   CustomMessageEntry,
@@ -359,4 +360,83 @@ export function hasAssistantText(entry: SessionEntry): boolean {
   if (entry.type !== "message") return false;
   if (entry.message.role !== "assistant") return false;
   return assistantTextParts(entry.message).length > 0;
+}
+
+// --- AgentMessage rendering (stage dumps) ------------------------------------
+
+/** AgentMessages carry no entry ids — the dump render is a recall-style
+ *  consumer (no entry= attributes). */
+const DUMP_ID = "";
+/** includeEntryId=false for every dump block (same reason as DUMP_ID). */
+const DUMP_OMIT_ENTRY_ID = false;
+
+function isUserMessage(message: AgentMessage): message is UserMessage {
+  return (message as UserMessage).role === "user";
+}
+
+function isAssistantMessage(message: AgentMessage): message is AssistantMessage {
+  return (message as AssistantMessage).role === "assistant";
+}
+
+function isToolResultMessage(message: AgentMessage): message is ToolResultMessage {
+  return (message as ToolResultMessage).role === "toolResult";
+}
+
+/** Render `AgentMessage[]` into the chunk tag grammar, full fidelity (no caps,
+ *  thinking included, redacted thinking skipped) — the stage-dump renderer:
+ *  what an LLM stage call saw / produced, in the same format the Observer
+ *  reads. A tool call's matched result is absorbed right after the call
+ *  (adjacency unit); an orphan result renders standalone in place. Unknown
+ *  message shapes are skipped. */
+export function renderAgentMessages(messages: readonly AgentMessage[]): string {
+  const resultByCallId = new Map<string, ToolResultMessage>();
+  for (const message of messages) {
+    if (isToolResultMessage(message)) resultByCallId.set(message.toolCallId, message);
+  }
+  const consumedResultIds = new Set<string>();
+  const blocks: string[] = [];
+
+  const emitResult = (result: ToolResultMessage): void => {
+    blocks.push(rBlock(DUMP_ID, cleanText(result.content), result.isError, DUMP_OMIT_ENTRY_ID).text);
+    consumedResultIds.add(result.toolCallId);
+  };
+
+  for (const message of messages) {
+    if (isToolResultMessage(message)) {
+      if (consumedResultIds.has(message.toolCallId)) continue; // absorbed into its call
+      emitResult(message);
+      continue;
+    }
+    if (isUserMessage(message)) {
+      const text = cleanText(message.content);
+      if (text.length > 0) blocks.push(uBlock(DUMP_ID, text, DUMP_OMIT_ENTRY_ID).text);
+      continue;
+    }
+    if (!isAssistantMessage(message)) continue;
+    for (const part of message.content) {
+      switch (part.type) {
+        case "text": {
+          const text = cleanText([part]);
+          if (text.length > 0) blocks.push(aBlock(DUMP_ID, text, DUMP_OMIT_ENTRY_ID).text);
+          break;
+        }
+        case "thinking": {
+          if (part.redacted === true) break; // redacted always skipped
+          const cleaned = sanitizeThinking(part.thinking);
+          if (cleaned.length > 0) blocks.push(tBlock(DUMP_ID, cleaned, DUMP_OMIT_ENTRY_ID).text);
+          break;
+        }
+        case "toolCall": {
+          // args are structured JSON — full fidelity, not ANSI-stripped
+          blocks.push(cBlock(DUMP_ID, part.name, JSON.stringify(part.arguments), DUMP_OMIT_ENTRY_ID).text);
+          const result = resultByCallId.get(part.id);
+          if (result !== undefined) emitResult(result);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  }
+  return blocks.join(BLOCK_SEP);
 }

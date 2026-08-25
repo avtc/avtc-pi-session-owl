@@ -28,6 +28,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `llmCallTimeoutMs` | duration | `1200000` | Aborts any Observer, Builder, or Selector LLM call that runs longer than this. `null` = no limit. |
 | `toolResultTokenBudget` | number | `6000` | Max size (in tokens) of a single `cat`/`find`/`ls`/`mk_recall` result. A larger result shows fewer items or less detail (each item stays whole); reading one observation in full is never cut off. |
 | `debugLog` | boolean | `false` | Write detailed trace logs to the log file. |
+| `debugDumpLimit` | number | `0` | Maximum stage dump files kept under `<cwd>/.pi/memkeeper/debug/` (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format. |
 
 ## Observer
 

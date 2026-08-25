@@ -26,6 +26,7 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
+import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { buildChunks, type ChunkOptions, type RenderedChunk } from "../format/chunk.js";
 import { computeDetailsAndCache, type EntryResolver } from "../format/details.js";
 import { toStoredTimestamp } from "../format/render.js";
@@ -284,9 +285,25 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   let done = 0;
   let totalRecords = 0;
   const ledger = makeLedgerHook(OBSERVE_STAGE);
+  // Stage dump (debugDumpLimit): opened before the loop so the finally can
+  // close it; the file itself appears only when the header is written (a
+  // zero-chunk run or a startStage throw leaves nothing behind). The header
+  // shows the first chunk's record tool — its `allowedIds` parameter is the
+  // only per-chunk difference.
+  const dumpPath = openStageDump(OBSERVE_STAGE, input.settings.debugDumpLimit, DEFAULT_DUMP_BASE);
+  let dumpHeaderWritten = false;
   try {
     input.widget.startStage(OBSERVE_STAGE, { batch: { done: 0, total: totalChunks } });
     stageOpened = true;
+    if (dumpPath !== null && chunks.length > 0) {
+      appendDump(
+        dumpPath,
+        stageDumpHeader(OBSERVE_STAGE, new Date().toISOString(), OBSERVER_SYSTEM, [
+          makeRecordObservationsTool(chunks[0].allowedIds).tool,
+        ]),
+      );
+      dumpHeaderWritten = true;
+    }
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
       const chunk = chunks[chunkIndex];
       if (input.signal.aborted) return;
@@ -336,10 +353,12 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         // Per-stage affinity so a session's Observer chunks route consistently
         // and share a cache namespace (null outside an active session).
         sessionId: getStageAffinityId(OBSERVE_STAGE) ?? undefined,
+        dumpPath,
       };
 
       const run = input.runStageFn ?? runStage;
       let timedOut = false;
+      appendDump(dumpPath, `<chunk i="${chunkIndex + 1}/${totalChunks}">\n`);
       try {
         const result = await run(stageInput);
         timedOut = result.timedOut;
@@ -353,6 +372,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       } finally {
         done += 1;
         input.widget.setBatch(done, totalChunks);
+        appendDump(dumpPath, "</chunk>\n");
       }
       // a per-LLM-call timeout — a stage-stopping error: THROW so the compaction
       // hook cancels compaction + surfaces a visible error.
@@ -425,6 +445,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     log.error("observer run failed", cause);
     throw cause;
   } finally {
+    if (dumpHeaderWritten) appendDump(dumpPath, DUMP_FOOTER);
     if (stageOpened) input.widget.endStage();
   }
 }
