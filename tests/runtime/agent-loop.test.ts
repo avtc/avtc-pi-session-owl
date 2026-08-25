@@ -831,7 +831,7 @@ describe("runStage — stage dump seam", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mk-stagedump-"));
     const dump = openStageDump("builder", 5, dir);
     const inMsg = [{ role: "user", content: "organize", timestamp: 0 }] as unknown as AgentMessage[];
-    const outMsg = [
+    const produced = [
       {
         role: "assistant",
         content: [{ type: "text", text: "done" }],
@@ -843,12 +843,34 @@ describe("runStage — stage dump seam", () => {
         timestamp: 0,
       },
     ] as unknown as AgentMessage[];
-    const events = [messageEnd(NO_USAGE), agentEnd(outMsg)];
-    await runStage(baseInput({ messages: inMsg, loopFn: makeFakeLoop({ events, messages: outMsg }), dumpPath: dump }));
+    // faithful to the real agentLoop: stream.result() = [...prompts, ...produced]
+    const result = [...inMsg, ...produced];
+    const events = [messageEnd(NO_USAGE), agentEnd(result)];
+    await runStage(baseInput({ messages: inMsg, loopFn: makeFakeLoop({ events, messages: result }), dumpPath: dump }));
     const text = fs.readFileSync(dump as string, "utf8");
     expect(text).toContain("<input>\n<USER>organize</USER>\n</input>\n");
+    // <output> holds ONLY what the call produced — the input is not re-rendered
     expect(text).toContain("<output>\n<ASSISTANT>done</ASSISTANT>\n</output>\n");
+    expect(text).not.toContain("</output>\n<USER>");
     expect(text.indexOf("<input>")).toBeLessThan(text.indexOf("<output>"));
+  });
+
+  it("passes an EMPTY context history (input.messages are the prompts — agentLoop concatenates)", async () => {
+    const inMsg = [{ role: "user", content: "x", timestamp: 0 }] as unknown as AgentMessage[];
+    let seenContext: AgentContext | undefined;
+    const spyLoop = ((_prompts: unknown, context: AgentContext) => {
+      seenContext = context;
+      return makeFakeLoop({ events: [agentEnd([])], messages: [] })(
+        [],
+        context,
+        {} as AgentLoopConfig,
+        undefined,
+        undefined as unknown as import("@earendil-works/pi-agent-core").StreamFn,
+      );
+    }) as unknown as typeof import("@earendil-works/pi-agent-core").agentLoop;
+    await runStage(baseInput({ messages: inMsg, loopFn: spyLoop }));
+    // a non-empty history would duplicate the prompts into the provider request
+    expect(seenContext?.messages).toEqual([]);
   });
 
   it("accepts an absent dumpPath (dumps off) and runs unchanged", async () => {

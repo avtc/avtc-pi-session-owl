@@ -288,8 +288,9 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   // Stage dump (debugDumpLimit): opened before the loop so the finally can
   // close it; the file itself appears only when the header is written (a
   // zero-chunk run or a startStage throw leaves nothing behind). The header
-  // shows the first chunk's record tool — its `allowedIds` parameter is the
-  // only per-chunk difference.
+  // carries the record tool's static schema (identical for every chunk —
+  // allowedIds is closure state the model never sees); each <chunk> wrapper
+  // records its allowed ids for forensics (why records were accepted/rejected).
   const dumpPath = openStageDump(OBSERVE_STAGE, input.settings.debugDumpLimit, DEFAULT_DUMP_BASE);
   let dumpHeaderWritten = false;
   try {
@@ -358,7 +359,12 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
 
       const run = input.runStageFn ?? runStage;
       let timedOut = false;
-      appendDump(dumpPath, `<chunk i="${chunkIndex + 1}/${totalChunks}">\n`);
+      // per-chunk wrapper: the allowed source ids the tool enforces for THIS
+      // chunk (the model infers them from the chunk text; rejections trace here)
+      appendDump(
+        dumpPath,
+        `<chunk i="${chunkIndex + 1}/${totalChunks}">\n<allowed>\n${[...chunk.allowedIds].join("\n")}\n</allowed>\n`,
+      );
       try {
         const result = await run(stageInput);
         timedOut = result.timedOut;

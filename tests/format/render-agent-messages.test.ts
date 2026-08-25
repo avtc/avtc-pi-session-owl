@@ -23,83 +23,58 @@ function toolResult(callId: string, text: string, isError: boolean): AgentMessag
   } as unknown as AgentMessage;
 }
 
+/** An assistant message carrying the given content parts (usage boilerplate shared). */
+function assistantMsg(content: unknown[]): AgentMessage {
+  return {
+    role: "assistant",
+    content,
+    api: "openai",
+    provider: "openai",
+    model: "test-model",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: 0,
+  } as unknown as AgentMessage;
+}
+
 describe("renderAgentMessages", () => {
   it("renders a user message as <USER>", () => {
     expect(renderAgentMessages([user("Organize the graph.")])).toBe("<USER>Organize the graph.</USER>");
   });
 
   it("renders assistant thinking + text as THINKING and ASSISTANT blocks, in content order", () => {
-    const msg = {
-      role: "assistant",
-      content: [
+    const out = renderAgentMessages([
+      assistantMsg([
         { type: "thinking", thinking: "Thinking: plan first" },
         { type: "text", text: "done" },
-      ],
-      api: "anthropic",
-      provider: "anthropic",
-      model: "m",
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      stopReason: "stop",
-      timestamp: 0,
-    } as unknown as AgentMessage;
-    const out = renderAgentMessages([msg]);
+      ]),
+    ]);
     expect(out).toContain("<THINKING>plan first</THINKING>"); // 'Thinking:' prefix stripped
     expect(out).toContain("<ASSISTANT>done</ASSISTANT>");
     expect(out.indexOf("<THINKING>")).toBeLessThan(out.indexOf("<ASSISTANT>"));
   });
 
   it("skips redacted thinking even though fidelity is full", () => {
-    const msg = {
-      role: "assistant",
-      content: [
+    const out = renderAgentMessages([
+      assistantMsg([
         { type: "thinking", thinking: "secret", thinkingSignature: "sig", redacted: true },
         { type: "text", text: "visible" },
-      ],
-      api: "anthropic",
-      provider: "anthropic",
-      model: "m",
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      stopReason: "stop",
-      timestamp: 0,
-    } as unknown as AgentMessage;
-    const out = renderAgentMessages([msg]);
+      ]),
+    ]);
     expect(out).not.toContain("secret");
     expect(out).toContain("<ASSISTANT>visible</ASSISTANT>");
   });
 
   it("pairs each TOOLCALL with its TOOLRESULT (absorbed right after the call, orphans standalone)", () => {
     const call = (id: string, name: string, args: unknown): AgentMessage =>
-      ({
-        role: "assistant",
-        content: [{ type: "toolCall", id, name, arguments: args }],
-        api: "anthropic",
-        provider: "anthropic",
-        model: "m",
-        usage: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 0,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "stop",
-        timestamp: 0,
-      }) as unknown as AgentMessage;
+      assistantMsg([{ type: "toolCall", id, name, arguments: args }]);
     const out = renderAgentMessages([
       call("c1", "mkdir", { summary: "decisions" }),
       call("c2", "ls", { path: "n8" }),
@@ -118,25 +93,17 @@ describe("renderAgentMessages", () => {
   });
 
   it("marks error results with the error attribute", () => {
-    const call = {
-      role: "assistant",
-      content: [{ type: "toolCall", id: "c1", name: "merge", arguments: {} }],
-      api: "anthropic",
-      provider: "anthropic",
-      model: "m",
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      stopReason: "stop",
-      timestamp: 0,
-    } as unknown as AgentMessage;
+    const call = assistantMsg([{ type: "toolCall", id: "c1", name: "merge", arguments: {} }]);
     const out = renderAgentMessages([call, toolResult("c1", "no such node", true)]);
     expect(out).toContain("<TOOLRESULT error>no such node</TOOLRESULT>");
+  });
+
+  it("renders an orphan result (no matching call) standalone, in place", () => {
+    const orphan = toolResult("ghost", "late result", false);
+    const withText = assistantMsg([{ type: "text", text: "summary" }]);
+    const out = renderAgentMessages([withText, orphan]);
+    expect(out).toContain("<ASSISTANT>summary</ASSISTANT>");
+    expect(out.indexOf("<ASSISTANT>")).toBeLessThan(out.indexOf("<TOOLRESULT>late result</TOOLRESULT>"));
   });
 
   it("keeps full fidelity — no truncation markers on long content", () => {

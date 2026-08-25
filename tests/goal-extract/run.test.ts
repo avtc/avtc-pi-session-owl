@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import {
   _resetGoalExtract,
@@ -239,5 +242,47 @@ describe("runGoalExtract", () => {
     resolveGate();
     await promise;
     expect(getGraphStore().graph.nodes.get(N_GOAL)?.summary).toBe("");
+  });
+});
+
+describe("runGoalExtract — stage dump", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    _resetRunLock();
+  });
+
+  it("debugDumpLimit > 0: writes a toolless header + footer dump for the one-shot", async () => {
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-goal-dump-"));
+    let seenDumpPath: string | null | undefined;
+    const scripted = async (input: StageRunInput): Promise<StageRunResult> => {
+      seenDumpPath = input.dumpPath;
+      return assistantResult("Fix the login bug in auth.ts");
+    };
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    try {
+      await runGoalExtract(makeInput({ runStageFn: scripted, settings: { ...DEFAULT_CONFIG, debugDumpLimit: 5 } }));
+    } finally {
+      cwdSpy.mockRestore();
+    }
+    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "debug"));
+    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "debug");
+    const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("goal-extract-"));
+    expect(files.length).toBe(1);
+    const text = fs.readFileSync(path.join(debugDir, files[0] as string), "utf8");
+    expect(text.startsWith('<dump stage="goal-extract" started="')).toBe(true);
+    expect(text).toContain("</system-prompt>\n"); // toolless: no <tools> section
+    expect(text).not.toContain("<tools>");
+    expect(text.trimEnd().endsWith("</dump>")).toBe(true);
+  });
+
+  it("a model-gap skip leaves NO dump file (opens only after the skips)", async () => {
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-goal-dump-"));
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    try {
+      await runGoalExtract(makeInput({ ctx: makeNoModelCtx(), runStageFn: async () => assistantResult("x") }));
+    } finally {
+      cwdSpy.mockRestore();
+    }
+    expect(fs.existsSync(path.join(dumpRoot, ".pi", "memkeeper", "debug"))).toBe(false);
   });
 });

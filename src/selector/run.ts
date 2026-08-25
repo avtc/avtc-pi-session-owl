@@ -174,19 +174,24 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
       }
 
       appendDump(dumpPath, `<pass n="${pass}">\n`);
-      const { outcome } = await runPass(
-        input,
-        workingCopy,
-        contextView,
-        resolved,
-        tools,
-        runStageFn,
-        pass,
-        treeTotal,
-        ledger.onStageEnd,
-        dumpPath,
-      );
-      appendDump(dumpPath, "</pass>\n");
+      let passOutcome: { outcome: ConvergenceOutcome };
+      try {
+        passOutcome = await runPass(
+          input,
+          workingCopy,
+          contextView,
+          resolved,
+          tools,
+          runStageFn,
+          pass,
+          treeTotal,
+          ledger.onStageEnd,
+          dumpPath,
+        );
+      } finally {
+        appendDump(dumpPath, "</pass>\n"); // balanced even when the pass throws
+      }
+      const { outcome } = passOutcome;
 
       // persist the cumulative usage ledger PER PASS so an interrupted run keeps
       // the usage tally for every completed pass — matching the per-mutate

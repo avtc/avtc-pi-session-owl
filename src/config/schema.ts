@@ -207,6 +207,7 @@ const ROOT_VIEW_STRATEGY_PRESETS: readonly PresetElement[] = [
   ["By topic", "by-topic"],
 ];
 const ROOT_VIEW_TARGET_PRESETS: readonly PresetElement[] = [["No target", NO_TARGET], 20, 40, 80, 160, 320];
+const DEBUG_DUMP_LIMIT_PRESETS: readonly PresetElement[] = [0, 10, 50, 200];
 const COMMAND_RESULT_CAP_PRESETS: readonly PresetElement[] = [10, 25, 50, 100, ["No limit", NO_LIMIT]];
 const FIND_TIMEOUT_PRESETS: readonly PresetElement[] = [
   ["10s", 10_000],
@@ -400,7 +401,7 @@ const SETTINGS: readonly SettingSchema[] = [
     type: "number",
     defaultValue: DEFAULT_CONFIG.debugDumpLimit,
     min: 0,
-    presets: [0, 10, 50, 200],
+    presets: DEBUG_DUMP_LIMIT_PRESETS,
   }),
 
   // ── Observer ───────────────────────────────────────────────────────────────

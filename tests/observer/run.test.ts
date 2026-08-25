@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -119,6 +122,7 @@ function makeArgs(opts: {
   unobserved: SessionEntry[];
   runStageFn: ObserverRunInput["runStageFn"];
   thresholdTokens?: number;
+  debugDumpLimit?: number;
   widget?: WidgetController;
   maybeBuild?: ObserverRunInput["maybeBuild"];
 }): ObserverRunInput {
@@ -130,6 +134,7 @@ function makeArgs(opts: {
       enabled: true,
       observerMode: "on-threshold",
       observerThresholdTokens: opts.thresholdTokens ?? 100000,
+      ...(opts.debugDumpLimit !== undefined ? { debugDumpLimit: opts.debugDumpLimit } : {}),
     },
     unobserved: opts.unobserved,
     signal: new AbortController().signal,
@@ -1070,5 +1075,84 @@ describe("runObserver — record_observations debug logging", () => {
     expect(line).toBeDefined();
     expect(line).toContain("chunk 1/1 covers u1..a1");
     expect(line).toMatch(/ tokens$/);
+  });
+});
+
+describe("runObserver — stage dump", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    setClock(() => "2026-07-29T10:05:00.000Z");
+    _resetSessionAffinity();
+  });
+  afterAll(() => setClock(null));
+
+  it("debugDumpLimit > 0: header + per-chunk wrappers carrying EACH chunk's record tool", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [
+      userEntry("u1", "initial prompt captured mechanically"),
+      assistantEntry("a1", "we chose vitest for tests"),
+    ];
+    const script = scriptedRunStage([
+      [{ summary: "Chose vitest for all new tests.", importance: "high", sourceEntryIds: ["a1"] }],
+    ]);
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-observer-dump-"));
+    let seenDumpPath: string | null | undefined;
+    const scripted = script.fn as NonNullable<ObserverRunInput["runStageFn"]>;
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    try {
+      await runObserver(
+        makeArgs({
+          pi,
+          ctx,
+          unobserved,
+          thresholdTokens: 1,
+          debugDumpLimit: 5,
+          runStageFn: (input) => {
+            seenDumpPath = input.dumpPath;
+            return scripted(input);
+          },
+        }),
+      );
+    } finally {
+      cwdSpy.mockRestore();
+    }
+    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "debug"));
+    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "debug");
+    const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("observe-"));
+    expect(files.length).toBe(1);
+    const text = fs.readFileSync(path.join(debugDir, files[0] as string), "utf8");
+    expect(text.startsWith('<dump stage="observe" started="')).toBe(true);
+    expect(text).toContain("</system-prompt>\n");
+    // the header carries the (static) record tool schema once
+    const headerPart = text.slice(0, text.indexOf("<chunk"));
+    expect(headerPart).toContain('<tool name="record_observations">');
+    expect(text).toContain('<chunk i="1/2">\n<allowed>\nu1\n</allowed>');
+    expect(text).toContain('<chunk i="2/2">\n<allowed>\na1\n</allowed>');
+    expect(text).toContain("</chunk>\n");
+    expect(text.trimEnd().endsWith("</dump>")).toBe(true);
+  });
+
+  it("a zero-chunk run opens a dump but leaves NO file (nothing appended)", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const script = scriptedRunStage([]);
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-observer-dump-"));
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    try {
+      await runObserver(
+        makeArgs({
+          pi,
+          ctx,
+          unobserved: [],
+          thresholdTokens: 1,
+          debugDumpLimit: 5,
+          runStageFn: script.fn,
+        }),
+      );
+    } finally {
+      cwdSpy.mockRestore();
+    }
+    expect(fs.existsSync(path.join(dumpRoot, ".pi", "memkeeper", "debug"))).toBe(false);
   });
 });

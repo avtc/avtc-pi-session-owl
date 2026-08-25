@@ -37,6 +37,12 @@ export const NO_EVENT_SINK = null;
 export const NO_STAGE_END_HOOK = null;
 export const NO_LOOP_OVERRIDE = null;
 
+/** Empty context history — a stage call is self-contained: `input.messages`
+ *  are the new prompts, and agentLoop builds its LLM context as
+ *  `[...context.messages, ...prompts]`, so any non-empty history here would
+ *  duplicate the stage input into the provider request. */
+export const NO_HISTORY: AgentMessage[] = [];
+
 /** Sequential tool execution (memkeeper stages run tools one-by-one). */
 export const SEQUENTIAL = "sequential" as const;
 
@@ -258,7 +264,11 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
   try {
     const context: AgentContext = {
       systemPrompt: input.systemPrompt,
-      messages: input.messages,
+      // input.messages are the NEW prompts for this self-contained stage call —
+      // agentLoop seeds its LLM context with [...context.messages, ...prompts],
+      // so carrying them here too would send every stage input to the provider
+      // TWICE (doubled tokens since the seam's introduction). History is empty.
+      messages: NO_HISTORY,
       tools: input.tools,
     };
 
@@ -314,8 +324,11 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     const loop = input.loopFn ?? agentLoop;
     log.debug("runStage: starting agentLoop stream");
     // Stage dump: the exact input messages, before the call runs (a run that
-    // dies mid-call still leaves the input record).
-    appendDump(dumpPath, `<input>\n${renderAgentMessages(input.messages)}\n</input>\n`);
+    // dies mid-call still leaves the input record). Guarded so a disabled
+    // dump (null path) never pays the render.
+    if (dumpPath !== null) {
+      appendDump(dumpPath, `<input>\n${renderAgentMessages(input.messages)}\n</input>\n`);
+    }
     // pi 0.84.1 made `streamFn` a required `agentLoop` arg. Pass `undefined` (cast to the
     // required type) so pi-agent-core falls back to its process-global default streamFn,
     // which pi-coding-agent installs at startup — that default dispatches through the
@@ -374,8 +387,12 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       const messages = await stream.result();
       log.debug(`runStage: agentLoop stream done (${usage.turns} turns)`);
       // Stage dump: the full output record (thinking/text/tool calls+results),
-      // even for a run that then surfaces a model error below.
-      appendDump(dumpPath, `<output>\n${renderAgentMessages(messages)}\n</output>\n`);
+      // even for a run that then surfaces a model error below. agentLoop seeds
+      // its result with the prompts — slice them off so <output> holds only what
+      // the call PRODUCED (the input is already in <input>).
+      if (dumpPath !== null) {
+        appendDump(dumpPath, `<output>\n${renderAgentMessages(messages.slice(input.messages.length))}\n</output>\n`);
+      }
       // A terminal model failure: surface it instead of returning a clean
       // no-record result (which would let the stage caller proceed and Pi prune
       // an unobserved gap). The outer catch re-throws StageModelError unwrapped.
@@ -401,7 +418,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
   } catch (cause) {
     // Stage dump: record why the call produced nothing (stream/loop failure —
     // the model-error case already dumped its output messages above).
-    if (!(cause instanceof StageModelError)) {
+    if (dumpPath !== null && !(cause instanceof StageModelError)) {
       const reason = cause instanceof Error ? cause.message : String(cause);
       appendDump(dumpPath, `<output error>\n${reason}\n</output>\n`);
     }

@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendDump, DUMP_FOOTER, NO_DUMP, openStageDump, stageDumpHeader } from "../src/debug-dump.js";
+import { appendDump, DUMP_FOOTER, dumpToolBlock, NO_DUMP, openStageDump, stageDumpHeader } from "../src/debug-dump.js";
 
 /** Fresh temp dir per test — no litter in the repo. */
 function tempDumpDir(): string {
@@ -33,14 +33,22 @@ describe("openStageDump", () => {
     expect(fs.existsSync(path.join(dir, "debug"))).toBe(false);
   });
 
-  it("opens a dump under <dir>/debug/ and creates nothing until the first append", () => {
+  it("opens a dump path but creates NOTHING (no dir, no file, no prune) until the first append", () => {
     const dir = tempDumpDir();
     const dump = openStageDump("builder", 5, dir);
     expect(dump).not.toBeNull();
     expect(dump).toContain(path.join("debug", "builder-"));
-    expect(fs.readdirSync(path.join(dir, "debug")).length).toBe(0); // no file yet
+    expect(fs.existsSync(path.join(dir, "debug"))).toBe(false); // no dir yet
     appendDump(dump, "hello");
     expect(fs.readFileSync(dump as string, "utf8")).toBe("hello");
+  });
+
+  it("a run that opens but never appends does not prune existing dumps", () => {
+    const dir = tempDumpDir();
+    const first = openStageDump("builder", 1, dir) as string;
+    appendDump(first, "keep me");
+    openStageDump("builder", 1, dir); // opened (would prune at open) but never appended
+    expect(fs.existsSync(first)).toBe(true); // prune deferred to a real write
   });
 
   it("prunes older same-stage dumps to the limit (newest kept)", () => {
@@ -107,6 +115,21 @@ describe("stageDumpHeader / footer", () => {
     const header = stageDumpHeader("builder", "ts", "p", tools);
     expect(header).not.toContain("<description>");
     expect(header).toContain('<tool name="x">\n<parameters>');
+  });
+
+  it("omits the whole <tools> section when there are no tools (goal-extract one-shot, observer per-chunk tools)", () => {
+    const header = stageDumpHeader("goal-extract", "ts", "p", []);
+    expect(header).not.toContain("<tools>");
+    expect(header.endsWith("</system-prompt>\n")).toBe(true);
+  });
+
+  it("dumpToolBlock formats one tool (description + parameters JSON)", () => {
+    const tool = { name: "ls", description: "List.", parameters: { type: "object" } } as unknown as Parameters<
+      typeof dumpToolBlock
+    >[0];
+    const block = dumpToolBlock(tool);
+    expect(block).toContain('<tool name="ls">\n<description>\nList.\n</description>\n');
+    expect(block).toContain('<parameters>\n{"type":"object"}\n</parameters>\n');
   });
 
   it("footer closes the dump tag", () => {
