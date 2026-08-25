@@ -893,7 +893,9 @@ describe("selectorSystemPrompt (used by runSelector)", () => {
         return scripted(input);
       },
     });
+    // default shape: no target set → plain node count, no ratio
     expect(seenPassText).toContain("consolidate and condense to fit the budget. Root view: ");
+    expect(seenPassText).toMatch(/Root view: \d+ nodes, /);
     expect(seenPassText).toContain("/20k tokens.");
   });
 });

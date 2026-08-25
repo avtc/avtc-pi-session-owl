@@ -262,7 +262,14 @@ async function runPass(
   dumpPath: string | null,
 ): Promise<{ outcome: ConvergenceOutcome }> {
   const { outcome, onEvent } = makeSelectorPassTracker((event) => input.widget.onEvent(event));
-  const messages = passMessages(working, contextView, pass, treeTotal, input.settings.selectorRootViewThreshold);
+  const messages = passMessages(
+    working,
+    contextView,
+    pass,
+    treeTotal,
+    input.settings.selectorRootViewThreshold,
+    input.settings.rootViewTargetNodes,
+  );
   await runConvergencePass({
     systemPrompt: selectorSystemPrompt(input.settings),
     messages,
@@ -299,13 +306,17 @@ function passMessages(
   pass: number,
   treeTotal: string,
   rootViewThreshold: number,
+  rootViewTargetNodes: number | null,
 ): AgentMessage[] {
   const workingTree = renderWorkingRoots(working);
+  // budget + current usage up front (tokens AND the rendered root count —
+  // easier to read than counting lines): without the numbers the model treats
+  // an unknown budget as tight and consolidates proactively below the ceiling
+  const roots = nonObsoleteRoots(working.graph).length;
+  const nodePart = rootViewTargetNodes === null ? `${roots} nodes` : `${roots}/${rootViewTargetNodes} nodes`;
   const text =
     `Shape the active-set for the current task (pass ${pass}). Promote what matters, demote what doesn't into nIrrelevant, consolidate and condense to fit the budget. ` +
-    // budget + current usage up front — without the numbers the model treats an
-    // unknown budget as tight and consolidates proactively below the ceiling
-    `Root view: ${formatTokens(measureRootViewTokens(working.graph, NON_BUILDER))}/${formatTokens(rootViewThreshold)} tokens.\n\n` +
+    `Root view: ${nodePart}, ${formatTokens(measureRootViewTokens(working.graph, NON_BUILDER))}/${formatTokens(rootViewThreshold)} tokens.\n\n` +
     `Working tree\n\n${workingTree}\n${treeTotal}\n\n${contextView}`;
   return [{ role: "user", content: text } as AgentMessage];
 }

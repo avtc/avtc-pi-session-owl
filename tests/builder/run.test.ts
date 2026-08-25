@@ -337,7 +337,12 @@ describe("runBuilder", () => {
     seedGraph([{ id: "n3", summary: "fresh arrival" }]);
     const cap = makeFakePi();
     const widget = recordingWidget();
-    const cfg = settings({ builderRootViewThreshold: 40_000, builderSkipWithinBudget: false, debugDumpLimit: 5 });
+    const cfg = settings({
+      builderRootViewThreshold: 40_000,
+      builderSkipWithinBudget: false,
+      debugDumpLimit: 5,
+      rootViewTargetNodes: 160,
+    });
     // route the default dump root (~/.pi/memkeeper/dumps/<project>) to a temp
     // dir so the test never litters the user's home
     const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-builder-dump-"));
@@ -365,8 +370,9 @@ describe("runBuilder", () => {
       _setDumpHomeForTest(null);
     }
     expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "dumps"));
-    // the pass message states budget + current usage so the model need not guess
-    expect(seenPassText).toContain("to fit the budget. Root view: ");
+    // the pass message states node count (with target ratio) + token budget +
+    // current usage so the model need not guess or count lines
+    expect(seenPassText).toContain("to fit the budget. Root view: 2/160 nodes, ");
     expect(seenPassText).toContain("/40k tokens.\n\nCurrent root view (pass 1):");
     const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
     const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("build-"));
