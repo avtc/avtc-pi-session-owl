@@ -20,7 +20,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { MemkeeperConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { NON_BUILDER, renderTreeTotal } from "../format/render.js";
-import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
+import { formatTokens } from "../format/tokens.js";
+import { measureRootViewTokens, nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { selectorSystemPrompt } from "../prompts/selector.js";
@@ -261,7 +262,7 @@ async function runPass(
   dumpPath: string | null,
 ): Promise<{ outcome: ConvergenceOutcome }> {
   const { outcome, onEvent } = makeSelectorPassTracker((event) => input.widget.onEvent(event));
-  const messages = passMessages(working, contextView, pass, treeTotal);
+  const messages = passMessages(working, contextView, pass, treeTotal, input.settings.selectorRootViewThreshold);
   await runConvergencePass({
     systemPrompt: selectorSystemPrompt(input.settings),
     messages,
@@ -297,10 +298,14 @@ function passMessages(
   contextView: string,
   pass: number,
   treeTotal: string,
+  rootViewThreshold: number,
 ): AgentMessage[] {
   const workingTree = renderWorkingRoots(working);
   const text =
-    `Shape the active-set for the current task (pass ${pass}). Promote what matters, demote what doesn't into nIrrelevant, consolidate and condense to fit the budget.\n\n` +
+    `Shape the active-set for the current task (pass ${pass}). Promote what matters, demote what doesn't into nIrrelevant, consolidate and condense to fit the budget. ` +
+    // budget + current usage up front — without the numbers the model treats an
+    // unknown budget as tight and consolidates proactively below the ceiling
+    `Root view: ${formatTokens(measureRootViewTokens(working.graph, NON_BUILDER))}/${formatTokens(rootViewThreshold)} tokens.\n\n` +
     `Working tree\n\n${workingTree}\n${treeTotal}\n\n${contextView}`;
   return [{ role: "user", content: text } as AgentMessage];
 }

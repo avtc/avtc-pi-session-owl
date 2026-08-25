@@ -875,4 +875,25 @@ describe("selectorSystemPrompt (used by runSelector)", () => {
     expect(prompt).toContain("nIrrelevant");
     expect(prompt).not.toMatch(/\bremove\b/);
   });
+  it("states budget + current usage in the pass message (run-level)", async () => {
+    const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
+    let seenPassText = "";
+    const cap = recordingPi();
+    await runSelector({
+      ctx: makeFakeCtx(),
+      pi: cap.pi,
+      settings: settings({}),
+      signal: new AbortController().signal,
+      widget: selectionWidget(),
+      scope: { firstKeptEntryId: "e2" },
+      todo: null,
+      todoBridge: null,
+      runStageFn: (input) => {
+        seenPassText = (input.messages[0] as unknown as { content: string })?.content ?? "";
+        return scripted(input);
+      },
+    });
+    expect(seenPassText).toContain("consolidate and condense to fit the budget. Root view: ");
+    expect(seenPassText).toContain("/20k tokens.");
+  });
 });

@@ -337,11 +337,12 @@ describe("runBuilder", () => {
     seedGraph([{ id: "n3", summary: "fresh arrival" }]);
     const cap = makeFakePi();
     const widget = recordingWidget();
-    const cfg = settings({ builderRootViewThreshold: 0, debugDumpLimit: 5 });
+    const cfg = settings({ builderRootViewThreshold: 40_000, builderSkipWithinBudget: false, debugDumpLimit: 5 });
     // route the default dump root (~/.pi/memkeeper/dumps/<project>) to a temp
     // dir so the test never litters the user's home
     const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-builder-dump-"));
     let seenDumpPath: string | null | undefined;
+    let seenPassText = "";
     const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
     _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/memkeeper/dumps/<project>
     try {
@@ -356,6 +357,7 @@ describe("runBuilder", () => {
         // themselves are appended inside runStage — covered by agent-loop tests)
         runStageFn: (input) => {
           seenDumpPath = input.dumpPath;
+          seenPassText = (input.messages[0] as unknown as { content: string })?.content ?? "";
           return scripted(input);
         },
       });
@@ -363,6 +365,9 @@ describe("runBuilder", () => {
       _setDumpHomeForTest(null);
     }
     expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "dumps"));
+    // the pass message states budget + current usage so the model need not guess
+    expect(seenPassText).toContain("to fit the budget. Root view: ");
+    expect(seenPassText).toContain("/40k tokens.\n\nCurrent root view (pass 1):");
     const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
     const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("build-"));
     expect(files.length).toBe(1);

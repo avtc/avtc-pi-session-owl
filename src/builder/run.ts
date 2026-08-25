@@ -20,6 +20,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { MemkeeperConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { BUILDER, renderTreeTotal } from "../format/render.js";
+import { formatTokens } from "../format/tokens.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
@@ -267,7 +268,7 @@ async function runPass(
   dumpPath: string | null,
 ): Promise<{ outcome: ConvergenceOutcome }> {
   const { outcome, onEvent } = makeBuilderPassTracker((event) => input.widget.onEvent(event));
-  const messages = passMessages(graph, pass, compactionCount);
+  const messages = passMessages(graph, pass, compactionCount, input.settings.builderRootViewThreshold);
   await runConvergencePass({
     systemPrompt: builderSystemPrompt(input.settings),
     messages,
@@ -294,10 +295,18 @@ async function runPass(
 
 /** Build the per-pass user message: the task + the current root view snapshot
  *  + the source-tree totals (the scale behind the view). */
-function passMessages(graph: MemkeeperGraph, pass: number, compactionCount: number): AgentMessage[] {
+function passMessages(
+  graph: MemkeeperGraph,
+  pass: number,
+  compactionCount: number,
+  rootViewThreshold: number,
+): AgentMessage[] {
   const rootView = renderRootView(graph, BUILDER) || EMPTY_ROOT_VIEW;
   const text =
-    "Organize the memory graph. Process the new arrivals and consolidate the root view to fit the budget.\n\n" +
+    "Organize the memory graph. Process the new arrivals and consolidate the root view to fit the budget. " +
+    // budget + current usage up front — without the numbers the model treats an
+    // unknown budget as tight and consolidates proactively below the ceiling
+    `Root view: ${formatTokens(measureRootViewTokens(graph, BUILDER))}/${formatTokens(rootViewThreshold)} tokens.\n\n` +
     `Current root view (pass ${pass}):\n${rootView}\n${renderTreeTotal(graph, compactionCount)}`;
   return [{ role: "user", content: text } as AgentMessage];
 }
