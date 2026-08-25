@@ -159,6 +159,14 @@ describe("MEMKEEPER_SCHEMA", () => {
     expect(values).toEqual(["balanced", "by-task", "by-category", "by-recency", "by-importance", "by-topic"]);
   });
 
+  it("declares debugDumpLimit's presets (off by default, growing windows)", () => {
+    const dump = MEMKEEPER_SCHEMA.settings.find((s) => s.id === "debugDumpLimit");
+    expect(dump?.type).toBe("number");
+    expect(dump?.min).toBe(0);
+    expect(dump?.presets).toEqual([0, 10, 50, 200]);
+    expect(dump?.defaultValue).toBe(0);
+  });
+
   it("declares the correct `type` for every setting", () => {
     const expectedType: Record<string, string> = {
       enabled: "boolean",
