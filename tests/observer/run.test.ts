@@ -249,6 +249,8 @@ describe("runObserver", () => {
     const obs = obsId !== undefined ? getGraphStore().graph.observations.get(obsId) : undefined;
     // the UTC ISO instant is preserved verbatim (render converts to local)
     expect(obs?.timestamp).toBe("2026-07-29T09:22:50.283Z");
+    // clean case: the whole batch landed — the shortest confirmation, no directives
+    expect(script.acks[0]).toBe("accepted: all");
   });
 
   it("writes no memkeeper.usage entry when no chunk reports usage (the hasUsage guard)", async () => {
@@ -301,13 +303,13 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
 
-    // only the good record wrapped; the ack reports 1 recorded, 1 rejected
+    // only the good record wrapped; the ack is a pure state report — which of
+    // the model's own records landed, why the other didn't
     const graph = getGraphStore().graph;
     const newNodes = [...graph.nodes.values()].filter((n) => n.state === "new");
     expect(newNodes).toHaveLength(1);
     expect(newNodes[0].importance).toBe("crit");
-    expect(script.acks[0]).toMatch(/recorded 1/i);
-    expect(script.acks[0]).toMatch(/reject/i);
+    expect(script.acks[0]).toBe("accepted: #1\nrejected:\n#2: source id not in this chunk");
 
     // one observation entry with exactly one record
     const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
@@ -333,12 +335,11 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
 
-    // only the good record wrapped; the ack reports 1 recorded, 2 rejected
+    // only the good record wrapped; per-record rejection report, model-indexed
     const graph = getGraphStore().graph;
     const newNodes = [...graph.nodes.values()].filter((n) => n.state === "new");
     expect(newNodes).toHaveLength(1);
-    expect(script.acks[0]).toMatch(/recorded 1/i);
-    expect(script.acks[0]).toMatch(/reject/i);
+    expect(script.acks[0]).toBe("accepted: #1\nrejected:\n#2: non-substantive summary\n#3: non-substantive summary");
     // one observation entry with exactly one record (the garbage was dropped)
     const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
     expect(obsEntries).toHaveLength(1);

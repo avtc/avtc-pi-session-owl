@@ -27,8 +27,10 @@ Each observation carries an importance — how much it matters if lost, by natur
 - med — meaningful context that is not itself a decision or constraint
 - low — routine activity or minor detail with little durable consequence
 
-Call record_observations with a batch (array) of observations, as many times as
-needed to cover the chunk. Each item has three fields: summary (the concise
+Call record_observations with a batch (array) of observations — typically one
+call covers the chunk; use further calls only to add facts you missed. Records
+are kept as first submitted; do not resubmit or reword them. Each item has
+three fields: summary (the concise
 observation — the full detail stays in the source), importance, and sourceEntryIds (the source entry ids it draws on
 — an observation may span several blocks). When the chunk is fully covered, reply
 with the single word Done; if the chunk has nothing worth capturing, skip the

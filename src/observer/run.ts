@@ -163,26 +163,43 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
     label: "Record observations",
     parameters: RECORD_OBS_PARAMS,
     async execute(_toolCallId, params) {
-      let accepted = EMPTY_RECORDS;
-      let rejected = EMPTY_RECORDS;
+      const acceptedIndexes: number[] = [];
+      const failures: string[] = [];
       const callSummaries: string[] = [];
-      for (const raw of params.observations) {
+      params.observations.forEach((raw, index) => {
         attempted += 1;
-        const valid =
-          isSubstantiveSummary(raw.summary) && raw.sourceEntryIds.every((srcId: string) => allowedIds.has(srcId));
-        if (!valid) {
-          rejected += 1;
-          continue;
+        // per-record validation — a bad record drops alone, the batch continues
+        if (raw.sourceEntryIds.some((srcId: string) => !allowedIds.has(srcId))) {
+          failures.push(`#${index + 1}: source id not in this chunk`);
+          return;
+        }
+        if (!isSubstantiveSummary(raw.summary)) {
+          failures.push(`#${index + 1}: non-substantive summary`);
+          return;
         }
         records.push({
           summary: raw.summary,
           importance: raw.importance as Importance,
           sourceEntryIds: [...raw.sourceEntryIds],
         });
-        accepted += 1;
+        acceptedIndexes.push(index + 1);
         callSummaries.push(raw.summary);
+      });
+      const accepted = acceptedIndexes.length;
+      const rejected = failures.length;
+      // a pure state report, API-response style — no next-step directives here
+      // (the protocol lives in the system prompt): "all" for the clean common
+      // case, otherwise the #positions that landed + one line per rejected item,
+      // model-indexed so it can diff against its own submitted batch
+      const lines: string[] = [];
+      if (failures.length === EMPTY_RECORDS) {
+        lines.push("accepted: all");
+      } else {
+        if (accepted > EMPTY_RECORDS) lines.push(`accepted: #${acceptedIndexes.join(", #")}`);
+        lines.push("rejected:");
+        lines.push(...failures);
       }
-      const ack = `recorded ${accepted}${rejected > EMPTY_RECORDS ? `, ${rejected} rejected (invalid ids or non-substantive summary)` : ""}; continue or reply Done`;
+      const ack = lines.join("\n");
       log.debug(`observer: record_observations accepted=${accepted} rejected=${rejected}`);
       if (accepted > EMPTY_RECORDS) {
         log.debug(`observer: recorded ${accepted} — ${dumpRecordsForLog(callSummaries)}`);

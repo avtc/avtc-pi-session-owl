@@ -802,7 +802,7 @@ describe("runStage — tool-call debug logging", () => {
     _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, debugLog: true }));
     sink.debug.mockClear();
     const events = [
-      toolExecutionEnd("record_observations", false, "recorded 2; continue or reply Done"),
+      toolExecutionEnd("record_observations", false, "accepted: all"),
       toolExecutionEnd("mkdir", true, "boom\nsecond line"),
       agentEnd([]),
     ];
@@ -820,7 +820,7 @@ describe("runStage — tool-call debug logging", () => {
     _setBaseLoggerForTest(sink);
     _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, debugLog: false }));
     sink.debug.mockClear();
-    const events = [toolExecutionEnd("record_observations", false, "recorded 1"), agentEnd([])];
+    const events = [toolExecutionEnd("record_observations", false, "accepted: all"), agentEnd([])];
     await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
     expect(sink.debug).not.toHaveBeenCalled();
   });
