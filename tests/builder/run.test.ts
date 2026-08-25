@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { makeBuilderPassTracker, runBuilder } from "../../src/builder/run.js";
 import {
   CAT_TOOL,
@@ -20,6 +20,7 @@ import {
   TRY_FINISH_TOOL,
 } from "../../src/builder/tools.js";
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _setDumpHomeForTest, sanitizeForPath } from "../../src/debug-dump.js";
 import { applyCreateNode, applyRecordObservation, setClock } from "../../src/graph/mutations.js";
 import { builderSystemPrompt } from "../../src/prompts/builder.js";
 import { type StageRunInput, type StageRunResult, StageTimeoutError } from "../../src/runtime/agent-loop.js";
@@ -337,12 +338,12 @@ describe("runBuilder", () => {
     const cap = makeFakePi();
     const widget = recordingWidget();
     const cfg = settings({ builderRootViewThreshold: 0, debugDumpLimit: 5 });
-    // route the default dump root (<cwd>/.pi/memkeeper/debug) to a temp dir so
-    // the test never litters the repo
+    // route the default dump root (~/.pi/memkeeper/dumps/<project>) to a temp
+    // dir so the test never litters the user's home
     const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-builder-dump-"));
     let seenDumpPath: string | null | undefined;
     const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/memkeeper/dumps/<project>
     try {
       await runBuilder({
         pi: cap.pi,
@@ -359,10 +360,10 @@ describe("runBuilder", () => {
         },
       });
     } finally {
-      cwdSpy.mockRestore();
+      _setDumpHomeForTest(null);
     }
-    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "debug"));
-    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "debug");
+    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "dumps"));
+    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
     const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("build-"));
     expect(files.length).toBe(1);
     const text = fs.readFileSync(path.join(debugDir, files[0] as string), "utf8");

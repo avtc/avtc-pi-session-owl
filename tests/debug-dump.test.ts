@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Stage dumps: one timestamped file per Observer/Builder/Selector/goal-extract
-// LLM run under <cwd>/.pi/memkeeper/debug/ (or an injected dir for tests),
+// LLM run under an injected dir (production: ~/.pi/memkeeper/dumps/<sanitized-cwd>/),
 // pruned per stage prefix to the debugDumpLimit setting. The file appears only
 // on the first append (a skipped run leaves nothing). Synchronous appends —
 // flushed to disk immediately, nothing lost if the process dies mid-run.
@@ -11,9 +11,18 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendDump, DUMP_FOOTER, dumpToolBlock, NO_DUMP, openStageDump, stageDumpHeader } from "../src/debug-dump.js";
+import {
+  _setDumpHomeForTest,
+  appendDump,
+  DUMP_FOOTER,
+  dumpToolBlock,
+  NO_DUMP,
+  openStageDump,
+  sanitizeForPath,
+  stageDumpHeader,
+} from "../src/debug-dump.js";
 
-/** Fresh temp dir per test — no litter in the repo. */
+/** Fresh temp dir per test — no litter in the repo or the user's home. */
 function tempDumpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "mk-dump-test-"));
 }
@@ -26,19 +35,18 @@ function dumpFiles(dir: string, stage: string): string[] {
 }
 
 describe("openStageDump", () => {
-  it("limit 0 → null (dumps disabled; no dir created)", () => {
+  it("limit 0 → null (dumps disabled; nothing materialized)", () => {
     const dir = tempDumpDir();
     expect(openStageDump("builder", 0, dir)).toBeNull();
-    // no debug/ subdir materialized
-    expect(fs.existsSync(path.join(dir, "debug"))).toBe(false);
+    expect(fs.readdirSync(dir).length).toBe(0);
   });
 
   it("opens a dump path but creates NOTHING (no dir, no file, no prune) until the first append", () => {
     const dir = tempDumpDir();
     const dump = openStageDump("builder", 5, dir);
     expect(dump).not.toBeNull();
-    expect(dump).toContain(path.join("debug", "builder-"));
-    expect(fs.existsSync(path.join(dir, "debug"))).toBe(false); // no dir yet
+    expect(dump).toContain("builder-");
+    expect(fs.readdirSync(dir).length).toBe(0); // no file yet — the path is a reservation only
     appendDump(dump, "hello");
     expect(fs.readFileSync(dump as string, "utf8")).toBe("hello");
   });
@@ -58,7 +66,7 @@ describe("openStageDump", () => {
       appendDump(p, `dump ${n}`);
       return p;
     });
-    const kept = dumpFiles(path.join(dir, "debug"), "builder");
+    const kept = dumpFiles(dir, "builder");
     expect(kept.length).toBe(2);
     expect(fs.existsSync(paths[0] as string)).toBe(false); // oldest pruned
     expect(fs.existsSync(paths[1] as string)).toBe(false);
@@ -72,9 +80,37 @@ describe("openStageDump", () => {
     appendDump(openStageDump("selector", 1, dir) as string, "s1");
     appendDump(openStageDump("builder", 1, dir) as string, "b2"); // prunes b1
     appendDump(openStageDump("selector", 1, dir) as string, "s2"); // prunes s1
-    const debugDir = path.join(dir, "debug");
-    expect(dumpFiles(debugDir, "builder").length).toBe(1);
-    expect(dumpFiles(debugDir, "selector").length).toBe(1);
+    expect(dumpFiles(dir, "builder").length).toBe(1);
+    expect(dumpFiles(dir, "selector").length).toBe(1);
+  });
+
+  it("default dir (null dumpDir): ~/.pi/memkeeper/dumps/<sanitized-cwd>/ per project", () => {
+    const home = tempDumpDir();
+    _setDumpHomeForTest(home);
+    try {
+      const dump = openStageDump("builder", 5, null) as string;
+      appendDump(dump, "x");
+      // the file sits under <home>/.pi/memkeeper/dumps/<sanitized cwd>
+      const dumpsRoot = path.join(home, ".pi", "memkeeper", "dumps");
+      const projects = fs.readdirSync(dumpsRoot);
+      expect(projects.length).toBe(1);
+      const sanitized = sanitizeForPath(process.cwd());
+      expect(projects[0]).toBe(sanitized);
+      expect(fs.existsSync(path.join(dumpsRoot, sanitized, path.basename(dump)))).toBe(true);
+    } finally {
+      _setDumpHomeForTest(null);
+    }
+  });
+});
+
+describe("sanitizeForPath", () => {
+  it("turns separators into hyphens and strips unsafe chars (featyard convention)", () => {
+    expect(sanitizeForPath("E:\\sync\\unique\\avtc-pi-memkeeper")).toBe("E-sync-unique-avtc-pi-memkeeper");
+    expect(sanitizeForPath("/home/u/x:y z")).toBe("home-u-xyz"); // unsafe chars are stripped, not hyphenated
+  });
+
+  it("removes path traversal and collapses repeated hyphens", () => {
+    expect(sanitizeForPath("/a/../b//c/")).toBe("a-b-c");
   });
 });
 
@@ -117,7 +153,7 @@ describe("stageDumpHeader / footer", () => {
     expect(header).toContain('<tool name="x">\n<parameters>');
   });
 
-  it("omits the whole <tools> section when there are no tools (goal-extract one-shot, observer per-chunk tools)", () => {
+  it("omits the whole <tools> section when there are no tools (goal-extract one-shot)", () => {
     const header = stageDumpHeader("goal-extract", "ts", "p", []);
     expect(header).not.toContain("<tools>");
     expect(header.endsWith("</system-prompt>\n")).toBe(true);

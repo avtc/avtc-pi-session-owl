@@ -7,8 +7,9 @@ import * as path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _setDumpHomeForTest, sanitizeForPath } from "../../src/debug-dump.js";
 import {
   _resetGoalExtract,
   abortGoalExtract,
@@ -258,14 +259,14 @@ describe("runGoalExtract — stage dump", () => {
       seenDumpPath = input.dumpPath;
       return assistantResult("Fix the login bug in auth.ts");
     };
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/memkeeper/dumps/<project>
     try {
       await runGoalExtract(makeInput({ runStageFn: scripted, settings: { ...DEFAULT_CONFIG, debugDumpLimit: 5 } }));
     } finally {
-      cwdSpy.mockRestore();
+      _setDumpHomeForTest(null);
     }
-    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "debug"));
-    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "debug");
+    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "dumps"));
+    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
     const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("goal-extract-"));
     expect(files.length).toBe(1);
     const text = fs.readFileSync(path.join(debugDir, files[0] as string), "utf8");
@@ -277,12 +278,12 @@ describe("runGoalExtract — stage dump", () => {
 
   it("a model-gap skip leaves NO dump file (opens only after the skips)", async () => {
     const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-goal-dump-"));
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    _setDumpHomeForTest(dumpRoot);
     try {
       await runGoalExtract(makeInput({ ctx: makeNoModelCtx(), runStageFn: async () => assistantResult("x") }));
     } finally {
-      cwdSpy.mockRestore();
+      _setDumpHomeForTest(null);
     }
-    expect(fs.existsSync(path.join(dumpRoot, ".pi", "memkeeper", "debug"))).toBe(false);
+    expect(fs.existsSync(path.join(dumpRoot, ".pi", "memkeeper", "dumps"))).toBe(false);
   });
 });

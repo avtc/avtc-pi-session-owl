@@ -9,6 +9,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _setDumpHomeForTest, sanitizeForPath } from "../../src/debug-dump.js";
 import { setClock } from "../../src/graph/mutations.js";
 import { _setBaseLoggerForTest } from "../../src/log.js";
 import { type ObserverRunInput, runObserver } from "../../src/observer/run.js";
@@ -1099,7 +1100,7 @@ describe("runObserver — stage dump", () => {
     const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-observer-dump-"));
     let seenDumpPath: string | null | undefined;
     const scripted = script.fn as NonNullable<ObserverRunInput["runStageFn"]>;
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/memkeeper/dumps/<project>
     try {
       await runObserver(
         makeArgs({
@@ -1115,10 +1116,10 @@ describe("runObserver — stage dump", () => {
         }),
       );
     } finally {
-      cwdSpy.mockRestore();
+      _setDumpHomeForTest(null);
     }
-    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "debug"));
-    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "debug");
+    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "dumps"));
+    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
     const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("observe-"));
     expect(files.length).toBe(1);
     const text = fs.readFileSync(path.join(debugDir, files[0] as string), "utf8");
@@ -1138,7 +1139,7 @@ describe("runObserver — stage dump", () => {
     const ctx = makeFakeCtx();
     const script = scriptedRunStage([]);
     const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-observer-dump-"));
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(dumpRoot);
+    _setDumpHomeForTest(dumpRoot);
     try {
       await runObserver(
         makeArgs({
@@ -1151,8 +1152,8 @@ describe("runObserver — stage dump", () => {
         }),
       );
     } finally {
-      cwdSpy.mockRestore();
+      _setDumpHomeForTest(null);
     }
-    expect(fs.existsSync(path.join(dumpRoot, ".pi", "memkeeper", "debug"))).toBe(false);
+    expect(fs.existsSync(path.join(dumpRoot, ".pi", "memkeeper", "dumps"))).toBe(false);
   });
 });

@@ -66,7 +66,7 @@ export interface MemkeeperConfig {
   /** Write debug-level trace logs (trigger decisions, per-stage stream start/end)
    *  to the log file. Off by default — enable to diagnose a stall. */
   debugLog: boolean;
-  /** Max stage dump files kept per stage under <cwd>/.pi/memkeeper/debug/ (0 = off). */
+  /** Max dump files kept per stage under ~/.pi/memkeeper/dumps/<project>/ (0 = off). */
   debugDumpLimit: number;
   // Observer
   observerModel: string | null;
@@ -397,7 +397,7 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("debugDumpLimit", {
     label: "Debug dump limit",
     description:
-      "Maximum stage dump files kept under <cwd>/.pi/memkeeper/debug/ (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format.",
+      "Maximum per-stage dump files kept under ~/.pi/memkeeper/dumps/<project>/ (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.debugDumpLimit,
     min: 0,

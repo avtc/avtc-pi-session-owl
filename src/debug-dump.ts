@@ -9,19 +9,25 @@
 // (appendFileSync) so output is flushed immediately — nothing is lost if the
 // process dies mid-run. Materialization (dir creation + pruning of older
 // same-stage dumps) is deferred to the FIRST append: a run that opens but never
-// writes (skipped early, or a throw before the header) leaves the debug/ dir
-// and every existing dump untouched — opening never destroys debug data.
+// writes (skipped early, or a throw before the header) leaves the dump dir and
+// every existing dump untouched — opening never destroys debug data.
+//
+// Location: ~/.pi/memkeeper/dumps/<sanitized-cwd>/ — OUTSIDE the project so
+// dumps never land in a repo (.pi is not gitignored by default in user
+// projects) and survive the project being moved/cleaned. The sanitized cwd
+// (path separators → "-", filename-safe chars only) keeps per-project dumps
+// separate, mirroring the featyard artifact-path convention.
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 
 /** "Dumps disabled" sentinel — the null dump path (every append no-ops). */
 export const NO_DUMP: string | null = null;
-/** "Use the default dump base" (<cwd>/.pi/memkeeper) — the null dumpDir. */
+/** "Use the default dump dir" (~/.pi/memkeeper/dumps/<sanitized-cwd>) — the null dumpDir. */
 export const DEFAULT_DUMP_BASE: string | null = null;
 
-const DEBUG_DIR_NAME = "debug";
 const TXT_EXT = ".txt";
 /** Monotonic counter for same-millisecond dump ordering (deterministic prune
  *  order: filename sort = creation order within a process). */
@@ -31,26 +37,45 @@ let dumpCounter = 0;
  *  by the first `appendDump` (dir creation + prune happen there, not at open). */
 const pendingDumps = new Map<string, { dir: string; stage: string; limit: number }>();
 
-/** The default dump base: <cwd>/.pi/memkeeper (the dump dir itself is
- *  `<base>/debug/`, mirroring an injected test dir). */
-function defaultDumpBase(): string {
-  return path.join(process.cwd(), ".pi", "memkeeper");
+/** Sanitize an absolute path for use as a single directory name (featyard
+ *  artifact-path convention: strip traversal, separators → "-", keep only
+ *  filename-safe chars, collapse/trim hyphens). */
+export function sanitizeForPath(value: string): string {
+  return value
+    .replace(/\.\./g, "") // path traversal
+    .replace(/[\\/]/g, "-") // path separators
+    .replace(/[^a-zA-Z0-9._-]/g, "") // keep only filename-safe chars
+    .replace(/--+/g, "-") // collapse repeated hyphens
+    .replace(/^-|-$/g, ""); // strip leading/trailing hyphens
+}
+
+/** Test seam for the home dir (os.homedir is not spyable under ESM). */
+let dumpHomeOverride: string | null = null;
+/** Override the home dir used for the default dump location (tests). */
+export function _setDumpHomeForTest(home: string | null): void {
+  dumpHomeOverride = home;
+}
+
+/** The default dump dir for THIS project: ~/.pi/memkeeper/dumps/<sanitized-cwd>/. */
+function defaultProjectDumpDir(): string {
+  const home = dumpHomeOverride ?? os.homedir();
+  return path.join(home, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
 }
 
 /**
  * Reserve a new timestamped dump path `<stage>-<isoTs>-<counter>-<nonce>.txt`
- * under `<dumpDir | default>/debug/` and return it. Touches NO filesystem —
+ * under `<dumpDir | default>` and return it. Touches NO filesystem —
  * the dir is created, and older files with the same stage prefix are pruned to
  * keep at most `limit` (newest kept), on the dump's FIRST `appendDump`. Returns
  * null when `limit <= 0` (dumps disabled).
  *
- * `dumpDir: string | null` — the base dir; null uses the default
- * `<cwd>/.pi/memkeeper`, and the dumps live in its `debug/` subdir. Tests
- * inject a temp base so they never touch the repo's .pi/.
+ * `dumpDir: string | null` — the dump dir; null uses the default
+ *  `~/.pi/memkeeper/dumps/<sanitized-cwd>/`. Tests inject a temp dir so they
+ *  never touch the user's home.
  */
 export function openStageDump(stage: string, limit: number, dumpDir: string | null): string | null {
   if (limit <= 0) return null; // dumps disabled (debugDumpLimit = 0)
-  const dir = path.join(dumpDir ?? defaultDumpBase(), DEBUG_DIR_NAME);
+  const dir = dumpDir ?? defaultProjectDumpDir();
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   // Filename = <stage>-<isoTs>-<paddedCounter>-<nonce>.txt: the padded counter
   // breaks same-ms ties deterministically (pruning sorts by filename, not
@@ -83,7 +108,7 @@ function pruneStageDumps(dir: string, stage: string, limit: number): void {
 }
 
 /** Append content to a dump file (synchronously flushed). Never throws. The
- *  first append to a freshly opened dump creates the debug/ dir and prunes
+ *  first append to a freshly opened dump creates the dump dir and prunes
  *  older same-stage dumps to the limit; no-op on a null path (dumps disabled)
  *  — call sites pass the `openStageDump` result through unconditionally. */
 export function appendDump(dumpPath: string | null, content: string): void {
