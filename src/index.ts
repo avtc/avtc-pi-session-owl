@@ -62,7 +62,11 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   const widget = initWidget();
   const conflicts = detectConflicts();
   setConflictHits(conflicts.length > 0 ? conflicts : null);
-  if (conflicts.length > 0 && !getMemkeeperSettings().ignoreConflicts) {
+  const activationSettings = getMemkeeperSettings();
+  if (conflicts.length > 0 && !activationSettings.enabled) {
+    // Detect + record only. enabled=false is the operator's explicit choice —
+    // a conflict warning would claim a pause that is not why memkeeper is off.
+  } else if (conflicts.length > 0 && !activationSettings.ignoreConflicts) {
     log.info(
       `conflict pause: ${conflicts.map((h) => h.matched).join(", ")} also handles compaction — ` +
         "memkeeper stays dormant; remove it, or set ignoreConflicts (see README → Conflicts), to resume",

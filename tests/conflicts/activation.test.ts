@@ -45,13 +45,14 @@ const wiring = vi.hoisted(() => ({
   })),
   registerSettingsCommand: vi.fn(() => ({
     getSettings: (): { enabled: boolean; ignoreConflicts?: boolean } => ({
-      enabled: true,
+      enabled: wiring.enabled,
       ...(wiring.ignoreConflicts === null ? {} : { ignoreConflicts: wiring.ignoreConflicts }),
     }),
     updateSetting: () => {},
     loadSettingsIntoMemory: () => {},
   })),
   conflicts: [] as Array<{ entry: string; matched: string }>,
+  enabled: true,
   ignoreConflicts: null as boolean | null,
 }));
 
@@ -146,6 +147,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
     vi.clearAllMocks();
     wiring.conflicts = [{ entry: "npm:pi-blackhole", matched: "pi-blackhole" }];
     wiring.ignoreConflicts = null;
+    wiring.enabled = true;
   });
 
   it("registers the FULL surface even when conflict-paused (dormant, not absent)", () => {
@@ -246,5 +248,37 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
     await ready?.({}, makeCtx());
     const api = pi.events.emit.mock.calls.at(-1)?.[1] as { getConflictPause: () => unknown };
     expect(api.getConflictPause()).toBeNull();
+  });
+
+  it("enabled=false + conflicts: user's explicit choice — no pause line, no conflict wiring", async () => {
+    wiring.enabled = false;
+    const pi = makeFakePi();
+    memkeeperExtension(pi);
+    expect(wiring.widgetSetConflict).not.toHaveBeenCalled();
+
+    const start = pi._handlers.get("session_start")?.[0];
+    await start?.({}, makeCtx());
+    // falls through to the normal path (mocked lifecycle no-ops) — NOT the pause branch
+    expect(wiring.onSessionStart).toHaveBeenCalledTimes(1);
+    expect(wiring.widgetSetCtx).not.toHaveBeenCalled();
+
+    const turnEnd = pi._handlers.get("turn_end")?.[0];
+    await turnEnd?.({}, makeCtx());
+    expect(wiring.captureInitialPromptAndExtract).not.toHaveBeenCalled();
+  });
+
+  it("enabled=false + conflicts, then user enables mid-session: pause is live and takes over", async () => {
+    wiring.enabled = false;
+    const pi = makeFakePi();
+    memkeeperExtension(pi);
+    const start = pi._handlers.get("session_start")?.[0];
+    await start?.({}, makeCtx());
+    expect(wiring.onSessionStart).toHaveBeenCalledTimes(1);
+
+    wiring.enabled = true; // same hits, same ignoreConflicts=false — now it WANTS to run
+    await start?.({}, makeCtx());
+    expect(wiring.onSessionStart).toHaveBeenCalledTimes(1); // paused branch instead
+    expect(wiring.widgetSetCtx).toHaveBeenCalledTimes(1);
+    expect(wiring.widgetRender).toHaveBeenCalledTimes(1);
   });
 });

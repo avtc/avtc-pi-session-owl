@@ -8,7 +8,7 @@
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _setGetMemkeeperSettings } from "../../src/config/schema.js";
+import { _setGetMemkeeperSettings, type MemkeeperConfig } from "../../src/config/schema.js";
 import { setConflictHits } from "../../src/conflicts/pause.js";
 import { applyCreateNode, applyRecordObservation } from "../../src/graph/mutations.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
@@ -430,12 +430,7 @@ describe("WidgetController conflict mode liveness (un-pause mid-session)", () =>
   const fakeTheme = { fg: (_c: string, t: string) => t };
 
   it("the pause line follows the LIVE pause state, not the activation snapshot", () => {
-    _setGetMemkeeperSettings(
-      () =>
-        ({ ignoreConflicts: false }) as Parameters<
-          ReturnType<typeof import("../../src/config/schema.js").getMemkeeperSettings>
-        >[0],
-    );
+    _setGetMemkeeperSettings(() => ({ enabled: true, ignoreConflicts: false }) as MemkeeperConfig);
     setConflictHits([{ entry: "npm:x", matched: "pi-observational-memory" }]);
     const widget = initWidget();
     widget.setConflict(["pi-observational-memory"]);
@@ -454,12 +449,7 @@ describe("WidgetController conflict mode liveness (un-pause mid-session)", () =>
 
     // flip ignoreConflicts mid-session: the gate goes live-un-paused — the line
     // must DROP on the next render (stage null → hide), not linger forever
-    _setGetMemkeeperSettings(
-      () =>
-        ({ ignoreConflicts: true }) as Parameters<
-          ReturnType<typeof import("../../src/config/schema.js").getMemkeeperSettings>
-        >[0],
-    );
+    _setGetMemkeeperSettings(() => ({ enabled: true, ignoreConflicts: true }) as MemkeeperConfig);
     widget.render();
     expect(setWidget).toHaveBeenLastCalledWith("memkeeper_progress", undefined, { placement: "aboveEditor" });
 

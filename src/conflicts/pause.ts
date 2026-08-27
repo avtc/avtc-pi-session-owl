@@ -26,8 +26,12 @@ export function getConflictHits(): ConflictHit[] | null {
 /**
  * Whether memkeeper is conflict-paused RIGHT NOW: conflicts were detected at
  * activation and the operator has not opted into the deliberate last-wins
- * co-run (ignoreConflicts). Live — a settings reload flips it.
+ * co-run (ignoreConflicts). Live — a settings reload flips it. A memkeeper
+ * the user explicitly disabled (enabled=false) is never conflict-paused: it
+ * is off by choice, not blocked — the pause (and its warning line) only
+ * applies to a memkeeper that wants to run.
  */
 export function isConflictPaused(): boolean {
-  return conflictHits !== null && !getMemkeeperSettings().ignoreConflicts;
+  const settings = getMemkeeperSettings();
+  return settings.enabled && conflictHits !== null && !settings.ignoreConflicts;
 }
