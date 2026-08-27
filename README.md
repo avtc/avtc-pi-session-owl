@@ -124,7 +124,7 @@ The defaults keep the observations graph in shape, so when a compaction is trigg
 
 Pi's compaction hook is last-registration-wins: when two extensions customize compaction, only the last one registered has an effect — the other silently does nothing. Pi has no mechanism for extensions to veto each other.
 
-Memkeeper handles this by checking, at every start, whether another compaction-handling extension is installed (from `~/.pi/agent/settings.json`, `<project>/.pi/settings.json`, and the pi extension dirs). When it finds one, it stays dormant — every hook returns immediately, compaction falls through to pi's native summary or the other extension's, and the widget shows a paused line:
+Memkeeper handles this by checking, at every start, whether another compaction-handling extension is installed (from `~/.pi/agent/settings.json`, `<project>/.pi/settings.json`, and the pi extension dirs). When it finds one, it stays dormant — it collects no observations, compaction falls through to pi's native summary or the other extension's, and the widget shows a paused line:
 
 ```text
 🦉 ⚠ paused — pi-blackhole also handles compaction (/mk:status)
