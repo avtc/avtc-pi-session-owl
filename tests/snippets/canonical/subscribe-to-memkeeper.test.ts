@@ -81,6 +81,22 @@ describe("subscribeToMemkeeper (canonical snippet)", () => {
     expect(() => proxy.reloadConfig()).not.toThrow();
   });
 
+  it("exposes getConflictPause; null when the bridge is older (indistinguishable from not-paused)", () => {
+    const pi = makeFakePi();
+    const proxy = subscribeToMemkeeper(pi as unknown as ExtensionAPI);
+    const hits = [{ entry: "npm:pi-blackhole", matched: "pi-blackhole" }];
+    fire(pi, "memkeeper:ready", {
+      reloadConfig() {},
+      getConflictPause: () => hits,
+    });
+    expect(proxy.getConflictPause()).toEqual(hits);
+
+    const older = makeFakePi();
+    const olderProxy = subscribeToMemkeeper(older as unknown as ExtensionAPI);
+    fire(older, "memkeeper:ready", { reloadConfig() {}, getConfig() {} });
+    expect(olderProxy.getConflictPause()).toBeNull();
+  });
+
   it("session_shutdown cleans the :ready listener (reload-safe)", () => {
     const pi = makeFakePi();
     subscribeToMemkeeper(pi as unknown as ExtensionAPI);

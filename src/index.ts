@@ -12,7 +12,7 @@ import { registerUserCommands } from "./commands/user.js";
 import { compactionHook } from "./compaction/hook.js";
 import { getMemkeeperSettings, initMemkeeperSettings, reloadMemkeeperConfig } from "./config/schema.js";
 import { detectConflicts } from "./conflicts/detect.js";
-import { setConflictPause } from "./conflicts/pause.js";
+import { clearConflictPause, getConflictPause, setConflictPause } from "./conflicts/pause.js";
 import { captureInitialPromptAndExtract, onSessionShutdown, onSessionStart } from "./lifecycle.js";
 import { log } from "./log.js";
 import { makeMkRecallTool } from "./recall/mk-recall.js";
@@ -40,6 +40,10 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   const api = {
     reloadConfig: () => reloadMemkeeperConfig(),
     getConfig: () => getMemkeeperSettings(),
+    // Conflict-pause state (null when memkeeper registered normally): lets a
+    // host (e.g. the bench harness co-running other memory extensions via
+    // ignoreConflicts) assert memkeeper is actually live, not just configured.
+    getConflictPause: (): ReturnType<typeof getConflictPause> => getConflictPause(),
   };
   const emitReady = (): void => {
     pi.events.emit("memkeeper:ready", api);
@@ -74,6 +78,12 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
       `conflict detected (${conflicts.map((h) => h.matched).join(", ")}) but ignoreConflicts=true — ` +
         "registering anyway; pi compaction is last-registration-wins",
     );
+  }
+  // A clean / ignoreConflicts activation is NOT paused — clear any pause a
+  // previous (re)activation recorded, so the pause state and /mk:status never
+  // report a stale pause after the conflicting package was removed + reloaded.
+  if (conflicts.length === 0 || getMemkeeperSettings().ignoreConflicts) {
+    clearConflictPause();
   }
 
   const widget = initWidget();

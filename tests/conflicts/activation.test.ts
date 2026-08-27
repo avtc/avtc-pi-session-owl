@@ -163,13 +163,17 @@ describe("memkeeperExtension (conflict-pause wiring)", () => {
     expect(wiring.initWidget).toHaveBeenCalledTimes(1);
   });
 
-  it("still emits memkeeper:ready at session_start (bench host API)", async () => {
+  it("still emits memkeeper:ready at session_start (bench host API) — with the conflict pause exposed", async () => {
     const pi = makeFakePi();
     memkeeperExtension(pi);
     const handler = pi._handlers.get("session_start")?.[0];
     expect(handler).toBeDefined();
     await handler?.({}, {} as ExtensionContext);
     expect(pi.events.emit).toHaveBeenCalledWith("memkeeper:ready", expect.anything());
+    // the api exposes the pause state so a host can assert memkeeper is actually live
+    const api = pi.events.emit.mock.calls[0]?.[1] as { getConflictPause: () => unknown };
+    expect(typeof api.getConflictPause).toBe("function");
+    expect(api.getConflictPause()).toEqual([{ entry: "npm:pi-blackhole", matched: "pi-blackhole" }]);
   });
 
   it("clean mode registers the full surface (all hooks, tool, commands, stages)", () => {
@@ -191,6 +195,11 @@ describe("memkeeperExtension (conflict-pause wiring)", () => {
     wiring.ignoreConflicts = true;
     const pi = makeFakePi();
     memkeeperExtension(pi);
+    // ready api still fires — and reports NO pause (registered despite conflicts)
+    const handler = pi._handlers.get("session_start")?.at(-1);
+    handler?.({}, {} as ExtensionContext);
+    const api = pi.events.emit.mock.calls.at(-1)?.[1] as { getConflictPause: () => unknown };
+    expect(api.getConflictPause()).toBeNull();
     expect([...pi._handlers.keys()].sort()).toEqual([
       "session_before_compact",
       "session_shutdown",
