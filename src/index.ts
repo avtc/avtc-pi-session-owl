@@ -123,8 +123,15 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
 
   pi.on("turn_end", (_event, ctx) => {
     const settings = getMemkeeperSettings();
-    // enabled=false / conflict-pause off-path: no work, no capture, no background run.
-    if (!settings.enabled || isConflictPaused()) return;
+    // enabled=false / conflict-pause off-path: no work, no capture, no background
+    // run — but still render the widget once so the pause LINE stays honest
+    // across mid-session flips (render-time liveness shows it when a pause has
+    // started, hides it when memkeeper was disabled — no next-session_start lag).
+    if (!settings.enabled || isConflictPaused()) {
+      widget.setCtx(ctx);
+      widget.render();
+      return;
+    }
     // Capture the verbatim initial user message SYNCHRONOUSLY before the
     // fire-and-forget trigger: the capture's graph mutations commit before the
     // Observer reads the graph, so the first user message is exclusively

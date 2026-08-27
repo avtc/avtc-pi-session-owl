@@ -280,5 +280,31 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
     expect(wiring.onSessionStart).toHaveBeenCalledTimes(1); // paused branch instead
     expect(wiring.widgetSetCtx).toHaveBeenCalledTimes(1);
     expect(wiring.widgetRender).toHaveBeenCalledTimes(1);
+
+    // and the turn_end off-path keeps the line honest: after DISABLING again
+    // mid-session, the next turn_end still renders once (render-time liveness
+    // then hides the line instead of leaving it stale)
+    wiring.enabled = false;
+    const turnEnd = pi._handlers.get("turn_end")?.[0];
+    await turnEnd?.({}, makeCtx());
+    expect(wiring.widgetSetCtx).toHaveBeenCalledTimes(2);
+    expect(wiring.widgetRender).toHaveBeenCalledTimes(2);
+    expect(wiring.captureInitialPromptAndExtract).not.toHaveBeenCalled();
+  });
+
+  it("enabled mid-session with conflicts: the next turn_end publishes the pause line", async () => {
+    wiring.enabled = false;
+    const pi = makeFakePi();
+    memkeeperExtension(pi);
+    const turnEnd = pi._handlers.get("turn_end")?.[0];
+    await turnEnd?.({}, makeCtx()); // disabled — off-path render only
+    expect(wiring.widgetRender).toHaveBeenCalledTimes(1);
+    expect(wiring.captureInitialPromptAndExtract).not.toHaveBeenCalled();
+
+    wiring.enabled = true; // conflicts still installed — pause takes over NOW
+    await turnEnd?.({}, makeCtx());
+    expect(wiring.widgetRender).toHaveBeenCalledTimes(2);
+    expect(wiring.widgetSetCtx).toHaveBeenCalledTimes(2); // off-path renders wire the widget too
+    expect(wiring.captureInitialPromptAndExtract).not.toHaveBeenCalled();
   });
 });
