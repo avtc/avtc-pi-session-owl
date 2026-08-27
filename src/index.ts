@@ -30,7 +30,11 @@ import { onTurnEnd, setStageRuns } from "./triggers.js";
 import { initWidget } from "./widget/tracker.js";
 
 export default function memkeeperExtension(pi: ExtensionAPI): void {
-  initMemkeeperSettings(pi);
+  // Widget first so settings registration can already refresh it: every panel
+  // edit re-renders, keeping the pause line in step with live gate flips
+  // (render-time liveness decides show/hide — see tracker.ts).
+  const widget = initWidget();
+  initMemkeeperSettings(pi, () => widget.render());
 
   // --- memkeeper:ready extensibility API (for avtc-pi-bench-compact) ---
   // Lets a host reconfigure memkeeper LIVE (reload the in-memory settings cache from
@@ -59,7 +63,6 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   // package recovers at the next pi start. The widget line + /mk:status keep
   // the pause visible. (Also clears any pause a previous (re)activation
   // recorded, so state never goes stale.)
-  const widget = initWidget();
   const conflicts = detectConflicts();
   setConflictHits(conflicts.length > 0 ? conflicts : null);
   const activationSettings = getMemkeeperSettings();

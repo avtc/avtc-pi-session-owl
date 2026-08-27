@@ -687,9 +687,19 @@ const REGISTRATION_OPTIONS: RegisterSettingsOptions = {
   envVar: "PI_SETTINGS_MEMKEEPER",
 };
 
-/** Register the /mk:settings command + tabbed modal once (from activate); stores the handle. */
-export function initMemkeeperSettings(pi: ExtensionAPI): SettingsHandle<MemkeeperConfig> {
-  handle = registerFn<MemkeeperConfig>(pi, MEMKEEPER_SCHEMA, REGISTRATION_OPTIONS);
+/** Register the /mk:settings command + tabbed modal once (from activate); stores the handle.
+ * The optional onAfterChange is the settings modal's per-edit hook (fired after
+ * updateSetting persists) — memkeeper uses it to refresh the widget so a live
+ * gate flip (enabled / ignoreConflicts) is reflected in the pause line instantly. */
+export function initMemkeeperSettings(
+  pi: ExtensionAPI,
+  onAfterChange?: (id: string, newValue: unknown) => void,
+): SettingsHandle<MemkeeperConfig> {
+  handle = registerFn<MemkeeperConfig>(
+    pi,
+    MEMKEEPER_SCHEMA,
+    onAfterChange ? { ...REGISTRATION_OPTIONS, onAfterChange } : REGISTRATION_OPTIONS,
+  );
   return handle;
 }
 

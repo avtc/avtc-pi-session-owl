@@ -43,14 +43,16 @@ const wiring = vi.hoisted(() => ({
     getContext: () => ({ getInProgress: () => null, getPending: () => [] }),
     getBridge: () => ({ getItems: (): unknown[] => [] }),
   })),
-  registerSettingsCommand: vi.fn(() => ({
-    getSettings: (): { enabled: boolean; ignoreConflicts?: boolean } => ({
-      enabled: wiring.enabled,
-      ...(wiring.ignoreConflicts === null ? {} : { ignoreConflicts: wiring.ignoreConflicts }),
+  registerSettingsCommand: vi.fn(
+    (_pi: unknown, _schema: unknown, _opts?: { onAfterChange?: (id: string, newValue: unknown) => void }) => ({
+      getSettings: (): { enabled: boolean; ignoreConflicts?: boolean } => ({
+        enabled: wiring.enabled,
+        ...(wiring.ignoreConflicts === null ? {} : { ignoreConflicts: wiring.ignoreConflicts }),
+      }),
+      updateSetting: () => {},
+      loadSettingsIntoMemory: () => {},
     }),
-    updateSetting: () => {},
-    loadSettingsIntoMemory: () => {},
-  })),
+  ),
   conflicts: [] as Array<{ entry: string; matched: string }>,
   enabled: true,
   ignoreConflicts: null as boolean | null,
@@ -290,6 +292,27 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
     expect(wiring.widgetSetCtx).toHaveBeenCalledTimes(2);
     expect(wiring.widgetRender).toHaveBeenCalledTimes(2);
     expect(wiring.captureInitialPromptAndExtract).not.toHaveBeenCalled();
+  });
+
+  it("panel edits refresh the widget instantly: onAfterChange is wired to render", async () => {
+    const pi = makeFakePi();
+    memkeeperExtension(pi);
+    // the registration options must carry onAfterChange (fired by the settings
+    // modal after each /mk:settings edit persists)
+    const opts = wiring.registerSettingsCommand.mock.calls.at(-1)?.[2] as
+      | { onAfterChange?: (id: string, value: unknown) => void }
+      | undefined;
+    expect(typeof opts?.onAfterChange).toBe("function");
+
+    // fire it like the panel would (after flipping ignoreConflicts via the panel)
+    wiring.ignoreConflicts = true;
+    opts?.onAfterChange?.("ignoreConflicts", true);
+    expect(wiring.widgetRender).toHaveBeenCalledTimes(1);
+
+    // and back: un-pause → panel edit → render again (render-time liveness decides)
+    wiring.ignoreConflicts = null;
+    opts?.onAfterChange?.("enabled", true);
+    expect(wiring.widgetRender).toHaveBeenCalledTimes(2);
   });
 
   it("enabled mid-session with conflicts: the next turn_end publishes the pause line", async () => {
