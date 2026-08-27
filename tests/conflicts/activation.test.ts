@@ -22,11 +22,13 @@ const wiring = vi.hoisted(() => ({
   setStageRuns: vi.fn(() => {}),
   compactionHook: vi.fn(async () => undefined),
   widgetSetConflict: vi.fn(),
+  widgetSetCtx: vi.fn(),
+  widgetRender: vi.fn(),
   initWidget: vi.fn(() => ({
     setConflict: (names: string[]) => wiring.widgetSetConflict(names),
-    setCtx: () => {},
+    setCtx: (ctx: unknown) => wiring.widgetSetCtx(ctx),
+    render: () => wiring.widgetRender(),
     clearCtx: () => {},
-    render: () => {},
     startStage: () => {},
     setPass: () => {},
     setBatch: () => {},
@@ -178,6 +180,20 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
     const result = await compact?.({}, makeCtx());
     expect(result).toBeUndefined();
     expect(wiring.compactionHook).not.toHaveBeenCalled();
+  });
+
+  it("while paused, session_start still wires the widget (pause line must publish)", async () => {
+    const pi = makeFakePi();
+    memkeeperExtension(pi);
+    // the LIFECYCLE session_start handler is gated on pause (no observer work) —
+    // but it is also what calls widget.setCtx; the pause line must still get a
+    // ctx + a render, so the gated branch wires the widget itself.
+    const lifecycleStart = pi._handlers.get("session_start")?.[0];
+    expect(lifecycleStart).toBeDefined();
+    await lifecycleStart?.({}, makeCtx());
+    expect(wiring.widgetSetCtx).toHaveBeenCalledTimes(1);
+    expect(wiring.widgetRender).toHaveBeenCalledTimes(1);
+    expect(wiring.onSessionStart).not.toHaveBeenCalled(); // no observer work
   });
 
   it("ready API reports the ACTIVE pause (hits) for hosts to assert on", async () => {

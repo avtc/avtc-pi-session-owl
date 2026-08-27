@@ -105,8 +105,14 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", (event, ctx) => {
-    // dormant while conflict-paused (no observer catch-up / graph init work)
-    if (isConflictPaused()) return;
+    // Dormant while conflict-paused — but the pause LINE is the warning
+    // channel: it needs a ctx + a render even when no observer work runs
+    // (normally onSessionStart wires the widget; the gated branch must too).
+    if (isConflictPaused()) {
+      widget.setCtx(ctx);
+      widget.render();
+      return;
+    }
     onSessionStart(event, ctx, pi, widget);
   });
   pi.on("session_shutdown", (_event, _ctx) => onSessionShutdown(_event, widget));
