@@ -64,9 +64,11 @@ export function buildPausedStatusReport(hits: Array<{ entry: string; matched: st
     "",
     listed,
     "",
-    "Pi's compaction hook is last-registration-wins, so memkeeper registered no",
-    "hooks or tools this session. Remove the other package and restart pi to",
-    "re-enable memkeeper — or see README → Conflicts.",
+    "Pi's compaction hook is last-registration-wins, so memkeeper stays dormant",
+    "this session — it collects no observations and leaves compaction to the",
+    "other extension. To resolve: remove the other package and restart pi;",
+    "co-run deliberately via ignoreConflicts in /mk:settings; or turn memkeeper",
+    "off (enabled in /mk:settings) — see README → Conflicts.",
   ].join("\n");
 }
 
