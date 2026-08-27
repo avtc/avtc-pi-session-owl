@@ -12,6 +12,7 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { getMemkeeperSettings } from "../config/schema.js";
+import { isConflictPaused } from "../conflicts/pause.js";
 import { BUILDER } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { RECORD_OBS_TOOL } from "../observer/run.js";
@@ -554,8 +555,11 @@ function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null, co
   if (ctx === null) return;
   // TUI-only: no-op in rpc/json/print.
   if (ctx.mode !== "tui" || !ctx.hasUI) return;
-  // conflict-pause line first — static, width-aware, ignores stage state
-  if (conflictNames !== null) {
+  // Conflict-pause line first — width-aware, ignores stage state. LIVENESs: the
+  // gate (isConflictPaused) reads settings live, so a mid-session ignoreConflicts
+  // flip drops the line on the next render instead of lingering over a
+  // resumed memkeeper (the hits themselves only exist while conflict-paused).
+  if (conflictNames !== null && isConflictPaused()) {
     const names = conflictNames;
     ctx.ui.setWidget(
       WIDGET_KEY,

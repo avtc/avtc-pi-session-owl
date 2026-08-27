@@ -7,7 +7,9 @@
 // the WidgetController wrapper, tested via the wiring smoke test).
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { _setGetMemkeeperSettings } from "../../src/config/schema.js";
+import { setConflictHits } from "../../src/conflicts/pause.js";
 import { applyCreateNode, applyRecordObservation } from "../../src/graph/mutations.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import type { NodeId, ObsId } from "../../src/types.js";
@@ -357,6 +359,15 @@ describe("onEvent — in-flight accepted observations (+N obs)", () => {
 });
 
 describe("WidgetController conflict mode", () => {
+  beforeEach(() => {
+    // the pause line renders only while the LIVE gate is paused (hits + no
+    // ignoreConflicts opt-out; DEFAULT_CONFIG has ignoreConflicts: false)
+    setConflictHits([{ entry: "npm:pi-blackhole", matched: "pi-blackhole" }]);
+  });
+  afterEach(() => {
+    setConflictHits(null);
+  });
+
   function makeTuiCtx() {
     return {
       mode: "tui",
@@ -405,5 +416,54 @@ describe("WidgetController conflict mode", () => {
     widget.clearCtx();
     const setWidget = (ctx.ui as unknown as { setWidget: ReturnType<typeof vi.fn> }).setWidget;
     expect(setWidget).toHaveBeenLastCalledWith("memkeeper_progress", undefined, { placement: "aboveEditor" });
+  });
+});
+
+describe("WidgetController conflict mode liveness (un-pause mid-session)", () => {
+  function makeTuiCtx() {
+    return {
+      mode: "tui",
+      hasUI: true,
+      ui: { setWidget: vi.fn() },
+    } as unknown as Parameters<ReturnType<typeof initWidget>["setCtx"]>[0];
+  }
+  const fakeTheme = { fg: (_c: string, t: string) => t };
+
+  it("the pause line follows the LIVE pause state, not the activation snapshot", () => {
+    _setGetMemkeeperSettings(
+      () =>
+        ({ ignoreConflicts: false }) as Parameters<
+          ReturnType<typeof import("../../src/config/schema.js").getMemkeeperSettings>
+        >[0],
+    );
+    setConflictHits([{ entry: "npm:x", matched: "pi-observational-memory" }]);
+    const widget = initWidget();
+    widget.setConflict(["pi-observational-memory"]);
+    const ctx = makeTuiCtx();
+    widget.setCtx(ctx);
+    widget.render();
+    const setWidget = (ctx.ui as unknown as { setWidget: ReturnType<typeof vi.fn> }).setWidget;
+    expect(setWidget).toHaveBeenCalledTimes(1);
+    const factory1 = setWidget.mock.calls[0]?.[1] as (
+      tui: unknown,
+      theme: unknown,
+    ) => {
+      render: (w: number) => string[];
+    };
+    expect(factory1({}, fakeTheme).render(200)[0]).toContain("⚠ paused");
+
+    // flip ignoreConflicts mid-session: the gate goes live-un-paused — the line
+    // must DROP on the next render (stage null → hide), not linger forever
+    _setGetMemkeeperSettings(
+      () =>
+        ({ ignoreConflicts: true }) as Parameters<
+          ReturnType<typeof import("../../src/config/schema.js").getMemkeeperSettings>
+        >[0],
+    );
+    widget.render();
+    expect(setWidget).toHaveBeenLastCalledWith("memkeeper_progress", undefined, { placement: "aboveEditor" });
+
+    _setGetMemkeeperSettings(null);
+    setConflictHits(null);
   });
 });
