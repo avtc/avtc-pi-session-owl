@@ -40,6 +40,7 @@ afterAll(() => _setRegisterSettingsCommand(null));
 const EXPECTED_IDS = [
   // General
   "enabled",
+  "ignoreConflicts",
   "defaultModel",
   "defaultThinkingLevel",
   "renderMode",
@@ -170,6 +171,7 @@ describe("MEMKEEPER_SCHEMA", () => {
   it("declares the correct `type` for every setting", () => {
     const expectedType: Record<string, string> = {
       enabled: "boolean",
+      ignoreConflicts: "boolean",
       defaultModel: "model",
       defaultThinkingLevel: "thinking-level",
       renderMode: "string",

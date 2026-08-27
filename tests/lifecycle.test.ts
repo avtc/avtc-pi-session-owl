@@ -133,6 +133,7 @@ function makeCtx(branch: FakeEntry[]): {
 }
 
 const noopWidget: WidgetController = {
+  setConflict: () => {},
   setCtx: () => {},
   clearCtx: () => {},
   render: () => {},

@@ -303,6 +303,13 @@ async function bootFreshGraph(): Promise<void> {
       loadSettingsIntoMemory: () => {},
     })) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand,
   }));
+  // e2e tests exercise the CLEAN activation path — detection must not read the
+  // real home (a developer machine with a real conflicting package installed
+  // would otherwise pause the extension and starve every hook test).
+  vi.doMock("../src/conflicts/detect.js", () => ({
+    detectConflicts: () => [] as Array<{ entry: string; matched: string }>,
+    CONFLICT_PACKAGE_MARKERS: [] as string[],
+  }));
   const indexMod = await import("../src/index.js");
   const storeMod = await import("../src/store/graph-store.js");
   const lockMod = await import("../src/runtime/run-lock.js");

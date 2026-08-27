@@ -36,6 +36,9 @@ export type RootViewStrategy = "balanced" | "by-task" | "by-category" | "by-rece
 export interface MemkeeperConfig {
   // General
   enabled: boolean;
+  /** Register even when a conflicting compaction extension is detected
+   *  (deliberate last-wins co-run, e.g. benchmarking). */
+  ignoreConflicts: boolean;
   defaultModel: string | null;
   /** Thinking level for all stages when a stage doesn't override. null = reuse
    *  the session's thinking level (ctx.thinkingLevel). "off" = no thinking. */
@@ -137,6 +140,7 @@ const DEBUG_LOG_DEFAULT = false;
 export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   // General
   enabled: true,
+  ignoreConflicts: false,
   defaultModel: NO_MODEL,
   defaultThinkingLevel: NO_MODEL,
   renderMode: DEFAULT_RENDER_MODE,
@@ -285,6 +289,13 @@ const SETTINGS: readonly SettingSchema[] = [
       "Master switch for memkeeper. Off = memkeeper stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected).",
     type: "boolean",
     defaultValue: DEFAULT_CONFIG.enabled,
+  }),
+  setting("ignoreConflicts", {
+    label: "Ignore conflicts",
+    description:
+      "Register even when a conflicting compaction extension is detected (pi compaction is last-wins — for deliberate co-runs, e.g. benchmarking).",
+    type: "boolean",
+    defaultValue: DEFAULT_CONFIG.ignoreConflicts,
   }),
   setting("defaultModel", {
     label: "Default model",
@@ -568,6 +579,7 @@ const TABS: readonly SettingsTabSchema[] = [
     label: "General",
     settingIds: [
       "enabled",
+      "ignoreConflicts",
       "defaultModel",
       "defaultThinkingLevel",
       "renderMode",

@@ -99,6 +99,7 @@ export function scriptRunStageWithError(
 
 /** A no-op widget controller (the stub). */
 export const NO_OP_WIDGET: WidgetController = {
+  setConflict: () => {},
   setCtx: () => {},
   clearCtx: () => {},
   render: () => {},
@@ -116,6 +117,7 @@ export function recordingWidget(): WidgetController & {
 } {
   const calls: string[] = [];
   return {
+    setConflict: () => {},
     setCtx: () => {},
     clearCtx: () => {},
     render: () => {},

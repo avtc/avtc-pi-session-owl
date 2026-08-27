@@ -7,6 +7,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
+import { getConflictPause } from "../conflicts/pause.js";
 import { BUILDER, NON_BUILDER, type SizeHintObservation, treeLevels } from "../format/render.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
 import { nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
@@ -50,6 +51,24 @@ const PHASES = ["observe", "build", "select"] as const;
 const PHASE_LABEL_WIDTH = 7; // "observe" is the longest phase label
 const REPORT_HEADER = "🦉 memkeeper — status";
 const DISABLED_MESSAGE = "memkeeper is disabled.";
+
+/** The conflict-pause report (approved text): which packages conflicted and
+ *  how to recover. Pure over the activation-time conflict hits. */
+export function buildPausedStatusReport(hits: Array<{ entry: string; matched: string }>): string {
+  const nameWidth = Math.max(...hits.map((h) => h.matched.length));
+  const listed = hits.map((h) => `  ${h.matched.padEnd(nameWidth)} ${h.entry}`).join("\n");
+  return [
+    REPORT_HEADER,
+    "",
+    "Paused — another compaction-handling extension is installed:",
+    "",
+    listed,
+    "",
+    "Pi's compaction hook is last-registration-wins, so memkeeper registered no",
+    "hooks or tools this session. Remove the other package and restart pi to",
+    "re-enable memkeeper — or see README → Conflicts.",
+  ].join("\n");
+}
 
 /** Build the multi-line status report (pure). Mirrors the pi footer token
  *  format shared with the widget (formatTokens). */
@@ -122,6 +141,12 @@ function appendPhaseLines(lines: string[], ledger: UsageLedger): void {
 /** `/mk:status` (no args) → build the report from live state → notify the user. */
 export async function runMkStatus(_args: string, ctx: ExtensionCommandContext): Promise<void> {
   try {
+    // conflict-pause first: no graph/session state exists to report
+    const paused = getConflictPause();
+    if (paused !== null) {
+      notify(ctx, buildPausedStatusReport(paused), "info");
+      return;
+    }
     const settings = getMemkeeperSettings();
     const { sessionStartMs, compactionCount } = readSessionBounds(ctx.sessionManager);
     const report = buildStatusReport(gatherStatusInput(settings, { sessionStartMs, compactionCount }));

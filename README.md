@@ -120,6 +120,24 @@ Four independent mode axes, all live-toggleable mid-session:
 
 The defaults keep the observations graph in shape, so when a compaction is triggered the summary is immediately provided — tune the modes and thresholds to your model and workload. Two shape knobs — `rootViewTargetNodes` (how many roots to aim for; no target = the agent shapes the root view on its own) and `rootViewStrategy` (task · category · recency · importance · topic) — advise the Builder and Selector on the root view's organization. See [CONFIGURATION.md](docs/CONFIGURATION.md) for the full schema reference (every knob, defaults, per-component model presets).
 
+## Conflicts with other extensions
+
+Pi's compaction hook is last-registration-wins: when two extensions customize compaction, only the last one registered has an effect — the other silently does nothing. Pi has no mechanism for extensions to veto each other.
+
+Memkeeper handles this by checking, at every start, whether another compaction-handling extension is installed (from `~/.pi/agent/settings.json`, `<project>/.pi/settings.json`, and the pi extension dirs). When it finds one, it registers nothing that touches sessions — no hooks, no tools, no background runs — and shows a paused line in the widget:
+
+```text
+🦉 ⚠ paused — pi-blackhole also handles compaction (/mk:status)
+```
+
+The pause is runtime-only (nothing is written to your settings): remove the other extension and restart pi, and memkeeper comes back by itself.
+
+Unknown or future packages are caught by a source scan for the override-shaped compaction-hook registration in installed package dirs (best effort — passive listeners that only observe compaction events never trigger it). Known compaction-handling packages are also checked by name — a curated list maintained in memkeeper's source — so forks and renamed copies are caught even when their code shape changes.
+
+### Forcing memkeeper on
+
+If you deliberately run memkeeper alongside another compaction handler (e.g. for benchmarking), set `ignoreConflicts: true` in the memkeeper settings (/mk:settings). The last-registered extension wins — with this enabled you are choosing that fight knowingly.
+
 ## Full suite
 
 Check out the full suite of related extensions, [avtc-pi](https://github.com/avtc/avtc-pi) — deterministic feature development, subagent delegation, working-memory, behavioral learning, parallel-work guardrails, durable decisions, notifications, and more.

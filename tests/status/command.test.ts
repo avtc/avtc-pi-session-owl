@@ -8,9 +8,16 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, type MemkeeperConfig } from "../../src/config/schema.js";
+import { clearConflictPause, setConflictPause } from "../../src/conflicts/pause.js";
 import type { SizeHintObservation } from "../../src/format/render.js";
 import { renderRootViewFromRoots } from "../../src/graph/read-tools.js";
-import { buildStatusReport, gatherStatusInput, runMkStatus, type StatusInput } from "../../src/status/command.js";
+import {
+  buildPausedStatusReport,
+  buildStatusReport,
+  gatherStatusInput,
+  runMkStatus,
+  type StatusInput,
+} from "../../src/status/command.js";
 import type { UsageLedger } from "../../src/store/codecs.js";
 import { cloneLedger, EMPTY_LEDGER, encodeSelection } from "../../src/store/codecs.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
@@ -417,5 +424,46 @@ describe("runMkStatus (handler)", () => {
     expect(notified).toHaveLength(1);
     expect(notified[0].level).toBe("error");
     expect(notified[0].text).toContain("boom");
+  });
+});
+
+describe("paused status report (conflict pause)", () => {
+  const HITS = [
+    { entry: "npm:pi-blackhole", matched: "pi-blackhole" },
+    { entry: "E:/work/pi/pi-observational-memory", matched: "pi-observational-memory" },
+  ];
+
+  it("buildPausedStatusReport lists name + entry and the recovery note", () => {
+    const report = buildPausedStatusReport(HITS);
+    expect(report).toBe(
+      [
+        "🦉 memkeeper — status",
+        "",
+        "Paused — another compaction-handling extension is installed:",
+        "",
+        "  pi-blackhole            npm:pi-blackhole",
+        "  pi-observational-memory E:/work/pi/pi-observational-memory",
+        "",
+        "Pi's compaction hook is last-registration-wins, so memkeeper registered no",
+        "hooks or tools this session. Remove the other package and restart pi to",
+        "re-enable memkeeper — or see README → Conflicts.",
+      ].join("\n"),
+    );
+  });
+
+  it("runMkStatus shows the paused report when conflict-paused", async () => {
+    setConflictPause(HITS);
+    const notified: Array<{ text: string; level: string }> = [];
+    const ctx = {
+      ui: { notify: async (text: string, level: string) => notified.push({ text, level }) },
+    } as unknown as ExtensionCommandContext;
+    try {
+      await runMkStatus("", ctx);
+      expect(notified).toHaveLength(1);
+      expect(notified[0].level).toBe("info");
+      expect(notified[0].text).toContain("Paused — another compaction-handling extension is installed:");
+    } finally {
+      clearConflictPause();
+    }
   });
 });

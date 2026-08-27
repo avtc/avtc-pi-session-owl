@@ -7,12 +7,12 @@
 // the WidgetController wrapper, tested via the wiring smoke test).
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { applyCreateNode, applyRecordObservation } from "../../src/graph/mutations.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import type { NodeId, ObsId } from "../../src/types.js";
 import { makeObservation } from "../../src/types.js";
-import { createTracker, type ProgressTracker } from "../../src/widget/tracker.js";
+import { createTracker, initWidget, type ProgressTracker } from "../../src/widget/tracker.js";
 
 // Apply a root node to the live store so snapshot() sees non-zero counts.
 function seedRoot(id: NodeId, summary: string): void {
@@ -353,5 +353,57 @@ describe("onEvent — in-flight accepted observations (+N obs)", () => {
     tracker.onEvent(recordEnd(3, false));
     tracker.startStage("observe", { batch: { done: 1, total: 5 } });
     expect(tracker.inFlightObs).toBe(0);
+  });
+});
+
+describe("WidgetController conflict mode", () => {
+  function makeTuiCtx() {
+    return {
+      mode: "tui",
+      hasUI: true,
+      ui: { setWidget: vi.fn() },
+    } as unknown as Parameters<ReturnType<typeof initWidget>["setCtx"]>[0];
+  }
+  const fakeTheme = { fg: (_c: string, t: string) => t };
+
+  it("setConflict publishes the paused line; render(width) fits the width", () => {
+    const widget = initWidget();
+    const ctx = makeTuiCtx();
+    widget.setConflict(["pi-blackhole", "pi-vcc"]);
+    widget.setCtx(ctx);
+    widget.render();
+    const setWidget = (ctx.ui as unknown as { setWidget: ReturnType<typeof vi.fn> }).setWidget;
+    expect(setWidget).toHaveBeenCalledTimes(1);
+    const [key, factory, opts] = setWidget.mock.calls[0] as [
+      string,
+      (tui: unknown, theme: unknown) => { render: (w: number) => string[] },
+      { placement: string },
+    ];
+    expect(key).toBe("memkeeper_progress");
+    expect(opts.placement).toBe("aboveEditor");
+    const renderable = factory({}, fakeTheme);
+    const line = renderable.render(200)[0];
+    expect(line).toContain("⚠ paused — pi-blackhole, pi-vcc also handle compaction (/mk:status)");
+  });
+
+  it("setConflict before setCtx publishes once ctx arrives (session_start order)", () => {
+    const widget = initWidget();
+    widget.setConflict(["pi-blackhole"]);
+    const ctx = makeTuiCtx();
+    widget.setCtx(ctx);
+    widget.render();
+    const setWidget = (ctx.ui as unknown as { setWidget: ReturnType<typeof vi.fn> }).setWidget;
+    expect(setWidget).toHaveBeenCalledTimes(1);
+  });
+
+  it("clearCtx hides the conflict line too", () => {
+    const widget = initWidget();
+    const ctx = makeTuiCtx();
+    widget.setConflict(["pi-blackhole"]);
+    widget.setCtx(ctx);
+    widget.render();
+    widget.clearCtx();
+    const setWidget = (ctx.ui as unknown as { setWidget: ReturnType<typeof vi.fn> }).setWidget;
+    expect(setWidget).toHaveBeenLastCalledWith("memkeeper_progress", undefined, { placement: "aboveEditor" });
   });
 });

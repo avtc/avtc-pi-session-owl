@@ -147,6 +147,7 @@ function selectionWidget(): WidgetController & {
   const base = recordingWidget();
   let selectedProvider: SelectedCountsProvider | null = null;
   return {
+    setConflict: () => {},
     setCtx: base.setCtx,
     clearCtx: base.clearCtx,
     render: base.render,

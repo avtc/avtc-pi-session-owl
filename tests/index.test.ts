@@ -72,6 +72,11 @@ const wiring = vi.hoisted(() => {
     // Seeded from DEFAULT_CONFIG in beforeEach (vi.hoisted runs before imports,
     // so the frozen defaults are not referenceable here).
     settings: { config: undefined as MemkeeperConfig | undefined },
+    // The conflict-detection result the fresh graph's detectConflicts() returns
+    // (default: no conflicts — the real detector has its own tests and MUST NOT
+    // run here: a developer machine with a real conflicting package installed
+    // would otherwise flip these wiring tests into conflict mode).
+    conflicts: [] as Array<{ entry: string; matched: string }>,
   };
 });
 
@@ -115,6 +120,7 @@ const MOCKED_PATHS = [
   "../src/widget/tracker.js",
   "../src/runtime/stages.js",
   "../src/todo/wiring.js",
+  "../src/conflicts/detect.js",
   "avtc-pi-settings-ui",
 ] as const;
 
@@ -152,6 +158,10 @@ async function importMockedExtension(): Promise<typeof import("../src/index.js")
     ...(await importOriginal<typeof import("../src/todo/wiring.js")>()),
     createTodoWiring: wiring.createTodoWiring,
   }));
+  vi.doMock("../src/conflicts/detect.js", () => ({
+    detectConflicts: () => wiring.conflicts,
+    CONFLICT_PACKAGE_MARKERS: [] as string[],
+  }));
   vi.doMock("avtc-pi-settings-ui", async (importOriginal) => ({
     ...(await importOriginal<typeof import("avtc-pi-settings-ui")>()),
     registerSettingsCommand: (() => ({
@@ -175,6 +185,7 @@ describe("memkeeperExtension (activate wiring)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     wiring.settings.config = { ...DEFAULT_CONFIG, enabled: true };
+    wiring.conflicts = [];
     memkeeperExtension(makeFakePi());
   });
 

@@ -14,6 +14,7 @@
 // Colors: counts=text (accent on the active stage's section); budgets/labels/→
 // separators/spaces=dim; deltas follow their parent count; trailing ctx/tok=muted.
 
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { formatTokens } from "../format/tokens.js";
 import type { WidgetSnapshot } from "./tracker.js";
 
@@ -132,4 +133,35 @@ export function formatWidgetLine(snap: WidgetSnapshot, theme: ThemeSeam): string
   const structural = structuralParts.join(paint(theme, "dim", SEP));
   const trailing = trailingSection(snap, theme);
   return `${owl}${structural}${paint(theme, "dim", MID)}${trailing}`;
+}
+
+/**
+ * The conflict-pause line (static — no stages run while paused):
+ * `🦉 ⚠ paused — {names} also handle(s) compaction (/mk:status)`.
+ * Width-aware degradation ladder — the resolution hint `(/mk:status)` is the
+ * last thing to go: full list → `{first}, +N more` → drop the verb → cut the
+ * names with an ellipsis. Coloring happens after truncation so the visible
+ * width math stays ANSI-free (prefix accent, rest muted).
+ */
+export function formatConflictLine(names: string[], width: number, theme: ThemeSeam): string {
+  const prefix = `${OWL} ⚠ paused — `;
+  const suffix = " (/mk:status)";
+  const verb = names.length > 1 ? " also handle compaction" : " also handles compaction";
+  const compose = (body: string): string => `${prefix}${body}${suffix}`;
+  const fits = (line: string): boolean => visibleWidth(line) <= width;
+
+  let body = `${names.join(", ")}${verb}`;
+  if (!fits(compose(body)) && names.length > 1) {
+    body = `${names[0]}, +${names.length - 1} more${verb}`;
+  }
+  if (!fits(compose(body))) {
+    body = names.length > 1 ? `${names[0]}, +${names.length - 1} more` : `${names[0]}`;
+  }
+  let plain = compose(body);
+  if (!fits(plain)) {
+    // middle-truncate the names segment so prefix + resolution hint survive
+    const cut = width - visibleWidth(prefix) - visibleWidth(suffix) - 1; // -1: ellipsis
+    plain = cut > 0 ? `${prefix}${truncateToWidth(body, cut, "…")}${suffix}` : truncateToWidth(plain, width, "…");
+  }
+  return paint(theme, "accent", plain.slice(0, prefix.length)) + paint(theme, "muted", plain.slice(prefix.length));
 }

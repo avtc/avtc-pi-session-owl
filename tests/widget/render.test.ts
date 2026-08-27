@@ -6,8 +6,9 @@
 // assignment are both assertable without a real terminal. Structural assertions
 // strip the markers (visible text); color assertions check the marked fragments.
 
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { formatWidgetLine } from "../../src/widget/render.js";
+import { formatConflictLine, formatWidgetLine } from "../../src/widget/render.js";
 import type { WidgetSnapshot } from "../../src/widget/tracker.js";
 
 interface FakeTheme {
@@ -221,5 +222,51 @@ describe("formatWidgetLine", () => {
     expect(line).toContain("«dim| → »");
     // trailing tok is muted (the whole "N tok" fragment)
     expect(line).toContain("«muted|0 tok»");
+  });
+});
+
+describe("formatConflictLine", () => {
+  it("wide terminal: the approved full line, accent prefix + muted rest", () => {
+    const line = formatConflictLine(["pi-blackhole"], 200, fakeTheme());
+    expect(visible(line)).toBe("🦉 ⚠ paused — pi-blackhole also handles compaction (/mk:status)");
+    expect(line).toContain("«accent|🦉 ⚠ paused — »");
+    expect(line).toContain("«muted|pi-blackhole also handles compaction (/mk:status)»");
+  });
+
+  it("plural verb for multiple names", () => {
+    const line = formatConflictLine(["pi-blackhole", "pi-vcc"], 200, fakeTheme());
+    expect(visible(line)).toBe("🦉 ⚠ paused — pi-blackhole, pi-vcc also handle compaction (/mk:status)");
+  });
+
+  it("narrow: collapses the list to first + +N more (list truncates, hint stays)", () => {
+    const collapsed = "🦉 ⚠ paused — pi-blackhole, +2 more also handle compaction (/mk:status)";
+    const width = visibleWidth(collapsed) + 1;
+    const line = formatConflictLine(["pi-blackhole", "pi-vcc", "pi-pact"], width, fakeTheme());
+    expect(visible(line)).toBe(collapsed);
+    expect(visible(line)).toContain("(/mk:status)");
+  });
+
+  it("narrower: drops the verb before touching names", () => {
+    const name = "x".repeat(60);
+    const noVerb = `🦉 ⚠ paused — ${name} (/mk:status)`;
+    const width = visibleWidth(noVerb) + 1;
+    const line = formatConflictLine([name], width, fakeTheme());
+    expect(visible(line)).toBe(noVerb);
+  });
+
+  it("very narrow: cuts the name with an ellipsis, keeps prefix + resolution hint", () => {
+    const line = formatConflictLine(["y".repeat(120)], 40, fakeTheme());
+    const text = visible(line);
+    expect(visibleWidth(text)).toBeLessThanOrEqual(40);
+    expect(text).toContain("…");
+    expect(text.endsWith("(/mk:status)")).toBe(true);
+  });
+
+  it("never exceeds the width in any degradation step", () => {
+    for (const width of [12, 20, 30, 45, 60, 80, 120]) {
+      for (const names of [["pi-blackhole"], ["a", "b"], ["n1", "n2", "n3", "n4"]]) {
+        expect(visibleWidth(visible(formatConflictLine(names, width, fakeTheme())))).toBeLessThanOrEqual(width);
+      }
+    }
   });
 });

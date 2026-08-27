@@ -15,6 +15,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | Setting | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | boolean | `true` | Master switch for memkeeper. Off = memkeeper stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected). |
+| `ignoreConflicts` | boolean | `false` | Register even when a conflicting compaction extension is detected (pi compaction is last-wins — for deliberate co-runs, e.g. benchmarking). |
 | `defaultModel` | model | `null` | One model for all components. `null`/unset uses the current session model. Per-component models override this. |
 | `defaultThinkingLevel` | thinking-level | `null` | Thinking level for all components. `null`/Session default = use the session's thinking level; `off` = no thinking. Per-component levels override this. |
 | `renderMode` | string | `observations-root` | What memkeeper injects after compaction (and what `/mk:*` recall reads). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the root view of the memory graph. |

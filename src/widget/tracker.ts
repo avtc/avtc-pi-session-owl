@@ -19,7 +19,7 @@ import type { StageUsage } from "../runtime/agent-loop.js";
 import { deltaTextOf, deltaTokens, messageEndUsage, streamedOutputUsage } from "../runtime/streaming-tokens.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { estimateContentTokens, type MemkeeperGraph } from "../types.js";
-import { formatWidgetLine } from "./render.js";
+import { formatConflictLine, formatWidgetLine } from "./render.js";
 
 /** The maintenance stages the widget surfaces (one at a time; run-level). */
 export type WidgetStage = "observe" | "build" | "select";
@@ -445,6 +445,9 @@ export interface WidgetController extends StageController {
   setCtx(ctx: ExtensionContext): void;
   clearCtx(): void;
   render(): void;
+  /** Conflict-pause mode: publish the static paused line instead of stage
+   *  progress (names = conflicting package names; null-able via []). */
+  setConflict(names: string[]): void;
 }
 
 const NO_OP = (): void => {};
@@ -454,6 +457,7 @@ export const NO_OP_WIDGET: WidgetController = {
   setCtx: NO_OP,
   clearCtx: NO_OP,
   render: NO_OP,
+  setConflict: NO_OP,
   startStage: NO_OP,
   setPass: NO_OP,
   setBatch: NO_OP,
@@ -466,6 +470,7 @@ export const NO_OP_WIDGET: WidgetController = {
 export function initWidget(): WidgetController {
   const tracker = createTracker();
   let ctxRef: ExtensionContext | null = null;
+  let conflictNames: string[] | null = null;
   // Throttle renders: a fast stream emits many message_update events, but the
   // widget only needs a fresh line every so often — and rendering every chunk
   // (microtask) can saturate pi's event loop on a runaway generation, freezing
@@ -480,14 +485,14 @@ export function initWidget(): WidgetController {
     const elapsed = now - lastRenderMs;
     if (trailingTimer === null && elapsed >= RENDER_INTERVAL_MS) {
       lastRenderMs = now;
-      renderWidget(tracker, ctxRef);
+      renderWidget(tracker, ctxRef, conflictNames);
       return;
     }
     if (trailingTimer !== null) return; // a trailing render is already pending
     trailingTimer = setTimeout(() => {
       trailingTimer = null;
       lastRenderMs = Date.now();
-      renderWidget(tracker, ctxRef);
+      renderWidget(tracker, ctxRef, conflictNames);
     }, RENDER_INTERVAL_MS - elapsed);
   };
   return {
@@ -519,14 +524,18 @@ export function initWidget(): WidgetController {
       // ends with no further events, so without this the last stage's line
       // (e.g. the Selector's final `N selected`) would persist forever. The
       // onEvent path coalesces its own renders; endStage is one-shot.
-      renderWidget(tracker, ctxRef);
+      renderWidget(tracker, ctxRef, conflictNames);
     },
     onEvent(event) {
       tracker.onEvent(event);
       scheduleRender();
     },
     render() {
-      renderWidget(tracker, ctxRef);
+      renderWidget(tracker, ctxRef, conflictNames);
+    },
+    setConflict(names) {
+      conflictNames = names;
+      renderWidget(tracker, ctxRef, conflictNames);
     },
   };
 }
@@ -541,10 +550,21 @@ const TEXT_PAD_X = 0;
 const TEXT_PAD_Y = 0;
 
 /** Publish the widget line (or hide it) via ctx.ui.setWidget. */
-function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null): void {
+function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null, conflictNames: string[] | null): void {
   if (ctx === null) return;
   // TUI-only: no-op in rpc/json/print.
   if (ctx.mode !== "tui" || !ctx.hasUI) return;
+  // conflict-pause line first — static, width-aware, ignores stage state
+  if (conflictNames !== null) {
+    const names = conflictNames;
+    ctx.ui.setWidget(
+      WIDGET_KEY,
+      (_tui, theme) =>
+        ({ render: (width: number): string[] => [formatConflictLine(names, width, theme)] }) as unknown as Text,
+      { placement: WIDGET_PLACEMENT },
+    );
+    return;
+  }
   // idle → hide the line (a prior render may have shown it during a run).
   if (tracker.stage === null) {
     hideWidget(ctx);
