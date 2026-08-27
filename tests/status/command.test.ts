@@ -8,7 +8,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, type MemkeeperConfig } from "../../src/config/schema.js";
-import { clearConflictPause, setConflictPause } from "../../src/conflicts/pause.js";
+import { setConflictHits } from "../../src/conflicts/pause.js";
 import type { SizeHintObservation } from "../../src/format/render.js";
 import { renderRootViewFromRoots } from "../../src/graph/read-tools.js";
 import {
@@ -452,7 +452,7 @@ describe("paused status report (conflict pause)", () => {
   });
 
   it("runMkStatus shows the paused report when conflict-paused", async () => {
-    setConflictPause(HITS);
+    setConflictHits(HITS);
     const notified: Array<{ text: string; level: string }> = [];
     const ctx = {
       ui: { notify: async (text: string, level: string) => notified.push({ text, level }) },
@@ -463,7 +463,7 @@ describe("paused status report (conflict pause)", () => {
       expect(notified[0].level).toBe("info");
       expect(notified[0].text).toContain("Paused — another compaction-handling extension is installed:");
     } finally {
-      clearConflictPause();
+      setConflictHits(null);
     }
   });
 });

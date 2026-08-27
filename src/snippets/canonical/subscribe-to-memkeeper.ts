@@ -14,9 +14,10 @@ export interface MemkeeperReadyApi {
   /** Read the current effective config (snapshot). May be absent on older
    *  bridges — the proxy returns null then. */
   getConfig?: () => unknown;
-  /** The activation-time conflict pause (what paused memkeeper + why), or null
-   *  when memkeeper registered normally. May be absent on older bridges — the
-   *  proxy returns null then (indistinguishable from "not paused"). */
+  /** The ACTIVE conflict pause (what paused memkeeper + why), or null when
+   *  memkeeper is live (no conflicts, or ignoreConflicts opted in). May be
+   *  absent on older bridges — the proxy returns null then (indistinguishable
+   *  from "not paused"). */
   getConflictPause?: () => Array<{ entry: string; matched: string }> | null;
 }
 

@@ -7,7 +7,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
-import { getConflictPause } from "../conflicts/pause.js";
+import { getConflictHits, isConflictPaused } from "../conflicts/pause.js";
 import { BUILDER, NON_BUILDER, type SizeHintObservation, treeLevels } from "../format/render.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
 import { nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
@@ -142,7 +142,7 @@ function appendPhaseLines(lines: string[], ledger: UsageLedger): void {
 export async function runMkStatus(_args: string, ctx: ExtensionCommandContext): Promise<void> {
   try {
     // conflict-pause first: no graph/session state exists to report
-    const paused = getConflictPause();
+    const paused = isConflictPaused() ? getConflictHits() : null;
     if (paused !== null) {
       notify(ctx, buildPausedStatusReport(paused), "info");
       return;
