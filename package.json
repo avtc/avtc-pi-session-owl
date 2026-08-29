@@ -1,6 +1,6 @@
 {
   "name": "avtc-pi-memkeeper",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Preserves task-relevant older context across many compactions in long Pi sessions by continuously maintaining a knowledge graph in the background and rendering a curated active set at compaction.",
   "type": "module",
   "license": "MIT",
