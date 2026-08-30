@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// mk_recall — the agent's single read-only drill-down tool over preserved
+// owl_recall — the agent's single read-only drill-down tool over preserved
 // memory. Registered via pi.registerTool as a ToolDefinition (the main agent's
 // tool, NOT passed to any agentLoop). Targets the rendered tree per renderMode:
 // the source observations graph in observations-root, the persisted selected
@@ -11,7 +11,7 @@
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Component, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { getMemkeeperSettings } from "../config/schema.js";
+import { getSessionOwlSettings } from "../config/schema.js";
 import { renderDetails } from "../format/details.js";
 import {
   directObsSizeHint,
@@ -50,11 +50,11 @@ import {
 import { type ContentMode, contentBlock, grepBlock, resolveContentMode } from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
-import { IMPORTANCE_RANK, type Importance, type MemkeeperGraph, type NodeId, type ObsId } from "../types.js";
+import { IMPORTANCE_RANK, type Importance, type SessionOwlGraph, type NodeId, type ObsId } from "../types.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
-export const MK_RECALL_TOOL = "mk_recall";
+export const OWL_RECALL_TOOL = "owl_recall";
 const VIEWER: RenderViewer = NON_BUILDER;
 const CHILD_DEPTH = 1;
 /** Maximum word-wrapped screen rows a collapsed (non-expanded) transcript
@@ -107,7 +107,7 @@ function buildTreeObsParent(selection: SerializedSelection): Map<string, string>
  *  the id is not present (caller skips). */
 function resolveTreeObs(
   selection: SerializedSelection,
-  sourceGraph: MemkeeperGraph,
+  sourceGraph: SessionOwlGraph,
   obsId: string,
   treeObsParent: Map<string, string>,
 ): RecallObservation | undefined {
@@ -123,7 +123,7 @@ function resolveTreeObs(
  *  node/observation maps are referenced directly (no eager copy) — the live
  *  graph is read-only during a recall call, and `Observation`/`Node` already
  *  satisfy the renderable view types. */
-function targetFromSourceGraph(graph: MemkeeperGraph): RecallTarget {
+function targetFromSourceGraph(graph: SessionOwlGraph): RecallTarget {
   return {
     renderMode: "observations-root",
     nodes: graph.nodes as Map<string, RenderableNode>,
@@ -138,7 +138,7 @@ function targetFromSourceGraph(graph: MemkeeperGraph): RecallTarget {
  *  regrouped an obs under a different node than the source), NOT from the source
  *  obs.parentNode — so the search `in <parent>` render + parent-state gate use
  *  the curated tree parent. */
-function targetFromSelection(selection: SerializedSelection, sourceGraph: MemkeeperGraph): RecallTarget {
+function targetFromSelection(selection: SerializedSelection, sourceGraph: SessionOwlGraph): RecallTarget {
   const nodes = new Map<string, RenderableNode>();
   for (const sn of selection.nodes) nodes.set(sn.id, serializedNodeToView(sn));
 
@@ -190,7 +190,7 @@ function materializeFocusedIds(
 /** Build a FOCUSED recall target over the source graph for an `ids` drill:
  *  materialize only the requested nodes + their direct children + requested
  *  observations, instead of iterating the whole graph. */
-function targetFromSourceGraphForIds(graph: MemkeeperGraph, ids: readonly string[]): RecallTarget {
+function targetFromSourceGraphForIds(graph: SessionOwlGraph, ids: readonly string[]): RecallTarget {
   const nodes = new Map<string, RenderableNode>();
   const observations = new Map<string, RecallObservation>();
   materializeFocusedIds(
@@ -210,7 +210,7 @@ function targetFromSourceGraphForIds(graph: MemkeeperGraph, ids: readonly string
  *  placement, mirroring the full targetFromSelection path. */
 function targetFromSelectionForIds(
   selection: SerializedSelection,
-  sourceGraph: MemkeeperGraph,
+  sourceGraph: SessionOwlGraph,
   ids: readonly string[],
 ): RecallTarget {
   const byId = new Map<string, SerializedNode>();
@@ -291,7 +291,7 @@ function makeDetailsProvider(target: RecallTarget): DetailsProvider {
 /** Resolve the active recall target from the live renderMode + store state. */
 function resolveTarget(): RecallTarget {
   const store = getGraphStore();
-  const settings = getMemkeeperSettings();
+  const settings = getSessionOwlSettings();
   if (settings.renderMode === "observations-root") {
     return targetFromSourceGraph(store.graph);
   }
@@ -310,7 +310,7 @@ function resolveTarget(): RecallTarget {
  *  retained observation set per single-id drill is pure waste. */
 function resolveTargetForIds(ids: readonly string[]): RecallTarget {
   const store = getGraphStore();
-  const settings = getMemkeeperSettings();
+  const settings = getSessionOwlSettings();
   if (settings.renderMode === "observations-root") {
     return targetFromSourceGraphForIds(store.graph, ids);
   }
@@ -602,7 +602,7 @@ function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean):
     roots.push(node);
   }
   // nGoal first, nIrrelevant last, the rest by importance/recency — the same
-  // canonical ordering as the compaction summary and /mk:ls, so the agent's
+  // canonical ordering as the compaction summary and /owl:ls, so the agent's
   // browse view matches its injected memory.
   const ordered = orderActiveSetRoots(roots);
   return ordered.map((node) => ({
@@ -632,7 +632,7 @@ function pageOf(take: number | undefined, afterId: string | undefined): Resolved
 
 // --- tool parameters + description -----------------------------------------
 
-const MK_RECALL_PARAMS = Type.Object({
+const OWL_RECALL_PARAMS = Type.Object({
   ids: Type.Optional(
     Type.Array(Type.String(), {
       description:
@@ -691,12 +691,12 @@ const MK_RECALL_PARAMS = Type.Object({
   ),
 });
 
-const MK_RECALL_DESCRIPTION =
+const OWL_RECALL_DESCRIPTION =
   "Browse the full memory tree preserved across compactions — the memory summary shows only the top level. Fetch the detail behind any id (a node, its observations, their verbatim source lines), search all captured memory by regex, or filter by time. Use it proactively: recall before relying on session-derived understanding — search memory, expand a visible related id, add fullDetails for exact source.";
 
 // --- execute ---------------------------------------------------------------
 
-interface MkRecallParams {
+interface OwlRecallParams {
   ids?: string[];
   query?: string;
   from?: string;
@@ -710,23 +710,23 @@ interface MkRecallParams {
   afterId?: string;
 }
 
-/** Build the mk_recall ToolDefinition. Reads the graph store + renderMode live
+/** Build the owl_recall ToolDefinition. Reads the graph store + renderMode live
  *  (closures; needs no ExtensionContext). Read-only — never mutates. */
-export function makeMkRecallTool(): ToolDefinition<typeof MK_RECALL_PARAMS> {
+export function makeOwlRecallTool(): ToolDefinition<typeof OWL_RECALL_PARAMS> {
   return {
-    name: MK_RECALL_TOOL,
+    name: OWL_RECALL_TOOL,
     label: "Browse memory",
-    description: MK_RECALL_DESCRIPTION,
-    parameters: MK_RECALL_PARAMS,
+    description: OWL_RECALL_DESCRIPTION,
+    parameters: OWL_RECALL_PARAMS,
     async execute(_toolCallId, params) {
-      const result = await executeRecall(params as MkRecallParams);
+      const result = await executeRecall(params as OwlRecallParams);
       return {
         content: [{ type: "text", text: result.text }],
         details: result.error ? { error: true } : { ok: true },
       };
     },
     renderCall(args, theme) {
-      return renderRecallCall(args as MkRecallParams, theme);
+      return renderRecallCall(args as OwlRecallParams, theme);
     },
     renderResult(result, options, theme) {
       return renderRecallResult(result, options, theme);
@@ -765,7 +765,7 @@ class CollapsedOutput implements Component {
   }
 }
 
-/** Transcript render for mk_recall results. The default fallback prints the
+/** Transcript render for owl_recall results. The default fallback prints the
  *  whole text — a browse or fullDetails read would flood the visible transcript.
  *  Collapsed caps the output at COLLAPSED_LINE_LIMIT word-wrapped screen rows
  *  plus the expand-hint row; expanded (Ctrl+O) and error results render in
@@ -783,7 +783,7 @@ function renderRecallResult(result: RenderableToolResult, options: { expanded?: 
   return new CollapsedOutput(new Text(theme.fg("toolOutput", last), 0, 0), theme.fg("toolOutput", EXPAND_HINT));
 }
 
-/** Call-line render: `mk_recall <action>[ · <qualifier…]` — bold name, dim
+/** Call-line render: `owl_recall <action>[ · <qualifier…]` — bold name, dim
  *  rest (the todo-tools convention). Action mirrors executeRecall's dispatch:
  *  ids lookup > regex search > grep-only > root browse (no filters). Qualifiers
  *  echo the params that survive into the result: pagination (take/after) apply
@@ -791,8 +791,8 @@ function renderRecallResult(result: RenderableToolResult, options: { expanded?: 
  *  grep are ignored on the ids path, so they are not shown there. Tolerates
  *  partial/unknown args (streaming) — anything unreadable degrades to the bare
  *  bold name. */
-function renderRecallCall(params: MkRecallParams, theme: Theme): Text {
-  const name = theme.fg("toolTitle", theme.bold("mk_recall "));
+function renderRecallCall(params: OwlRecallParams, theme: Theme): Text {
+  const name = theme.fg("toolTitle", theme.bold("owl_recall "));
   const args = params ?? {};
   const ids = Array.isArray(args.ids) ? args.ids.filter((id) => typeof id === "string" && id !== "") : [];
   const query = typeof args.query === "string" && args.query !== "" ? args.query : undefined;
@@ -841,7 +841,7 @@ function err(text: string): RecallResult {
 
 /** Compile `contentPattern` (if present) and resolve the content mode.
  *  Precedence: lines > contentPattern > fullDetails > terse. */
-function resolveRecallMode(fullDetails: boolean, params: MkRecallParams): { mode: ContentMode } | { error: string } {
+function resolveRecallMode(fullDetails: boolean, params: OwlRecallParams): { mode: ContentMode } | { error: string } {
   const grepRes = resolveGrepSpec(params.contentPattern, params.contextLines);
   if ("error" in grepRes) return grepRes;
   const mode = resolveContentMode(fullDetails, grepRes.grep, params.lines);
@@ -862,7 +862,7 @@ async function computeGrepExcerpts(
   details: DetailsProvider,
 ): Promise<{ excerpts: ReadonlyMap<string, string[]>; note: string | null } | { error: string }> {
   const items = observations.map((o) => ({ id: o.id, content: details(o.id) ?? o.summary }));
-  const result = await runGrepExcerpts(items, pattern, context, getMemkeeperSettings().findTimeoutMs);
+  const result = await runGrepExcerpts(items, pattern, context, getSessionOwlSettings().findTimeoutMs);
   if ("error" in result) return result;
   if (result.timedOutMs !== null) {
     return { excerpts: result.excerpts, note: grepTimeoutNote(result.timedOutMs) };
@@ -871,7 +871,7 @@ async function computeGrepExcerpts(
 }
 
 /** Pure recall logic (extracted for testability + so the tool shell stays thin). */
-async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
+async function executeRecall(params: OwlRecallParams): Promise<RecallResult> {
   const fullDetails = params.fullDetails ?? false;
   const includeSuperseded = params.includeSuperseded ?? false;
   const modeRes = resolveRecallMode(fullDetails, params);
@@ -954,7 +954,7 @@ async function executeRecall(params: MkRecallParams): Promise<RecallResult> {
   // (per-item atomic — a single-observation target is unbudgeted in any mode:
   // the cap lifts, but the mode still applies).
   const singleObs = window.length === 1 && window[0].obs !== undefined;
-  const budget = singleObs ? null : getMemkeeperSettings().toolResultTokenBudget;
+  const budget = singleObs ? null : getSessionOwlSettings().toolResultTokenBudget;
   const units = window.map((c) => ({
     id: c.id,
     text:
@@ -1058,7 +1058,7 @@ async function executeIds(
       }
     }
     const summaryTexts = summaryNodes.map((n) => n.summary);
-    const outcome = await runRegexTests(mode.pattern, summaryTexts, getMemkeeperSettings().findTimeoutMs);
+    const outcome = await runRegexTests(mode.pattern, summaryTexts, getSessionOwlSettings().findTimeoutMs);
     if ("error" in outcome) return err(outcome.error);
     const matchSet = new Set<string>();
     for (let i = 0; i < summaryNodes.length; i += 1) {
@@ -1112,7 +1112,7 @@ async function executeIds(
   const budget =
     ids.length === 1 && countConnectedObservations(target.nodes, target.observations, ids[0]) === 1
       ? null
-      : getMemkeeperSettings().toolResultTokenBudget;
+      : getSessionOwlSettings().toolResultTokenBudget;
   const { text, footer } = budgetUnits(window, budget, more, units.length, window[window.length - 1].id);
   const parts = [text];
   if (footer !== null) parts.push(footer);

@@ -8,7 +8,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { _setDumpHomeForTest, sanitizeForPath } from "../../src/debug-dump.js";
 import {
   _resetGoalExtract,
@@ -113,7 +113,7 @@ function makeInput(
 function nGoalSetMetaCount(appended: readonly [string, unknown][]): number {
   return appended.filter(
     ([type, data]) =>
-      type === "memkeeper.graph_delta" &&
+      type === "session-owl.graph_delta" &&
       (data as { delta?: { type: string; nodeId?: string } }).delta?.type === "set_meta" &&
       (data as { delta?: { nodeId?: string } }).delta?.nodeId === N_GOAL,
   ).length;
@@ -126,11 +126,11 @@ describe("runGoalExtract", () => {
     resetForNewSession();
     _resetGoalExtract();
     _resetRunLock();
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG }));
     seedNGoal("");
   });
   afterEach(() => {
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
 
   it("sets nGoal.summary from the assistant's one-line reply + persists set_meta", async () => {
@@ -253,20 +253,20 @@ describe("runGoalExtract — stage dump", () => {
   });
 
   it("debugDumpLimit > 0: writes a toolless header + footer dump for the one-shot", async () => {
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-goal-dump-"));
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-goal-dump-"));
     let seenDumpPath: string | null | undefined;
     const scripted = async (input: StageRunInput): Promise<StageRunResult> => {
       seenDumpPath = input.dumpPath;
       return assistantResult("Fix the login bug in auth.ts");
     };
-    _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/memkeeper/dumps/<project>
+    _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/session-owl/dumps/<project>
     try {
       await runGoalExtract(makeInput({ runStageFn: scripted, settings: { ...DEFAULT_CONFIG, debugDumpLimit: 5 } }));
     } finally {
       _setDumpHomeForTest(null);
     }
-    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "dumps"));
-    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
+    expect(seenDumpPath).toContain(path.join(".pi", "session-owl", "dumps"));
+    const debugDir = path.join(dumpRoot, ".pi", "session-owl", "dumps", sanitizeForPath(process.cwd()));
     const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("goal-extract-"));
     expect(files.length).toBe(1);
     const text = fs.readFileSync(path.join(debugDir, files[0] as string), "utf8");
@@ -277,13 +277,13 @@ describe("runGoalExtract — stage dump", () => {
   });
 
   it("a model-gap skip leaves NO dump file (opens only after the skips)", async () => {
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-goal-dump-"));
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-goal-dump-"));
     _setDumpHomeForTest(dumpRoot);
     try {
       await runGoalExtract(makeInput({ ctx: makeNoModelCtx(), runStageFn: async () => assistantResult("x") }));
     } finally {
       _setDumpHomeForTest(null);
     }
-    expect(fs.existsSync(path.join(dumpRoot, ".pi", "memkeeper", "dumps"))).toBe(false);
+    expect(fs.existsSync(path.join(dumpRoot, ".pi", "session-owl", "dumps"))).toBe(false);
   });
 });

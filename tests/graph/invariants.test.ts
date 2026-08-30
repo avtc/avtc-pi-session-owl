@@ -19,7 +19,7 @@ import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/typ
 import {
   countLines,
   estimateContentTokens,
-  MemkeeperGraph,
+  SessionOwlGraph,
   N_GOAL,
   N_IRRELEVANT,
   O_INITIAL_PROMPT,
@@ -285,21 +285,21 @@ function obsWith(overrides: Partial<Observation> & Pick<Observation, "id" | "par
 }
 
 /** Fetch a node by id, throwing if absent (avoids non-null assertions). */
-function node(graph: MemkeeperGraph, id: NodeId): Node {
+function node(graph: SessionOwlGraph, id: NodeId): Node {
   const n = graph.nodes.get(id);
   if (n === undefined) throw new Error(`test fixture missing node ${id}`);
   return n;
 }
 
 /** Fetch an observation by id, throwing if absent (avoids non-null assertions). */
-function observation(graph: MemkeeperGraph, id: ObsId): Observation {
+function observation(graph: SessionOwlGraph, id: ObsId): Observation {
   const o = graph.observations.get(id);
   if (o === undefined) throw new Error(`test fixture missing observation ${id}`);
   return o;
 }
 
 /** A small well-formed graph: nGoal(root, +oInitialPrompt +o1), n5(root, o2), n6(child of n5, o3). */
-function validGraph(): MemkeeperGraph {
+function validGraph(): SessionOwlGraph {
   const nodes = new Map<NodeId, Node>();
   const observations = new Map<ObsId, Observation>();
   nodes.set(N_GOAL, nodeWith({ id: N_GOAL, importance: "crit", state: "active" }));
@@ -316,5 +316,5 @@ function validGraph(): MemkeeperGraph {
   nodes.get("n5")?.observationIds.push("o2" as ObsId);
   nodes.get("n6")?.observationIds.push("o3" as ObsId);
 
-  return new MemkeeperGraph({ nodes, observations, nextObsId: 4, nextNodeId: 7 });
+  return new SessionOwlGraph({ nodes, observations, nextObsId: 4, nextNodeId: 7 });
 }

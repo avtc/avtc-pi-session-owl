@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Stage dumps: one timestamped file per Observer/Builder/Selector/goal-extract
-// LLM run under an injected dir (production: ~/.pi/memkeeper/dumps/<sanitized-cwd>/),
+// LLM run under an injected dir (production: ~/.pi/session-owl/dumps/<sanitized-cwd>/),
 // pruned per stage prefix to the debugDumpLimit setting. The file appears only
 // on the first append (a skipped run leaves nothing). Synchronous appends —
 // flushed to disk immediately, nothing lost if the process dies mid-run.
@@ -24,7 +24,7 @@ import {
 
 /** Fresh temp dir per test — no litter in the repo or the user's home. */
 function tempDumpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "mk-dump-test-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "owl-dump-test-"));
 }
 
 function dumpFiles(dir: string, stage: string): string[] {
@@ -84,14 +84,14 @@ describe("openStageDump", () => {
     expect(dumpFiles(dir, "selector").length).toBe(1);
   });
 
-  it("default dir (null dumpDir): ~/.pi/memkeeper/dumps/<sanitized-cwd>/ per project", () => {
+  it("default dir (null dumpDir): ~/.pi/session-owl/dumps/<sanitized-cwd>/ per project", () => {
     const home = tempDumpDir();
     _setDumpHomeForTest(home);
     try {
       const dump = openStageDump("builder", 5, null) as string;
       appendDump(dump, "x");
-      // the file sits under <home>/.pi/memkeeper/dumps/<sanitized cwd>
-      const dumpsRoot = path.join(home, ".pi", "memkeeper", "dumps");
+      // the file sits under <home>/.pi/session-owl/dumps/<sanitized cwd>
+      const dumpsRoot = path.join(home, ".pi", "session-owl", "dumps");
       const projects = fs.readdirSync(dumpsRoot);
       expect(projects.length).toBe(1);
       const sanitized = sanitizeForPath(process.cwd());
@@ -105,7 +105,7 @@ describe("openStageDump", () => {
 
 describe("sanitizeForPath", () => {
   it("turns separators into hyphens and strips unsafe chars (featyard convention)", () => {
-    expect(sanitizeForPath("E:\\sync\\unique\\avtc-pi-memkeeper")).toBe("E-sync-unique-avtc-pi-memkeeper");
+    expect(sanitizeForPath("E:\\sync\\unique\\avtc-pi-session-owl")).toBe("E-sync-unique-avtc-pi-session-owl");
     expect(sanitizeForPath("/home/u/x:y z")).toBe("home-u-xyz"); // unsafe chars are stripped, not hyphenated
   });
 

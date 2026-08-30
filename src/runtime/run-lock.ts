@@ -96,7 +96,7 @@ export function acquireOrSkip(stage: StageName): RunHandle | null {
 }
 
 /**
- * Abort the in-flight run's OWN abort controller (memkeeper's
+ * Abort the in-flight run's OWN abort controller (session-owl's
  * per-run controller, NOT event.signal). The run stops at its next tool-call
  * boundary and releases in its `finally`; this does NOT release the lock itself.
  * No-op when idle.

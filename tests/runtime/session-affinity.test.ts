@@ -4,9 +4,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   _resetSessionAffinity,
-  clearMemkeeperSessionBase,
+  clearSessionOwlSessionBase,
   getStageAffinityId,
-  setMemkeeperSessionBase,
+  setSessionOwlSessionBase,
 } from "../../src/runtime/session-affinity.js";
 
 describe("session-affinity singleton", () => {
@@ -20,26 +20,26 @@ describe("session-affinity singleton", () => {
     expect(getStageAffinityId("select")).toBeNull();
   });
 
-  it("returns a per-stage id suffixed off the base after setMemkeeperSessionBase", () => {
-    setMemkeeperSessionBase("abc-123");
+  it("returns a per-stage id suffixed off the base after setSessionOwlSessionBase", () => {
+    setSessionOwlSessionBase("abc-123");
     expect(getStageAffinityId("observe")).toBe("abc-123:observe");
     expect(getStageAffinityId("build")).toBe("abc-123:build");
     expect(getStageAffinityId("select")).toBe("abc-123:select");
   });
 
-  it("returns null again for every stage after clearMemkeeperSessionBase", () => {
-    setMemkeeperSessionBase("abc-123");
+  it("returns null again for every stage after clearSessionOwlSessionBase", () => {
+    setSessionOwlSessionBase("abc-123");
     expect(getStageAffinityId("build")).toBe("abc-123:build");
-    clearMemkeeperSessionBase();
+    clearSessionOwlSessionBase();
     expect(getStageAffinityId("observe")).toBeNull();
     expect(getStageAffinityId("build")).toBeNull();
     expect(getStageAffinityId("select")).toBeNull();
   });
 
-  it("setMemkeeperSessionBase overwrites a prior base", () => {
-    setMemkeeperSessionBase("first");
+  it("setSessionOwlSessionBase overwrites a prior base", () => {
+    setSessionOwlSessionBase("first");
     expect(getStageAffinityId("build")).toBe("first:build");
-    setMemkeeperSessionBase("second");
+    setSessionOwlSessionBase("second");
     expect(getStageAffinityId("build")).toBe("second:build");
   });
 });

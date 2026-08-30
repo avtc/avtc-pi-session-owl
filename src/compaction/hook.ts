@@ -23,7 +23,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { BuilderRunInput } from "../builder/run.js";
 import { runBuilder as realRunBuilder } from "../builder/run.js";
-import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
+import { getSessionOwlSettings, type SessionOwlConfig } from "../config/schema.js";
 import { isRenderableEntry } from "../format/chunk.js";
 import { assertGraphStructure } from "../graph/mutations.js";
 import { log } from "../log.js";
@@ -70,17 +70,17 @@ export function setCompactionStageRuns(runs: CompactionStageRuns): void {
 }
 
 /** Injectable settings getter (tests override to control renderMode/thresholds). */
-let settingsGetter: () => MemkeeperConfig = getMemkeeperSettings;
+let settingsGetter: () => SessionOwlConfig = getSessionOwlSettings;
 
 /** Override the settings getter (tests). */
-export function setCompactionSettingsGetter(getter: () => MemkeeperConfig): void {
+export function setCompactionSettingsGetter(getter: () => SessionOwlConfig): void {
   settingsGetter = getter;
 }
 
 /** Restore the default seams (tests reset between cases). */
 export function resetCompactionSeams(): void {
   stageRuns = { runObserver: realRunObserver, runBuilder: realRunBuilder, runSelector: realRunSelector };
-  settingsGetter = getMemkeeperSettings;
+  settingsGetter = getSessionOwlSettings;
 }
 
 // --- named constants (no bare literals) ------------------------------------
@@ -157,11 +157,11 @@ export async function compactionHook(
       log.info("compaction: observer catch-up end");
     }
     if (signal.aborted) return cancelAborted(ctx);
-    // live master switch: disabling mid-gate leaves memkeeper out of this
+    // live master switch: disabling mid-gate leaves session-owl out of this
     // compaction — Pi runs its native summary (NOT a cancel). The Observer's
     // completed chunks are durable (per-chunk persistence).
     if (!settingsGetter().enabled) {
-      log.info("compaction: memkeeper disabled mid-gate — leaving (native compaction)");
+      log.info("compaction: session-owl disabled mid-gate — leaving (native compaction)");
       return undefined;
     }
 
@@ -175,7 +175,7 @@ export async function compactionHook(
     // live master switch (between phases): a disable after the Builder leaves
     // the gate — the Selector is skipped and Pi runs its native compaction.
     if (!settingsGetter().enabled) {
-      log.info("compaction: memkeeper disabled mid-gate — leaving (native compaction)");
+      log.info("compaction: session-owl disabled mid-gate — leaving (native compaction)");
       return undefined;
     }
 
@@ -214,7 +214,7 @@ export async function compactionHook(
       touchedFiles,
       compactionCount: countCompactions(ctx.sessionManager),
     });
-    // capture the compaction baseline so post-compaction /mk:status "since last
+    // capture the compaction baseline so post-compaction /owl:status "since last
     // compaction" arithmetic is correct (deep copy — later stage activity must
     // not mutate the captured baseline).
     store.lastCompactionLedger = snapshotAtCompaction(store.usageLedger).lastCompactionLedger;
@@ -241,7 +241,7 @@ export async function compactionHook(
   } catch (cause) {
     log.error("compaction hook failed", cause);
     const reason = cause instanceof Error ? cause.message : String(cause);
-    notify(ctx, `memkeeper compaction failed: ${reason}; retry`, "error");
+    notify(ctx, `session-owl compaction failed: ${reason}; retry`, "error");
     return CANCEL_RESULT;
   } finally {
     handle.release();
@@ -261,7 +261,7 @@ function linkAbort(piSignal: AbortSignal, own: AbortController): void {
 
 /** The cancel path when the compaction was aborted mid-gate. */
 function cancelAborted(ctx: ExtensionContext): { cancel: true } {
-  notify(ctx, "memkeeper compaction canceled: compaction aborted", "warning");
+  notify(ctx, "session-owl compaction canceled: compaction aborted", "warning");
   return CANCEL_RESULT;
 }
 

@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MEMKEEPER_SCHEMA } from "../../src/config/schema.js";
+import { SESSION_OWL_SCHEMA } from "../../src/config/schema.js";
 
 const CONFIG_PATH = resolve(__dirname, "../../docs/CONFIGURATION.md");
 const README_PATH = resolve(__dirname, "../../README.md");
@@ -25,9 +25,9 @@ function documentedKnobIds(): string[] {
   return [...ids].sort();
 }
 
-describe("docs/CONFIGURATION.md parity with MEMKEEPER_SCHEMA", () => {
+describe("docs/CONFIGURATION.md parity with SESSION_OWL_SCHEMA", () => {
   it("documents exactly the schema's setting ids (no drift either way)", () => {
-    const schemaIds = MEMKEEPER_SCHEMA.settings.map((s) => s.id).sort();
+    const schemaIds = SESSION_OWL_SCHEMA.settings.map((s) => s.id).sort();
     const docIds = documentedKnobIds();
     expect(docIds).toEqual(schemaIds);
   });

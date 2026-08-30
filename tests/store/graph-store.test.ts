@@ -20,7 +20,7 @@ import {
   encodeSelection,
   GRAPH_DELTA_TYPE,
   type GraphDeltaEntry,
-  type MemkeeperDetails,
+  type SessionOwlDetails,
   OBSERVATION_TYPE,
   type ObservationEntry,
   RESCAN_TYPE,
@@ -45,7 +45,7 @@ import {
   setEntryResolver,
 } from "../../src/store/graph-store.js";
 import type { Importance, NodeId, ObsId } from "../../src/types.js";
-import { MemkeeperGraph, makeNode, makeObservation, N_GOAL } from "../../src/types.js";
+import { SessionOwlGraph, makeNode, makeObservation, N_GOAL } from "../../src/types.js";
 
 // --- fake StoreContext -----------------------------------------------------
 
@@ -172,7 +172,7 @@ describe("GraphStore singleton", () => {
 });
 
 describe("persist methods (PERSIST-ONLY)", () => {
-  it("appendObservation persists a memkeeper.observation entry and advances the frontier", () => {
+  it("appendObservation persists a session-owl.observation entry and advances the frontier", () => {
     freshStore();
     const fake = new FakeStore();
     const batch: ObservationEntry = {
@@ -218,7 +218,7 @@ describe("persist methods (PERSIST-ONLY)", () => {
     expect(getGraphStore().observerFrontier).toBe("src3");
   });
 
-  it("appendGraphDelta persists a memkeeper.graph_delta envelope", () => {
+  it("appendGraphDelta persists a session-owl.graph_delta envelope", () => {
     freshStore();
     const fake = new FakeStore();
     const delta: GraphDelta = {
@@ -266,7 +266,7 @@ describe("load reconstruction", () => {
     freshStore();
     const fake = new FakeStore();
     // base snapshot at e5: nGoal + n1(active) with o1
-    const details: MemkeeperDetails = {
+    const details: SessionOwlDetails = {
       type: DETAILS_TYPE,
       version: "v1",
       nodes: [
@@ -442,7 +442,7 @@ describe("load reconstruction", () => {
       tokenCount: 1,
     } satisfies ObservationEntry);
     const tree = encodeSelection(
-      new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 }),
+      new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 }),
       null,
       null,
     );
@@ -472,7 +472,7 @@ describe("load reconstruction", () => {
   it("reconstructs from a batched graph_delta entry (deltas array, e.g. an Observer run)", async () => {
     freshStore();
     const fake = new FakeStore();
-    // one memkeeper.graph_delta entry carrying an ARRAY of two create_node
+    // one session-owl.graph_delta entry carrying an ARRAY of two create_node
     // deltas (how the Observer persists its wrapper batch).
     fake.addCustomAt("e1", GRAPH_DELTA_TYPE, {
       kind: "graph_delta",
@@ -578,7 +578,7 @@ describe("load reconstruction", () => {
   it("falls back to deltas-only and does not throw on a corrupt details snapshot", async () => {
     freshStore();
     const fake = new FakeStore();
-    fake.addCompaction("e3", { bogus: "not memkeeper details" });
+    fake.addCompaction("e3", { bogus: "not session-owl details" });
     // a wrapper node via graph_delta (deltas-only path after the corrupt snapshot is skipped)
     fake.addCustomAt("e3b", GRAPH_DELTA_TYPE, {
       kind: "graph_delta",
@@ -648,7 +648,7 @@ describe("load reconstruction", () => {
     expect(store.graph.nextNodeId).toBe(2);
   });
 
-  it("a /mk:rescan marker voids everything before it (reconstruct from the marker forward)", async () => {
+  it("a /owl:rescan marker voids everything before it (reconstruct from the marker forward)", async () => {
     freshStore();
     const fake = new FakeStore();
     // pre-rescan: n1 + o1
@@ -692,11 +692,11 @@ describe("load reconstruction", () => {
     expect(store.observerFrontier).toBe("g5");
   });
 
-  it("warns on a corrupt memkeeper snapshot (carries the memkeeper type marker but fails validation)", async () => {
+  it("warns on a corrupt session-owl snapshot (carries the session-owl type marker but fails validation)", async () => {
     freshStore();
     const fake = new FakeStore();
     const warn = vi.spyOn(log, "warn");
-    // a details carrying the memkeeper type marker but a malformed body that
+    // a details carrying the session-owl type marker but a malformed body that
     // fails decodeDetails → the warn branch + deltas-only
     fake.addCompaction("e3", { type: DETAILS_TYPE, version: "v1", nodes: "NOT_AN_ARRAY" });
     fake.addCustomAt("e3b", GRAPH_DELTA_TYPE, {
@@ -722,16 +722,16 @@ describe("load reconstruction", () => {
 
     await load(fake);
     // the version-carrying corrupt snapshot surfaced the warn
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("corrupt memkeeper snapshot"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("corrupt session-owl snapshot"));
     // deltas-only reconstruction still applies
     expect(getGraphStore().graph.observations.has("o9")).toBe(true);
     warn.mockRestore();
   });
 
-  it("skips a native (non-memkeeper) compaction details", async () => {
+  it("skips a native (non-session-owl) compaction details", async () => {
     freshStore();
     const fake = new FakeStore();
-    // a native pi compaction with non-memkeeper details
+    // a native pi compaction with non-session-owl details
     fake.addCompaction("e5", { someOtherExt: true });
     fake.addCustomAt("e5b", GRAPH_DELTA_TYPE, {
       kind: "graph_delta",
@@ -767,7 +767,7 @@ describe("load reconstruction", () => {
 
   it("stays silent (debug, not warn) on a foreign-TYPED snapshot — e.g. another memory extension's details", async () => {
     // The compaction `details` field is shared + last-writer-wins; a snapshot
-    // another extension wrote (carrying ITS OWN type marker, not "memkeeper")
+    // another extension wrote (carrying ITS OWN type marker, not "session-owl")
     // legitimately fails decode. That is expected when switching extensions, not
     // corruption — so it must NOT flood the log with warns on every load.
     freshStore();
@@ -806,7 +806,7 @@ describe("load reconstruction", () => {
     // deltas-only reconstruction still applies
     expect(getGraphStore().graph.observations.has("o1")).toBe(true);
     // no warn — the foreign snapshot is expected, not corrupt
-    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("corrupt memkeeper snapshot"));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("corrupt session-owl snapshot"));
     warn.mockRestore();
   });
 
@@ -1007,7 +1007,7 @@ describe("load edge cases", () => {
     freshStore();
     const fake = new FakeStore();
     // snapshot: a single node n1 with rangeEnd at an early time
-    const details: MemkeeperDetails = {
+    const details: SessionOwlDetails = {
       type: DETAILS_TYPE,
       version: "v1",
       nodes: [
@@ -1065,7 +1065,7 @@ describe("load edge cases", () => {
 // --- load reconciliation (node lists authoritative) -------------------------
 
 /** The serialized-node literal used by snapshot fixtures in this describe. */
-function snapNode(id: string, observationIds: string[]): MemkeeperDetails["nodes"][number] {
+function snapNode(id: string, observationIds: string[]): SessionOwlDetails["nodes"][number] {
   return {
     id,
     summary: `summary of ${id}`,
@@ -1080,7 +1080,7 @@ function snapNode(id: string, observationIds: string[]): MemkeeperDetails["nodes
   };
 }
 
-function snapshotDetails(nodes: MemkeeperDetails["nodes"], nextObsId: number, nextNodeId: number): MemkeeperDetails {
+function snapshotDetails(nodes: SessionOwlDetails["nodes"], nextObsId: number, nextNodeId: number): SessionOwlDetails {
   return {
     type: DETAILS_TYPE,
     version: "v1",
@@ -1513,7 +1513,7 @@ describe("rescan markers (plain vs --reuse-observations)", () => {
       },
     } satisfies UsageEntry);
     const tree = encodeSelection(
-      new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 }),
+      new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 }),
       null,
       null,
     );

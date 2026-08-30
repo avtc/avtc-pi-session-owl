@@ -5,7 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Dormant conflict-pause wiring: when detectConflicts() reports another
-// compaction-handling extension, memkeeper still registers its FULL surface
+// compaction-handling extension, session-owl still registers its FULL surface
 // (hooks, tools, commands, stages) but stays dormant — every hook early-returns
 // and compaction returns undefined, which pi's runner treats as fully
 // transparent (the other extension's compaction result wins). The pause is
@@ -136,11 +136,11 @@ function makeCtx(): ExtensionContext {
   return { sessionManager: { getLeafId: () => null, getBranch: () => [] } } as unknown as ExtensionContext;
 }
 
-describe("memkeeperExtension (dormant conflict pause)", () => {
-  let memkeeperExtension: typeof import("../../src/index.js").default;
+describe("sessionOwlExtension (dormant conflict pause)", () => {
+  let sessionOwlExtension: typeof import("../../src/index.js").default;
 
   beforeAll(async () => {
-    memkeeperExtension = (await importMockedExtension()).default;
+    sessionOwlExtension = (await importMockedExtension()).default;
   });
   afterAll(() => {
     for (const path of MOCKED_PATHS) vi.doUnmock(path);
@@ -154,7 +154,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
 
   it("registers the FULL surface even when conflict-paused (dormant, not absent)", () => {
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     expect([...pi._handlers.keys()].sort()).toEqual([
       "session_before_compact",
       "session_shutdown",
@@ -168,7 +168,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
 
   it("dormant hooks: turn_end does no capture and no trigger work while paused", async () => {
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const turnEnd = pi._handlers.get("turn_end")?.[0];
     expect(turnEnd).toBeDefined();
     await turnEnd?.({}, makeCtx());
@@ -178,7 +178,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
 
   it("dormant hooks: compaction returns undefined (transparent) and never calls compactionHook", async () => {
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const compact = pi._handlers.get("session_before_compact")?.[0];
     expect(compact).toBeDefined();
     const result = await compact?.({}, makeCtx());
@@ -188,7 +188,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
 
   it("while paused, session_start still wires the widget (pause line must publish)", async () => {
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     // the LIFECYCLE session_start handler is gated on pause (no observer work) —
     // but it is also what calls widget.setCtx; the pause line must still get a
     // ctx + a render, so the gated branch wires the widget itself.
@@ -202,7 +202,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
 
   it("ready API reports the ACTIVE pause (hits) for hosts to assert on", async () => {
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ready = pi._handlers.get("session_start")?.at(-1);
     await ready?.({}, makeCtx());
     const api = pi.events.emit.mock.calls.at(-1)?.[1] as { getConflictPause: () => unknown };
@@ -212,7 +212,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
   it("ignoreConflicts=true: same conflicts, hooks fully live (compactionHook runs)", async () => {
     wiring.ignoreConflicts = true;
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const compact = pi._handlers.get("session_before_compact")?.[0];
     await compact?.({}, makeCtx());
     expect(wiring.compactionHook).toHaveBeenCalledTimes(1);
@@ -226,7 +226,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
   it("ignoreConflicts=true: ready API reports no active pause", async () => {
     wiring.ignoreConflicts = true;
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ready = pi._handlers.get("session_start")?.at(-1);
     await ready?.({}, makeCtx());
     const api = pi.events.emit.mock.calls.at(-1)?.[1] as { getConflictPause: () => unknown };
@@ -234,18 +234,18 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
   });
 
   it("the widget gets the paused line when actively paused; not when ignoreConflicts is set", () => {
-    memkeeperExtension(makeFakePi());
+    sessionOwlExtension(makeFakePi());
     expect(wiring.widgetSetConflict).toHaveBeenCalledWith(["pi-blackhole"]);
 
     wiring.ignoreConflicts = true;
-    memkeeperExtension(makeFakePi());
+    sessionOwlExtension(makeFakePi());
     expect(wiring.widgetSetConflict).toHaveBeenCalledTimes(1); // no second call
   });
 
   it("a clean activation clears any pause a previous (re)activation recorded", async () => {
     wiring.conflicts = [];
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ready = pi._handlers.get("session_start")?.at(-1);
     await ready?.({}, makeCtx());
     const api = pi.events.emit.mock.calls.at(-1)?.[1] as { getConflictPause: () => unknown };
@@ -255,7 +255,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
   it("enabled=false + conflicts: user's explicit choice — no pause line, no conflict wiring", async () => {
     wiring.enabled = false;
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     expect(wiring.widgetSetConflict).not.toHaveBeenCalled();
 
     const start = pi._handlers.get("session_start")?.[0];
@@ -272,7 +272,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
   it("enabled=false + conflicts, then user enables mid-session: pause is live and takes over", async () => {
     wiring.enabled = false;
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const start = pi._handlers.get("session_start")?.[0];
     await start?.({}, makeCtx());
     expect(wiring.onSessionStart).toHaveBeenCalledTimes(1);
@@ -296,9 +296,9 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
 
   it("panel edits refresh the widget instantly: onAfterChange is wired to render", async () => {
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     // the registration options must carry onAfterChange (fired by the settings
-    // modal after each /mk:settings edit persists)
+    // modal after each /owl:settings edit persists)
     const opts = wiring.registerSettingsCommand.mock.calls.at(-1)?.[2] as
       | { onAfterChange?: (id: string, value: unknown) => void }
       | undefined;
@@ -318,7 +318,7 @@ describe("memkeeperExtension (dormant conflict pause)", () => {
   it("enabled mid-session with conflicts: the next turn_end publishes the pause line", async () => {
     wiring.enabled = false;
     const pi = makeFakePi();
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const turnEnd = pi._handlers.get("turn_end")?.[0];
     await turnEnd?.({}, makeCtx()); // disabled — off-path render only
     expect(wiring.widgetRender).toHaveBeenCalledTimes(1);

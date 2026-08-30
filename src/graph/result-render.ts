@@ -12,7 +12,7 @@
 //
 // The tools stay thin: they fetch + select the items (as RenderItems), compile
 // contentPattern (via tryCompileFindRegex, handling the error), resolve the
-// mode + budget, and hand both to `renderBudgeted`. The agent mk_recall shares
+// mode + budget, and hand both to `renderBudgeted`. The agent owl_recall shares
 // the lower-level primitives (contentBlock, grepBlock, runGrepExcerpts) but
 // keeps its own opaque-unit budgeting (its units are heterogeneous node
 // payloads / observations / not-found blocks).
@@ -290,7 +290,7 @@ function expandItems(items: RenderItem[], mode: ExpandMode): ExpandedItem[] {
 
 /** Render one item's body under full/lines/terse: header, then the content
  *  block (full content, a numbered line range, or nothing for terse /
- *  content-less items). Shared with the agent mk_recall, which passes a
+ *  content-less items). Shared with the agent owl_recall, which passes a
  *  pre-computed header + content (and, for grep, pre-computed excerpts). */
 export function contentBlock(header: string, content: string | undefined, mode: ExpandMode): string {
   if (content === undefined) return header;
@@ -306,7 +306,7 @@ export function contentBlock(header: string, content: string | undefined, mode: 
 
 /** Render one item's body when grep excerpts were pre-computed (header + the
  *  excerpt lines, or header-only when there are no excerpts). Used by the agent
- *  mk_recall, which pre-computes excerpts for the observations in its window. */
+ *  owl_recall, which pre-computes excerpts for the observations in its window. */
 export function grepBlock(header: string, excerpts: readonly string[] | undefined): string {
   if (excerpts === undefined || excerpts.length === 0) return header;
   return `${header}\n${excerpts.join("\n")}`;

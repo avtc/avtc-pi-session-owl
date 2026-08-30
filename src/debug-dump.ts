@@ -12,7 +12,7 @@
 // writes (skipped early, or a throw before the header) leaves the dump dir and
 // every existing dump untouched — opening never destroys debug data.
 //
-// Location: ~/.pi/memkeeper/dumps/<sanitized-cwd>/ — OUTSIDE the project so
+// Location: ~/.pi/session-owl/dumps/<sanitized-cwd>/ — OUTSIDE the project so
 // dumps never land in a repo (.pi is not gitignored by default in user
 // projects) and survive the project being moved/cleaned. The sanitized cwd
 // (path separators → "-", filename-safe chars only) keeps per-project dumps
@@ -25,7 +25,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 
 /** "Dumps disabled" sentinel — the null dump path (every append no-ops). */
 export const NO_DUMP: string | null = null;
-/** "Use the default dump dir" (~/.pi/memkeeper/dumps/<sanitized-cwd>) — the null dumpDir. */
+/** "Use the default dump dir" (~/.pi/session-owl/dumps/<sanitized-cwd>) — the null dumpDir. */
 export const DEFAULT_DUMP_BASE: string | null = null;
 
 const TXT_EXT = ".txt";
@@ -56,10 +56,10 @@ export function _setDumpHomeForTest(home: string | null): void {
   dumpHomeOverride = home;
 }
 
-/** The default dump dir for THIS project: ~/.pi/memkeeper/dumps/<sanitized-cwd>/. */
+/** The default dump dir for THIS project: ~/.pi/session-owl/dumps/<sanitized-cwd>/. */
 function defaultProjectDumpDir(): string {
   const home = dumpHomeOverride ?? os.homedir();
-  return path.join(home, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
+  return path.join(home, ".pi", "session-owl", "dumps", sanitizeForPath(process.cwd()));
 }
 
 /**
@@ -70,7 +70,7 @@ function defaultProjectDumpDir(): string {
  * null when `limit <= 0` (dumps disabled).
  *
  * `dumpDir: string | null` — the dump dir; null uses the default
- *  `~/.pi/memkeeper/dumps/<sanitized-cwd>/`. Tests inject a temp dir so they
+ *  `~/.pi/session-owl/dumps/<sanitized-cwd>/`. Tests inject a temp dir so they
  *  never touch the user's home.
  */
 export function openStageDump(stage: string, limit: number, dumpDir: string | null): string | null {

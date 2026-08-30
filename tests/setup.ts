@@ -31,7 +31,7 @@
  */
 
 import { afterAll, beforeEach, vi } from "vitest";
-import { _resetMemkeeperSettingsHandle, _setRegisterSettingsCommand } from "../src/config/schema.js";
+import { _resetSessionOwlSettingsHandle, _setRegisterSettingsCommand } from "../src/config/schema.js";
 import { _setBaseLoggerForTest } from "../src/log.js";
 import { _resetSessionAffinity } from "../src/runtime/session-affinity.js";
 import { resetForNewSession } from "../src/store/graph-store.js";
@@ -60,7 +60,7 @@ beforeEach(() => {
 // leak boundary). Runs after the file's own afterAll.
 afterAll(() => {
   vi.useRealTimers();
-  _resetMemkeeperSettingsHandle();
+  _resetSessionOwlSettingsHandle();
   _setRegisterSettingsCommand(null);
   _resetSessionAffinity();
   resetForNewSession();

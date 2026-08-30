@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// End-to-end integration: drive the REAL `memkeeperExtension(pi)` activate +
+// End-to-end integration: drive the REAL `sessionOwlExtension(pi)` activate +
 // the four session hooks through a scripted multi-turn session, faking only
 // cross-boundary I/O (the LLM `runStage`, the session branch, the UI). Asserts
 // the deterministic acceptance seams hold and that every component is
@@ -274,7 +274,7 @@ function scriptObserverRecordsOnePerChunk(): { recorded: number; mkdirs: number 
 // Fresh-graph bindings (assigned in beforeAll — the same re-evaluated graph the
 // doMocks target, so the singletons the assertions read are the ones the
 // extension actually wired).
-let memkeeperExtension: typeof import("../src/index.js").default;
+let sessionOwlExtension: typeof import("../src/index.js").default;
 let getGraphStore: typeof import("../src/store/graph-store.js").getGraphStore;
 let resetForNewSession: typeof import("../src/store/graph-store.js").resetForNewSession;
 let runLockInFlight: typeof import("../src/runtime/run-lock.js").inFlight;
@@ -314,7 +314,7 @@ async function bootFreshGraph(): Promise<void> {
   const storeMod = await import("../src/store/graph-store.js");
   const lockMod = await import("../src/runtime/run-lock.js");
   const invariantsMod = await import("../src/graph/invariants.js");
-  memkeeperExtension = indexMod.default;
+  sessionOwlExtension = indexMod.default;
   getGraphStore = storeMod.getGraphStore;
   resetForNewSession = storeMod.resetForNewSession;
   runLockInFlight = lockMod.inFlight;
@@ -322,11 +322,11 @@ async function bootFreshGraph(): Promise<void> {
   validateGraph = invariantsMod.validateGraph;
 }
 
-describe("memkeeperExtension end-to-end (default profile)", () => {
+describe("sessionOwlExtension end-to-end (default profile)", () => {
   it("session_start seeds an empty graph with nGoal (no oInitialPrompt yet)", async () => {
     const state: FakePiState = { branch: [], appendedEntries: [] };
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
 
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, makeFakeCtx(state));
 
@@ -342,7 +342,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
       appendedEntries: [],
     };
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
     // turn_end: the synchronous capture runs before the background trigger.
@@ -372,7 +372,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     settingsHolder.config = { ...DEFAULT_CONFIG, observerThresholdTokens: 50 };
     const script = scriptObserverRecordsOnePerChunk();
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
     await pi.emit("turn_end", {}, ctx); // captures oInitialPrompt + fires Observer
@@ -420,7 +420,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     };
     scriptObserverRecordsOnePerChunk();
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
     await pi.emit("turn_end", {}, ctx); // observe the gap (background)
@@ -440,7 +440,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
       cancel?: boolean;
     };
 
-    // the LAST session_before_compact handler is memkeeper's (settings-ui does
+    // the LAST session_before_compact handler is session-owl's (settings-ui does
     // not register one); its return is the compaction result.
     expect(result.compaction).toBeDefined();
     const summary = result.compaction?.summary ?? "";
@@ -485,7 +485,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     };
     scriptObserverRecordsOnePerChunk();
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
     await pi.emit("turn_end", {}, ctx); // observe → new wrapper nodes at root
@@ -518,7 +518,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
       appendedEntries: [],
     };
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
     await pi.emit("turn_end", {}, ctx);
@@ -559,7 +559,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     const abort = new AbortController();
     abort.abort(); // Pi already gave up before we start
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
     // session_start captured oInitialPrompt + fired the goal-extract call
@@ -588,7 +588,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
   it("/new (session_start reason=new) reseeds an empty graph with nGoal", async () => {
     const state: FakePiState = { branch: [], appendedEntries: [] };
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     // simulate a prior populated graph, then a /new resets it.
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
@@ -611,7 +611,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
         type: "custom",
         parentId: null,
         timestamp: "2026-07-28T14:30:00.000Z",
-        customType: "memkeeper.graph_delta",
+        customType: "session-owl.graph_delta",
         data: {
           kind: "graph_delta",
           delta: {
@@ -627,7 +627,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     ];
     const state: FakePiState = { branch, appendedEntries: [] };
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
 
     await pi.emit("session_start", { type: "session_start", reason: "reload" } as SessionStartEvent, ctx);
@@ -638,9 +638,9 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     expect(graph.nodes.get(N_GOAL)?.summary).toBe("reloaded goal");
   });
 
-  it("mk_recall reads the selected tree in selected-root mode (consistent ids)", async () => {
+  it("owl_recall reads the selected tree in selected-root mode (consistent ids)", async () => {
     // Run a full observe→compact cycle so the Selector builds + persists a
-    // selected tree carrying observations, then mk_recall reads it.
+    // selected tree carrying observations, then owl_recall reads it.
     const branch: FakeEntry[] = [
       userEntry("u1", "Fix the login bug in auth.ts"),
       assistantEntry("a1", "x".repeat(600)),
@@ -657,7 +657,7 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     };
     scriptObserverRecordsOnePerChunk();
     const pi = makeFakePi() as FakePi;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
     await pi.emit("turn_end", {}, ctx);
@@ -672,8 +672,8 @@ describe("memkeeperExtension end-to-end (default profile)", () => {
     } as unknown as SessionBeforeCompactEvent;
     await pi.emit("session_before_compact", compactEvt, ctx);
 
-    // mk_recall (registered read-only tool) reads the selected tree.
-    const mkRecall = pi._tool("mk_recall");
+    // owl_recall (registered read-only tool) reads the selected tree.
+    const mkRecall = pi._tool("owl_recall");
     expect(mkRecall).toBeDefined();
     const result = (await mkRecall.execute(
       "call-1",

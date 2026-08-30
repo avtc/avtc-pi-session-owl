@@ -2,13 +2,13 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Result token-budget + targeted content-extraction helpers shared by the graph
-// read tools (cat/find/ls) and the agent mk_recall. Pure functions; the tools
+// read tools (cat/find/ls) and the agent owl_recall. Pure functions; the tools
 // wire them into their execute handlers.
 //
 // `estimateContentTokens` (chars/4, types.ts) is the token estimate used for the
 // budget — the same heuristic Pi's own compaction applies.
 
-import { getMemkeeperSettings } from "../config/schema.js";
+import { getSessionOwlSettings } from "../config/schema.js";
 import { pluralize } from "../format/render.js";
 import { estimateContentTokens } from "../types.js";
 import { runRegexTests } from "./regex-runner.js";
@@ -16,7 +16,7 @@ import { runRegexTests } from "./regex-runner.js";
 /** Note surfaced when an observation's verbatim source can't be re-rendered
  *  (source entries gone — e.g. cross-branch drill). The one-line summary is
  *  the fallback body; this flags that the full source is gone, not just absent
- *  from the current render. Shared by cat (read-tools) and mk_recall. */
+ *  from the current render. Shared by cat (read-tools) and owl_recall. */
 export const SOURCE_UNAVAILABLE_NOTE = "  (verbatim source unavailable)";
 
 /** Build the searchable text for an observation: its one-line summary plus the
@@ -144,7 +144,7 @@ export function budgetReachedFooter(
 
 /** The note surfaced when a find/search times out: how long it ran, how many of
  *  the candidate items were tested before the worker was killed, and the hint
- *  to narrow the query. Shared by find (read-tools) and mk_recall search. */
+ *  to narrow the query. Shared by find (read-tools) and owl_recall search. */
 export function searchTimeoutNote(timedOutMs: number, testedCount: number, total: number): string {
   const seconds = Math.floor(timedOutMs / 1000);
   return `Search timed out after ${seconds}s — tested ${testedCount} of ${total} items before the kill. These are partial results; refine or narrow the query.`;
@@ -153,7 +153,7 @@ export function searchTimeoutNote(timedOutMs: number, testedCount: number, total
 /** Intersect multiple regex filters over a batch of texts (worker-bounded by
  *  `findTimeoutMs`). An item passes only if it matches EVERY regex. A timed-out
  *  regex marks untested items false (conservative — partial matches + note).
- *  Used by `find`/`mk_recall` search to intersect `query` + `contentPattern` over
+ *  Used by `find`/`owl_recall` search to intersect `query` + `contentPattern` over
  *  node summaries + observation text. Returns the per-text pass flags + an
  *  optional timeout note, or an error string the caller surfaces verbatim. */
 export async function intersectRegexFilters(
@@ -163,7 +163,7 @@ export async function intersectRegexFilters(
   const passes = new Array<boolean>(texts.length).fill(true);
   let note: string | undefined;
   for (const re of regexes) {
-    const outcome = await runRegexTests(re, texts, getMemkeeperSettings().findTimeoutMs);
+    const outcome = await runRegexTests(re, texts, getSessionOwlSettings().findTimeoutMs);
     if ("error" in outcome) return { error: outcome.error };
     for (let i = 0; i < texts.length; i += 1) {
       if (!outcome.results[i]) passes[i] = false;
@@ -177,7 +177,7 @@ export async function intersectRegexFilters(
 
 /** The note surfaced when a contentPattern-grep over observation content lines
  *  times out: partial excerpts are returned. Shared by cat/find (result-render)
- *  and mk_recall (grep excerpts). */
+ *  and owl_recall (grep excerpts). */
 export function grepTimeoutNote(timedOutMs: number): string {
   const seconds = Math.floor(timedOutMs / 1000);
   return `Grep timed out after ${seconds}s — partial excerpts only; refine or narrow the pattern.`;
@@ -198,7 +198,7 @@ export interface GrepExcerptsOutcome {
 /** Batch-test a contentPattern over many items' content lines in ONE worker
  *  round-trip (via runRegexTests), map the hits back to per-item local line
  *  indices, and build ±context excerpts (merged ranges) per item. Shared by the
- *  budgeted grep renderer and the agent mk_recall's pre-compute path. Returns an
+ *  budgeted grep renderer and the agent owl_recall's pre-compute path. Returns an
  *  error string on a compile/worker failure (surfaced verbatim to the caller). */
 export async function runGrepExcerpts(
   items: readonly GrepableItem[],

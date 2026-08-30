@@ -4,10 +4,10 @@
 import type { SessionEntry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  _resetGetMemkeeperSettings,
-  _setGetMemkeeperSettings,
+  _resetGetSessionOwlSettings,
+  _setGetSessionOwlSettings,
   DEFAULT_CONFIG,
-  type MemkeeperConfig,
+  type SessionOwlConfig,
 } from "../../src/config/schema.js";
 import {
   applyCreateNode,
@@ -17,7 +17,7 @@ import {
   MUTATE_SOURCE,
   setClock,
 } from "../../src/graph/mutations.js";
-import { makeMkRecallTool } from "../../src/recall/mk-recall.js";
+import { makeOwlRecallTool } from "../../src/recall/owl-recall.js";
 import { encodeSelection } from "../../src/store/codecs.js";
 import {
   getGraphStore,
@@ -25,7 +25,7 @@ import {
   resetForNewSession,
   setEntryResolver,
 } from "../../src/store/graph-store.js";
-import { MemkeeperGraph, makeObservation, N_GOAL, type Node, type ObsId } from "../../src/types.js";
+import { SessionOwlGraph, makeObservation, N_GOAL, type Node, type ObsId } from "../../src/types.js";
 
 const T0 = "2026-07-17T09:00:00.000Z";
 const T1 = "2026-07-17T14:30:00.000Z";
@@ -54,7 +54,7 @@ function wireResolver(textById: Record<string, string>): void {
  *  (the test fixtures carry the body in the summary; the resolver maps each
  *  cited sourceEntryId to that text). Lets fullDetails/lines/grep re-render a
  *  real body instead of degrading to 'source unavailable'. */
-function wireResolverForGraph(graph: MemkeeperGraph): void {
+function wireResolverForGraph(graph: SessionOwlGraph): void {
   const textById: Record<string, string> = {};
   for (const obs of graph.observations.values()) {
     for (const id of obs.sourceEntryIds) textById[id] = obs.summary;
@@ -75,9 +75,9 @@ const NO_OP_CTX = {
 //   superseded by n7, obs o9). Observations carry distinct timestamps for
 //   range testing.
 
-function buildGraph(): MemkeeperGraph {
+function buildGraph(): SessionOwlGraph {
   setClock(() => T0);
-  const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+  const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
 
   applyCreateNode(g, {
     id: N_GOAL,
@@ -165,7 +165,7 @@ function buildGraph(): MemkeeperGraph {
 }
 
 /** Seed the store singleton with a fresh graph (source-graph mode). */
-function seedSource(): MemkeeperGraph {
+function seedSource(): SessionOwlGraph {
   resetForNewSession();
   const graph = buildGraph();
   const store = getGraphStore();
@@ -177,12 +177,12 @@ function seedSource(): MemkeeperGraph {
 
 /** Seed the store with a source graph AND a persisted selected tree built from a
  *  SMALLER curated graph (so selected-root reads distinct ids/summaries). */
-function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
+function seedSelected(): { source: SessionOwlGraph; curated: SessionOwlGraph } {
   resetForNewSession();
   const source = buildGraph();
   // curated tree: only n7 + n8 + o5 + oInitialPrompt (a Selector's pick)
   setClock(() => T0);
-  const curated = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+  const curated = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
   applyCreateNode(curated, {
     id: N_GOAL,
     summary: "CURATED goal: stable public API",
@@ -236,12 +236,12 @@ function seedSelected(): { source: MemkeeperGraph; curated: MemkeeperGraph } {
   return { source, curated };
 }
 
-function setRenderMode(renderMode: MemkeeperConfig["renderMode"]): void {
-  _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, renderMode }));
+function setRenderMode(renderMode: SessionOwlConfig["renderMode"]): void {
+  _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, renderMode }));
 }
 
 function clearRenderMode(): void {
-  _setGetMemkeeperSettings(null);
+  _setGetSessionOwlSettings(null);
 }
 
 type ToolResult = { content: { type: string; text?: string }[]; details: unknown };
@@ -261,17 +261,17 @@ function text(result: ToolResult): string {
   return result.content.map((c) => c.text ?? "").join("\n");
 }
 
-describe("mk_recall", () => {
-  const tool = () => makeMkRecallTool();
+describe("owl_recall", () => {
+  const tool = () => makeOwlRecallTool();
 
   /** Build a fresh store whose graph holds one node n1 with a single large
    *  observation o1 (4000 `a`s + `!`) — a payload that makes a catastrophic
    *  polynomial regex hang so the timeout path can be exercised. Returns the
    *  live graph for assertion. */
-  function slowGrepTarget(): MemkeeperGraph {
+  function slowGrepTarget(): SessionOwlGraph {
     resetForNewSession();
     setClock(() => T0);
-    const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+    const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
     applyCreateNode(g, {
       id: "n1",
       summary: "slow target",
@@ -348,7 +348,7 @@ describe("mk_recall", () => {
   });
 
   describe("query — regex search + ranking", () => {
-    afterEach(() => _resetGetMemkeeperSettings());
+    afterEach(() => _resetGetSessionOwlSettings());
     it("ranks by importance-then-recency, non-obsolete only (parent-state rule), flat with in <parent>", async () => {
       seedSource();
       const out = text(await recall(tool(), { query: "[Jj]wt|auth" }));
@@ -367,19 +367,19 @@ describe("mk_recall", () => {
     });
 
     it("kills a slow regex past the timeout and surfaces a timeout error (worker-thread backstop)", async () => {
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       seedSource();
       // a guard-slipping polynomial shape over a large observation content
       slowGrepTarget();
       const out = text(await recall(tool(), { query: "(.+a)(.+a)b" }));
       expect(out.toLowerCase()).toContain("timed out");
-      _setGetMemkeeperSettings(null);
+      _setGetSessionOwlSettings(null);
     });
 
     it("obs ranking importance = max(obs, parent node) — a low obs under a crit node ranks as crit", async () => {
       resetForNewSession();
       setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       applyCreateNode(g, {
         id: "n1",
         summary: "Critical constraint area",
@@ -500,14 +500,14 @@ describe("mk_recall", () => {
   });
 
   describe("query + contentPattern match over observation DETAILS (verbatim source), not just summary", () => {
-    afterEach(() => _resetGetMemkeeperSettings());
+    afterEach(() => _resetGetSessionOwlSettings());
 
     /** Seed one node n1 with observation oLib whose summary omits a keyword but
      *  whose verbatim source (resolved from sourceEntryId e1) contains it. */
     function seedDetailsOnly(keywordInSource: string): void {
       resetForNewSession();
       setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       applyCreateNode(g, {
         id: "n1",
         summary: "Picked the auth library",
@@ -557,7 +557,7 @@ describe("mk_recall", () => {
       // detail-excerpts → header-only (Option C: no drop).
       resetForNewSession();
       setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       applyCreateNode(g, {
         id: "n1",
         summary: "Picked the auth library",
@@ -596,7 +596,7 @@ describe("mk_recall", () => {
     it("shows full source content; terse shows the one-line summary; no sourceEntryIds in either", async () => {
       resetForNewSession();
       setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       applyCreateNode(g, {
         id: "n1",
         summary: "Node one",
@@ -643,7 +643,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     it("terse shows the full summary — no length cap, no ellipsis", async () => {
       resetForNewSession();
       setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       applyCreateNode(g, {
         id: "n1",
         summary: "Node one",
@@ -680,7 +680,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     it("take/afterId paginate + footer; take:0 returns all", async () => {
       resetForNewSession();
       setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       // 3 roots matching a query, all active
       for (let i = 1; i <= 3; i += 1) {
         applyCreateNode(g, {
@@ -710,7 +710,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     it("footer total counts ALL matches (not just the tail from the cursor)", async () => {
       resetForNewSession();
       setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       for (let i = 1; i <= 3; i += 1) {
         applyCreateNode(g, {
           id: `n${i}` as Node["id"],
@@ -794,7 +794,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       resetForNewSession();
       const source = buildGraph();
       setClock(() => T0);
-      const curated = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const curated = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       applyCreateNode(curated, {
         id: "n50",
         summary: "node carrying a real + a phantom obs",
@@ -883,7 +883,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     it("fullDetails in a search shows the full multi-line observation content", async () => {
       resetForNewSession();
       setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       applyCreateNode(g, {
         id: "n1",
         summary: "Search target",
@@ -922,7 +922,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     it("fullDetails degrades to a source-unavailable note when the verbatim source can't render (no resolver)", async () => {
       resetForNewSession();
       setClock(() => T0);
-      const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
       applyCreateNode(g, {
         id: "n1",
         summary: "Node one",
@@ -955,25 +955,25 @@ Third line that concludes the lengthy multi-line observation body fully.`;
   describe("result token budget + extraction", () => {
     it("fullDetails single observation is returned whole (uncapped)", async () => {
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
       try {
         const out = text(await recall(tool(), { ids: ["o5"], fullDetails: true }));
         expect(out).toContain("Chose JWT for stateless auth");
         expect(out).not.toContain("budget reached");
       } finally {
-        _setGetMemkeeperSettings(null);
+        _setGetSessionOwlSettings(null);
       }
     });
 
     it("single observation + lines is uncapped (any mode)", async () => {
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
       try {
         const out = text(await recall(tool(), { ids: ["o5"], lines: "1-1" }));
         expect(out).toContain("1: <USER>Chose JWT for stateless auth</USER>");
         expect(out).not.toContain("budget reached");
       } finally {
-        _setGetMemkeeperSettings(null);
+        _setGetSessionOwlSettings(null);
       }
     });
 
@@ -981,26 +981,26 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       // n7 has exactly one direct observation (o5); ids:["n7"] is a
       // single-observation target and must be uncapped regardless of mode.
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
       try {
         const out = text(await recall(tool(), { ids: ["n7"], fullDetails: true }));
         expect(out).toContain("Chose JWT for stateless auth");
         expect(out).not.toContain("budget reached");
       } finally {
-        _setGetMemkeeperSettings(null);
+        _setGetSessionOwlSettings(null);
       }
     });
 
     it("single observation + contentPattern is uncapped (any mode)", async () => {
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
       try {
         const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "JWT" }));
         // the grep excerpt is present despite the 1-token budget (single-obs grep uncapped).
         expect(out).toContain("Chose JWT for stateless auth");
         expect(out).not.toContain("budget reached");
       } finally {
-        _setGetMemkeeperSettings(null);
+        _setGetSessionOwlSettings(null);
       }
     });
 
@@ -1008,13 +1008,13 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       // n7 has exactly one direct observation (o5); the single-obs exception
       // applies even when the target is a node and the mode is lines.
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
       try {
         const out = text(await recall(tool(), { ids: ["n7"], lines: "1-1" }));
         expect(out).toContain("1: <USER>Chose JWT for stateless auth</USER>");
         expect(out).not.toContain("budget reached");
       } finally {
-        _setGetMemkeeperSettings(null);
+        _setGetSessionOwlSettings(null);
       }
     });
 
@@ -1027,7 +1027,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
 
     it("rejects a malformed contentPattern with the compiler error", async () => {
       // resolveGrepSpec → tryCompileFindRegex error branch (unclosed paren) must
-      // surface to the mk_recall caller (resolveRecallMode consumer).
+      // surface to the owl_recall caller (resolveRecallMode consumer).
       seedSource();
       const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "a(" }));
       expect(out.toLowerCase()).toContain("invalid regex");
@@ -1083,12 +1083,12 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     it("contentPattern grep timeout surfaces a partial-excerpts note (not silent)", async () => {
       // a catastrophic contentPattern over a large observation must surface the
       // timeout note — not silently return partial excerpts with no signal.
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       seedSource();
       slowGrepTarget();
       const out = text(await recall(tool(), { ids: ["o1"], contentPattern: "(.+a)(.+a)b" }));
       expect(out.toLowerCase()).toContain("grep timed out");
-      _setGetMemkeeperSettings(null);
+      _setGetSessionOwlSettings(null);
     });
 
     it("search-path contentPattern timeout surfaces a timeout note", async () => {
@@ -1096,22 +1096,22 @@ Third line that concludes the lengthy multi-line observation body fully.`;
       // a filtered search, the catastrophic contentPattern runs as the obs filter
       // (runRegexTests) during candidate-building and times out there — surfacing
       // the search-timeout note (not the ids-path grep note).
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       seedSource();
       slowGrepTarget();
       const out = text(await recall(tool(), { from: "2020-01-01 00:00", contentPattern: "(.+a)(.+a)b" }));
       expect(out.toLowerCase()).toContain("timed out");
-      _setGetMemkeeperSettings(null);
+      _setGetSessionOwlSettings(null);
     });
 
     it("search results bounded by toolResultTokenBudget", async () => {
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 2 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 2 }));
       try {
         const out = text(await recall(tool(), { query: "." }));
         expect(out).toContain("budget reached");
       } finally {
-        _setGetMemkeeperSettings(null);
+        _setGetSessionOwlSettings(null);
       }
     });
 
@@ -1185,19 +1185,19 @@ Third line that concludes the lengthy multi-line observation body fully.`;
 const renderTheme = {
   fg: (cls: string, s: string) => `<${cls}>${s}</${cls}>`,
   bold: (s: string) => `<bold>${s}</bold>`,
-} as unknown as Parameters<NonNullable<ReturnType<typeof makeMkRecallTool>["renderResult"]>>[2];
+} as unknown as Parameters<NonNullable<ReturnType<typeof makeOwlRecallTool>["renderResult"]>>[2];
 
-/** The mk_recall tool definition's renderResult, if registered. */
-function renderResultOf(): NonNullable<ReturnType<typeof makeMkRecallTool>["renderResult"]> {
-  const def = makeMkRecallTool();
-  if (def.renderResult === undefined) throw new Error("mk_recall has no renderResult");
+/** The owl_recall tool definition's renderResult, if registered. */
+function renderResultOf(): NonNullable<ReturnType<typeof makeOwlRecallTool>["renderResult"]> {
+  const def = makeOwlRecallTool();
+  if (def.renderResult === undefined) throw new Error("owl_recall has no renderResult");
   return def.renderResult;
 }
 
-/** The mk_recall tool definition's renderCall, if registered. */
-function renderCallOf(): NonNullable<ReturnType<typeof makeMkRecallTool>["renderCall"]> {
-  const def = makeMkRecallTool();
-  if (def.renderCall === undefined) throw new Error("mk_recall has no renderCall");
+/** The owl_recall tool definition's renderCall, if registered. */
+function renderCallOf(): NonNullable<ReturnType<typeof makeOwlRecallTool>["renderCall"]> {
+  const def = makeOwlRecallTool();
+  if (def.renderCall === undefined) throw new Error("owl_recall has no renderCall");
   return def.renderCall;
 }
 
@@ -1236,7 +1236,7 @@ function resultOver(
   return { content: [{ type: "text", text: linesOfText.join("\n") }], details: { error } };
 }
 
-describe("mk_recall renderResult (collapsed transcript render)", () => {
+describe("owl_recall renderResult (collapsed transcript render)", () => {
   const many = Array.from({ length: 20 }, (_, i) => `n${i + 1} · line ${i + 1}`);
 
   it("collapsed: a result over the row cap truncates to 12 rows + expand hint", () => {
@@ -1289,10 +1289,10 @@ describe("mk_recall renderResult (collapsed transcript render)", () => {
 
 // --- renderCall (transcript call line) --------------------------------------
 
-describe("mk_recall renderCall (transcript call line)", () => {
+describe("owl_recall renderCall (transcript call line)", () => {
   it("bold name + dim action: every part renders after the toolTitle name", () => {
     const out = renderCallWith({ query: "renderResult" });
-    expect(out).toBe("<toolTitle><bold>mk_recall </bold></toolTitle><dim>search: renderResult</dim>");
+    expect(out).toBe("<toolTitle><bold>owl_recall </bold></toolTitle><dim>search: renderResult</dim>");
   });
 
   it("ids lookup renders the ids; lines rides along, ignored filters do not", () => {
@@ -1324,8 +1324,8 @@ describe("mk_recall renderCall (transcript call line)", () => {
   });
 
   it("query + grep + ctx render search with grep and ctx qualifiers", () => {
-    const out = renderCallWith({ query: "mk_recall", contentPattern: "budget", contextLines: 5 });
-    expect(out).toContain("search: mk_recall");
+    const out = renderCallWith({ query: "owl_recall", contentPattern: "budget", contextLines: 5 });
+    expect(out).toContain("search: owl_recall");
     expect(out).toContain("grep: budget");
     expect(out).toContain("ctx 5");
   });
@@ -1355,9 +1355,9 @@ describe("mk_recall renderCall (transcript call line)", () => {
   });
 });
 
-describe("mk_recall description — recall-before-relying close", () => {
+describe("owl_recall description — recall-before-relying close", () => {
   it("carries the recall-first principle close (mirrors the ## Memory use section)", () => {
-    const description = String(makeMkRecallTool().description);
+    const description = String(makeOwlRecallTool().description);
     expect(description).toContain("recall before relying on session-derived understanding");
     expect(description).toContain("fullDetails for exact source");
     expect(description).not.toContain("before redoing work or assuming a decision");

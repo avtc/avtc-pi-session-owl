@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 //
-// Tests for the `/mk:rescan --reuse-observations` rebuild pipeline: re-wrap the
+// Tests for the `/owl:rescan --reuse-observations` rebuild pipeline: re-wrap the
 // collected observation records into a fresh structure in batches (original
 // capture order), interleaving Builder runs per the configured cadence, without
 // re-running the Observer LLM.
@@ -152,7 +152,7 @@ describe("runReuseRebuild", () => {
     const markers = appended.filter((e) => e.type === RESCAN_TYPE);
     expect(markers).toHaveLength(1);
     expect((markers[0]?.data as { mode?: string })?.mode).toBe(RESCAN_MODE_REUSE);
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta").length).toBeGreaterThan(0);
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta").length).toBeGreaterThan(0);
   });
 
   it("resumes: an existing non-empty parking node continues instead of re-parking", async () => {
@@ -263,6 +263,6 @@ describe("runReuseRebuild", () => {
     await runReuseRebuild(makeInput({ pi, builderCalls }));
     expect(builderCalls).toHaveLength(0);
     expect(getGraphStore().graph.nodes.has(N_PENDING)).toBe(false);
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(2); // nGoal create + summary set_meta
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(2); // nGoal create + summary set_meta
   });
 });

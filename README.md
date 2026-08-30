@@ -1,26 +1,26 @@
-# avtc-pi-memkeeper
+# avtc-pi-session-owl
 
 A working-memory extension for [pi](https://pi.dev) — maintains a knowledge graph across context compactions and renders a task-relative summary into each compaction, so the agent picks up after each compaction with its goal, decisions, and important context intact.
 
-![memkeeper](assets/images/memkeeper-hero.webp)
+![session-owl](assets/images/session-owl-hero.webp)
 
 ## Features
 
 - **Persistent memory** — observations (immutable, source-backed) are captured continuously and organized into a semantic node graph that lasts across every compaction.
 - **Compaction summary** — at compaction, the graph's root level is refined toward a token budget and rendered into the summary pi injects; the full detail remains available to the agent via recall.
 - **Task-relative** — a Selector picks the nodes that matter to the current work and the planned next tasks; superseded and stale context drops out.
-- **Browse session memory** — `/mk:ls`, `/mk:cat`, `/mk:find` let you list, inspect, and search your memory graph; the `mk_recall` tool lets the agent recall on demand.
+- **Browse session memory** — `/owl:ls`, `/owl:cat`, `/owl:find` let you list, inspect, and search your memory graph; the `owl_recall` tool lets the agent recall on demand.
 - **Live status widget** — a footer line shows the active maintenance stage, its progress, and its token cost.
 
 ## Installation
 
 ```bash
-pi install npm:avtc-pi-memkeeper
+pi install npm:avtc-pi-session-owl
 ```
 
 ## How it works
 
-memkeeper runs three maintenance stages:
+session-owl runs three maintenance stages:
 
 1. **Observer** — watches the session turn-by-turn and captures observations: condensed, source-backed facts. Each captured fact becomes a node in the graph.
 2. **Builder** — maintains the graph: groups, merges, supersedes, and re-rates nodes so the structure stays coherent and bounded.
@@ -30,7 +30,7 @@ At compaction, the active set is rendered into the compaction summary that pi in
 
 ```
 # Memory
-Your session memory — the top level of a tree; each id opens deeper detail via mk_recall.
+Your session memory — the top level of a tree; each id opens deeper detail via owl_recall.
 Legend: 📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · 2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size)
 
 ## Memory use
@@ -58,7 +58,7 @@ After compaction the agent continues with this summary alongside pi's own recent
 
 ## The memory graph
 
-The graph is a containment tree of **nodes** (folders) holding **observations** (leaves). It renders the same way everywhere — the agent's `mk_recall`, the Builder and Selector tools, and the `/mk:ls`/`/mk:cat`/`/mk:find` commands:
+The graph is a containment tree of **nodes** (folders) holding **observations** (leaves). It renders the same way everywhere — the agent's `owl_recall`, the Builder and Selector tools, and the `/owl:ls`/`/owl:cat`/`/owl:find` commands:
 
 ```
 📁 nGoal · crit · The session goal · 4nodes 1obs · 2lines 45tokens · Jul 28 14:30
@@ -72,11 +72,11 @@ The graph is a containment tree of **nodes** (folders) holding **observations** 
 
 (*📁* *n..* node · *📄* *o..* observation (obs); importance *crit*/*high*/*med*/*low* (how much it matters if lost); state glyphs *📦* archived · *🪦* obsolete · *🆕* new, Builder view only; 2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size).)
 
-**How the agent operates it.** The Builder and Selector navigate and edit the graph with filesystem-style tools — `ls`, `cat`, `find` to read; `mkdir`, `mv`, `merge`, `supersede` (Builder-only), `set_meta` to reorganize; `try_finish` to converge the root view on its budget. The Builder maintains the source graph; the Selector builds a curated copy (the active set) for the summary. The agent itself uses the read-only `mk_recall` to fetch and search on demand.
+**How the agent operates it.** The Builder and Selector navigate and edit the graph with filesystem-style tools — `ls`, `cat`, `find` to read; `mkdir`, `mv`, `merge`, `supersede` (Builder-only), `set_meta` to reorganize; `try_finish` to converge the root view on its budget. The Builder maintains the source graph; the Selector builds a curated copy (the active set) for the summary. The agent itself uses the read-only `owl_recall` to fetch and search on demand.
 
 ## Status widget
 
-While memkeeper works, a footer line shows the active stage, its progress, and its token cost:
+While session-owl works, a footer line shows the active stage, its progress, and its token cost:
 
 ```
 🦉 1005(+11) obs 150/371 → 95 roots 35k/40k · 8.0k/262k · 3.4k tok · +3 obs
@@ -88,24 +88,24 @@ While memkeeper works, a footer line shows the active stage, its progress, and i
 
 | Tool | Description |
 |---|---|
-| `mk_recall` | Recall from memory — fetch by id, filter by time range, or regex search. Targets the rendered tree (selected-root or observations-root). |
+| `owl_recall` | Recall from memory — fetch by id, filter by time range, or regex search. Targets the rendered tree (selected-root or observations-root). |
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `/mk:status` | Show memory stats and per-phase token/cost usage (since last compaction and since session start) |
-| `/mk:ls [nodeId]` | List root nodes, or a node's children |
-| `/mk:cat <id>` | Show a node (with its observations) or a single observation in full |
-| `/mk:find <query>` | Search memory (regex; current items) |
-| `/mk:find-all <query>` | Search memory (regex; everything, including superseded) |
-| `/mk:rescan` | Discard the current memory graph and re-observe the entire session from the start (asks confirmation). With `--reuse-observations`: rebuild the graph structure from the collected observations without re-observing |
-| `/mk:reobserve-0-obs-chunks` | Re-observe session ranges that were skipped with zero observations (repair after a degraded model run) |
-| `/mk:settings` | Open the settings UI |
+| `/owl:status` | Show memory stats and per-phase token/cost usage (since last compaction and since session start) |
+| `/owl:ls [nodeId]` | List root nodes, or a node's children |
+| `/owl:cat <id>` | Show a node (with its observations) or a single observation in full |
+| `/owl:find <query>` | Search memory (regex; current items) |
+| `/owl:find-all <query>` | Search memory (regex; everything, including superseded) |
+| `/owl:rescan` | Discard the current memory graph and re-observe the entire session from the start (asks confirmation). With `--reuse-observations`: rebuild the graph structure from the collected observations without re-observing |
+| `/owl:reobserve-0-obs-chunks` | Re-observe session ranges that were skipped with zero observations (repair after a degraded model run) |
+| `/owl:settings` | Open the settings UI |
 
-`/mk:status` output:
+`/owl:status` output:
 
-![mk:status](assets/images/mk-status.png)
+![owl:status](assets/images/owl-status.png)
 
 ## Configuration
 
@@ -124,19 +124,19 @@ The defaults keep the observations graph in shape, so when a compaction is trigg
 
 Pi's compaction hook is last-registration-wins: when two extensions customize compaction, only the last one registered has an effect — the other silently does nothing. Pi has no mechanism for extensions to veto each other.
 
-Memkeeper handles this by checking, at every start, whether another compaction-handling extension is installed (from `~/.pi/agent/settings.json`, `<project>/.pi/settings.json`, and the pi extension dirs). When it finds one, it stays dormant — it collects no observations, compaction falls through to pi's native summary or the other extension's, and the widget shows a paused line:
+Session Owl handles this by checking, at every start, whether another compaction-handling extension is installed (from `~/.pi/agent/settings.json`, `<project>/.pi/settings.json`, and the pi extension dirs). When it finds one, it stays dormant — it collects no observations, compaction falls through to pi's native summary or the other extension's, and the widget shows a paused line:
 
 ```text
-🦉 ⚠ paused — pi-blackhole also handles compaction (/mk:status)
+🦉 ⚠ paused — pi-blackhole also handles compaction (/owl:status)
 ```
 
-The pause is runtime-only (nothing is written to your settings): remove the other extension and restart pi, or toggle `ignoreConflicts` in /mk:settings — memkeeper resumes immediately, even mid-session.
+The pause is runtime-only (nothing is written to your settings): remove the other extension and restart pi, or toggle `ignoreConflicts` in /owl:settings — session-owl resumes immediately, even mid-session.
 
-Unknown or future packages are caught by a source scan for the override-shaped compaction-hook registration in installed package dirs (best effort — passive listeners that only observe compaction events never trigger it). Known compaction-handling packages are also checked by name — a curated list maintained in memkeeper's source — so forks and renamed copies are caught even when their code shape changes.
+Unknown or future packages are caught by a source scan for the override-shaped compaction-hook registration in installed package dirs (best effort — passive listeners that only observe compaction events never trigger it). Known compaction-handling packages are also checked by name — a curated list maintained in session-owl's source — so forks and renamed copies are caught even when their code shape changes.
 
-### Forcing memkeeper on
+### Forcing session-owl on
 
-If you deliberately run memkeeper alongside another compaction handler (e.g. for benchmarking), set `ignoreConflicts: true` in the memkeeper settings (/mk:settings). The last-registered extension wins — with this enabled you are choosing that fight knowingly.
+If you deliberately run session-owl alongside another compaction handler (e.g. for benchmarking), set `ignoreConflicts: true` in the session-owl settings (/owl:settings). The last-registered extension wins — with this enabled you are choosing that fight knowingly.
 
 ## Full suite
 

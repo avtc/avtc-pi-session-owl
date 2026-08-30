@@ -3,7 +3,7 @@
 
 // Shared text sanitization. ANSI/VT escape sequences appear in thinking blocks
 // (and can be pasted into any user message); they are stripped from EVERY text
-// memkeeper captures — Observer chunks AND the oInitialPrompt capture — so the
+// session-owl captures — Observer chunks AND the oInitialPrompt capture — so the
 // sanitization surface is uniform across all stored observations.
 
 /** ANSI/VT escape sequences stripped from all captured text: CSI (SGR colors,

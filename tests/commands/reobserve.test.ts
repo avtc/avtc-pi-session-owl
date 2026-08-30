@@ -3,8 +3,8 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type ReobserveDeps, runMkReobserve } from "../../src/commands/reobserve.js";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { type ReobserveDeps, runOwlReobserve } from "../../src/commands/reobserve.js";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { _resetRunLock, acquireOrSkip } from "../../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import { makeObservation } from "../../src/types.js";
@@ -40,12 +40,12 @@ function assistantEntry(id: string): FakeEntry {
   };
 }
 
-/** A `memkeeper.observation` entry covering `from..to` and citing `from`. */
+/** A `session-owl.observation` entry covering `from..to` and citing `from`. */
 function obsEntry(id: string, from: string, to: string): FakeEntry {
   return {
     id,
     type: "custom",
-    customType: "memkeeper.observation",
+    customType: "session-owl.observation",
     parentId: null,
     timestamp: "t",
     data: { coversFromId: from, coversUpToId: to, records: [{ sourceEntryIds: [from] }], tokenCount: 1 },
@@ -128,31 +128,31 @@ function makeDeps(opts: { recordsPerRange?: number; fail?: boolean } = {}): {
 
 // ---------------------------------------------------------------------------
 
-describe("/mk:reobserve-0-obs-chunks", () => {
+describe("/owl:reobserve-0-obs-chunks", () => {
   beforeEach(() => {
     resetForNewSession();
     _resetRunLock();
-    _resetGetMemkeeperSettings();
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: true }));
+    _resetGetSessionOwlSettings();
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: true }));
   });
   afterEach(() => {
     _resetRunLock();
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
 
   it("gates on enabled (master-switch off-path)", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
     const { deps } = makeDeps();
     const { ctx, messages } = makeCtx([userEntry("u1"), assistantEntry("a1")], null);
-    await runMkReobserve("", ctx, deps);
-    expect(messages).toEqual([{ message: "memkeeper is disabled (enable it first).", type: "warning" }]);
+    await runOwlReobserve("", ctx, deps);
+    expect(messages).toEqual([{ message: "session-owl is disabled (enable it first).", type: "warning" }]);
   });
 
   it("notifies and runs nothing when every range is covered", async () => {
     const { deps, calls, launched } = makeDeps();
     const branch = [userEntry("u1"), assistantEntry("a1"), assistantEntry("a2"), obsEntry("o1", "a1", "a2")];
     const { ctx, messages } = makeCtx(branch, null);
-    await runMkReobserve("", ctx, deps);
+    await runOwlReobserve("", ctx, deps);
     await Promise.all(launched);
     expect(messages).toEqual([{ message: "No skipped or unobserved ranges — nothing to re-observe.", type: "info" }]);
     expect(calls).toEqual([]);
@@ -164,7 +164,7 @@ describe("/mk:reobserve-0-obs-chunks", () => {
     if (lockHandle === null) throw new Error("lock should be free");
     const { deps, calls } = makeDeps();
     const { ctx, messages } = makeCtx([userEntry("u1"), assistantEntry("a1")], null);
-    await runMkReobserve("", ctx, deps);
+    await runOwlReobserve("", ctx, deps);
     expect(messages).toEqual([
       { message: "A maintenance run is in flight — try again once it finishes.", type: "warning" },
     ]);
@@ -187,7 +187,7 @@ describe("/mk:reobserve-0-obs-chunks", () => {
     ];
     const harness = makeDeps({ recordsPerRange: 2 });
     const { ctx, messages } = makeCtx(branch, null);
-    await runMkReobserve("", ctx, harness.deps);
+    await runOwlReobserve("", ctx, harness.deps);
     await Promise.all(harness.launched);
     // start notice + done summary
     expect(messages[0]).toEqual({ message: "Re-observing 1 skipped range(s) (1 entries)…", type: "info" });
@@ -205,7 +205,7 @@ describe("/mk:reobserve-0-obs-chunks", () => {
     const branch = [userEntry("u1"), assistantEntry("a1"), assistantEntry("a2"), obsEntry("o1", "a2", "a2")];
     const { deps, launched } = makeDeps({ recordsPerRange: 0 });
     const { ctx, messages } = makeCtx(branch, null);
-    await runMkReobserve("", ctx, deps);
+    await runOwlReobserve("", ctx, deps);
     await Promise.all(launched);
     expect(messages[messages.length - 1]).toEqual({
       message: "Re-observe done — 0 observation(s) recovered into new roots.",
@@ -214,7 +214,7 @@ describe("/mk:reobserve-0-obs-chunks", () => {
   });
 
   it("pipelines the mid-repair Builder fold (mode-aware cadence per settings)", async () => {
-    _setGetMemkeeperSettings(() => ({
+    _setGetSessionOwlSettings(() => ({
       ...DEFAULT_CONFIG,
       enabled: true,
       builderMode: "on-session-context-threshold",
@@ -224,7 +224,7 @@ describe("/mk:reobserve-0-obs-chunks", () => {
     const branch = [userEntry("u1"), assistantEntry("a1")];
     const harness = makeDeps({ recordsPerRange: 1 });
     const { ctx } = makeCtx(branch, 999_999); // context above the threshold
-    await runMkReobserve("", ctx, harness.deps);
+    await runOwlReobserve("", ctx, harness.deps);
     await Promise.all(harness.launched);
     // the fake runObserver awaits maybeBuild per range — the trigger fires per
     // the on-context mode and routes to runBuilderStage
@@ -236,10 +236,10 @@ describe("/mk:reobserve-0-obs-chunks", () => {
     const branch = [userEntry("u1"), assistantEntry("a1")];
     const { deps, launched } = makeDeps({ fail: true });
     const { ctx, messages } = makeCtx(branch, null);
-    await runMkReobserve("", ctx, deps);
+    await runOwlReobserve("", ctx, deps);
     await Promise.all(launched);
     expect(messages[messages.length - 1]).toEqual({
-      message: "Re-observe failed — see the memkeeper log for the error.",
+      message: "Re-observe failed — see the session-owl log for the error.",
       type: "error",
     });
     expect(acquireOrSkip("observe") !== null).toBe(true);

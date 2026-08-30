@@ -58,7 +58,7 @@ const TOUCHED: TouchedFile[] = [
   { path: "src/z.ts", timestamp: "2026-07-28T14:25:00.000Z", op: "read", lineRanges: [{ start: 10, end: 40 }] },
 ];
 
-const PROMPT = sObs("oInitialPrompt", "Design the memkeeper extension. Brand-new; no 3rd-party reuse.", {});
+const PROMPT = sObs("oInitialPrompt", "Design the session-owl extension. Brand-new; no 3rd-party reuse.", {});
 
 function emptyGraph(): { nodes: Map<string, SerializedNode> } {
   return { nodes: new Map() };
@@ -71,7 +71,7 @@ function nodeGraph(nodes: SerializedNode[]): { nodes: Map<string, SerializedNode
 }
 
 describe("renderSummary — preamble + legend + initial prompt + touched", () => {
-  it("renders the # Memory header, legend, mk_recall hint", () => {
+  it("renders the # Memory header, legend, owl_recall hint", () => {
     const out = renderSummary({
       graph: emptyGraph(),
       selectedTree: null,
@@ -82,7 +82,7 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
     });
     expect(out).toContain("# Memory");
     expect(out).toContain(RENDER_LEGEND);
-    expect(out).toContain("mk_recall");
+    expect(out).toContain("owl_recall");
   });
 
   it("renders the verbatim initial prompt in its own ## Initial prompt section", () => {
@@ -95,7 +95,7 @@ describe("renderSummary — preamble + legend + initial prompt + touched", () =>
       compactionCount: 0,
     });
     expect(out).toContain("## Initial prompt");
-    expect(out).toContain("Design the memkeeper extension. Brand-new; no 3rd-party reuse.");
+    expect(out).toContain("Design the session-owl extension. Brand-new; no 3rd-party reuse.");
   });
 
   it("renders the '(none captured yet)' placeholder when oInitialPrompt is null (compaction before first user message)", () => {

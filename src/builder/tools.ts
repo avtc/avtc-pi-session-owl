@@ -12,7 +12,7 @@
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import type { MemkeeperConfig } from "../config/schema.js";
+import type { SessionOwlConfig } from "../config/schema.js";
 import { BUILDER } from "../format/render.js";
 import {
   MERGE_TOOL,
@@ -28,7 +28,7 @@ import { applySetMeta, applySupersede, MUTATE_SOURCE } from "../graph/mutations.
 import { makeReadTools, makeTryFinishTool } from "../graph/read-tools.js";
 import { ImportanceSchema } from "../schema.js";
 import { appendGraphDelta, type StoreContext } from "../store/graph-store.js";
-import type { Importance, MemkeeperGraph, NodeId } from "../types.js";
+import type { Importance, SessionOwlGraph, NodeId } from "../types.js";
 
 // Re-export the Builder toolset names + param schemas so callers (the run, the
 // compaction hook, tests) can name the full Builder surface through the module
@@ -81,7 +81,7 @@ const SUPERSEDE_PARAMS = Type.Object({
 
 /** Build the `supersede` tool: mark nodes obsolete, each carrying supersededBy
  *  pointing at the replacement. The superseded nodes retain their evidence. */
-function makeSupersedeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof SUPERSEDE_PARAMS> {
+function makeSupersedeTool(graph: SessionOwlGraph, ctx: MutateContext): AgentTool<typeof SUPERSEDE_PARAMS> {
   return {
     name: SUPERSEDE_TOOL,
     description: "Retire nodes as obsolete, pointing each at a replacement node.",
@@ -122,7 +122,7 @@ const SET_META_PARAMS = Type.Object({
 /** Build the `set_meta` tool: re-rate importance, archive/un-archive, condense
  *  the summary, or resurrect an obsolete node. obsolete:true is rejected (use
  *  supersede). nGoal allows summary only. */
-function makeSetMetaTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof SET_META_PARAMS> {
+function makeSetMetaTool(graph: SessionOwlGraph, ctx: MutateContext): AgentTool<typeof SET_META_PARAMS> {
   return {
     name: SET_META_TOOL,
     description:
@@ -157,7 +157,7 @@ function makeSetMetaTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<t
 /** Build the Builder read tools (ls/cat/find) rendered for the Builder viewer
  *  (the 🆕 glyph is Builder-only — non-Builder consumers render `new` as
  *  `active`). Thin wrapper over the shared read-tool factories. */
-export function makeBuilderReadTools(graph: MemkeeperGraph): AgentTool[] {
+export function makeBuilderReadTools(graph: SessionOwlGraph): AgentTool[] {
   return makeReadTools(graph, BUILDER);
 }
 
@@ -166,7 +166,7 @@ export function makeBuilderReadTools(graph: MemkeeperGraph): AgentTool[] {
  *  over the store (to append graph deltas) and settings (try_finish threshold).
  *  Builder tools operate on the SOURCE graph with `MUTATE_SOURCE` policy (the
  *  nGoal/oInitialPrompt protection matrix is enforced). */
-export function makeBuilderTools(graph: MemkeeperGraph, store: StoreContext, settings: MemkeeperConfig): AgentTool[] {
+export function makeBuilderTools(graph: SessionOwlGraph, store: StoreContext, settings: SessionOwlConfig): AgentTool[] {
   const ctx = sourceMutateContext(store);
   return [
     ...makeBuilderReadTools(graph),

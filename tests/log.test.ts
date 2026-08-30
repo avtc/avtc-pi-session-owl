@@ -1,11 +1,11 @@
 // log: `debug` honors the live `debugLog` setting (read each call so toggling it
-// in /mk:settings takes effect immediately). info/warn/error always write.
+// in /owl:settings takes effect immediately). info/warn/error always write.
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  _resetGetMemkeeperSettings,
-  _resetMemkeeperSettingsHandle,
-  _setGetMemkeeperSettings,
-  type MemkeeperConfig,
+  _resetGetSessionOwlSettings,
+  _resetSessionOwlSettingsHandle,
+  _setGetSessionOwlSettings,
+  type SessionOwlConfig,
 } from "../src/config/schema.js";
 import { _setBaseLoggerForTest, clearLogSessionScope, log, setLogSessionScope } from "../src/log.js";
 
@@ -13,7 +13,7 @@ import { _setBaseLoggerForTest, clearLogSessionScope, log, setLogSessionScope } 
 const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
 function settingsWith(debugLog: boolean): void {
-  _setGetMemkeeperSettings(() => ({ debugLog }) as unknown as MemkeeperConfig);
+  _setGetSessionOwlSettings(() => ({ debugLog }) as unknown as SessionOwlConfig);
 }
 
 describe("log", () => {
@@ -26,8 +26,8 @@ describe("log", () => {
   });
   afterAll(() => {
     _setBaseLoggerForTest(null); // restore the real logger
-    _resetGetMemkeeperSettings();
-    _resetMemkeeperSettingsHandle();
+    _resetGetSessionOwlSettings();
+    _resetSessionOwlSettingsHandle();
   });
 
   it("writes a debug message only when debugLog is on", () => {

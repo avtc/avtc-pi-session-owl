@@ -3,8 +3,8 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { formatList, runMkCat, runMkFind, runMkFindAll, runMkLs, runMkRescan } from "../../src/commands/user.js";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { formatList, runOwlCat, runOwlFind, runOwlFindAll, runOwlLs, runOwlRescan } from "../../src/commands/user.js";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import {
   applyCreateNode,
   applyRecordObservation,
@@ -14,7 +14,7 @@ import {
   setClock,
 } from "../../src/graph/mutations.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
-import { MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
+import { SessionOwlGraph, makeObservation, N_GOAL } from "../../src/types.js";
 import { NO_OP_WIDGET } from "../../src/widget/tracker.js";
 
 const T0 = "2026-07-17T09:00:00.000Z";
@@ -25,9 +25,9 @@ const T3 = "2026-07-19T10:00:00.000Z";
  *  Roots: nGoal (crit) · n7 (high, "Auth migration to JWT", child n8 + obs o5)
  *  · n12 (new state — renders active to non-Builder · "Build failed") · n20
  *  (archived, "Old YAML config") · n99 (obsolete, superseded by n7, obs o9). */
-function buildGraph(): MemkeeperGraph {
+function buildGraph(): SessionOwlGraph {
   setClock(() => T0);
-  const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+  const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
 
   applyCreateNode(g, {
     id: N_GOAL,
@@ -112,7 +112,7 @@ function buildGraph(): MemkeeperGraph {
   return g;
 }
 
-function seedSource(): MemkeeperGraph {
+function seedSource(): SessionOwlGraph {
   resetForNewSession();
   const graph = buildGraph();
   getGraphStore().graph = graph;
@@ -146,27 +146,27 @@ async function run(
   return { message: captured.lastMessage, type: captured.lastType };
 }
 
-describe("/mk:* user commands", () => {
+describe("/owl:* user commands", () => {
   beforeEach(() => {
     resetForNewSession();
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
   afterEach(() => {
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
 
-  describe("/mk:ls", () => {
-    it("replies 'memkeeper is disabled.' when enabled=false (master-switch off-path)", async () => {
+  describe("/owl:ls", () => {
+    it("replies 'session-owl is disabled.' when enabled=false (master-switch off-path)", async () => {
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
-      const { message, type } = await run(runMkLs, "");
-      expect(message).toBe("memkeeper is disabled.");
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+      const { message, type } = await run(runOwlLs, "");
+      expect(message).toBe("session-owl is disabled.");
       expect(type).toBe("info");
     });
 
     it("no arg → non-obsolete roots, indented, nGoal first by importance", async () => {
       seedSource();
-      const { message, type } = await run(runMkLs, "");
+      const { message, type } = await run(runOwlLs, "");
       expect(type).toBe("info");
       const text = message ?? "";
       // non-obsolete roots only: nGoal, n7, n12(new→active render), n20(archived)
@@ -182,7 +182,7 @@ describe("/mk:* user commands", () => {
 
     it("nodeId arg → that node's children indented under the parent header", async () => {
       seedSource();
-      const { message, type } = await run(runMkLs, "n7");
+      const { message, type } = await run(runOwlLs, "n7");
       expect(type).toBe("info");
       const text = message ?? "";
       // parent header present (n7)
@@ -196,35 +196,35 @@ describe("/mk:* user commands", () => {
 
     it("unknown nodeId → error notify naming the id", async () => {
       seedSource();
-      const { message, type } = await run(runMkLs, "nDoesNotExist");
+      const { message, type } = await run(runOwlLs, "nDoesNotExist");
       expect(type).toBe("error");
       expect(message ?? "").toContain("nDoesNotExist");
     });
 
     it("respects commandResultCap with a drill footer when over", async () => {
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: 1 }));
-      const { message } = await run(runMkLs, "");
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: 1 }));
+      const { message } = await run(runOwlLs, "");
       const text = message ?? "";
       // capped to 1 root line + footer
       expect(text).toMatch(/\+\d+ more/);
-      expect(text).toContain("/mk:ls");
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: null }));
+      expect(text).toContain("/owl:ls");
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: null }));
     });
 
     it("commandResultCap null → no cap, no footer", async () => {
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: null }));
-      const { message } = await run(runMkLs, "");
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: null }));
+      const { message } = await run(runOwlLs, "");
       const text = message ?? "";
       expect(text).not.toMatch(/\+\d+ more/);
     });
   });
 
-  describe("/mk:cat", () => {
+  describe("/owl:cat", () => {
     it("node id → header + direct observations full text (child nodes NOT expanded)", async () => {
       seedSource();
-      const { message, type } = await run(runMkCat, "n7");
+      const { message, type } = await run(runOwlCat, "n7");
       expect(type).toBe("info");
       const text = message ?? "";
       // node header present
@@ -237,7 +237,7 @@ describe("/mk:* user commands", () => {
 
     it("observation id → full content + header (NO sourceEntryIds)", async () => {
       seedSource();
-      const { message, type } = await run(runMkCat, "o5");
+      const { message, type } = await run(runOwlCat, "o5");
       expect(type).toBe("info");
       const text = message ?? "";
       // full multi-line content preserved
@@ -251,7 +251,7 @@ describe("/mk:* user commands", () => {
 
     it("unknown id → error notify naming the id", async () => {
       seedSource();
-      const { message, type } = await run(runMkCat, "nDoesNotExist");
+      const { message, type } = await run(runOwlCat, "nDoesNotExist");
       expect(type).toBe("error");
       expect(message ?? "").toContain("nDoesNotExist");
     });
@@ -259,7 +259,7 @@ describe("/mk:* user commands", () => {
     it("node with zero direct observations → header only (no content body)", async () => {
       seedSource();
       // n8 has no direct observations (it is a child of n7 with no obs of its own)
-      const { message, type } = await run(runMkCat, "n8");
+      const { message, type } = await run(runOwlCat, "n8");
       expect(type).toBe("info");
       const text = message ?? "";
       // node header present
@@ -271,19 +271,19 @@ describe("/mk:* user commands", () => {
 
     it("missing arg → usage error", async () => {
       seedSource();
-      const { message, type } = await run(runMkCat, "");
+      const { message, type } = await run(runOwlCat, "");
       expect(type).toBe("error");
       expect(message ?? "").toMatch(/usage/i);
     });
   });
 
-  describe("/mk:find", () => {
+  describe("/owl:find", () => {
     it("matches across node summaries + obs content, non-obsolete, with in <parent>", async () => {
       seedSource();
       // "JWT" matches the n7 NODE summary ("Auth migration to JWT") AND the o5
       // observation content ("Chose JWT for stateless auth") — so both a node
       // line and an obs line appear, the obs showing `in n7`.
-      const { message, type } = await run(runMkFind, "JWT");
+      const { message, type } = await run(runOwlFind, "JWT");
       expect(type).toBe("info");
       const text = message ?? "";
       // n7 node line genuinely matches its summary (not just via `in n7`)
@@ -298,41 +298,41 @@ describe("/mk:* user commands", () => {
 
     it("invalid regex → error notify", async () => {
       seedSource();
-      const { message, type } = await run(runMkFind, "(unclosed");
+      const { message, type } = await run(runOwlFind, "(unclosed");
       expect(type).toBe("error");
       expect(message ?? "").toMatch(/regex|invalid/i);
     });
 
     it("empty query → usage error", async () => {
       seedSource();
-      const { message, type } = await run(runMkFind, "");
+      const { message, type } = await run(runOwlFind, "");
       expect(type).toBe("error");
       expect(message ?? "").toMatch(/usage/i);
     });
 
     it("no matches → info notify saying no matches", async () => {
       seedSource();
-      const { message, type } = await run(runMkFind, "zzzznomatch");
+      const { message, type } = await run(runOwlFind, "zzzznomatch");
       expect(type).toBe("info");
       expect(message ?? "").toMatch(/no matches/i);
     });
 
     it("respects commandResultCap with footer when over", async () => {
       seedSource();
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: 1 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: 1 }));
       // JWT matches n7 + n8 summaries and o5 content (>1 match) → cap=1 truncates
-      const { message } = await run(runMkFind, "JWT");
+      const { message } = await run(runOwlFind, "JWT");
       expect(message ?? "").toMatch(/\+\d+ more/);
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: null }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, commandResultCap: null }));
     });
   });
 
-  describe("/mk:find-all", () => {
+  describe("/owl:find-all", () => {
     it("includes obsolete nodes (🪦 + → supersededBy)", async () => {
       seedSource();
       // "sessions" matches the obsolete NODE n99 ("Auth via sessions") so its
       // node line renders with 🪦 + → supersededBy (glyphs are node-only).
-      const { message, type } = await run(runMkFindAll, "sessions");
+      const { message, type } = await run(runOwlFindAll, "sessions");
       expect(type).toBe("info");
       const text = message ?? "";
       // obsolete n99 now included
@@ -347,7 +347,7 @@ describe("/mk:* user commands", () => {
       seedSource();
       const captured: Captured = { lastMessage: null, lastType: null, calls: [] };
       const ctx = makeCtx(captured);
-      await runMkLs("", ctx);
+      await runOwlLs("", ctx);
       // exactly one notify call, type info
       expect(captured.calls).toHaveLength(1);
       expect(captured.calls[0]?.type).toBe("info");
@@ -374,8 +374,8 @@ describe("formatList (cap helper)", () => {
     expect(out.truncated).toBe(2);
     expect(out.text.startsWith("a\nb")).toBe(true);
     expect(out.text).toContain("+2 more");
-    expect(out.text).toContain("/mk:ls");
-    expect(out.text).toContain("/mk:find");
+    expect(out.text).toContain("/owl:ls");
+    expect(out.text).toContain("/owl:find");
   });
 
   it("empty input → empty text, no footer", () => {
@@ -394,12 +394,12 @@ describe("formatList (cap helper)", () => {
   });
 });
 
-describe("/mk:rescan", () => {
+describe("/owl:rescan", () => {
   beforeEach(() => {
     resetForNewSession();
   });
   afterEach(() => {
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
 
   /** A command ctx capturing notify + a scripted confirm result. */
@@ -433,14 +433,14 @@ describe("/mk:rescan", () => {
 
   function makeDeps(): {
     pi: { appended: { type: string; data: unknown }[] } & Record<string, unknown>;
-    deps: Parameters<typeof runMkRescan>[2];
+    deps: Parameters<typeof runOwlRescan>[2];
     launched: Promise<void>[];
   } {
     const appended: { type: string; data: unknown }[] = [];
     const pi = { appended, appendEntry: (t: string, d: unknown) => appended.push({ type: t, data: d }) };
     const launched: Promise<void>[] = [];
     const deps = {
-      pi: pi as unknown as Parameters<typeof runMkRescan>[2]["pi"],
+      pi: pi as unknown as Parameters<typeof runOwlRescan>[2]["pi"],
       widget: NO_OP_WIDGET,
       runBuilderStage: async () => {},
       runObserver: async () => {},
@@ -452,7 +452,7 @@ describe("/mk:rescan", () => {
   }
 
   it("reuse mode: confirms with the collected count and launches the rebuild", async () => {
-    _setGetMemkeeperSettings(
+    _setGetSessionOwlSettings(
       () =>
         ({
           ...DEFAULT_CONFIG,
@@ -464,56 +464,56 @@ describe("/mk:rescan", () => {
     seedSource(); // 3 observations incl. oInitialPrompt -> 2 collected
     const { ctx, confirmTitle, confirmBody, messages } = makeRescanCtx(true);
     const harness = makeDeps();
-    await runMkRescan("--reuse-observations", ctx, harness.deps);
+    await runOwlRescan("--reuse-observations", ctx, harness.deps);
     for (const p of harness.launched) await p;
     expect(confirmTitle()).toBe("Rebuild memory");
     expect(confirmBody()).toContain("2 collected observations");
     expect(messages.some((m) => m.includes("Rebuilding"))).toBe(true);
-    const markers = harness.pi.appended.filter((e) => e.type === "memkeeper.rescan");
+    const markers = harness.pi.appended.filter((e) => e.type === "session-owl.rescan");
     expect(markers).toHaveLength(1);
     expect((markers[0]?.data as { mode?: string })?.mode).toBe("reuse");
   });
 
   it("reuse mode with an empty ledger: notifies and skips the confirm", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: true }) as typeof DEFAULT_CONFIG);
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: true }) as typeof DEFAULT_CONFIG);
     resetForNewSession();
     const { ctx, confirmTitle, messages } = makeRescanCtx(true);
     const harness = makeDeps();
-    await runMkRescan("--reuse-observations", ctx, harness.deps);
+    await runOwlRescan("--reuse-observations", ctx, harness.deps);
     expect(confirmTitle()).toBeNull();
     expect(messages.some((m) => m.includes("Nothing to rebuild"))).toBe(true);
-    expect(harness.pi.appended.filter((e) => e.type === "memkeeper.rescan")).toHaveLength(0);
+    expect(harness.pi.appended.filter((e) => e.type === "session-owl.rescan")).toHaveLength(0);
   });
 
   it("reuse mode declined: nothing happens", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: true }) as typeof DEFAULT_CONFIG);
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: true }) as typeof DEFAULT_CONFIG);
     seedSource();
     const { ctx, messages } = makeRescanCtx(false);
     const harness = makeDeps();
-    await runMkRescan("--reuse-observations", ctx, harness.deps);
+    await runOwlRescan("--reuse-observations", ctx, harness.deps);
     expect(messages).toHaveLength(0);
     expect(harness.pi.appended).toHaveLength(0);
   });
 
   it("plain mode: resets everything (marker without mode, frontier cleared)", async () => {
-    _setGetMemkeeperSettings(
+    _setGetSessionOwlSettings(
       () => ({ ...DEFAULT_CONFIG, enabled: true, observerMode: "on-threshold" }) as typeof DEFAULT_CONFIG,
     );
     seedSource();
     getGraphStore().observerFrontier = "some-entry";
     const { ctx, confirmTitle } = makeRescanCtx(false);
     const harness = makeDeps();
-    await runMkRescan("", ctx, harness.deps);
+    await runOwlRescan("", ctx, harness.deps);
     expect(confirmTitle()).toBe("Rescan memory");
     expect(getGraphStore().observerFrontier).toBe("some-entry"); // declined -> untouched
   });
 
   it("disabled: warns and does nothing", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }) as typeof DEFAULT_CONFIG);
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }) as typeof DEFAULT_CONFIG);
     seedSource();
     const { ctx, confirmTitle, messages } = makeRescanCtx(true);
     const harness = makeDeps();
-    await runMkRescan("--reuse-observations", ctx, harness.deps);
+    await runOwlRescan("--reuse-observations", ctx, harness.deps);
     expect(confirmTitle()).toBeNull();
     expect(messages.some((m) => m.includes("disabled"))).toBe(true);
   });

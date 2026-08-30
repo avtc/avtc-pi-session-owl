@@ -318,7 +318,7 @@ describe("renderBlocks: entry-type filtering", () => {
       { type: "thinking_level_change", id: "tl1", parentId: null, timestamp: "", thinkingLevel: "high" },
       { type: "label", id: "lb1", parentId: null, timestamp: "", targetId: "x", label: "y" },
       { type: "session_info", id: "si1", parentId: null, timestamp: "" },
-      { type: "custom", id: "cu1", parentId: null, timestamp: "", customType: "memkeeper.observation" },
+      { type: "custom", id: "cu1", parentId: null, timestamp: "", customType: "session-owl.observation" },
       userEntry("u1", "real"),
     ];
     const text = renderBlocks(entries, NO_CAP)

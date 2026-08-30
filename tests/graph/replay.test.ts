@@ -7,13 +7,13 @@ import type { GraphDelta, MergeDelta, MvDelta, SetMetaDelta, SupersedeDelta } fr
 import { applyCreateNode, applyRecordObservation, MUTATE_SOURCE } from "../../src/graph/mutations.js";
 import { applyDelta } from "../../src/graph/replay.js";
 import type { Importance, Node, NodeId, ObsId } from "../../src/types.js";
-import { MemkeeperGraph, makeNode, makeObservation, N_GOAL } from "../../src/types.js";
+import { SessionOwlGraph, makeNode, makeObservation, N_GOAL } from "../../src/types.js";
 
 // --- fixtures ---------------------------------------------------------------
 
 /** A small well-formed graph: nGoal (root) > n1; o1 under n1. */
-function seedGraph(): MemkeeperGraph {
-  const graph = new MemkeeperGraph({
+function seedGraph(): SessionOwlGraph {
+  const graph = new SessionOwlGraph({
     nodes: new Map(),
     observations: new Map(),
     nextObsId: 2,
@@ -51,7 +51,7 @@ function seedGraph(): MemkeeperGraph {
   return graph;
 }
 
-function node(graph: MemkeeperGraph, id: NodeId): Node {
+function node(graph: SessionOwlGraph, id: NodeId): Node {
   const n = graph.nodes.get(id);
   if (n === undefined) throw new Error(`node ${id} missing`);
   return n;

@@ -16,7 +16,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { CacheRetention } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { MemkeeperConfig } from "../config/schema.js";
+import type { SessionOwlConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, NO_DUMP, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { stripAnsi } from "../format/sanitize.js";
 import { applySetMeta, MUTATE_SOURCE } from "../graph/mutations.js";
@@ -56,7 +56,7 @@ const GOAL_DUMP_STAGE = "goal-extract";
  *  on shutdown); it takes no run-lock. */
 export interface GoalExtractInput {
   ctx: ExtensionContext;
-  settings: MemkeeperConfig;
+  settings: SessionOwlConfig;
   /** The store (built by the caller via `toStoreContext`) — keeps this module
    *  free of a lifecycle import (no import cycle). */
   store: StoreContext;

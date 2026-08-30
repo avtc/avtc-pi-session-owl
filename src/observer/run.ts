@@ -7,15 +7,15 @@
 // batch. The Observer is a non-writer (it only appends observation +
 // new-wrapper deltas; it never restructures — that's the Builder).
 //
-// Persistence granularity: ONE `memkeeper.observation` entry PER CHUNK
+// Persistence granularity: ONE `session-owl.observation` entry PER CHUNK
 // (coversFromId = chunk's first entry, coversUpToId = chunk's last) plus ONE
-// `memkeeper.graph_delta` batch per record-bearing chunk holding the chunk's ops
+// `session-owl.graph_delta` batch per record-bearing chunk holding the chunk's ops
 // in live order ([create_node, record_observation] per wrapper), persisted
 // immediately after each chunk's agentLoop succeeds (per-chunk durability).
 // A 0-record chunk persists an EMPTY-VERDICT observation entry (records: [])
 // covering its range: every completed chunk advances the frontier, so a
 // zero-observation range is NEVER re-observed automatically —
-// /mk:reobserve-0-obs-chunks is the only retry path for it.
+// /owl:reobserve-0-obs-chunks is the only retry path for it.
 // An abort loses only the in-flight chunk — completed chunks are durable and the
 // frontier has already advanced past them, so a re-run skips them (idempotent by
 // coverage range). Reverses the earlier accumulate-then-append (one delta per
@@ -25,7 +25,7 @@
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
+import { getSessionOwlSettings, type SessionOwlConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { buildChunks, type ChunkOptions, type RenderedChunk } from "../format/chunk.js";
 import { computeDetailsAndCache, type EntryResolver } from "../format/details.js";
@@ -223,7 +223,7 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
 export interface ObserverRunInput {
   ctx: ExtensionContext;
   pi: ExtensionAPI;
-  settings: MemkeeperConfig;
+  settings: SessionOwlConfig;
   /** The unobserved renderable entries (the gap to cover this run). */
   unobserved: SessionEntry[];
   /** Abort signal (the caller's per-run controller). */
@@ -329,8 +329,8 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       // disabling mid-run stops it at the next block boundary — completed
       // chunks are durable (their coversUpToId advanced the frontier), the
       // uncovered tail re-observes on a later run.
-      if (!getMemkeeperSettings().enabled) {
-        log.info(`observer: stopping: memkeeper disabled (after ${done}/${totalChunks} chunks)`);
+      if (!getSessionOwlSettings().enabled) {
+        log.info(`observer: stopping: session-owl disabled (after ${done}/${totalChunks} chunks)`);
         return;
       }
       const recordTool = makeRecordObservationsTool(chunk.allowedIds);
@@ -407,7 +407,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       // past every prior chunk). A record-bearing chunk wraps + persists its
       // records; a 0-record chunk persists an EMPTY-VERDICT entry covering its
       // range — a completed chunk is never re-observed automatically (neither
-      // mid-run jumps nor the trailing treadmill); /mk:reobserve-0-obs-chunks
+      // mid-run jumps nor the trailing treadmill); /owl:reobserve-0-obs-chunks
       // is the only retry path for zero-observation ranges.
       const records = recordTool.records;
       if (records.length > EMPTY_RECORDS) {
@@ -476,8 +476,8 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
 // --- persist helpers -------------------------------------------------------
 
 /** Wrap a chunk's records in fresh `new` root nodes + persist immediately: one
- *  `memkeeper.graph_delta` entry (the wrapper create_node ops) and one
- *  `memkeeper.observation` entry spanning this chunk's coversFromId/coversUpToId
+ *  `session-owl.graph_delta` entry (the wrapper create_node ops) and one
+ *  `session-owl.observation` entry spanning this chunk's coversFromId/coversUpToId
  *  range. The frontier advances to the chunk's lastEntryId via appendObservation
  *  — so an abort loses only the in-flight chunk; completed chunks are durable
  *  and skipped on re-run. The chunk is prepared WHOLE before anything applies

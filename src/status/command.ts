@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// /mk:status — a user-facing slash command that prints a full memkeeper status
+// /owl:status — a user-facing slash command that prints a full session-owl status
 // report to the user via ui.notify (multi-line; does NOT consume the agent
 // context window). User-facing only; not injected, not part of any graph.
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getMemkeeperSettings, type MemkeeperConfig } from "../config/schema.js";
+import { getSessionOwlSettings, type SessionOwlConfig } from "../config/schema.js";
 import { getConflictHits, isConflictPaused } from "../conflicts/pause.js";
 import { BUILDER, NON_BUILDER, type SizeHintObservation, treeLevels } from "../format/render.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
@@ -19,7 +19,7 @@ import { sinceLastCompaction, sinceSessionStart } from "./usage-ledger.js";
 
 // --- pure report builder ---------------------------------------------------
 
-/** The data sources /mk:status reads, as plain values (testable without pi). */
+/** The data sources /owl:status reads, as plain values (testable without pi). */
 export interface StatusInput {
   enabled: boolean;
   settings: {
@@ -49,8 +49,8 @@ export interface StatusInput {
 
 const PHASES = ["observe", "build", "select"] as const;
 const PHASE_LABEL_WIDTH = 7; // "observe" is the longest phase label
-const REPORT_HEADER = "🦉 memkeeper — status";
-const DISABLED_MESSAGE = "memkeeper is disabled.";
+const REPORT_HEADER = "🦉 session-owl — status";
+const DISABLED_MESSAGE = "session-owl is disabled.";
 
 /** The conflict-pause report (approved text): which packages conflicted and
  *  how to recover. Pure over the activation-time conflict hits. */
@@ -64,11 +64,11 @@ export function buildPausedStatusReport(hits: Array<{ entry: string; matched: st
     "",
     listed,
     "",
-    "Pi's compaction hook is last-registration-wins, so memkeeper stays dormant",
+    "Pi's compaction hook is last-registration-wins, so session-owl stays dormant",
     "this session — it collects no observations and leaves compaction to the",
     "other extension. To resolve: remove the other package and restart pi;",
-    "co-run deliberately via ignoreConflicts in /mk:settings; or turn memkeeper",
-    "off (enabled in /mk:settings) — see README → Conflicts.",
+    "co-run deliberately via ignoreConflicts in /owl:settings; or turn session-owl",
+    "off (enabled in /owl:settings) — see README → Conflicts.",
   ].join("\n");
 }
 
@@ -140,8 +140,8 @@ function appendPhaseLines(lines: string[], ledger: UsageLedger): void {
 
 // --- command handler (gathers live data + notifies) ------------------------
 
-/** `/mk:status` (no args) → build the report from live state → notify the user. */
-export async function runMkStatus(_args: string, ctx: ExtensionCommandContext): Promise<void> {
+/** `/owl:status` (no args) → build the report from live state → notify the user. */
+export async function runOwlStatus(_args: string, ctx: ExtensionCommandContext): Promise<void> {
   try {
     // conflict-pause first: no graph/session state exists to report
     const paused = isConflictPaused() ? getConflictHits() : null;
@@ -149,13 +149,13 @@ export async function runMkStatus(_args: string, ctx: ExtensionCommandContext): 
       notify(ctx, buildPausedStatusReport(paused), "info");
       return;
     }
-    const settings = getMemkeeperSettings();
+    const settings = getSessionOwlSettings();
     const { sessionStartMs, compactionCount } = readSessionBounds(ctx.sessionManager);
     const report = buildStatusReport(gatherStatusInput(settings, { sessionStartMs, compactionCount }));
     notify(ctx, report, "info");
   } catch (cause) {
     const reason = cause instanceof Error ? cause.message : String(cause);
-    notify(ctx, `memkeeper status failed: ${reason}`, "error");
+    notify(ctx, `session-owl status failed: ${reason}`, "error");
   }
 }
 
@@ -188,11 +188,11 @@ function readSessionBounds(sessionManager: {
   };
 }
 
-/** Gather all /mk:status data sources from the live store (the session-derived
+/** Gather all /owl:status data sources from the live store (the session-derived
  *  bounds are passed in — they need ctx.sessionManager, which buildStatusReport
  *  stays free of). */
 export function gatherStatusInput(
-  config: MemkeeperConfig,
+  config: SessionOwlConfig,
   session: { sessionStartMs: number; compactionCount: number },
 ): StatusInput {
   const store = getGraphStore();
@@ -243,12 +243,12 @@ function measureSelectedView(
 // --- registration ----------------------------------------------------------
 
 /** The registered command name. */
-export const MK_STATUS_COMMAND = "mk:status";
+export const OWL_STATUS_COMMAND = "owl:status";
 
-/** Register the /mk:status command. */
+/** Register the /owl:status command. */
 export function registerStatusCommand(pi: ExtensionAPI): void {
-  pi.registerCommand(MK_STATUS_COMMAND, {
-    description: "Show memory stats and per-phase token/cost usage. Usage: /mk:status",
-    handler: runMkStatus,
+  pi.registerCommand(OWL_STATUS_COMMAND, {
+    description: "Show memory stats and per-phase token/cost usage. Usage: /owl:status",
+    handler: runOwlStatus,
   });
 }

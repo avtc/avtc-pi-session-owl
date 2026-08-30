@@ -11,7 +11,7 @@
 // This module is a thin dispatcher — it owns no state
 // and adds no mutation logic of its own.
 
-import type { MemkeeperGraph } from "../types.js";
+import type { SessionOwlGraph } from "../types.js";
 import { GraphInvariantError } from "./invariants.js";
 import type { MutationPolicy } from "./mutations.js";
 import {
@@ -30,7 +30,7 @@ import {
  * Apply one recorded delta to the graph via the corresponding mutator.
  * Throws `GraphInvariantError` on a bad delta (caller decides skip/abort).
  */
-export function applyDelta(graph: MemkeeperGraph, delta: GraphDelta, policy: MutationPolicy): void {
+export function applyDelta(graph: SessionOwlGraph, delta: GraphDelta, policy: MutationPolicy): void {
   switch (delta.type) {
     case "create_node":
       applyCreateNode(graph, {
@@ -44,7 +44,7 @@ export function applyDelta(graph: MemkeeperGraph, delta: GraphDelta, policy: Mut
       return;
     case "record_observation": {
       // tolerant-attach: the load fold may have ALREADY indexed this record from
-      // its memkeeper.observation entry (the entry precedes/follows the delta in
+      // its session-owl.observation entry (the entry precedes/follows the delta in
       // file order; both carry the same immutable content) — then the op is just
       // the listing link (re-point + list), never an id collision. A record new
       // to the map applies fully.

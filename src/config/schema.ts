@@ -24,7 +24,7 @@ export function _setRegisterSettingsCommand(fn: typeof registerSettingsCommand |
 }
 
 // ---------------------------------------------------------------------------
-// MemkeeperConfig — the typed shape returned by getMemkeeperSettings()
+// SessionOwlConfig — the typed shape returned by getSessionOwlSettings()
 // ---------------------------------------------------------------------------
 
 /** Root-view organization axis injected into the Builder and Selector prompts. */
@@ -33,7 +33,7 @@ export type RootViewStrategy = "balanced" | "by-task" | "by-category" | "by-rece
 /** The `model` settings resolve to a `provider/id` string, or `null` = fall through to
  *  defaultModel (then the session model). `commandResultCap` / `observerToolBlockCapTokens`
  *  allow `null` = no limit / no truncation (the "No limit" presets). */
-export interface MemkeeperConfig {
+export interface SessionOwlConfig {
   // General
   enabled: boolean;
   /** Register even when a conflicting compaction extension is detected
@@ -55,21 +55,21 @@ export interface MemkeeperConfig {
   /** Organization axis for roots, injected into the Builder/Selector prompts. */
   rootViewStrategy: RootViewStrategy;
   commandResultCap: number | null;
-  /** Find/mk_recall search execution timeout. Runs in a worker thread; a
+  /** Find/owl_recall search execution timeout. Runs in a worker thread; a
    *  pattern still running past this is stopped. */
   findTimeoutMs: number;
   /** Per-LLM-call timeout for the Observer/Builder/Selector stages. A single
    *  response (one agentLoop turn) that runs longer is aborted. null = no
    *  limit. Bounds runaway/stalled generation so it can't pin a background run. */
   llmCallTimeoutMs: number | null;
-  /** Max estimated tokens (chars/4) in any one cat/find/ls/mk_recall result
+  /** Max estimated tokens (chars/4) in any one cat/find/ls/owl_recall result
    *  text. Overflow pages with afterId (terse list) or stops expansion
    *  (fullDetails/grep); a single-observation target is unbudgeted in any mode.*/
   toolResultTokenBudget: number;
   /** Write debug-level trace logs (trigger decisions, per-stage stream start/end)
    *  to the log file. Off by default — enable to diagnose a stall. */
   debugLog: boolean;
-  /** Max dump files kept per stage under ~/.pi/memkeeper/dumps/<project>/ (0 = off). */
+  /** Max dump files kept per stage under ~/.pi/session-owl/dumps/<project>/ (0 = off). */
   debugDumpLimit: number;
   // Observer
   observerModel: string | null;
@@ -137,7 +137,7 @@ const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
 const DEFAULT_FAST_PATH = true;
 const DEBUG_LOG_DEFAULT = false;
 
-export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
+export const DEFAULT_CONFIG: Readonly<SessionOwlConfig> = Object.freeze({
   // General
   enabled: true,
   ignoreConflicts: false,
@@ -178,7 +178,7 @@ export const DEFAULT_CONFIG: Readonly<MemkeeperConfig> = Object.freeze({
   maxSelectorPasses: 3,
   selectorMaxTokens: DEFAULT_SELECTOR_MAX_TOKENS,
   selectorThinkingLevel: NO_MODEL,
-} satisfies MemkeeperConfig);
+} satisfies SessionOwlConfig);
 
 // ---------------------------------------------------------------------------
 // Presets — shared label/value pairs for the enum + ranged knobs.
@@ -273,11 +273,11 @@ const THINKING_LEVEL_INHERIT_PRESETS: readonly PresetElement[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// MEMKEEPER_SCHEMA — the full settings-ui schema (4 tabs).
-// settings-ui owns all validation/clamp/normalize; memkeeper does none.
+// SESSION_OWL_SCHEMA — the full settings-ui schema (4 tabs).
+// settings-ui owns all validation/clamp/normalize; session-owl does none.
 // ---------------------------------------------------------------------------
 
-function setting(id: keyof MemkeeperConfig, over: Omit<SettingSchema, "id">): SettingSchema {
+function setting(id: keyof SessionOwlConfig, over: Omit<SettingSchema, "id">): SettingSchema {
   return { id, ...over };
 }
 
@@ -286,7 +286,7 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("enabled", {
     label: "Enabled",
     description:
-      "Master switch for memkeeper. Off = memkeeper stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected).",
+      "Master switch for session-owl. Off = session-owl stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected).",
     type: "boolean",
     defaultValue: DEFAULT_CONFIG.enabled,
   }),
@@ -314,7 +314,7 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("renderMode", {
     label: "Render mode",
     description:
-      "What memkeeper injects after compaction (and what /mk:* recall reads). " +
+      "What session-owl injects after compaction (and what /owl:* recall reads). " +
       "Selected root = a focused, task-relevant view the Selector builds; " +
       "Observations root = the root view of the memory graph.",
     type: "string",
@@ -368,7 +368,7 @@ const SETTINGS: readonly SettingSchema[] = [
   }),
   setting("commandResultCap", {
     label: "Command result cap",
-    description: "Max items a /mk:* command shows before a '... +N more' footer. No limit = show all.",
+    description: "Max items a /owl:* command shows before a '... +N more' footer. No limit = show all.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.commandResultCap,
     min: 0,
@@ -376,7 +376,7 @@ const SETTINGS: readonly SettingSchema[] = [
   }),
   setting("findTimeoutMs", {
     label: "Find timeout",
-    description: "Max duration a find or mk_recall search may run before it is stopped.",
+    description: "Max duration a find or owl_recall search may run before it is stopped.",
     type: "duration",
     defaultValue: DEFAULT_CONFIG.findTimeoutMs,
     min: 1000,
@@ -393,7 +393,7 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("toolResultTokenBudget", {
     label: "Tool result token budget",
     description:
-      "Max size (in tokens) of a single cat/find/ls/mk_recall result. A larger result shows fewer items or less detail (each item stays whole); reading one observation in full is never cut off.",
+      "Max size (in tokens) of a single cat/find/ls/owl_recall result. A larger result shows fewer items or less detail (each item stays whole); reading one observation in full is never cut off.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.toolResultTokenBudget,
     min: MIN_TOOL_RESULT_TOKEN_BUDGET,
@@ -408,7 +408,7 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("debugDumpLimit", {
     label: "Debug dump limit",
     description:
-      "Maximum per-stage dump files kept under ~/.pi/memkeeper/dumps/<project>/ (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format.",
+      "Maximum per-stage dump files kept under ~/.pi/session-owl/dumps/<project>/ (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.debugDumpLimit,
     min: 0,
@@ -633,9 +633,9 @@ const TABS: readonly SettingsTabSchema[] = [
   },
 ];
 
-const { globalPath, projectPath } = settingsFilePaths("avtc-pi-memkeeper");
+const { globalPath, projectPath } = settingsFilePaths("avtc-pi-session-owl");
 
-export const MEMKEEPER_SCHEMA: SettingsSchema = {
+export const SESSION_OWL_SCHEMA: SettingsSchema = {
   settings: [...SETTINGS],
   tabs: [...TABS],
   globalPath,
@@ -648,56 +648,56 @@ export const MEMKEEPER_SCHEMA: SettingsSchema = {
 
 /** The runtime settings-ui handle carries `loadSettingsIntoMemory` (avtc-pi-settings-ui
  *  factory.ts returns it), but the public `SettingsHandle` type omits it (loading is "internal").
- *  `reloadMemkeeperConfig` needs it, so widen the handle with this structural member. */
-type ReloadableSettingsHandle = SettingsHandle<MemkeeperConfig> & {
+ *  `reloadSessionOwlConfig` needs it, so widen the handle with this structural member. */
+type ReloadableSettingsHandle = SettingsHandle<SessionOwlConfig> & {
   loadSettingsIntoMemory(cwd?: string, globalDir?: string): void;
 };
 
-let handle: SettingsHandle<MemkeeperConfig> | undefined;
+let handle: SettingsHandle<SessionOwlConfig> | undefined;
 
 /** Test-only override for the settings read (the repo DI/mock pattern): when set,
- *  getMemkeeperSettings returns this instead of the real handle. Cleared by
- *  _resetGetMemkeeperSettings. */
-let _getSettingsOverride: (() => MemkeeperConfig) | null = null;
+ *  getSessionOwlSettings returns this instead of the real handle. Cleared by
+ *  _resetGetSessionOwlSettings. */
+let _getSettingsOverride: (() => SessionOwlConfig) | null = null;
 
 /** Test-only: inject a mock settings source (pass `null` to restore the real handle). */
-export function _setGetMemkeeperSettings(fn: (() => MemkeeperConfig) | null): void {
+export function _setGetSessionOwlSettings(fn: (() => SessionOwlConfig) | null): void {
   _getSettingsOverride = fn;
 }
 
 /** Test-only: clear the mock override (restore real-handle reads). */
-export function _resetGetMemkeeperSettings(): void {
+export function _resetGetSessionOwlSettings(): void {
   _getSettingsOverride = null;
 }
 
 /** Test-only: clear BOTH the override AND the module handle (full reset back to the
- *  pre-init state — getMemkeeperSettings returns DEFAULT_CONFIG). Use this in a
- *  file-level afterAll so the handle (set by initMemkeeperSettings) does not
+ *  pre-init state — getSessionOwlSettings returns DEFAULT_CONFIG). Use this in a
+ *  file-level afterAll so the handle (set by initSessionOwlSettings) does not
  *  leak across test files under isolate:false. */
-export function _resetMemkeeperSettingsHandle(): void {
+export function _resetSessionOwlSettingsHandle(): void {
   _getSettingsOverride = null;
   handle = undefined;
 }
 
 const REGISTRATION_OPTIONS: RegisterSettingsOptions = {
-  commandName: "mk:settings",
-  title: "Memkeeper Settings",
-  titleRight: "avtc-pi-memkeeper",
+  commandName: "owl:settings",
+  title: "SessionOwl Settings",
+  titleRight: "avtc-pi-session-owl",
   storageLevels: ["session", "project", "global"],
-  envVar: "PI_SETTINGS_MEMKEEPER",
+  envVar: "PI_SETTINGS_SESSION_OWL",
 };
 
-/** Register the /mk:settings command + tabbed modal once (from activate); stores the handle.
+/** Register the /owl:settings command + tabbed modal once (from activate); stores the handle.
  * The optional onAfterChange is the settings modal's per-edit hook (fired after
- * updateSetting persists) — memkeeper uses it to refresh the widget so a live
+ * updateSetting persists) — session-owl uses it to refresh the widget so a live
  * gate flip (enabled / ignoreConflicts) is reflected in the pause line instantly. */
-export function initMemkeeperSettings(
+export function initSessionOwlSettings(
   pi: ExtensionAPI,
   onAfterChange?: (id: string, newValue: unknown) => void,
-): SettingsHandle<MemkeeperConfig> {
-  handle = registerFn<MemkeeperConfig>(
+): SettingsHandle<SessionOwlConfig> {
+  handle = registerFn<SessionOwlConfig>(
     pi,
-    MEMKEEPER_SCHEMA,
+    SESSION_OWL_SCHEMA,
     onAfterChange ? { ...REGISTRATION_OPTIONS, onAfterChange } : REGISTRATION_OPTIONS,
   );
   return handle;
@@ -706,16 +706,16 @@ export function initMemkeeperSettings(
 /** Live config read — every entry point calls this at trigger time (NOT cached at session start).
  *  Test override takes precedence; otherwise the real handle when initialized, or the frozen
  *  DEFAULT_CONFIG before init (early callers never crash). */
-export function getMemkeeperSettings(): MemkeeperConfig {
+export function getSessionOwlSettings(): SessionOwlConfig {
   if (_getSettingsOverride) return _getSettingsOverride();
   return handle ? handle.getSettings() : DEFAULT_CONFIG;
 }
 
-/** Re-read settings from env (PI_SETTINGS_MEMKEEPER) first, then files — refreshes the
- *  in-memory cache. Lets a host (e.g. avtc-pi-bench-compact) reconfigure memkeeper LIVE
- *  without ctx.reload() (which invalidates the command ctx). No-op before initMemkeeperSettings
+/** Re-read settings from env (PI_SETTINGS_SESSION_OWL) first, then files — refreshes the
+ *  in-memory cache. Lets a host (e.g. avtc-pi-bench-compact) reconfigure session-owl LIVE
+ *  without ctx.reload() (which invalidates the command ctx). No-op before initSessionOwlSettings
  *  (handle undefined — nothing to reload). */
-export function reloadMemkeeperConfig(): void {
+export function reloadSessionOwlConfig(): void {
   (handle as ReloadableSettingsHandle | undefined)?.loadSettingsIntoMemory(
     RELOAD_USE_DEFAULT_CWD,
     RELOAD_KEEP_GLOBAL_DIR,

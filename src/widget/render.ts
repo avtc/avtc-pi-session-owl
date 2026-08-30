@@ -137,15 +137,15 @@ export function formatWidgetLine(snap: WidgetSnapshot, theme: ThemeSeam): string
 
 /**
  * The conflict-pause line (static — no stages run while paused):
- * `🦉 ⚠ paused — {names} also handle(s) compaction (/mk:status)`.
- * Width-aware degradation ladder — the resolution hint `(/mk:status)` is the
+ * `🦉 ⚠ paused — {names} also handle(s) compaction (/owl:status)`.
+ * Width-aware degradation ladder — the resolution hint `(/owl:status)` is the
  * last thing to go: full list → `{first}, +N more` → drop the verb → cut the
  * names with an ellipsis. Coloring happens after truncation so the visible
  * width math stays ANSI-free (prefix accent, rest muted).
  */
 export function formatConflictLine(names: string[], width: number, theme: ThemeSeam): string {
   const prefix = `${OWL} ⚠ paused — `;
-  const suffix = " (/mk:status)";
+  const suffix = " (/owl:status)";
   const verb = names.length > 1 ? " also handle compaction" : " also handles compaction";
   const compose = (body: string): string => `${prefix}${body}${suffix}`;
   const fits = (line: string): boolean => visibleWidth(line) <= width;

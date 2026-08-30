@@ -18,7 +18,7 @@ import type {
   SessionShutdownEvent,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { getMemkeeperSettings } from "./config/schema.js";
+import { getSessionOwlSettings } from "./config/schema.js";
 import { clearDetailsCache, computeDetailsAndCache, type EntryResolver } from "./format/details.js";
 import { toStoredTimestamp } from "./format/render.js";
 import { stripAnsi } from "./format/sanitize.js";
@@ -27,7 +27,7 @@ import { applyCreateNode, applyRecordObservation } from "./graph/mutations.js";
 import { terminateRegexWorker } from "./graph/regex-runner.js";
 import { clearLogSessionScope, setLogSessionScope } from "./log.js";
 import { abortInFlight } from "./runtime/run-lock.js";
-import { clearMemkeeperSessionBase, setMemkeeperSessionBase } from "./runtime/session-affinity.js";
+import { clearSessionOwlSessionBase, setSessionOwlSessionBase } from "./runtime/session-affinity.js";
 import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
 import {
   appendGraphDelta,
@@ -222,7 +222,7 @@ export async function onSessionStart(
   // consistently (and namespace their caches) for this session only. Cleared on
   // shutdown. Random per session instance — not content-derived — so a resumed
   // session does not couple to the prior instance's node/cache namespace.
-  setMemkeeperSessionBase(randomUUID());
+  setSessionOwlSessionBase(randomUUID());
   const store = toStoreContext(pi, ctx);
   // Refresh the session-entry resolver on every session_start — a ctx captured
   // once goes stale across session changes (new/resume/fork), and entry ids are
@@ -236,7 +236,7 @@ export async function onSessionStart(
   // Fresh-session seed: if the graph is empty (no snapshot/deltas), nGoal must
   // exist before any observation arrives. Gated on enabled: a disabled session
   // persists no graph_delta (the seed self-heals on enable via capture).
-  if (getMemkeeperSettings().enabled) {
+  if (getSessionOwlSettings().enabled) {
     ensureNGoalSeeded(store);
     // Capture oInitialPrompt now too: for a RESUMED session the branch already
     // holds the first user message, and session_start may be the only hook
@@ -299,7 +299,7 @@ export function captureInitialPromptIfAbsent(ctx: ExtensionContext, pi: Extensio
   appendGraphDelta(store, { type: "record_observation", obs: { ...obs } } as const);
 
   // persist the capture: the observation (content + provenance) as a
-  // memkeeper.observation entry (coversUpToId = first user entry → frontier
+  // session-owl.observation entry (coversUpToId = first user entry → frontier
   // advances past it); the entry indexes the record's content — structural
   // application happens only via the graph_delta above.
   const observationEntry: ObservationEntry = {
@@ -330,7 +330,7 @@ export function captureInitialPromptAndExtract(
   const store = toStoreContext(pi, ctx);
   void runGoalExtract({
     ctx,
-    settings: getMemkeeperSettings(),
+    settings: getSessionOwlSettings(),
     store,
     widget,
     verbatimText: verbatim,
@@ -342,7 +342,7 @@ export function captureInitialPromptAndExtract(
  *  Fire-and-forget — the run releases in its own `finally`. */
 export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetController): void {
   abortInFlight();
-  clearMemkeeperSessionBase();
+  clearSessionOwlSessionBase();
   clearLogSessionScope();
   abortGoalExtract();
   terminateRegexWorker();

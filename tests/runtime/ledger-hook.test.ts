@@ -4,7 +4,7 @@
 // Tests for the ledger-feed hook factory: each stage run wires `onStageEnd`
 // (the agentLoop's end-of-run seam) to the fold hook built here, which folds the
 // stage's accumulated usage into the store's cumulative ledger IN-MEMORY. The
-// RUN persists the ledger as a single `memkeeper.usage` delta once at run end
+// RUN persists the ledger as a single `session-owl.usage` delta once at run end
 // (fold-per-pass, persist-once — mirroring the Observer).
 
 import { beforeEach, describe, expect, it } from "vitest";
@@ -35,14 +35,14 @@ function freshStore(): StoreContext {
   return ctx;
 }
 
-/** A StoreContext whose `getBranch` also reflects memkeeper.usage deltas written
+/** A StoreContext whose `getBranch` also reflects session-owl.usage deltas written
  *  via appendUsage (so the test can confirm persistence). */
 function recordingStore(): { ctx: StoreContext; usageDeltaCount: () => number } {
   let usageDeltas = 0;
   const base = freshStore();
   const wrapped: StoreContext = {
     appendEntry: (customType, data) => {
-      if (customType === "memkeeper.usage") usageDeltas += 1;
+      if (customType === "session-owl.usage") usageDeltas += 1;
       base.appendEntry(customType, data);
     },
     getLeafId: base.getLeafId,
@@ -97,7 +97,7 @@ describe("makeLedgerHook", () => {
     expect(ledger.hasUsage()).toBe(true);
   });
 
-  it("persistLedger writes ONE memkeeper.usage delta for the folded ledger (run-end persist)", () => {
+  it("persistLedger writes ONE session-owl.usage delta for the folded ledger (run-end persist)", () => {
     const { ctx, usageDeltaCount } = recordingStore();
     const ledger = makeLedgerHook("build");
     // two passes fold into the same phase — only ONE persist at run end

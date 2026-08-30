@@ -26,7 +26,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { MemkeeperConfig } from "../config/schema.js";
+import type { SessionOwlConfig } from "../config/schema.js";
 import { NON_BUILDER } from "../format/render.js";
 import {
   MERGE_TOOL,
@@ -146,7 +146,7 @@ function makeTodoListTool(bridge: TodoBridge): AgentTool<typeof TODO_LIST_PARAMS
  *  try_finish) bound to the working copy. The read tools render with the
  *  "nonBuilder" viewer (new→active); the mutate tools apply with the
  *  `workingCopy` policy and append nothing to the store. */
-export function makeSelectorGraphTools(working: SelectorWorkingCopy, settings: MemkeeperConfig): AgentTool[] {
+export function makeSelectorGraphTools(working: SelectorWorkingCopy, settings: SessionOwlConfig): AgentTool[] {
   const ctx = workingCopyMutateContext();
   return [
     ...makeReadTools(working.graph, NON_BUILDER),
@@ -163,7 +163,7 @@ export function makeSelectorGraphTools(working: SelectorWorkingCopy, settings: M
  *  todo bridge (omitted when avtc-pi-todo is not installed). */
 export interface SelectorToolsArgs {
   workingCopy: SelectorWorkingCopy;
-  settings: MemkeeperConfig;
+  settings: SessionOwlConfig;
   ctx: ExtensionContext;
   todoBridge: TodoBridge | null;
 }

@@ -4,7 +4,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
 import { _resetRunLock, acquireOrSkip, inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
 import {
@@ -98,17 +98,17 @@ afterEach(() => {
   _resetRunLock();
   resetForNewSession();
   resetStageRuns();
-  _resetGetMemkeeperSettings();
+  _resetGetSessionOwlSettings();
 });
 
 // ===========================================================================
 describe("computeUncoveredRanges — zero-observation holes (closed territory only)", () => {
-  /** A `memkeeper.observation` custom entry over the given coverage. */
+  /** A `session-owl.observation` custom entry over the given coverage. */
   function obsEntry(id: string, coversFromId: string | null, coversUpToId: string, citedIds: string[]): FakeEntry {
     return {
       id,
       type: "custom",
-      customType: "memkeeper.observation",
+      customType: "session-owl.observation",
       parentId: null,
       timestamp: "2026-07-28T14:33:00.000Z",
       data: {
@@ -579,7 +579,7 @@ describe("makeMaybeBuilder (mid-run / mid-catch-up Builder)", () => {
     expect(ran).toBe(true);
   });
 
-  it("returns false (no Builder launch) when memkeeper is disabled (live master switch re-check)", async () => {
+  it("returns false (no Builder launch) when session-owl is disabled (live master switch re-check)", async () => {
     addRootNode("n1" as NodeId, "new");
     let ran = false;
     // over the root-view safeguard threshold — it WOULD fire if enabled.
@@ -592,8 +592,8 @@ describe("makeMaybeBuilder (mid-run / mid-catch-up Builder)", () => {
         ran = true;
       },
     });
-    // disable memkeeper live → the mid-run Builder is skipped even over threshold.
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    // disable session-owl live → the mid-run Builder is skipped even over threshold.
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
     expect(await mb()).toBe(false);
     expect(ran).toBe(false);
   });
@@ -844,7 +844,7 @@ describe("onTurnEnd chained launch", () => {
       runObserver: async () => {
         order.push("observe");
         enabled = false;
-        _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled }));
+        _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled }));
       },
       runBuilder: async () => {
         order.push("build");
@@ -888,7 +888,7 @@ describe("onTurnEnd chained launch", () => {
       runBuilder: async () => {
         order.push("build");
         enabled = false;
-        _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled }));
+        _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled }));
       },
       runSelector: async () => {
         order.push("select");

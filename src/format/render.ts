@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Shared tree-render formatting: the one-line graph-item format used by the
-// Builder ls/find, the Selector, mk_recall, the user /mk:* commands, and the
+// Builder ls/find, the Selector, owl_recall, the user /owl:* commands, and the
 // compaction summary.
 
 import type { Node, Observation } from "../types.js";

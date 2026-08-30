@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { makeBuilderReadTools } from "../../src/builder/tools.js";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import {
   applyCreateNode,
   applyRecordObservation,
@@ -19,7 +19,7 @@ import {
   orderActiveSetRoots,
 } from "../../src/graph/read-tools.js";
 import { clearEntryResolver, setEntryResolver } from "../../src/store/graph-store.js";
-import { MemkeeperGraph, makeObservation, N_GOAL, N_IRRELEVANT, type NodeId, type ObsId } from "../../src/types.js";
+import { SessionOwlGraph, makeObservation, N_GOAL, N_IRRELEVANT, type NodeId, type ObsId } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 
@@ -29,9 +29,9 @@ const NOW = "2026-07-29T09:00:00.000Z";
 // n7 has children: n8 (active, JWT lib pick) + observation o5 (chose JWT).
 // nOld has observation oOld (obsolete's retained evidence).
 
-function buildGraph(): MemkeeperGraph {
+function buildGraph(): SessionOwlGraph {
   setClock(() => NOW);
-  const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+  const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
 
   // nGoal with oInitialPrompt
   applyCreateNode(g, {
@@ -394,7 +394,7 @@ describe("Builder read tools", () => {
       // A guard-slipping polynomial shape (each .+ greedily splits on a long
       // run of 'a's) over a large observation content — slow enough to exceed a
       // short timeout. This exercises the worker-thread kill path end-to-end.
-      _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
+      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
       const g = buildGraph();
       applyRecordObservation(g, {
         obs: makeObservation({
@@ -411,7 +411,7 @@ describe("Builder read tools", () => {
       expect(out.toLowerCase()).toContain("timed out");
     });
 
-    afterEach(() => _resetGetMemkeeperSettings());
+    afterEach(() => _resetGetSessionOwlSettings());
   });
 
   describe("find has no `lines` param (incompatible with required query)", () => {
@@ -523,7 +523,7 @@ describe("Builder read tools", () => {
 
 describe("read-tool viewer parameterization (Builder vs nonBuilder)", () => {
   // n12 is a `new` root in buildGraph(). The 🆕 glyph is Builder-only; every
-  // other consumer (Selector, mk_recall, commands, compaction summary) renders
+  // other consumer (Selector, owl_recall, commands, compaction summary) renders
   // `new` as `active` (no glyph) per the viewer-dependent render rule.
   it("builder viewer renders a new node with the 🆕 glyph", async () => {
     const builderTools = makeReadTools(buildGraph(), "builder");
@@ -566,7 +566,7 @@ describe("nonObsoleteRootsOf (shared root filter)", () => {
 });
 
 describe("orderActiveSetRoots — canonical active-set ordering", () => {
-  // Renders directly the contract loop-7 routed /mk:ls and mk_recall browse
+  // Renders directly the contract loop-7 routed /owl:ls and owl_recall browse
   // through (nGoal first, nIrrelevant last, the rest by importance then
   // recency) — a partition regression would otherwise pass the whole suite.
   const R = (over: Partial<Record<string, unknown>> & { id: string }) =>
@@ -601,9 +601,9 @@ describe("orderActiveSetRoots — canonical active-set ordering", () => {
 
 describe("result token budget + extraction", () => {
   /** Build a graph whose o5 observation has multi-line grep-able content. */
-  function grepGraph(): MemkeeperGraph {
+  function grepGraph(): SessionOwlGraph {
     setClock(() => NOW);
-    const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+    const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
     applyCreateNode(g, { id: N_GOAL, summary: "Goal", importance: "crit", parentNode: null, state: "active" });
     applyCreateNode(g, {
       id: "n7" as NodeId,
@@ -626,12 +626,12 @@ describe("result token budget + extraction", () => {
     return g;
   }
 
-  afterEach(() => _resetGetMemkeeperSettings());
+  afterEach(() => _resetGetSessionOwlSettings());
 
   it("cat budget truncates multi-observation output with a footer", async () => {
     // two nodes, each with a big-content observation; tight budget keeps headers
     // + stops expanding.
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 10 }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 10 }));
     const g = grepGraph();
     applyCreateNode(g, {
       id: "n8" as NodeId,
@@ -655,7 +655,7 @@ describe("result token budget + extraction", () => {
   });
 
   it("cat single observation is returned whole (uncapped)", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
     const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"] }));
     // the full multi-line content is present despite the 1-token budget.
     expect(out).toContain("the token is secret");
@@ -668,7 +668,7 @@ describe("result token budget + extraction", () => {
     // single content-bearing unit. The single-obs exception must count the
     // TARGET's connected observations (2), not the paginated window (1), so the
     // budget cap still applies.
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
     const g = buildGraph();
     applyRecordObservation(g, {
       obs: makeObservation({
@@ -686,7 +686,7 @@ describe("result token budget + extraction", () => {
 
   it("cat single observation + lines is uncapped (any mode)", async () => {
     // a single-observation target is uncapped regardless of mode — even lines.
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
     const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], lines: "2-4" }));
     expect(out).toContain("2: the token is secret");
     expect(out).toContain("4: token refresh logic");
@@ -694,7 +694,7 @@ describe("result token budget + extraction", () => {
   });
 
   it("cat single observation + contentPattern is uncapped (any mode)", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 1 }));
     const out = textOf(
       await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["o5"], contentPattern: "token" }),
     );
@@ -737,7 +737,7 @@ describe("result token budget + extraction", () => {
     // a catastrophic contentPattern over a large observation must surface a
     // timeout note (the filter regex batch, worker-bounded by findTimeoutMs),
     // not a silent partial result. Wording-agnostic — matches the find test.
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
     const g = buildGraph();
     applyRecordObservation(g, {
       obs: makeObservation({
@@ -752,7 +752,7 @@ describe("result token budget + extraction", () => {
     const localTools = makeBuilderReadTools(g);
     const out = textOf(await callTool(localTools, "cat", { ids: ["o100"], contentPattern: "(.+a)(.+a)b" }));
     expect(out.toLowerCase()).toContain("timed out");
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
 
   it("cat rejects a malformed contentPattern with the compiler error", async () => {
@@ -838,7 +838,7 @@ describe("result token budget + extraction", () => {
   });
 
   it("ls budget truncates the root list with a footer", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 2 }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, toolResultTokenBudget: 2 }));
     const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "ls", {}));
     expect(out).toContain("budget reached");
   });

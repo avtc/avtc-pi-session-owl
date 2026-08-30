@@ -1,12 +1,21 @@
 {
-  "name": "avtc-pi-memkeeper",
-  "version": "1.0.2",
+  "name": "avtc-pi-session-owl",
+  "version": "1.1.0",
   "description": "Preserves task-relevant older context across many compactions in long Pi sessions by continuously maintaining a knowledge graph in the background and rendering a curated active set at compaction.",
   "type": "module",
   "license": "MIT",
   "keywords": [
     "pi-package",
-    "pi-extension"
+    "pi-extension",
+    "session",
+    "memory",
+    "compaction",
+    "recall",
+    "context",
+    "observable",
+    "graph",
+    "tree",
+    "owl"
   ],
   "main": "./index.ts",
   "types": "./index.ts",
@@ -18,7 +27,7 @@
       "avtc-pi-logger",
       "avtc-pi-settings-ui"
     ],
-    "image": "https://raw.githubusercontent.com/avtc/avtc-pi-memkeeper/main/assets/images/cover.png"
+    "image": "https://raw.githubusercontent.com/avtc/avtc-pi-session-owl/main/assets/images/cover.png"
   },
   "files": [
     "index.ts",
@@ -60,10 +69,10 @@
   "author": "avtc <tarasenkov@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/avtc/avtc-pi-memkeeper.git"
+    "url": "https://github.com/avtc/avtc-pi-session-owl.git"
   },
   "bugs": {
-    "url": "https://github.com/avtc/avtc-pi-memkeeper/issues"
+    "url": "https://github.com/avtc/avtc-pi-session-owl/issues"
   },
-  "homepage": "https://github.com/avtc/avtc-pi-memkeeper"
+  "homepage": "https://github.com/avtc/avtc-pi-session-owl"
 }

@@ -17,7 +17,7 @@
 
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { MemkeeperConfig } from "../config/schema.js";
+import type { SessionOwlConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { BUILDER, renderTreeTotal } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
@@ -41,7 +41,7 @@ import { resolveStageModelOrNotify, resolveStageReasoning } from "../runtime/mod
 import { countCompactions } from "../status/command.js";
 // jscpd:ignore-end
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
-import type { MemkeeperGraph, NodeId } from "../types.js";
+import type { SessionOwlGraph, NodeId } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 import { MUTATE_TOOL_NAMES, makeBuilderTools, measureRootViewTokens, renderRootView } from "./tools.js";
 
@@ -70,7 +70,7 @@ export function makeBuilderPassTracker(downstream: (event: AgentEvent) => void):
 export interface BuilderRunInput {
   ctx: ExtensionContext;
   pi: ExtensionAPI;
-  settings: MemkeeperConfig;
+  settings: SessionOwlConfig;
   signal: AbortSignal;
   widget: WidgetController;
   /** The compaction cut; null at turn_end. Gates the compaction-only
@@ -259,7 +259,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
  *  ≥1 applied mutates → swallowed (counts as a finished pass, partial kept). */
 async function runPass(
   input: BuilderRunInput,
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   resolved: { model: StageRunInput["model"]; apiKey: string | undefined },
   tools: ReturnType<typeof makeBuilderTools>,
   runStageFn: (input: StageRunInput) => Promise<StageRunResult>,
@@ -303,7 +303,7 @@ async function runPass(
 /** Build the per-pass user message: the task + the current root view snapshot
  *  + the source-tree totals (the scale behind the view). */
 function passMessages(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   pass: number,
   compactionCount: number,
   rootViewThreshold: number,

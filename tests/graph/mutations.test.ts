@@ -18,7 +18,7 @@ import {
   setClock,
 } from "../../src/graph/mutations.js";
 import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/types.js";
-import { countLines, estimateContentTokens, MemkeeperGraph, makeObservation, N_GOAL } from "../../src/types.js";
+import { countLines, estimateContentTokens, SessionOwlGraph, makeObservation, N_GOAL } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 
@@ -675,7 +675,7 @@ describe("working-copy policy", () => {
 // core relocate/merge/supersede, the highest-risk paths for parent drift.
 describe("always-attached invariant holds after core mutations", () => {
   /** nGoal(root) + n1(root, obs o1) + n2(root, child n3, obs o2 under n3). */
-  function graphWithObs(): MemkeeperGraph {
+  function graphWithObs(): SessionOwlGraph {
     const g = graphWithNGoal();
     applyRecordObservation(g, {
       obs: makeObservation({
@@ -727,18 +727,18 @@ describe("always-attached invariant holds after core mutations", () => {
   });
 });
 
-function bareGraph(): MemkeeperGraph {
-  return new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+function bareGraph(): SessionOwlGraph {
+  return new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
 }
 
-function bareGraphWithRoot(id: NodeId): MemkeeperGraph {
+function bareGraphWithRoot(id: NodeId): SessionOwlGraph {
   const g = bareGraph();
   applyCreateNode(g, { id, summary: "root", importance: "med", parentNode: null, state: "active" });
   return g;
 }
 
 /** Two active root nodes n1, n2 (no observations). */
-function graphWithTwoRoots(): MemkeeperGraph {
+function graphWithTwoRoots(): SessionOwlGraph {
   const g = bareGraph();
   applyCreateNode(g, { id: "n1", summary: "root one", importance: "med", parentNode: null, state: "active" });
   applyCreateNode(g, { id: "n2", summary: "root two", importance: "med", parentNode: null, state: "active" });
@@ -746,7 +746,7 @@ function graphWithTwoRoots(): MemkeeperGraph {
 }
 
 /** nGoal (crit, root) with oInitialPrompt attached, plus an empty root n1. */
-function graphWithNGoal(): MemkeeperGraph {
+function graphWithNGoal(): SessionOwlGraph {
   const g = bareGraph();
   applyCreateNode(g, { id: N_GOAL, summary: "the goal", importance: "crit", parentNode: null, state: "active" });
   applyRecordObservation(g, {
@@ -763,13 +763,13 @@ function graphWithNGoal(): MemkeeperGraph {
   return g;
 }
 
-function nodeById(g: MemkeeperGraph, id: NodeId): Node {
+function nodeById(g: SessionOwlGraph, id: NodeId): Node {
   const n = g.nodes.get(id);
   if (n === undefined) throw new Error(`missing node ${id}`);
   return n;
 }
 
-function obsById(g: MemkeeperGraph, id: ObsId): Observation {
+function obsById(g: SessionOwlGraph, id: ObsId): Observation {
   const o = g.observations.get(id);
   if (o === undefined) throw new Error(`missing observation ${id}`);
   return o;

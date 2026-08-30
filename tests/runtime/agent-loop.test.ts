@@ -16,7 +16,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { EventStream } from "@earendil-works/pi-ai";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { openStageDump } from "../../src/debug-dump.js";
 import { _setBaseLoggerForTest } from "../../src/log.js";
 import {
@@ -794,12 +794,12 @@ describe("runStage — tool-call debug logging", () => {
   const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   afterAll(() => {
     _setBaseLoggerForTest(null);
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
 
   it("logs each tool_execution_end (name + ok/error + bounded error text) when debugLog is on", async () => {
     _setBaseLoggerForTest(sink);
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, debugLog: true }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, debugLog: true }));
     sink.debug.mockClear();
     const events = [
       toolExecutionEnd("record_observations", false, "accepted: all"),
@@ -818,7 +818,7 @@ describe("runStage — tool-call debug logging", () => {
 
   it("logs nothing when debugLog is off", async () => {
     _setBaseLoggerForTest(sink);
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, debugLog: false }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, debugLog: false }));
     sink.debug.mockClear();
     const events = [toolExecutionEnd("record_observations", false, "accepted: all"), agentEnd([])];
     await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
@@ -828,7 +828,7 @@ describe("runStage — tool-call debug logging", () => {
 
 describe("runStage — stage dump seam", () => {
   it("writes <input> before and <output> after the loop when dumpPath is set", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mk-stagedump-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-stagedump-"));
     const dump = openStageDump("builder", 5, dir);
     const inMsg = [{ role: "user", content: "organize", timestamp: 0 }] as unknown as AgentMessage[];
     const produced = [
@@ -880,7 +880,7 @@ describe("runStage — stage dump seam", () => {
   });
 
   it("a throwing loop writes an <output error> section, then StageRunError propagates", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mk-stagedump-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-stagedump-"));
     const dump = openStageDump("builder", 5, dir);
     const badLoop = (() => {
       throw new Error("boom");

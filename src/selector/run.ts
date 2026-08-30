@@ -17,7 +17,7 @@
 
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { MemkeeperConfig } from "../config/schema.js";
+import type { SessionOwlConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { NON_BUILDER, renderTreeTotal } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
@@ -42,7 +42,7 @@ import { countCompactions } from "../status/command.js";
 import { encodeSelection } from "../store/codecs.js";
 import { type GraphStore, getGraphStore, persistSelectedTree, type StoreContext } from "../store/graph-store.js";
 import type { TodoBridge, TodoContext } from "../todo/types.js";
-import { estimateContentTokens, type MemkeeperGraph as Graph, O_INITIAL_PROMPT } from "../types.js";
+import { estimateContentTokens, type SessionOwlGraph as Graph, O_INITIAL_PROMPT } from "../types.js";
 import type { SelectedCountsProvider, WidgetController } from "../widget/tracker.js";
 import { buildSelectorInputView, renderWorkingRoots, type SelectorInputView, type TailBoundary } from "./input-view.js";
 import { makeSelectorTools, SELECTOR_MUTATE_TOOL_NAMES } from "./tools.js";
@@ -74,7 +74,7 @@ export function makeSelectorPassTracker(downstream: (event: AgentEvent) => void)
 export interface SelectorRunInput {
   ctx: ExtensionContext;
   pi: ExtensionAPI;
-  settings: MemkeeperConfig;
+  settings: SessionOwlConfig;
   signal: AbortSignal;
   widget: WidgetController;
   /** The compaction cut; null at mid-session. */
@@ -228,7 +228,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
       // Persist the resulting tree whenever a stage opened (a working copy exists)
       // — on convergence / no-op / max, on a run-ending error, AND on an abort-
       // during-run (committed partial work is kept): the working copy is the best
-      // available curation and committing it keeps mk_recall's target alive.
+      // available curation and committing it keeps owl_recall's target alive.
       // (Aborted-before-start leaves no working copy; stageOpened is false.)
       if (stageOpened) persistResult(store, graphStore, workingCopy.graph);
     } catch (cleanupErr) {

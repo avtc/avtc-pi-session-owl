@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Pure validators over a MemkeeperGraph — no mutation. Used by the mutation
+// Pure validators over a SessionOwlGraph — no mutation. Used by the mutation
 // engine as the live per-call validation gate, and by tests.
 
-import { type MemkeeperGraph, N_GOAL, N_IRRELEVANT, type Node, O_INITIAL_PROMPT } from "../types.js";
+import { type SessionOwlGraph, N_GOAL, N_IRRELEVANT, type Node, O_INITIAL_PROMPT } from "../types.js";
 
 /** Raised when a structural invariant does not hold. */
 export class GraphInvariantError extends Error {
@@ -29,7 +29,7 @@ export function isSpecial(id: string): boolean {
  * unrepresentable by construction; the only failure mode is a dangling parent
  * reference (the node was removed but the obs still points at it).
  */
-export function everyObservationAttached(graph: MemkeeperGraph): boolean {
+export function everyObservationAttached(graph: SessionOwlGraph): boolean {
   for (const obs of graph.observations.values()) {
     if (!graph.nodes.has(obs.parentNode)) return false;
   }
@@ -42,7 +42,7 @@ export function everyObservationAttached(graph: MemkeeperGraph): boolean {
  * Catches double-listing, parent/list drift, and dangling obs ids. Single pass
  * over nodes (linear in node + edge count) — not nested in the obs count.
  */
-export function exactlyOneNodePerObservation(graph: MemkeeperGraph): boolean {
+export function exactlyOneNodePerObservation(graph: SessionOwlGraph): boolean {
   return observationParentingError(graph) === null;
 }
 
@@ -52,7 +52,7 @@ export function exactlyOneNodePerObservation(graph: MemkeeperGraph): boolean {
  * logs) what broke — a phantom listing, a double listing, a parent/list drift,
  * or an unlisted observation — instead of one conflated message.
  */
-export function observationParentingError(graph: MemkeeperGraph): string | null {
+export function observationParentingError(graph: SessionOwlGraph): string | null {
   const ownerOf = new Map<string, Node>();
   for (const node of graph.nodes.values()) {
     for (const obsId of node.observationIds) {
@@ -73,7 +73,7 @@ export function observationParentingError(graph: MemkeeperGraph): string | null 
  * non-root node is listed in its parent's `childNodeIds`. No phantom children,
  * no dangling parents.
  */
-export function childLinksConsistent(graph: MemkeeperGraph): boolean {
+export function childLinksConsistent(graph: SessionOwlGraph): boolean {
   for (const node of graph.nodes.values()) {
     for (const childId of node.childNodeIds) {
       const child = graph.nodes.get(childId);
@@ -97,7 +97,7 @@ export function childLinksConsistent(graph: MemkeeperGraph): boolean {
  * lets every node's chain share work — a node already known acyclic short-
  * circuits any later walk that reaches it.
  */
-export function noCycles(graph: MemkeeperGraph): boolean {
+export function noCycles(graph: SessionOwlGraph): boolean {
   const DONE = 2; // fully walked, chain reaches the root without looping
   const ON_PATH = 1; // on the current walk
   const status = new Map<string, number>();
@@ -125,7 +125,7 @@ export function noCycles(graph: MemkeeperGraph): boolean {
  * active and crit, carries no supersession, and the permanent seed
  * observation `oInitialPrompt` is attached to it (and thus undetachable).
  */
-export function nGoalInvariants(graph: MemkeeperGraph): boolean {
+export function nGoalInvariants(graph: SessionOwlGraph): boolean {
   const goal = graph.nodes.get(N_GOAL);
   if (goal === undefined) return false;
   if (goal.parentNode !== null) return false;
@@ -158,7 +158,7 @@ export function dissolvable(node: Node): boolean {
  * transition that would leave a dangling replacement ref (the supersession
  * link must not survive a state change away from obsolete).
  */
-export function supersededByCorrelatesState(graph: MemkeeperGraph): boolean {
+export function supersededByCorrelatesState(graph: SessionOwlGraph): boolean {
   for (const node of graph.nodes.values()) {
     if (node.state === "obsolete") {
       // an obsolete node must carry its replacement (supersede always sets it).
@@ -175,7 +175,7 @@ export function supersededByCorrelatesState(graph: MemkeeperGraph): boolean {
  * Run all structural validators. Returns true for a well-formed graph; throws
  * `GraphInvariantError` on the first violation (used as the per-mutate gate).
  */
-export function validateGraph(graph: MemkeeperGraph): boolean {
+export function validateGraph(graph: SessionOwlGraph): boolean {
   if (!everyObservationAttached(graph)) {
     throw new GraphInvariantError("an observation is not attached to an existing node");
   }

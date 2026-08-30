@@ -2,14 +2,14 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Event-sourced mutation engine: pure functions that apply ONE mutation to a
-// MemkeeperGraph in place, validate it live (throwing GraphInvariantError on a
+// SessionOwlGraph in place, validate it live (throwing GraphInvariantError on a
 // rejected call — which appends no delta), and return the serializable delta
 // that was applied. The append-only log records these deltas as-is for replay.
 
 import {
   estimateContentTokens,
   type Importance,
-  type MemkeeperGraph,
+  type SessionOwlGraph,
   N_GOAL,
   N_PENDING,
   type Node,
@@ -97,7 +97,7 @@ export type GraphDelta =
 // --- shared helpers --------------------------------------------------------
 
 /** Require a node to exist, else throw. */
-function requireNode(graph: MemkeeperGraph, id: NodeId, what: string): Node {
+function requireNode(graph: SessionOwlGraph, id: NodeId, what: string): Node {
   const node = graph.nodes.get(id);
   if (node === undefined) throw new GraphInvariantError(`${what}: node ${id} does not exist`);
   return node;
@@ -109,7 +109,7 @@ function requireNode(graph: MemkeeperGraph, id: NodeId, what: string): Node {
  *  and the pre-encode gate for the compaction snapshot (an invalid graph is
  *  never frozen into `details`). Throws `GraphInvariantError` naming the first
  *  violation. */
-export function assertGraphStructure(graph: MemkeeperGraph, what: string): void {
+export function assertGraphStructure(graph: SessionOwlGraph, what: string): void {
   if (!everyObservationAttached(graph)) throw new GraphInvariantError(`${what}: an observation is detached`);
   const parenting = observationParentingError(graph);
   if (parenting !== null) throw new GraphInvariantError(`${what}: ${parenting}`);
@@ -118,7 +118,7 @@ export function assertGraphStructure(graph: MemkeeperGraph, what: string): void 
 }
 
 /** The set of node ids reachable under `rootId` (inclusive of rootId). */
-function subtreeNodeIds(graph: MemkeeperGraph, rootId: NodeId): Set<NodeId> {
+function subtreeNodeIds(graph: SessionOwlGraph, rootId: NodeId): Set<NodeId> {
   const seen = new Set<NodeId>();
   const stack: NodeId[] = [rootId];
   while (stack.length > 0) {
@@ -138,7 +138,7 @@ function subtreeNodeIds(graph: MemkeeperGraph, rootId: NodeId): Set<NodeId> {
  * Recompute a node's timestamp range from all observations in its subtree.
  * A node with no observations keeps rangeStart === rangeEnd === createdAt.
  */
-export function recomputeRange(graph: MemkeeperGraph, node: Node): void {
+export function recomputeRange(graph: SessionOwlGraph, node: Node): void {
   let min: string | null = null;
   let max: string | null = null;
   for (const id of subtreeNodeIds(graph, node.id)) {
@@ -158,7 +158,7 @@ export function recomputeRange(graph: MemkeeperGraph, node: Node): void {
 /** Touch a node's updatedAt and recompute its range AND every ancestor's range
  *  (rangeStart/rangeEnd span a node's whole subtree, so an ancestor's range can
  *  change when a descendant's content moves). */
-function touchAndRecompute(graph: MemkeeperGraph, node: Node): void {
+function touchAndRecompute(graph: SessionOwlGraph, node: Node): void {
   const now = currentTimestamp();
   let current: Node | undefined = node;
   while (current !== undefined) {
@@ -176,7 +176,7 @@ function touchAndRecompute(graph: MemkeeperGraph, node: Node): void {
  * ranges need recompute).
  */
 function dissolveEmptied(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   candidates: NodeId[],
 ): { removed: Set<NodeId>; orphanedParents: Set<NodeId> } {
   const removed = new Set<NodeId>();
@@ -220,7 +220,7 @@ export function setClock(fn: (() => string) | null): void {
 // --- mutators --------------------------------------------------------------
 
 export function applyCreateNode(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   args: {
     id: NodeId;
     summary: string;
@@ -265,7 +265,7 @@ export function applyCreateNode(
 }
 
 export function applyRecordObservation(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   args: { obs: Observation },
   opts: { skipStructural?: boolean } = {},
 ): RecordObservationDelta {
@@ -290,7 +290,7 @@ export function applyRecordObservation(
  *  rebuild (re-wrapping collected records into a fresh structure). Throws when
  *  the record or the target node does not exist (caller decides skip/abort). */
 export function applyAttachObservation(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   args: { obsId: ObsId; parentNode: NodeId },
 ): RecordObservationDelta {
   const obs = graph.observations.get(args.obsId);
@@ -312,7 +312,7 @@ export function applyAttachObservation(
   return { type: "record_observation", obs };
 }
 
-export function applyFlushNew(graph: MemkeeperGraph, args: { nodeIds: NodeId[] }): FlushNewDelta {
+export function applyFlushNew(graph: SessionOwlGraph, args: { nodeIds: NodeId[] }): FlushNewDelta {
   for (const id of args.nodeIds) {
     const node = graph.nodes.get(id);
     if (node !== undefined && node.state === "new") {
@@ -324,7 +324,7 @@ export function applyFlushNew(graph: MemkeeperGraph, args: { nodeIds: NodeId[] }
 }
 
 export function applyMv(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   args: { sourceIds: Array<ObsId | NodeId>; destId: NodeId | null; newSummary?: string },
   policy: MutationPolicy,
   opts: { skipStructural?: boolean } = {},
@@ -422,7 +422,7 @@ export function applyMv(
 }
 
 export function applyMerge(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   args: {
     sourceIds: NodeId[];
     destId: NodeId | null;
@@ -538,7 +538,7 @@ export function applyMerge(
 }
 
 export function applySupersede(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   args: { nodeId: NodeId; supersededNodeIds: NodeId[] },
   policy: MutationPolicy,
   opts: { skipStructural?: boolean } = {},
@@ -583,7 +583,7 @@ export function applySupersede(
 }
 
 export function applySetMeta(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   args: {
     nodeId: NodeId;
     importance: Importance | null;

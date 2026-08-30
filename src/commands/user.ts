@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The user-facing `/mk:*` browse commands (DISTINCT from the agent's `mk_recall`
+// The user-facing `/owl:*` browse commands (DISTINCT from the agent's `owl_recall`
 // tool). They browse the SOURCE memory graph (the full retained graph incl.
 // obsolete — independent of `renderMode`) and render via `ctx.ui.notify`
 // multi-line popups — zero agent-context cost (user-facing only, never injected).
@@ -13,7 +13,7 @@
 // a render cap + drill footer, NOT cursor pagination).
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getMemkeeperSettings } from "../config/schema.js";
+import { getSessionOwlSettings } from "../config/schema.js";
 import {
   directObsSizeHint,
   formatNodeLine,
@@ -43,7 +43,7 @@ import { onTurnEnd, type RunFn } from "../triggers.js";
 import type { NodeId, ObsId } from "../types.js";
 import { O_INITIAL_PROMPT } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
-import { MK_REOBSERVE_COMMAND, runMkReobserve } from "./reobserve.js";
+import { OWL_REOBSERVE_COMMAND, runOwlReobserve } from "./reobserve.js";
 import { runReuseRebuild } from "./reuse-rebuild.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
@@ -73,23 +73,23 @@ export function formatList(lines: string[], cap: number | null): { text: string;
   }
   const truncated = lines.length - cap;
   const kept = lines.slice(0, cap);
-  kept.push(`… +${truncated} more — drill with /mk:ls <id> or narrow with /mk:find`);
+  kept.push(`… +${truncated} more — drill with /owl:ls <id> or narrow with /owl:find`);
   return { text: kept.join("\n"), truncated };
 }
 
 /** Resolve the live cap from settings (commandResultCap; default 50). */
 function resolveCap(): number | null {
-  return getMemkeeperSettings().commandResultCap;
+  return getSessionOwlSettings().commandResultCap;
 }
 
 // --- result channel --------------------------------------------------------
 
-const DISABLED_MESSAGE = "memkeeper is disabled.";
+const DISABLED_MESSAGE = "session-owl is disabled.";
 
 /** Master-switch guard: when `enabled=false`, reply once and return true so the
- *  caller short-circuits (the off-path contract — mirrors /mk:status). */
+ *  caller short-circuits (the off-path contract — mirrors /owl:status). */
 async function replyIfDisabled(ctx: ExtensionCommandContext): Promise<boolean> {
-  if (!getMemkeeperSettings().enabled) {
+  if (!getSessionOwlSettings().enabled) {
     notify(ctx, DISABLED_MESSAGE, "info");
     return true;
   }
@@ -106,17 +106,17 @@ async function notifyError(ctx: ExtensionCommandContext, text: string): Promise<
   notify(ctx, text, "error");
 }
 
-// --- /mk:ls ----------------------------------------------------------------
+// --- /owl:ls ----------------------------------------------------------------
 
-/** `/mk:ls [nodeId]` — list roots (no arg) or a node's direct children. */
-export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promise<void> {
+/** `/owl:ls [nodeId]` — list roots (no arg) or a node's direct children. */
+export async function runOwlLs(args: string, ctx: ExtensionCommandContext): Promise<void> {
   if (await replyIfDisabled(ctx)) return;
   const graph = getGraphStore().graph;
   const idArg = trimArg(args);
 
   const lines: string[] = [];
   if (idArg === null) {
-    // roots: non-obsolete only (obsolete hidden by default — use /mk:find-all).
+    // roots: non-obsolete only (obsolete hidden by default — use /owl:find-all).
     for (const node of orderActiveSetRoots(nonObsoleteRoots(graph))) {
       lines.push(
         formatNodeLine(node, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(node, graph.observations) }),
@@ -152,17 +152,17 @@ export async function runMkLs(args: string, ctx: ExtensionCommandContext): Promi
   await notifyInfo(ctx, text);
 }
 
-// --- /mk:cat ---------------------------------------------------------------
+// --- /owl:cat ---------------------------------------------------------------
 
-const MK_CAT_USAGE = "Usage: /mk:cat <id> — give a node id or an observation id.";
+const OWL_CAT_USAGE = "Usage: /owl:cat <id> — give a node id or an observation id.";
 
-/** `/mk:cat <id>` — a node's header + its direct observations' full text, or an
+/** `/owl:cat <id>` — a node's header + its direct observations' full text, or an
  *  observation's full content + header. Mirrors the Builder `cat`. */
-export async function runMkCat(args: string, ctx: ExtensionCommandContext): Promise<void> {
+export async function runOwlCat(args: string, ctx: ExtensionCommandContext): Promise<void> {
   if (await replyIfDisabled(ctx)) return;
   const idArg = trimArg(args);
   if (idArg === null) {
-    await notifyError(ctx, MK_CAT_USAGE);
+    await notifyError(ctx, OWL_CAT_USAGE);
     return;
   }
   const graph = getGraphStore().graph;
@@ -180,11 +180,11 @@ export async function runMkCat(args: string, ctx: ExtensionCommandContext): Prom
   await notifyInfo(ctx, text);
 }
 
-// --- /mk:find + /mk:find-all ----------------------------------------------
+// --- /owl:find + /owl:find-all ----------------------------------------------
 
-const MK_FIND_USAGE = "Usage: /mk:find <query> — give a JS regex to search node summaries and observation content.";
+const OWL_FIND_USAGE = "Usage: /owl:find <query> — give a JS regex to search node summaries and observation content.";
 
-/** Shared body for /mk:find (non-obsolete) and /mk:find-all (all statuses). */
+/** Shared body for /owl:find (non-obsolete) and /owl:find-all (all statuses). */
 async function runFind(
   args: string,
   ctx: ExtensionCommandContext,
@@ -193,7 +193,7 @@ async function runFind(
   if (await replyIfDisabled(ctx)) return;
   const query = trimArg(args);
   if (query === null) {
-    await notifyError(ctx, MK_FIND_USAGE);
+    await notifyError(ctx, OWL_FIND_USAGE);
     return;
   }
   const compiled = tryCompileFindRegex(query);
@@ -217,19 +217,19 @@ async function runFind(
   await notifyInfo(ctx, text);
 }
 
-/** `/mk:find <query>` — JS regex search, default NON-obsolete (active + archived;
+/** `/owl:find <query>` — JS regex search, default NON-obsolete (active + archived;
  *  new renders as active; obsolete/superseded excluded). */
-export async function runMkFind(args: string, ctx: ExtensionCommandContext): Promise<void> {
+export async function runOwlFind(args: string, ctx: ExtensionCommandContext): Promise<void> {
   await runFind(args, ctx, EXCLUDE_SUPERSEDED);
 }
 
-/** `/mk:find-all <query>` — same as /mk:find but ALL statuses incl obsolete
+/** `/owl:find-all <query>` — same as /owl:find but ALL statuses incl obsolete
  *  (shown with 🪦 + → supersededBy) — for digging dead ends. */
-export async function runMkFindAll(args: string, ctx: ExtensionCommandContext): Promise<void> {
+export async function runOwlFindAll(args: string, ctx: ExtensionCommandContext): Promise<void> {
   await runFind(args, ctx, INCLUDE_SUPERSEDED);
 }
 
-// --- /mk:rescan -----------------------------------------------------------
+// --- /owl:rescan -----------------------------------------------------------
 
 /** The reuse-mode flag: rebuild the graph structure from the collected
  *  observation records instead of re-observing the session (no Observer LLM). */
@@ -259,15 +259,15 @@ function collectedCount(): number {
   return count;
 }
 
-/** `/mk:rescan [--reuse-observations]` — discard the memory graph. Plain: void
+/** `/owl:rescan [--reuse-observations]` — discard the memory graph. Plain: void
  *  everything and re-observe the entire session (Observer LLM). With the reuse
  *  flag: void the STRUCTURE only and rebuild it from the collected records in
  *  the background (batched re-wrap + Builder cadence; the ledger, frontier, and
  *  usage are kept — no re-observing). */
-export async function runMkRescan(args: string, ctx: ExtensionCommandContext, deps: RescanDeps): Promise<void> {
-  const settings = getMemkeeperSettings();
+export async function runOwlRescan(args: string, ctx: ExtensionCommandContext, deps: RescanDeps): Promise<void> {
+  const settings = getSessionOwlSettings();
   if (!settings.enabled) {
-    notify(ctx, "memkeeper is disabled (enable it first).", "warning");
+    notify(ctx, "session-owl is disabled (enable it first).", "warning");
     return;
   }
   const reuse = args.trim().includes(REUSE_FLAG);
@@ -294,11 +294,11 @@ export async function runMkRescan(args: string, ctx: ExtensionCommandContext, de
         await runReuseRebuild({
           ctx,
           pi: deps.pi,
-          settings: getMemkeeperSettings(),
+          settings: getSessionOwlSettings(),
           signal,
           widget: deps.widget,
           runBuilder: () =>
-            deps.runBuilderStage({ ctx, settings: getMemkeeperSettings(), signal, scope: null, unobserved: null }),
+            deps.runBuilderStage({ ctx, settings: getSessionOwlSettings(), signal, scope: null, unobserved: null }),
         });
       } catch (err) {
         log.error("rescan --reuse-observations: rebuild failed", err);
@@ -321,7 +321,7 @@ export async function runMkRescan(args: string, ctx: ExtensionCommandContext, de
   // branch is unobserved); the chained Builder/Selector fire after per mode.
   void (async () => {
     try {
-      await onTurnEnd({ ctx, settings: getMemkeeperSettings() });
+      await onTurnEnd({ ctx, settings: getSessionOwlSettings() });
     } catch (err) {
       log.error("rescan: observer catch-up failed", err);
     }
@@ -331,40 +331,40 @@ export async function runMkRescan(args: string, ctx: ExtensionCommandContext, de
 // --- registration ----------------------------------------------------------
 
 /** The registered command names. */
-export const MK_LS_COMMAND = "mk:ls";
-export const MK_CAT_COMMAND = "mk:cat";
-export const MK_FIND_COMMAND = "mk:find";
-export const MK_FIND_ALL_COMMAND = "mk:find-all";
-export const MK_RESCAN_COMMAND = "mk:rescan";
+export const OWL_LS_COMMAND = "owl:ls";
+export const OWL_CAT_COMMAND = "owl:cat";
+export const OWL_FIND_COMMAND = "owl:find";
+export const OWL_FIND_ALL_COMMAND = "owl:find-all";
+export const OWL_RESCAN_COMMAND = "owl:rescan";
 
-/** Register all the `/mk:*` user browse commands. `deps` carries the widget,
+/** Register all the `/owl:*` user browse commands. `deps` carries the widget,
  *  the Builder stage run the rescan reuse-rebuild drives, and the raw Observer
  *  run the re-observe repair command drives. */
 export function registerUserCommands(pi: ExtensionAPI, deps: RescanDeps): void {
-  pi.registerCommand(MK_LS_COMMAND, {
-    description: "List memory — roots, or a node's children. Usage: /mk:ls [nodeId]",
-    handler: runMkLs,
+  pi.registerCommand(OWL_LS_COMMAND, {
+    description: "List memory — roots, or a node's children. Usage: /owl:ls [nodeId]",
+    handler: runOwlLs,
   });
-  pi.registerCommand(MK_CAT_COMMAND, {
-    description: "Show a node's full observations, or one observation's full text. Usage: /mk:cat <id>",
-    handler: runMkCat,
+  pi.registerCommand(OWL_CAT_COMMAND, {
+    description: "Show a node's full observations, or one observation's full text. Usage: /owl:cat <id>",
+    handler: runOwlCat,
   });
-  pi.registerCommand(MK_FIND_COMMAND, {
-    description: "Search memory by regex (non-obsolete). Usage: /mk:find <query>",
-    handler: runMkFind,
+  pi.registerCommand(OWL_FIND_COMMAND, {
+    description: "Search memory by regex (non-obsolete). Usage: /owl:find <query>",
+    handler: runOwlFind,
   });
-  pi.registerCommand(MK_FIND_ALL_COMMAND, {
-    description: "Search memory by regex (incl. obsolete/superseded). Usage: /mk:find-all <query>",
-    handler: runMkFindAll,
+  pi.registerCommand(OWL_FIND_ALL_COMMAND, {
+    description: "Search memory by regex (incl. obsolete/superseded). Usage: /owl:find-all <query>",
+    handler: runOwlFindAll,
   });
-  pi.registerCommand(MK_RESCAN_COMMAND, {
+  pi.registerCommand(OWL_RESCAN_COMMAND, {
     description:
       "Discard the memory graph and re-observe the session from the start. --reuse-observations rebuilds from collected observations.",
-    handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => runMkRescan(args, ctx, deps),
+    handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => runOwlRescan(args, ctx, deps),
   });
-  pi.registerCommand(MK_REOBSERVE_COMMAND, {
+  pi.registerCommand(OWL_REOBSERVE_COMMAND, {
     description:
-      "Re-observe session ranges that were skipped with zero observations (repair after a degraded model run). Usage: /mk:reobserve-0-obs-chunks",
-    handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => runMkReobserve(args, ctx, deps),
+      "Re-observe session ranges that were skipped with zero observations (repair after a degraded model run). Usage: /owl:reobserve-0-obs-chunks",
+    handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => runOwlReobserve(args, ctx, deps),
   });
 }

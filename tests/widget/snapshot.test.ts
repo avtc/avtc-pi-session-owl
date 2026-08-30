@@ -7,7 +7,7 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { applyCreateNode } from "../../src/graph/mutations.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import type { NodeId } from "../../src/types.js";
@@ -29,12 +29,12 @@ describe("buildSnapshot", () => {
   beforeEach(() => {
     resetForNewSession();
     // Pin the settings read to DEFAULT_CONFIG so buildSnapshot is order-independent
-    // under isolate:false (other files leak the module handle via initMemkeeperSettings).
-    _setGetMemkeeperSettings(() => DEFAULT_CONFIG);
+    // under isolate:false (other files leak the module handle via initSessionOwlSettings).
+    _setGetSessionOwlSettings(() => DEFAULT_CONFIG);
     tracker = createTracker();
   });
 
-  afterEach(() => _resetGetMemkeeperSettings());
+  afterEach(() => _resetGetSessionOwlSettings());
 
   it("obs/roots deltas are current − baseline (captured at stage start)", () => {
     tracker.startStage("observe"); // baseline: 0 obs, 0 roots
@@ -132,7 +132,7 @@ describe("buildSnapshot", () => {
   });
 
   it("selected section deltas measured from the working-copy baseline (captured at stage start)", () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, renderMode: "selected-root" }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, renderMode: "selected-root" }));
     let counts = { count: 95, viewTokens: 35_000 };
     tracker.startStage("select", { selectedCounts: () => counts }); // baseline: the pristine copy
     counts = { count: 20, viewTokens: 15_000 }; // mutates applied to the copy
@@ -163,7 +163,7 @@ describe("buildSnapshot", () => {
     // Exercises the renderMode arm of the gate: stage IS select and a provider
     // IS registered, but renderMode is observations-root → the selected section
     // is suppressed (observations-root has no curated selected tree).
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, renderMode: "observations-root" }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, renderMode: "observations-root" }));
     tracker.startStage("select", { selectedCounts: () => ({ count: 20, viewTokens: 15_000 }) });
     const snap = buildSnapshot(tracker, makeCtx());
     expect(snap.selected).toBeNull();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The `/mk:rescan --reuse-observations` rebuild: re-build the graph STRUCTURE
+// The `/owl:rescan --reuse-observations` rebuild: re-build the graph STRUCTURE
 // from the already-collected observation records, in their original capture
 // order, WITHOUT re-running the Observer LLM over the session. The collected
 // records are parked under a dedicated `nPending` root, then re-wrapped into
@@ -18,8 +18,8 @@
 // normal triggers (threshold / compaction), per the command's contract.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { MemkeeperConfig } from "../config/schema.js";
-import { getMemkeeperSettings } from "../config/schema.js";
+import type { SessionOwlConfig } from "../config/schema.js";
+import { getSessionOwlSettings } from "../config/schema.js";
 import {
   applyAttachObservation,
   applyCreateNode,
@@ -43,7 +43,7 @@ import {
 import { makeMaybeBuilder } from "../triggers.js";
 import {
   type Importance,
-  type MemkeeperGraph,
+  type SessionOwlGraph,
   N_GOAL,
   N_PENDING,
   O_INITIAL_PROMPT,
@@ -67,7 +67,7 @@ const FIRST_BATCH = 0;
 export interface ReuseRebuildInput {
   ctx: ExtensionContext;
   pi: ExtensionAPI;
-  settings: MemkeeperConfig;
+  settings: SessionOwlConfig;
   signal: AbortSignal;
   widget: WidgetController;
   /** The Builder run invoked by the cadence gate (test seam). */
@@ -204,7 +204,7 @@ function resumeParked(store: StoreContext): Observation[] | null {
 export async function runReuseRebuild(input: ReuseRebuildInput): Promise<void> {
   if (input.signal.aborted) return;
   const store = toStoreContext(input.pi, input.ctx);
-  const graph: MemkeeperGraph = getGraphStore().graph;
+  const graph: SessionOwlGraph = getGraphStore().graph;
 
   // resume when a previous rebuild parked records and never finished; otherwise
   // a fresh start (void structure, re-seed, park)
@@ -237,8 +237,8 @@ export async function runReuseRebuild(input: ReuseRebuildInput): Promise<void> {
     for (let offset = 0; offset < pending.length; offset += batchSize) {
       if (input.signal.aborted) return;
       // live master switch: a disable mid-rebuild parks the remainder (durable)
-      if (!getMemkeeperSettings().enabled) {
-        log.info(`reuse-rebuild: stopping: memkeeper disabled (after ${done}/${totalBatches} batches)`);
+      if (!getSessionOwlSettings().enabled) {
+        log.info(`reuse-rebuild: stopping: session-owl disabled (after ${done}/${totalBatches} batches)`);
         return;
       }
       const batch = pending.slice(offset, offset + batchSize);

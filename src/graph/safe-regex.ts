@@ -3,7 +3,7 @@
 
 // A lightweight static analyzer that rejects regexes prone to catastrophic
 // backtracking (ReDoS) BEFORE they are executed against observation content —
-// `find` / `mk_recall` / `/mk:find` accept user/agent-supplied patterns.
+// `find` / `owl_recall` / `/owl:find` accept user/agent-supplied patterns.
 //
 // It approximates the well-known "star-height" + "imprecise alternation under
 // repetition" heuristics (the same shape the `safe-regex` library checks):

@@ -21,7 +21,7 @@ import { nodeLineOptions, orderedNonObsoleteRoots } from "../graph/read-tools.js
 import { isUnstuckAutoContinue } from "../lifecycle.js";
 import type { TodoContext } from "../todo/types.js";
 import type { Node, NodeId, Observation, ObsId } from "../types.js";
-import { MemkeeperGraph, makeNode, N_IRRELEVANT, nowStoredTimestamp } from "../types.js";
+import { SessionOwlGraph, makeNode, N_IRRELEVANT, nowStoredTimestamp } from "../types.js";
 
 /**
  * The Selector's working copy: a deep-copied, in-memory graph the Selector
@@ -29,7 +29,7 @@ import { MemkeeperGraph, makeNode, N_IRRELEVANT, nowStoredTimestamp } from "../t
  * predefined demote-target node injected into the copy (absent from the source).
  */
 export interface SelectorWorkingCopy {
-  graph: MemkeeperGraph;
+  graph: SessionOwlGraph;
   nIrrelevantId: NodeId;
 }
 
@@ -43,7 +43,7 @@ export interface SelectorWorkingCopy {
  *
  * The clone is fully independent — mutating it never touches the source graph.
  */
-export function buildWorkingCopy(source: MemkeeperGraph): SelectorWorkingCopy {
+export function buildWorkingCopy(source: SessionOwlGraph): SelectorWorkingCopy {
   // Selective clone: copy ONLY non-obsolete nodes (active + new + archived) and
   // the observations under them, never deep-copying the obsolete portion. A
   // non-obsolete descendant of a dropped obsolete node is reparented to the
@@ -74,7 +74,7 @@ export function buildWorkingCopy(source: MemkeeperGraph): SelectorWorkingCopy {
       observations.set(obsId, cloneObservation(obs));
     }
   }
-  const clone = new MemkeeperGraph({
+  const clone = new SessionOwlGraph({
     nodes,
     observations,
     nextObsId: source.nextObsId,
@@ -240,7 +240,7 @@ const TAIL_LEGEND_NO_ENTRY = "<USER> · <ASSISTANT> · <THINKING> · <TOOLCALL:n
 
 /** Full args for assembling the Selector's agentLoop-start input view. */
 export interface SelectorInputViewArgs {
-  sourceGraph: MemkeeperGraph;
+  sourceGraph: SessionOwlGraph;
   tail: TailContext;
   tailBoundary: TailBoundary;
   /** `null` = avtc-pi-todo bridge absent → omit the todo section entirely. */

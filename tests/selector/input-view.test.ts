@@ -7,9 +7,9 @@ import { describe, expect, it } from "vitest";
 import { validateGraph } from "../../src/graph/invariants.js";
 import { buildTail, buildWorkingCopy, type TailContext } from "../../src/selector/input-view.js";
 import type { Node, NodeId, Observation, ObsId } from "../../src/types.js";
-import { MemkeeperGraph, makeNode, makeObservation, N_GOAL, N_IRRELEVANT, O_INITIAL_PROMPT } from "../../src/types.js";
+import { SessionOwlGraph, makeNode, makeObservation, N_GOAL, N_IRRELEVANT, O_INITIAL_PROMPT } from "../../src/types.js";
 
-function g(): MemkeeperGraph {
+function g(): SessionOwlGraph {
   const nodes = new Map<NodeId, Node>();
   const observations = new Map<ObsId, Observation>();
   const nGoal = makeNode({
@@ -78,7 +78,7 @@ function g(): MemkeeperGraph {
   nActive.observationIds = ["o1"];
   observations.set(O_INITIAL_PROMPT, oInit);
   observations.set("o1", o1);
-  return new MemkeeperGraph({ nodes, observations, nextObsId: 2, nextNodeId: 7 });
+  return new SessionOwlGraph({ nodes, observations, nextObsId: 2, nextNodeId: 7 });
 }
 
 describe("buildWorkingCopy", () => {
@@ -154,7 +154,7 @@ describe("buildWorkingCopy", () => {
     );
     nodes.set("n9", nObs);
     nodes.set("n10", nChild);
-    const source = new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 11 });
+    const source = new SessionOwlGraph({ nodes, observations, nextObsId: 1, nextNodeId: 11 });
     const { graph } = buildWorkingCopy(source);
     expect(graph.nodes.has("n9")).toBe(false); // obsolete dropped
     expect(graph.nodes.has("n10")).toBe(true); // live child kept
@@ -196,7 +196,7 @@ describe("buildWorkingCopy", () => {
     );
     nodes.set(N_GOAL, nGoal);
     nodes.set("n9", nObs);
-    const source = new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 10 });
+    const source = new SessionOwlGraph({ nodes, observations, nextObsId: 1, nextNodeId: 10 });
     const { graph } = buildWorkingCopy(source);
     expect(graph.nodes.has("n9")).toBe(false); // obsolete dropped
     // No phantom child link — nGoal no longer references the dropped n9.
@@ -251,7 +251,7 @@ describe("buildWorkingCopy", () => {
     nGoal.observationIds = [O_INITIAL_PROMPT];
     nodes.set(N_GOAL, nGoal);
     nodes.set("n9", nObs);
-    const source = new MemkeeperGraph({ nodes, observations, nextObsId: 2, nextNodeId: 10 });
+    const source = new SessionOwlGraph({ nodes, observations, nextObsId: 2, nextNodeId: 10 });
     const { graph } = buildWorkingCopy(source);
     expect(graph.nodes.has("n9")).toBe(false);
     expect(graph.observations.has("o5")).toBe(false); // obs under obsolete node excluded
@@ -317,7 +317,7 @@ describe("buildWorkingCopy", () => {
     nodes.set("n1", n1);
     nodes.set("n2", n2);
     nodes.set("n3", n3);
-    const source = new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 4 });
+    const source = new SessionOwlGraph({ nodes, observations, nextObsId: 1, nextNodeId: 4 });
     const { graph } = buildWorkingCopy(source);
     expect(graph.nodes.has("n1")).toBe(false);
     expect(graph.nodes.has("n2")).toBe(false);
@@ -599,7 +599,7 @@ describe("buildTodo", () => {
 
 import { buildSelectorInputView, renderWorkingRoots } from "../../src/selector/input-view.js";
 
-function sourceGraphForAssembly(): MemkeeperGraph {
+function sourceGraphForAssembly(): SessionOwlGraph {
   const nodes = new Map<NodeId, Node>();
   const observations = new Map<ObsId, Observation>();
   const nGoal = makeNode({
@@ -632,7 +632,7 @@ function sourceGraphForAssembly(): MemkeeperGraph {
     }),
   );
   nGoal.observationIds = [O_INITIAL_PROMPT];
-  return new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 4 });
+  return new SessionOwlGraph({ nodes, observations, nextObsId: 1, nextNodeId: 4 });
 }
 
 const ASSEMBLY_OPTS = { tokenThreshold: 1000, toolBlockCapTokens: null, includeThinking: false, includeEntryId: false };
@@ -760,7 +760,7 @@ describe("buildSelectorInputView", () => {
     );
     const nGoal = nodes.get(N_GOAL);
     if (nGoal) nGoal.observationIds = [O_INITIAL_PROMPT];
-    const source = new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 5 });
+    const source = new SessionOwlGraph({ nodes, observations, nextObsId: 1, nextNodeId: 5 });
     const view = assemble(
       buildSelectorInputView({
         sourceGraph: source,

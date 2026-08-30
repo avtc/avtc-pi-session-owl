@@ -13,7 +13,7 @@
 // (Observer/Builder/Selector) so this module is testable before those land.
 
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { getMemkeeperSettings, type MemkeeperConfig } from "./config/schema.js";
+import { getSessionOwlSettings, type SessionOwlConfig } from "./config/schema.js";
 import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./format/chunk.js";
 import { BUILDER } from "./format/render.js";
 import { measureRootViewTokens } from "./graph/read-tools.js";
@@ -30,7 +30,7 @@ import { estimateContentTokens } from "./types.js";
  *  config). Absent → the evaluator reads it itself. */
 export interface TriggerInput {
   ctx: ExtensionContext;
-  settings: MemkeeperConfig;
+  settings: SessionOwlConfig;
   prefetchedContextTokens?: number | null;
 }
 
@@ -38,7 +38,7 @@ export interface TriggerInput {
  *  Each run honors `signal` and takes only the fields it needs (the unified contract carries all). */
 export type RunFn = (args: {
   ctx: ExtensionContext;
-  settings: MemkeeperConfig;
+  settings: SessionOwlConfig;
   signal: AbortSignal;
   /** The compaction cut; null at turn_end (set only by the compaction hook). */
   scope: { firstKeptEntryId: string | null } | null;
@@ -78,7 +78,7 @@ export function computeUnobserved(entries: readonly SessionEntry[], frontier: st
 }
 
 /** Render the unobserved entries and sum their token estimate (chars/4). */
-function estimateUnobservedTokens(unobserved: SessionEntry[], settings: MemkeeperConfig): number {
+function estimateUnobservedTokens(unobserved: SessionEntry[], settings: SessionOwlConfig): number {
   if (unobserved.length === 0) return 0;
   const options: ChunkOptions = {
     tokenThreshold: Number.POSITIVE_INFINITY,
@@ -97,7 +97,7 @@ function estimateUnobservedTokens(unobserved: SessionEntry[], settings: Memkeepe
  *  0-record chunk followed by a record-bearing one) and empty-verdict chunks
  *  (a completed chunk persisted with `records: []`). NOT the open tail after
  *  the frontier — that belongs to the normal observe triggers. Each hole is a
- *  re-observe unit for /mk:reobserve-0-obs-chunks. */
+ *  re-observe unit for /owl:reobserve-0-obs-chunks. */
 export interface UncoveredRange {
   entries: SessionEntry[];
 }
@@ -248,7 +248,7 @@ function computeRootViewTokens(): number {
  *  adapter each own their Builder run + widget/stage wiring). */
 export function makeMaybeBuilder(opts: {
   ctx: ExtensionContext;
-  settings: MemkeeperConfig;
+  settings: SessionOwlConfig;
   signal: AbortSignal;
   scope: { firstKeptEntryId: string | null } | null;
   runBuilder: () => Promise<void>;
@@ -257,7 +257,7 @@ export function makeMaybeBuilder(opts: {
     if (opts.signal.aborted) return false;
     // live master switch: a disable mid-catch-up skips the mid-run Builder (the
     // Observer's per-block re-check stops the run at the next block boundary).
-    if (!getMemkeeperSettings().enabled) return false;
+    if (!getSessionOwlSettings().enabled) return false;
     // The mid-run Builder respects builderMode (each-N / on-root-view /
     // on-context) in BOTH scopes — so "each-N-observations" folds incrementally
     // during a compaction catch-up too, not only at turn_end. In compaction
@@ -477,8 +477,8 @@ export function onTurnEnd(input: TriggerInput): void {
       }
       // live master switch: a disable mid-run stops the remaining phases (the
       // Observer's chunks are durable; re-enable resumes on the next trigger).
-      if (!getMemkeeperSettings().enabled) {
-        log.info("background run: memkeeper disabled after observer — stopping");
+      if (!getSessionOwlSettings().enabled) {
+        log.info("background run: session-owl disabled after observer — stopping");
         return;
       }
       // Re-evaluate Builder/Selector AFTER the Observer (fresh `new` nodes).
@@ -494,8 +494,8 @@ export function onTurnEnd(input: TriggerInput): void {
       }
       // live master switch (between phases): a disable after the Builder skips
       // the Selector.
-      if (!getMemkeeperSettings().enabled) {
-        log.info("background run: memkeeper disabled after builder — stopping");
+      if (!getSessionOwlSettings().enabled) {
+        log.info("background run: session-owl disabled after builder — stopping");
         return;
       }
       if (selectorTriggerDecision(withCtx).shouldFire) {

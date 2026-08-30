@@ -196,7 +196,7 @@ describe("compactionHook", () => {
     // cancelled with a visible error — never a poisoned snapshot
     expect((result as { cancel?: boolean }).cancel).toBe(true);
     expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining("memkeeper compaction failed: encode snapshot: a node references a missing observation"),
+      expect.stringContaining("session-owl compaction failed: encode snapshot: a node references a missing observation"),
       "error",
     );
   });
@@ -383,7 +383,7 @@ describe("compactionHook", () => {
       NO_OP_WIDGET,
       TODO_ABSENT,
     );
-    // undefined → Pi runs its native compaction (NOT a cancel, NOT a memkeeper summary)
+    // undefined → Pi runs its native compaction (NOT a cancel, NOT a session-owl summary)
     expect(result).toBeUndefined();
     // Observer ran; Builder + Selector skipped (disabled before they started).
     expect(calls.observer).toBe(1);

@@ -4,7 +4,7 @@
 // The stage-end → usage-ledger seam. Each stage run wires `onStageEnd` (the
 // agentLoop's end-of-run hook) to a hook built here. The hook FOLDS the stage's
 // accumulated usage into the store's cumulative ledger in-memory; the RUN
-// persists the ledger as a single `memkeeper.usage` delta once at run end
+// persists the ledger as a single `session-owl.usage` delta once at run end
 // (mirroring the Observer's fold-per-unit, persist-once pattern). `hasUsage`
 // tells the run whether anything was folded so it can skip a redundant persist.
 
@@ -40,7 +40,7 @@ export function makeLedgerHook(phase: Phase): {
   };
 }
 
-/** Persist the store's live cumulative ledger as a `memkeeper.usage` delta. The
+/** Persist the store's live cumulative ledger as a `session-owl.usage` delta. The
  *  run calls this once at run end (after all passes have folded). */
 export function persistLedger(store: StoreContext): void {
   appendUsage(store, getGraphStore().usageLedger);

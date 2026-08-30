@@ -21,12 +21,12 @@
 let sessionBase: string | null = null;
 
 /** Set the per-session base id (called once on session_start). */
-export function setMemkeeperSessionBase(id: string): void {
+export function setSessionOwlSessionBase(id: string): void {
   sessionBase = id;
 }
 
 /** Clear the base (called on session_shutdown). */
-export function clearMemkeeperSessionBase(): void {
+export function clearSessionOwlSessionBase(): void {
   sessionBase = null;
 }
 

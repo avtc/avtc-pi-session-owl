@@ -15,7 +15,7 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import type { MemkeeperConfig } from "../../src/config/schema.js";
+import type { SessionOwlConfig } from "../../src/config/schema.js";
 import { validateGraph } from "../../src/graph/invariants.js";
 import { applyCreateNode, applyRecordObservation, setClock } from "../../src/graph/mutations.js";
 import { buildWorkingCopy, type SelectorWorkingCopy } from "../../src/selector/input-view.js";
@@ -32,7 +32,7 @@ import {
 } from "../../src/selector/tools.js";
 import type { TodoBridge } from "../../src/todo/types.js";
 import {
-  MemkeeperGraph,
+  SessionOwlGraph,
   makeObservation,
   N_GOAL,
   type Node,
@@ -53,11 +53,11 @@ afterAll(() => setClock(null));
 // child of n7); n12(new, empty); n13(archived). A realistic mix the Selector
 // reorganizes.
 
-function buildSource(): MemkeeperGraph {
+function buildSource(): SessionOwlGraph {
   setClock(() => NOW);
   const nodes = new Map<NodeId, Node>();
   const observations = new Map<ObsId, Observation>();
-  const g = new MemkeeperGraph({ nodes, observations, nextObsId: 1, nextNodeId: 1 });
+  const g = new SessionOwlGraph({ nodes, observations, nextObsId: 1, nextNodeId: 1 });
 
   applyCreateNode(g, {
     id: N_GOAL,
@@ -111,9 +111,9 @@ function textOf(result: AgentToolResult<unknown>): string {
   return result.content.map((c) => (c as { text?: string }).text ?? "").join("\n");
 }
 
-const SETTINGS: MemkeeperConfig = {
+const SETTINGS: SessionOwlConfig = {
   selectorRootViewThreshold: 10_000,
-} as MemkeeperConfig;
+} as SessionOwlConfig;
 
 // A minimal stub ExtensionContext carrying cwd for fs_* factory wiring.
 function ctxStub(): ExtensionContext {
@@ -123,7 +123,7 @@ function ctxStub(): ExtensionContext {
 // ===========================================================================
 
 describe("Selector working-copy graph tools (mkdir/mv/merge)", () => {
-  let source: MemkeeperGraph;
+  let source: SessionOwlGraph;
   let working: SelectorWorkingCopy;
 
   beforeEach(() => {
@@ -210,7 +210,7 @@ describe("Selector working-copy graph tools (mkdir/mv/merge)", () => {
 });
 
 describe("Selector set_meta (importance + summary; no lifecycle)", () => {
-  let source: MemkeeperGraph;
+  let source: SessionOwlGraph;
   let working: SelectorWorkingCopy;
 
   beforeEach(() => {
@@ -258,7 +258,7 @@ describe("Selector set_meta (importance + summary; no lifecycle)", () => {
 });
 
 describe("Selector try_finish (nonBuilder, selectorRootViewThreshold)", () => {
-  let source: MemkeeperGraph;
+  let source: SessionOwlGraph;
   let working: SelectorWorkingCopy;
 
   beforeEach(() => {
@@ -275,7 +275,7 @@ describe("Selector try_finish (nonBuilder, selectorRootViewThreshold)", () => {
   });
 
   it("over threshold → reject + numbers, no terminate", async () => {
-    const tight: MemkeeperConfig = { ...SETTINGS, selectorRootViewThreshold: 5 } as MemkeeperConfig;
+    const tight: SessionOwlConfig = { ...SETTINGS, selectorRootViewThreshold: 5 } as SessionOwlConfig;
     const tools = makeSelectorGraphTools(working, tight);
     const res = await callTool(tools, "try_finish", {});
     const text = textOf(res);
@@ -285,7 +285,7 @@ describe("Selector try_finish (nonBuilder, selectorRootViewThreshold)", () => {
 });
 
 describe("Selector fs_* read tools (alias pi built-ins)", () => {
-  let source: MemkeeperGraph;
+  let source: SessionOwlGraph;
   let working: SelectorWorkingCopy;
 
   beforeEach(() => {
@@ -321,7 +321,7 @@ describe("Selector fs_* read tools (alias pi built-ins)", () => {
 });
 
 describe("Selector todo_list (conditional)", () => {
-  let source: MemkeeperGraph;
+  let source: SessionOwlGraph;
   let working: SelectorWorkingCopy;
 
   beforeEach(() => {
@@ -386,7 +386,7 @@ describe("Selector todo_list (conditional)", () => {
 });
 
 describe("Selector toolset composition (supersede excluded)", () => {
-  let source: MemkeeperGraph;
+  let source: SessionOwlGraph;
   let working: SelectorWorkingCopy;
 
   beforeEach(() => {

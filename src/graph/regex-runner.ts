@@ -59,7 +59,7 @@ interface Pending {
 /** The lazily-created, reused worker. Null until first use, and reset to null
  *  after a timeout or worker error (the next call respawns). One worker serves
  *  all calls so the per-call spawn cost (OS thread + V8 isolate init) is paid
- *  once, not once per find/mk_recall query. */
+ *  once, not once per find/owl_recall query. */
 let worker: Worker | null = null;
 /** Pending requests keyed by id, so the shared worker's replies route to the
  *  right caller (the id also disambiguates if calls ever overlap). */

@@ -4,7 +4,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
 import { runRegexTests } from "../src/graph/regex-runner.js";
 import {
   buildEntryResolver,
@@ -16,7 +16,7 @@ import {
 } from "../src/lifecycle.js";
 import { _setBaseLoggerForTest, clearLogSessionScope, log } from "../src/log.js";
 import { _resetRunLock, acquireOrSkip, type RunHandle } from "../src/runtime/run-lock.js";
-import { _resetSessionAffinity, getStageAffinityId, setMemkeeperSessionBase } from "../src/runtime/session-affinity.js";
+import { _resetSessionAffinity, getStageAffinityId, setSessionOwlSessionBase } from "../src/runtime/session-affinity.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
 import { N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
 import type { WidgetController } from "../src/widget/tracker.js";
@@ -197,12 +197,12 @@ describe("isUnstuckAutoContinue", () => {
 describe("onSessionStart", () => {
   beforeEach(() => {
     resetForNewSession();
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
     _resetSessionAffinity();
     clearLogSessionScope();
   });
   afterEach(() => {
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
     clearLogSessionScope();
   });
 
@@ -244,15 +244,15 @@ describe("onSessionStart", () => {
   it("persists the nGoal seed as a graph_delta (so reload reconstructs it)", async () => {
     const { ctx, pi, appended } = makeCtx([]);
     await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
-    const deltas = appended.filter(([t]) => t === "memkeeper.graph_delta");
+    const deltas = appended.filter(([t]) => t === "session-owl.graph_delta");
     expect(deltas.length).toBe(1);
   });
 
   it("does NOT seed nGoal (writes no graph_delta) when enabled=false", async () => {
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
     const { ctx, pi, appended } = makeCtx([]);
     await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
-    const deltas = appended.filter(([t]) => t === "memkeeper.graph_delta");
+    const deltas = appended.filter(([t]) => t === "session-owl.graph_delta");
     expect(deltas.length).toBe(0);
     // reconstruction still ran (graph is empty, just no seed write)
     expect(getGraphStore().graph.nodes.has(N_GOAL)).toBe(false);
@@ -274,7 +274,7 @@ describe("onSessionStart", () => {
   });
 
   it("captures oInitialPrompt at startup when the branch already has a first user message (resumed session)", async () => {
-    // A resumed pre-memkeeper session: the branch already contains the first
+    // A resumed pre-session-owl session: the branch already contains the first
     // user message, but no turn_end has fired yet. session_start must capture it
     // so a compaction before any turn_end doesn't lose it (or observe it as a
     // regular observation instead of oInitialPrompt).
@@ -389,14 +389,14 @@ describe("captureInitialPromptIfAbsent", () => {
     const { ctx, pi, appended } = makeCtx(branch);
     await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, noopWidget);
     captureInitialPromptIfAbsent(ctx, pi);
-    const obs = appended.filter(([t]) => t === "memkeeper.observation");
+    const obs = appended.filter(([t]) => t === "session-owl.observation");
     expect(obs.length).toBe(1);
     // coversUpToId = the first user entry (frontier advances past it)
     expect((obs[0][1] as { coversUpToId: string }).coversUpToId).toBe("u1");
     // graph_delta log: create_node (nGoal seed) + record_observation (the
     // oInitialPrompt link — replay re-executes the capture exactly). nGoal.summary
     // is set by the goal-extract stage, not a capture-time set_meta.
-    const deltas = appended.filter(([t]) => t === "memkeeper.graph_delta");
+    const deltas = appended.filter(([t]) => t === "session-owl.graph_delta");
     expect(deltas.length).toBe(2);
     const create = deltas[0][1] as { delta: { type: string; id: string } };
     const record = deltas[1][1] as { delta: { type: string; obs: { id: string; parentNode: string } } };
@@ -442,7 +442,7 @@ describe("onSessionShutdown", () => {
   });
 
   it("clears the per-session affinity base", () => {
-    setMemkeeperSessionBase("abc-123");
+    setSessionOwlSessionBase("abc-123");
     expect(getStageAffinityId("build")).toBe("abc-123:build");
     onSessionShutdown({ type: "session_shutdown", reason: "quit" }, noopWidget);
     expect(getStageAffinityId("observe")).toBeNull();
@@ -454,9 +454,9 @@ describe("onSessionShutdown", () => {
 describe("session-entry resolver (buildEntryResolver + lifecycle wiring)", () => {
   beforeEach(() => {
     resetForNewSession();
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
-  afterEach(() => _resetGetMemkeeperSettings());
+  afterEach(() => _resetGetSessionOwlSettings());
 
   it("buildEntryResolver resolves known ids and drops missing ones (branch order)", () => {
     const { ctx } = makeCtx([userEntry("u1", "first"), userEntry("u2", "second")]);

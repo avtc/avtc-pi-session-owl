@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// `/mk:reobserve-0-obs-chunks` — re-run the Observer over the zero-observation
+// `/owl:reobserve-0-obs-chunks` — re-run the Observer over the zero-observation
 // HOLES: chunks the frontier jumped over (a 0-record chunk followed by a
 // record-bearing one) and empty-verdict chunks (a completed chunk persisted with
 // records: []). The repair tool for sessions where a degraded model left holes.
@@ -19,7 +19,7 @@
 // observations without moving the pointer back.
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getMemkeeperSettings } from "../config/schema.js";
+import { getSessionOwlSettings } from "../config/schema.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
 import type { ObserverRunInput } from "../observer/run.js";
@@ -29,7 +29,7 @@ import { computeUncoveredRanges, makeMaybeBuilder, type RunFn } from "../trigger
 import type { WidgetController } from "../widget/tracker.js";
 
 /** The registered command name. */
-export const MK_REOBSERVE_COMMAND = "mk:reobserve-0-obs-chunks";
+export const OWL_REOBSERVE_COMMAND = "owl:reobserve-0-obs-chunks";
 
 /** Deps for the re-observe command: the append surface (pi), the widget the
  *  Observer run drives, the Observer run itself, and the Builder stage run the
@@ -46,15 +46,15 @@ export interface ReobserveDeps {
 }
 
 /**
- * `/mk:reobserve-0-obs-chunks` — compute the zero-observation ranges on the
+ * `/owl:reobserve-0-obs-chunks` — compute the zero-observation ranges on the
  * active branch and re-observe each oldest-first under one run-lock acquire.
  * Additive only: nothing is discarded; recovered observations persist per-chunk
  * as usual. Notifies the start, the recovered summary, or the failure.
  */
-export async function runMkReobserve(_args: string, ctx: ExtensionCommandContext, deps: ReobserveDeps): Promise<void> {
-  const settings = getMemkeeperSettings();
+export async function runOwlReobserve(_args: string, ctx: ExtensionCommandContext, deps: ReobserveDeps): Promise<void> {
+  const settings = getSessionOwlSettings();
   if (!settings.enabled) {
-    notify(ctx, "memkeeper is disabled (enable it first).", "warning");
+    notify(ctx, "session-owl is disabled (enable it first).", "warning");
     return;
   }
   const branch = ctx.sessionManager.getBranch(ctx.sessionManager.getLeafId() ?? undefined);
@@ -84,7 +84,7 @@ export async function runMkReobserve(_args: string, ctx: ExtensionCommandContext
     signal,
     scope: { firstKeptEntryId: null },
     runBuilder: () =>
-      deps.runBuilderStage({ ctx, settings: getMemkeeperSettings(), signal, scope: null, unobserved: null }),
+      deps.runBuilderStage({ ctx, settings: getSessionOwlSettings(), signal, scope: null, unobserved: null }),
   });
   const launch = (async () => {
     let recovered = 0;
@@ -95,7 +95,7 @@ export async function runMkReobserve(_args: string, ctx: ExtensionCommandContext
         await deps.runObserver({
           ctx,
           pi: deps.pi,
-          settings: getMemkeeperSettings(),
+          settings: getSessionOwlSettings(),
           unobserved: range.entries,
           signal,
           widget: deps.widget,
@@ -106,7 +106,7 @@ export async function runMkReobserve(_args: string, ctx: ExtensionCommandContext
       notify(ctx, `Re-observe done — ${recovered} observation(s) recovered into new roots.`, "info");
     } catch (cause) {
       log.error("reobserve: run failed", cause);
-      notify(ctx, "Re-observe failed — see the memkeeper log for the error.", "error");
+      notify(ctx, "Re-observe failed — see the session-owl log for the error.", "error");
     } finally {
       handle.release();
     }

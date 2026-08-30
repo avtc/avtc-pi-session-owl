@@ -11,7 +11,7 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { getMemkeeperSettings } from "../config/schema.js";
+import { getSessionOwlSettings } from "../config/schema.js";
 import { isConflictPaused } from "../conflicts/pause.js";
 import { BUILDER } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
@@ -19,7 +19,7 @@ import { RECORD_OBS_TOOL } from "../observer/run.js";
 import type { StageUsage } from "../runtime/agent-loop.js";
 import { deltaTextOf, deltaTokens, messageEndUsage, streamedOutputUsage } from "../runtime/streaming-tokens.js";
 import { getGraphStore } from "../store/graph-store.js";
-import { estimateContentTokens, type MemkeeperGraph } from "../types.js";
+import { estimateContentTokens, type SessionOwlGraph } from "../types.js";
 import { formatConflictLine, formatWidgetLine } from "./render.js";
 
 /** The maintenance stages the widget surfaces (one at a time; run-level). */
@@ -55,7 +55,7 @@ export interface SelectedCounts {
 export type SelectedCountsProvider = () => SelectedCounts;
 
 /** The widget key + placement. */
-export const WIDGET_KEY = "memkeeper_progress";
+export const WIDGET_KEY = "session_owl_progress";
 export const WIDGET_PLACEMENT = "aboveEditor" as const;
 
 /** `setWidget` is NOT on the no-bare-literals allowlist → a bare undefined 2nd
@@ -150,7 +150,7 @@ export interface ProgressTracker extends StageController, TrackerState {
    *  widget renders per streaming event, but the graph only changes on a
    *  tool_execution_end, so this reuses the cache across message_update deltas
    *  (invalidated on startStage and tool_execution_end). */
-  rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number };
+  rootViewCounts(graph: SessionOwlGraph): { count: number; viewTokens: number };
 
   /** Live selected counts over the Selector's working copy: pulled from the
    *  stage-registered provider and cached across renders (recomputed after a
@@ -353,7 +353,7 @@ const WIDGET_ROOTS_VIEWER = BUILDER;
 /** Non-obsolete root count + view tokens from a SINGLE `nonObsoleteRoots` pass
  *  (the widget renders per streaming event, so the count + the rendered view must
  *  share one roots computation, not two). */
-function rootViewCounts(graph: MemkeeperGraph): { count: number; viewTokens: number } {
+function rootViewCounts(graph: SessionOwlGraph): { count: number; viewTokens: number } {
   const roots = nonObsoleteRoots(graph);
   const viewTokens = estimateContentTokens(renderRootViewFromRoots(roots, WIDGET_ROOTS_VIEWER, graph.observations));
   return { count: roots.length, viewTokens };
@@ -381,7 +381,7 @@ function resolveContextWindow(ctx: ExtensionContext, modelId: string | null): nu
 
 /** Build the render snapshot from the tracker + live store/ctx. */
 export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): WidgetSnapshot {
-  const settings = getMemkeeperSettings();
+  const settings = getSessionOwlSettings();
   const { graph } = getGraphStore();
   // The widget renders per streaming event, but the graph only changes on a
   // tool_execution_end, so reuse the cached root counts across message_update
@@ -558,7 +558,7 @@ function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null, co
   // Conflict-pause line first — width-aware, ignores stage state. LIVENESs: the
   // gate (isConflictPaused) reads settings live, so a mid-session ignoreConflicts
   // flip drops the line on the next render instead of lingering over a
-  // resumed memkeeper (the hits themselves only exist while conflict-paused).
+  // resumed session-owl (the hits themselves only exist while conflict-paused).
   if (conflictNames !== null && isConflictPaused()) {
     const names = conflictNames;
     ctx.ui.setWidget(

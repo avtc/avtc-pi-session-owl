@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The memkeeper extension activate entry point: register the settings command,
-// the widget, and the four session hooks. Hooks read `getMemkeeperSettings()`
+// The session-owl extension activate entry point: register the settings command,
+// the widget, and the four session hooks. Hooks read `getSessionOwlSettings()`
 // live at each trigger (live-toggle guarantee); `enabled=false` is the master
 // off-path (every entry early-returns; compaction returns undefined so Pi runs
 // its native summary).
@@ -10,12 +10,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerUserCommands } from "./commands/user.js";
 import { compactionHook } from "./compaction/hook.js";
-import { getMemkeeperSettings, initMemkeeperSettings, reloadMemkeeperConfig } from "./config/schema.js";
+import { getSessionOwlSettings, initSessionOwlSettings, reloadSessionOwlConfig } from "./config/schema.js";
 import { detectConflicts } from "./conflicts/detect.js";
 import { getConflictHits, isConflictPaused, setConflictHits } from "./conflicts/pause.js";
 import { captureInitialPromptAndExtract, onSessionShutdown, onSessionStart } from "./lifecycle.js";
 import { log } from "./log.js";
-import { makeMkRecallTool } from "./recall/mk-recall.js";
+import { makeOwlRecallTool } from "./recall/owl-recall.js";
 import {
   makeBuilderRun,
   makeObserverRun,
@@ -29,50 +29,50 @@ import { createTodoWiring } from "./todo/wiring.js";
 import { onTurnEnd, setStageRuns } from "./triggers.js";
 import { initWidget } from "./widget/tracker.js";
 
-export default function memkeeperExtension(pi: ExtensionAPI): void {
+export default function sessionOwlExtension(pi: ExtensionAPI): void {
   // Widget first so settings registration can already refresh it: every panel
   // edit re-renders, keeping the pause line in step with live gate flips
   // (render-time liveness decides show/hide — see tracker.ts).
   const widget = initWidget();
-  initMemkeeperSettings(pi, () => widget.render());
+  initSessionOwlSettings(pi, () => widget.render());
 
-  // --- memkeeper:ready extensibility API (for avtc-pi-bench-compact) ---
-  // Lets a host reconfigure memkeeper LIVE (reload the in-memory settings cache from
-  // PI_SETTINGS_MEMKEEPER env / files) without ctx.reload() (which invalidates the
-  // command ctx). Deferred to session_start (reload-safe: memkeeper re-activates each
+  // --- session-owl:ready extensibility API (for avtc-pi-bench-compact) ---
+  // Lets a host reconfigure session-owl LIVE (reload the in-memory settings cache from
+  // PI_SETTINGS_SESSION_OWL env / files) without ctx.reload() (which invalidates the
+  // command ctx). Deferred to session_start (reload-safe: session-owl re-activates each
   // reload; consumers clean their own listener on session_shutdown — see the snippet).
   const api = {
-    reloadConfig: () => reloadMemkeeperConfig(),
-    getConfig: () => getMemkeeperSettings(),
-    // The ACTIVE conflict pause (what paused memkeeper + why), or null: lets a
+    reloadConfig: () => reloadSessionOwlConfig(),
+    getConfig: () => getSessionOwlSettings(),
+    // The ACTIVE conflict pause (what paused session-owl + why), or null: lets a
     // host (e.g. the bench harness co-running other memory extensions via
-    // ignoreConflicts) assert memkeeper is actually live, not just configured.
+    // ignoreConflicts) assert session-owl is actually live, not just configured.
     getConflictPause: (): ReturnType<typeof getConflictHits> => (isConflictPaused() ? getConflictHits() : null),
   };
   const emitReady = (): void => {
-    pi.events.emit("memkeeper:ready", api);
+    pi.events.emit("session-owl:ready", api);
   };
 
   // Conflict pause: another compaction-handling extension is installed. pi's
   // runner treats a session_before_compact handler returning undefined as
   // fully transparent (the other extension's compaction result wins), so
-  // memkeeper registers its FULL surface and stays DORMANT while paused —
+  // session-owl registers its FULL surface and stays DORMANT while paused —
   // every hook early-returns, compaction returns undefined. The gate reads
   // settings live at each hook call, so ignoreConflicts (e.g. via the bench
-  // harness's reloadConfig) resumes memkeeper mid-session; removing the other
-  // package recovers at the next pi start. The widget line + /mk:status keep
+  // harness's reloadConfig) resumes session-owl mid-session; removing the other
+  // package recovers at the next pi start. The widget line + /owl:status keep
   // the pause visible. (Also clears any pause a previous (re)activation
   // recorded, so state never goes stale.)
   const conflicts = detectConflicts();
   setConflictHits(conflicts.length > 0 ? conflicts : null);
-  const activationSettings = getMemkeeperSettings();
+  const activationSettings = getSessionOwlSettings();
   if (conflicts.length > 0 && !activationSettings.enabled) {
     // Detect + record only. enabled=false is the operator's explicit choice —
-    // a conflict warning would claim a pause that is not why memkeeper is off.
+    // a conflict warning would claim a pause that is not why session-owl is off.
   } else if (conflicts.length > 0 && !activationSettings.ignoreConflicts) {
     log.info(
       `conflict pause: ${conflicts.map((h) => h.matched).join(", ")} also handles compaction — ` +
-        "memkeeper stays dormant; remove it, or set ignoreConflicts (see README → Conflicts), to resume",
+        "session-owl stays dormant; remove it, or set ignoreConflicts (see README → Conflicts), to resume",
     );
     widget.setConflict(conflicts.map((h) => h.matched));
   } else if (conflicts.length > 0) {
@@ -87,17 +87,17 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   const todo = createTodoWiring(pi);
 
   // The agent's read-only memory drill-down tool. Registered unconditionally
-  // (it is read-only and harmless even when memkeeper is disabled — it just
+  // (it is read-only and harmless even when session-owl is disabled — it just
   // reads whatever graph state exists).
-  pi.registerTool(makeMkRecallTool());
+  pi.registerTool(makeOwlRecallTool());
 
-  // The user's `/mk:*` browse commands (roots / cat / find / find-all / rescan).
+  // The user's `/owl:*` browse commands (roots / cat / find / find-all / rescan).
   // They render via ui.notify (zero agent-context cost) and read the source graph
-  // directly, so they are harmless even when memkeeper is disabled — except
-  // /mk:rescan, which gates on enabled itself. Registered AFTER the Builder
+  // directly, so they are harmless even when session-owl is disabled — except
+  // /owl:rescan, which gates on enabled itself. Registered AFTER the Builder
   // stage run exists (the rescan reuse-rebuild drives it).
 
-  // /mk:status — the user-facing status report (memory stats + per-phase usage).
+  // /owl:status — the user-facing status report (memory stats + per-phase usage).
   registerStatusCommand(pi);
 
   // Wire the stage run functions (Observer + Builder + Selector). The
@@ -125,11 +125,11 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", (_event, _ctx) => onSessionShutdown(_event, widget));
 
   pi.on("turn_end", (_event, ctx) => {
-    const settings = getMemkeeperSettings();
+    const settings = getSessionOwlSettings();
     // enabled=false / conflict-pause off-path: no work, no capture, no background
     // run — but still render the widget once so the pause LINE stays honest
     // across mid-session flips (render-time liveness shows it when a pause has
-    // started, hides it when memkeeper was disabled — no next-session_start lag).
+    // started, hides it when session-owl was disabled — no next-session_start lag).
     if (!settings.enabled || isConflictPaused()) {
       widget.setCtx(ctx);
       widget.render();
@@ -150,8 +150,8 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
     // Fire-and-forget the background trigger evaluation (Observer + Builder +
     // Selector); the handler returns immediately and never blocks the agent.
     // Wrapped so a throw from the synchronous trigger evaluation is logged via
-    // memkeeper's own logger (Pi's emit() also catches it, but this surfaces it
-    // in the memkeeper log alongside the stage traces).
+    // session-owl's own logger (Pi's emit() also catches it, but this surfaces it
+    // in the session-owl log alongside the stage traces).
     try {
       onTurnEnd({ ctx, settings });
     } catch (err) {
@@ -160,7 +160,7 @@ export default function memkeeperExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_before_compact", (event, ctx) => {
-    const settings = getMemkeeperSettings();
+    const settings = getSessionOwlSettings();
     // enabled=false / conflict-pause off-path: return undefined so Pi runs its
     // native compaction — or, with another compaction handler registered, so
     // that handler's result wins (pi treats undefined as fully transparent).

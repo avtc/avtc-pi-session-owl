@@ -4,7 +4,7 @@
 // Conflict detection for co-installed compaction-handling extensions. Pi's
 // compaction hook is last-registration-wins and pi has no pre-load veto, so the
 // only sane coexistence policy is self-restraint: when another known
-// compaction-handling package is installed, memkeeper skips registering its
+// compaction-handling package is installed, session-owl skips registering its
 // hooks/tools for this process (runtime pause — nothing persisted, so it
 // auto-recovers once the other package is removed).
 
@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** One installed package that conflicts with memkeeper's compaction role. */
+/** One installed package that conflicts with session-owl's compaction role. */
 export interface ConflictHit {
   /** The settings `packages` entry that matched (npm:/git:/path source form). */
   entry: string;
@@ -51,15 +51,15 @@ export function _setConflictsHomeForTest(home: string | null): void {
   conflictsHomeOverride = home;
 }
 
-/** This package's own root (…/avtc-pi-memkeeper), derived from this module file. */
+/** This package's own root (…/avtc-pi-session-owl), derived from this module file. */
 function defaultSelfRoot(): string {
   // <pkgRoot>/dist/conflicts/detect.js (or src/ under test) → three dirs up.
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
-/** True when the settings entry is memkeeper itself (own npm name or own path). */
+/** True when the settings entry is session-owl itself (own npm name or own path). */
 function isSelfEntry(entry: string, selfRoot: string): boolean {
-  if (entry.toLowerCase().includes("avtc-pi-memkeeper")) return true;
+  if (entry.toLowerCase().includes("avtc-pi-session-owl")) return true;
   // Only bare paths can be resolved against selfRoot — npm:/git:/http source
   // specs are not paths (path.resolve would fold them into cwd, which sits
   // inside our own package root and false-positive as "self").

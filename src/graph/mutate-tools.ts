@@ -11,7 +11,7 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { ImportanceSchema } from "../schema.js";
-import type { Importance, MemkeeperGraph, NodeId, ObsId } from "../types.js";
+import type { Importance, SessionOwlGraph, NodeId, ObsId } from "../types.js";
 import { GraphInvariantError } from "./invariants.js";
 import {
   applyCreateNode,
@@ -80,7 +80,7 @@ function stripOpPrefix(message: string): string {
  *  model learns any new/resolved ids (e.g. merge with destId=null resolves a
  *  new root id). */
 export function runMutate(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   ctx: MutateContext,
   what: string,
   apply: () => GraphDelta,
@@ -153,7 +153,7 @@ export const SELECTOR_SET_META_PARAMS = Type.Object({
 
 /** Build the `mkdir` tool: create a container node (zero observations OK) under
  *  an optional parent, state `active`, with the given importance. */
-export function makeMkdirTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof MKDIR_PARAMS> {
+export function makeMkdirTool(graph: SessionOwlGraph, ctx: MutateContext): AgentTool<typeof MKDIR_PARAMS> {
   return {
     name: MKDIR_TOOL,
     description: "Create an empty container node for grouping. Returns the new node's id.",
@@ -186,7 +186,7 @@ export function makeMkdirTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
  *  the root when destId is null). An optional newSummary rewrites the dest
  *  node's summary as part of the same atomic mutate (ignored when destId is
  *  null — promoting to root touches no dest). */
-export function makeMvTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof MV_PARAMS> {
+export function makeMvTool(graph: SessionOwlGraph, ctx: MutateContext): AgentTool<typeof MV_PARAMS> {
   return {
     name: MV_TOOL,
     description:
@@ -226,7 +226,7 @@ export function makeMvTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool
  *  required when destId is null (names the new root node); optional when merging
  *  into an existing dest (a refreshed synthesis — omit to keep the dest summary).
  *  Absorbed nodes dissolve once emptied. */
-export function makeMergeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentTool<typeof MERGE_PARAMS> {
+export function makeMergeTool(graph: SessionOwlGraph, ctx: MutateContext): AgentTool<typeof MERGE_PARAMS> {
   return {
     name: MERGE_TOOL,
     description: "Fold nodes into a destination, combining their contents; the absorbed nodes dissolve.",
@@ -269,7 +269,7 @@ export function makeMergeTool(graph: MemkeeperGraph, ctx: MutateContext): AgentT
  *  by archiving). Implemented over the shared set_meta mutator passing importance
  *  + summary and forcing the lifecycle fields to null. */
 export function makeSelectorSetMetaTool(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   ctx: MutateContext,
 ): AgentTool<typeof SELECTOR_SET_META_PARAMS> {
   return {

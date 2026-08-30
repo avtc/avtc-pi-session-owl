@@ -217,7 +217,7 @@ describe("runSelector", () => {
       runStageFn: countingRunStage,
     });
     expect(passCount).toBe(2);
-    // a memkeeper.selection snapshot was persisted
+    // a session-owl.selection snapshot was persisted
     const selections = selectionEntries(cap.appended);
     expect(selections.length).toBeGreaterThanOrEqual(1);
     // the widget opened/closed the select stage
@@ -823,9 +823,9 @@ describe("runSelector", () => {
     });
     // only pass 1 ran (the signal-abort break stopped the loop before pass 2)
     expect(passCount).toBe(1);
-    // partial tree persisted: a memkeeper.selection entry was written
+    // partial tree persisted: a session-owl.selection entry was written
     expect(selectionEntries(cap.appended).length).toBe(1);
-    // persistLedger skipped on abort (normalEnd false): no memkeeper.usage entry
+    // persistLedger skipped on abort (normalEnd false): no session-owl.usage entry
     expect(cap.appended.filter((e) => e.type === USAGE_TYPE).length).toBe(0);
   });
 

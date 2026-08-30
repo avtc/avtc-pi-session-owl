@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Custom-entry codecs: encode/decode the four `memkeeper.*` custom-entry
-// payloads + the `MemkeeperDetails` compaction-entry details snapshot.
+// Custom-entry codecs: encode/decode the four `session-owl.*` custom-entry
+// payloads + the `SessionOwlDetails` compaction-entry details snapshot.
 //
 // Tolerant-reader contract: decoders return `null` on any
 // malformed input rather than throwing — a single bad entry/details is skipped,
@@ -15,7 +15,7 @@ import type { GraphDelta } from "../graph/mutations.js";
 import {
   IMPORTANCE_VALUES,
   type Importance,
-  type MemkeeperGraph,
+  type SessionOwlGraph,
   makeNode,
   makeObservation,
   NODE_STATE_VALUES,
@@ -29,16 +29,16 @@ import {
 
 // --- customType names -----------------------------------------------------
 
-export const OBSERVATION_TYPE = "memkeeper.observation";
-export const GRAPH_DELTA_TYPE = "memkeeper.graph_delta";
-export const SELECTION_TYPE = "memkeeper.selection";
-export const USAGE_TYPE = "memkeeper.usage";
-/** `/mk:rescan` marker: a void-everything-before point. On load, entries at or
+export const OBSERVATION_TYPE = "session-owl.observation";
+export const GRAPH_DELTA_TYPE = "session-owl.graph_delta";
+export const SELECTION_TYPE = "session-owl.selection";
+export const USAGE_TYPE = "session-owl.usage";
+/** `/owl:rescan` marker: a void-everything-before point. On load, entries at or
  *  before the latest rescan marker are ignored (the graph rebuilds from the
  *  marker forward). Append-only/event-sourced, so the old entries stay in the
  *  session file but no longer contribute. */
-export const RESCAN_TYPE = "memkeeper.rescan";
-/** Rescan marker payload mode for `/mk:rescan --reuse-observations`: voids the
+export const RESCAN_TYPE = "session-owl.rescan";
+/** Rescan marker payload mode for `/owl:rescan --reuse-observations`: voids the
  *  graph STRUCTURE only — the collected observation records + frontier survive
  *  the marker so the rebuild pipeline can re-wrap them without re-observing
  *  (no Observer LLM). Absent mode (or any other value) = the plain full void. */
@@ -46,11 +46,11 @@ export const RESCAN_MODE_REUSE = "reuse" as const;
 
 /** Current snapshot schema version (additive fields don't bump). */
 export const DETAILS_VERSION = "v1";
-/** Producer marker stamped on every memkeeper compaction snapshot. The compaction
+/** Producer marker stamped on every session-owl compaction snapshot. The compaction
  *  `details` field is shared + last-writer-wins (any extension hooking
  *  session_before_compact overwrites it), so `type` — NOT the generic `version` —
- *  is the sound discriminator for "is this a memkeeper snapshot?". */
-export const DETAILS_TYPE = "memkeeper";
+ *  is the sound discriminator for "is this a session-owl snapshot?". */
+export const DETAILS_TYPE = "session-owl";
 
 // --- usage ledger ---------------------------------------------------------
 
@@ -158,7 +158,7 @@ export interface SerializedSelection {
 
 // --- custom-entry payloads -------------------------------------------------
 
-/** `memkeeper.observation` — a batch from one Observer run. */
+/** `session-owl.observation` — a batch from one Observer run. */
 export interface ObservationEntry {
   coversFromId: string | null;
   coversUpToId: string;
@@ -166,7 +166,7 @@ export interface ObservationEntry {
   tokenCount: number;
 }
 
-/** `memkeeper.graph_delta` — one or more applied mutates (envelope over
+/** `session-owl.graph_delta` — one or more applied mutates (envelope over
  *  GraphDelta(s)). Singular `delta` is a Builder per-mutate entry; `deltas`
  *  (array) is an Observer wrapper batch (additive; tolerant-reader safe). */
 export interface GraphDeltaEntry {
@@ -177,10 +177,10 @@ export interface GraphDeltaEntry {
   deltas?: GraphDelta[];
 }
 
-/** `memkeeper.selection` — the Selector's selected-tree snapshot. */
+/** `session-owl.selection` — the Selector's selected-tree snapshot. */
 export interface SelectionEntry extends SerializedSelection {}
 
-/** `memkeeper.usage` — the cumulative usage ledger. */
+/** `session-owl.usage` — the cumulative usage ledger. */
 export interface UsageEntry {
   ledger: UsageLedger;
 }
@@ -192,8 +192,8 @@ export interface UsageEntry {
  * snapshot — structure + cached token counts + id counters + observation-id refs,
  * NOT observation content. Carries the last selected tree + usage baseline.
  */
-export interface MemkeeperDetails {
-  type: "memkeeper";
+export interface SessionOwlDetails {
+  type: "session-owl";
   version: string;
   nodes: SerializedNode[];
   oInitialPrompt: SerializedObservation | null;
@@ -420,19 +420,19 @@ function normalizePhase(p: PhaseUsage): PhaseUsage {
   };
 }
 
-/** Known MemkeeperDetails schema versions (tolerant reader rejects others). */
+/** Known SessionOwlDetails schema versions (tolerant reader rejects others). */
 const KNOWN_DETAILS_VERSIONS = new Set<string>([DETAILS_VERSION]);
 
-/** Decode compaction details; null if malformed/non-memkeeper (native rejected).
+/** Decode compaction details; null if malformed/non-session-owl (native rejected).
  *  A KNOWN version is required: additive field changes do NOT bump the version
  *  (they're handled by the per-delta optional-field coalescing in `load`), so a
  *  bumped version signals a breaking schema change we cannot safely migrate at
  *  read. Returning null makes `load` fall back to deltas-only reconstruction
  *  (lossless for the graph + counters; the lastCompactionLedger baseline is
- *  lost until the next compaction re-captures it — cosmetic, /mk:status only).
+ *  lost until the next compaction re-captures it — cosmetic, /owl:status only).
  *  The drop is logged by `findLatestSnapshot` when the details carries a
  *  `version` field. */
-export function decodeDetails(raw: unknown): MemkeeperDetails | null {
+export function decodeDetails(raw: unknown): SessionOwlDetails | null {
   if (!isObject(raw)) return null;
   const {
     type,
@@ -478,7 +478,7 @@ export function decodeDetails(raw: unknown): MemkeeperDetails | null {
     lastCompactionLedger: ledger,
     // additive per-stage breakdown (bench reads it off the raw JSONL; pass through if present).
     compactionStages: isObject(compactionStages)
-      ? (compactionStages as MemkeeperDetails["compactionStages"])
+      ? (compactionStages as SessionOwlDetails["compactionStages"])
       : undefined,
   };
 }
@@ -525,7 +525,7 @@ export function encodeNode(node: Node): SerializedNode {
  * `oInitialPrompt` is carried verbatim.
  */
 export function encodeSelection(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   oInitialPrompt: ObsId | null,
   coveredFrontier: string | null,
 ): SerializedSelection {
@@ -560,10 +560,10 @@ export function encodeSelection(
 
 /** Encode compaction details from the in-memory graph + optional baseline state. */
 export function encodeDetails(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   selectedTree: SerializedSelection | null,
   lastCompactionLedger: UsageLedger | null,
-): MemkeeperDetails {
+): SessionOwlDetails {
   const nodes: SerializedNode[] = [];
   for (const node of graph.nodes.values()) {
     nodes.push(encodeNode(node));

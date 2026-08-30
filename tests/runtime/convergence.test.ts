@@ -7,7 +7,7 @@ import { MKDIR_TOOL, MV_TOOL } from "../../src/graph/mutate-tools.js";
 import { LS_TOOL, TRY_FINISH_TOOL } from "../../src/graph/read-tools.js";
 import type { StageRunInput, StageRunResult, StageUsage } from "../../src/runtime/agent-loop.js";
 import { makeConvergenceTracker, runConvergencePass } from "../../src/runtime/convergence.js";
-import { _resetSessionAffinity, setMemkeeperSessionBase } from "../../src/runtime/session-affinity.js";
+import { _resetSessionAffinity, setSessionOwlSessionBase } from "../../src/runtime/session-affinity.js";
 
 const NAMES = new Set<string>([MKDIR_TOOL, MV_TOOL]);
 
@@ -217,7 +217,7 @@ describe("runConvergencePass", () => {
   });
 
   it("forwards a per-stage affinity id derived from the session base + stage label", async () => {
-    setMemkeeperSessionBase("sess-1");
+    setSessionOwlSessionBase("sess-1");
     const { outcome, onEvent } = makeConvergenceTracker(() => {}, NAMES);
     let receivedId: string | undefined;
     const runStageFn = async (input: StageRunInput): Promise<StageRunResult> => {

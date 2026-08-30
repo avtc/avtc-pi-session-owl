@@ -228,27 +228,27 @@ describe("formatWidgetLine", () => {
 describe("formatConflictLine", () => {
   it("wide terminal: the approved full line, accent prefix + muted rest", () => {
     const line = formatConflictLine(["pi-blackhole"], 200, fakeTheme());
-    expect(visible(line)).toBe("🦉 ⚠ paused — pi-blackhole also handles compaction (/mk:status)");
+    expect(visible(line)).toBe("🦉 ⚠ paused — pi-blackhole also handles compaction (/owl:status)");
     expect(line).toContain("«accent|🦉 ⚠ paused — »");
-    expect(line).toContain("«muted|pi-blackhole also handles compaction (/mk:status)»");
+    expect(line).toContain("«muted|pi-blackhole also handles compaction (/owl:status)»");
   });
 
   it("plural verb for multiple names", () => {
     const line = formatConflictLine(["pi-blackhole", "pi-vcc"], 200, fakeTheme());
-    expect(visible(line)).toBe("🦉 ⚠ paused — pi-blackhole, pi-vcc also handle compaction (/mk:status)");
+    expect(visible(line)).toBe("🦉 ⚠ paused — pi-blackhole, pi-vcc also handle compaction (/owl:status)");
   });
 
   it("narrow: collapses the list to first + +N more (list truncates, hint stays)", () => {
-    const collapsed = "🦉 ⚠ paused — pi-blackhole, +2 more also handle compaction (/mk:status)";
+    const collapsed = "🦉 ⚠ paused — pi-blackhole, +2 more also handle compaction (/owl:status)";
     const width = visibleWidth(collapsed) + 1;
     const line = formatConflictLine(["pi-blackhole", "pi-vcc", "pi-pact"], width, fakeTheme());
     expect(visible(line)).toBe(collapsed);
-    expect(visible(line)).toContain("(/mk:status)");
+    expect(visible(line)).toContain("(/owl:status)");
   });
 
   it("narrower: drops the verb before touching names", () => {
     const name = "x".repeat(60);
-    const noVerb = `🦉 ⚠ paused — ${name} (/mk:status)`;
+    const noVerb = `🦉 ⚠ paused — ${name} (/owl:status)`;
     const width = visibleWidth(noVerb) + 1;
     const line = formatConflictLine([name], width, fakeTheme());
     expect(visible(line)).toBe(noVerb);
@@ -259,7 +259,7 @@ describe("formatConflictLine", () => {
     const text = visible(line);
     expect(visibleWidth(text)).toBeLessThanOrEqual(40);
     expect(text).toContain("…");
-    expect(text.endsWith("(/mk:status)")).toBe(true);
+    expect(text.endsWith("(/owl:status)")).toBe(true);
   });
 
   it("never exceeds the width in any degradation step", () => {

@@ -19,7 +19,7 @@ describe("phaseUsageToUsage", () => {
       output: 500,
       cacheRead: 300,
       cacheWrite: 40,
-      totalTokens: 1840, // derived (memkeeper doesn't track per-phase totalTokens)
+      totalTokens: 1840, // derived (session-owl doesn't track per-phase totalTokens)
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.05 }, // per-bucket 0 (not tracked); total real
     });
   });

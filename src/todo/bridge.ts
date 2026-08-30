@@ -16,7 +16,7 @@ export interface TodoProxy {
  *  the vendored proxy's getItems, which takes `{status} | null`). */
 const NO_FILTER = null;
 
-/** Known memkeeper statuses (the union). The vendored proxy's `status` is a
+/** Known session-owl statuses (the union). The vendored proxy's `status` is a
  *  bare `string` (cross-extension data), so mapTodoItem guards it at this trust
  *  boundary rather than casting blindly. */
 const KNOWN_STATUSES = new Set<TodoItem["status"]>(["pending", "in_progress", "completed"]);
@@ -28,7 +28,7 @@ const KNOWN_STATUSES = new Set<TodoItem["status"]>(["pending", "in_progress", "c
 const TERMINAL_STATUS: TodoItem["status"] = "completed";
 
 /** Map a raw bridge item (string status, includes `decomposed`, details always
- *  a string) to memkeeper's `TodoItem` (literal status union, details optional).
+ *  a string) to session-owl's `TodoItem` (literal status union, details optional).
  *  Drops `parentId` (not part of the Selector's todo view). Guards the status at
  *  the cross-extension boundary: decomposed → completed; unknown → completed. */
 export function mapTodoItem(raw: TodoReadyItem): TodoItem {

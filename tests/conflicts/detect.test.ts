@@ -12,8 +12,8 @@ let home: string;
 let project: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "mk-conflicts-"));
-  project = mkdtempSync(join(tmpdir(), "mk-conflicts-proj-"));
+  home = mkdtempSync(join(tmpdir(), "owl-conflicts-"));
+  project = mkdtempSync(join(tmpdir(), "owl-conflicts-proj-"));
   _setConflictsHomeForTest(home);
 });
 
@@ -57,12 +57,12 @@ describe("detectConflicts", () => {
     expect(hits[0].matched).toBe("pi-vcc");
   });
 
-  it("excludes memkeeper itself (own entry by name or under selfRoot)", () => {
-    writeUserSettings(["E:\\sync\\unique\\work\\git\\pi\\avtc-pi-memkeeper", "npm:avtc-pi-memkeeper"]);
-    // a foreign path that happens to live under a memkeeper-shaped selfRoot
+  it("excludes session-owl itself (own entry by name or under selfRoot)", () => {
+    writeUserSettings(["E:\\sync\\unique\\work\\git\\pi\\avtc-pi-session-owl", "npm:avtc-pi-session-owl"]);
+    // a foreign path that happens to live under a session-owl-shaped selfRoot
     const hits = detectConflicts({
       projectDir: project,
-      selfRoot: "E:\\sync\\unique\\work\\git\\pi\\avtc-pi-memkeeper",
+      selfRoot: "E:\\sync\\unique\\work\\git\\pi\\avtc-pi-session-owl",
     });
     expect(hits).toEqual([]);
   });
@@ -199,7 +199,7 @@ describe("detectConflicts: generic override-shape scan", () => {
     const suite = join(extDir, "avtc-pi-hypothetical");
     mkdirSync(suite, { recursive: true });
     writeFileSync(join(suite, "index.js"), 'pi.on("session_before_compact", () => ({ cancel: true }));', "utf8");
-    const selfDir = join(extDir, "avtc-pi-memkeeper");
+    const selfDir = join(extDir, "avtc-pi-session-owl");
     mkdirSync(selfDir, { recursive: true });
     writeFileSync(join(selfDir, "index.js"), 'pi.on("session_before_compact", () => ({ cancel: true }));', "utf8");
     const hits = detectConflicts({ projectDir: project });

@@ -3,12 +3,12 @@
 
 // Pure usage-ledger math (no callbacks, no I/O). The ledger is a per-phase
 // cumulative token/cost/turn tracker; the stage passes feed it via
-// addPhaseUsage at each stage end and /mk:status reads it.
+// addPhaseUsage at each stage end and /owl:status reads it.
 
 import type { StageUsage } from "../runtime/agent-loop.js";
 import { cloneLedger, type PhaseUsage, type UsageLedger } from "../store/codecs.js";
 
-/** The three memkeeper stages whose usage the ledger tracks. */
+/** The three session-owl stages whose usage the ledger tracks. */
 export type Phase = "observe" | "build" | "select";
 
 /**
@@ -40,7 +40,7 @@ export function bumpRun(ledger: UsageLedger, phase: Phase): void {
  * Snapshot the ledger at a compaction point. The `ledger` is the post-compaction
  * cumulative baseline; `lastCompactionLedger` is a deep copy of it so later
  * stage activity can't mutate the captured baseline. The compaction hook keeps
- * `lastCompactionLedger` (carried into `details`) so post-compaction /mk:status
+ * `lastCompactionLedger` (carried into `details`) so post-compaction /owl:status
  * "since last compaction" arithmetic is correct.
  */
 export function snapshotAtCompaction(ledger: UsageLedger): { ledger: UsageLedger; lastCompactionLedger: UsageLedger } {

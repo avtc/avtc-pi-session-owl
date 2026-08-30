@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// GraphStore: the single in-memory source of truth for the memkeeper graph.
+// GraphStore: the single in-memory source of truth for the session-owl graph.
 // Holds the reconstructed graph, the persisted selected tree, the usage ledger,
 // and the Observer frontier pointer. Persistence is append-only custom entries;
 // reconstruction = last snapshot + fold deltas-since.
@@ -21,7 +21,7 @@ import { type GraphDelta, parseSeq, recomputeRange } from "../graph/mutations.js
 import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
 import {
-  MemkeeperGraph,
+  SessionOwlGraph,
   makeNode,
   type Node,
   type NodeId,
@@ -40,7 +40,7 @@ import {
   EMPTY_LEDGER,
   GRAPH_DELTA_TYPE,
   type GraphDeltaEntry,
-  type MemkeeperDetails,
+  type SessionOwlDetails,
   OBSERVATION_TYPE,
   type ObservationEntry,
   RESCAN_MODE_REUSE,
@@ -96,10 +96,10 @@ export interface StoreContext {
 
 /** The in-memory store: the reconstructed graph + cached projection state. */
 export interface GraphStore {
-  graph: MemkeeperGraph;
+  graph: SessionOwlGraph;
   selectedTree: SerializedSelection | null;
   usageLedger: UsageLedger;
-  /** The cumulative ledger captured at the last compaction (the /mk:status
+  /** The cumulative ledger captured at the last compaction (the /owl:status
    *  "since last compaction" baseline). `null` until the first compaction on
    *  this branch — then since-last-compaction == since-session-start. */
   lastCompactionLedger: UsageLedger | null;
@@ -117,7 +117,7 @@ let store: GraphStore | null = null;
 export function getGraphStore(): GraphStore {
   if (store === null) {
     store = {
-      graph: new MemkeeperGraph({
+      graph: new SessionOwlGraph({
         nodes: new Map(),
         observations: new Map(),
         nextObsId: 1,
@@ -221,7 +221,7 @@ export function appendUsage(ctx: StoreContext, ledger: UsageLedger): void {
   getGraphStore().usageLedger = ledger;
 }
 
-/** `/mk:rescan`: void everything before now (persist a rescan marker) and reset
+/** `/owl:rescan`: void everything before now (persist a rescan marker) and reset
  *  the in-memory graph to empty (reseed nGoal on the next session_start /
  *  Observer run). The Observer frontier is cleared so the next trigger observes
  *  the entire branch from the first user message. The old entries stay in the
@@ -229,7 +229,7 @@ export function appendUsage(ctx: StoreContext, ledger: UsageLedger): void {
 export function resetGraphForRescan(ctx: StoreContext): void {
   ctx.appendEntry(RESCAN_TYPE, { at: nowStoredTimestamp() });
   const s = getGraphStore();
-  s.graph = new MemkeeperGraph({
+  s.graph = new SessionOwlGraph({
     nodes: new Map(),
     observations: new Map(),
     nextObsId: 1,
@@ -241,7 +241,7 @@ export function resetGraphForRescan(ctx: StoreContext): void {
   s.lastCompactionLedger = null;
 }
 
-/** `/mk:rescan --reuse-observations`: void the STRUCTURE at/before now (persist
+/** `/owl:rescan --reuse-observations`: void the STRUCTURE at/before now (persist
  *  a reuse-mode rescan marker) and reset the in-memory graph to empty structure,
  *  KEEPING the collected observation records (the ledger), the Observer
  *  frontier, and the usage ledger — the rebuild pipeline re-wraps the records
@@ -251,7 +251,7 @@ export function resetGraphForRescan(ctx: StoreContext): void {
 export function resetGraphForReuse(ctx: StoreContext): void {
   ctx.appendEntry(RESCAN_TYPE, { at: nowStoredTimestamp(), mode: RESCAN_MODE_REUSE });
   const s = getGraphStore();
-  s.graph = new MemkeeperGraph({
+  s.graph = new SessionOwlGraph({
     nodes: new Map(),
     observations: s.graph.observations,
     nextObsId: s.graph.nextObsId,
@@ -270,38 +270,38 @@ function isCompactionEntry(e: StoreEntry): e is StoreCompactionEntry {
   return e.type === "compaction";
 }
 
-/** Find the latest compaction entry whose details decode as MemkeeperDetails. */
+/** Find the latest compaction entry whose details decode as SessionOwlDetails. */
 function findLatestSnapshot(
   entries: StoreEntry[],
   rescanCutoff: number,
-): { details: MemkeeperDetails; index: number } | null {
+): { details: SessionOwlDetails; index: number } | null {
   for (let i = entries.length - 1; i > rescanCutoff; i -= 1) {
     const e = entries[i];
     if (e === undefined || !isCompactionEntry(e)) continue;
     const details = decodeDetails(e.details);
     if (details !== null) return { details, index: i };
     // Discriminate by the producer MARKER (`type`), not the generic `version`:
-    // `details` is shared + last-writer-wins, so only a snapshot memkeeper itself
-    // wrote (type === "memkeeper") that fails decode is genuine corruption (warn).
+    // `details` is shared + last-writer-wins, so only a snapshot session-owl itself
+    // wrote (type === "session-owl") that fails decode is genuine corruption (warn).
     // A foreign snapshot (another extension's compaction details, a native compaction,
     // or a future unknown producer) legitimately fails decode — expected when
     // switching extensions, so it stays debug-level (silent unless debugLog on)
     // instead of flooding the log on every load.
     const raw = e.details as { type?: unknown };
     if (raw.type === DETAILS_TYPE) {
-      log.warn(`graph-store: corrupt memkeeper snapshot at ${e.id} — falling back to deltas-only`);
+      log.warn(`graph-store: corrupt session-owl snapshot at ${e.id} — falling back to deltas-only`);
     } else {
-      log.debug(`graph-store: non-memkeeper snapshot at ${e.id} — skipped`);
+      log.debug(`graph-store: non-session-owl snapshot at ${e.id} — skipped`);
     }
   }
   return null;
 }
 
-/** The index of the latest `/mk:rescan` markers. `structureAt` = the latest
+/** The index of the latest `/owl:rescan` markers. `structureAt` = the latest
  *  marker of ANY mode (structure at/before it is void: nodes, graph deltas,
  *  snapshots, selected tree). `plainAt` = the latest FULL marker (additionally
  *  voids the observation ledger + frontier at/before it). A reuse-mode marker
- *  (`/mk:rescan --reuse-observations`) voids structure only — the collected
+ *  (`/owl:rescan --reuse-observations`) voids structure only — the collected
  *  observation records survive it for the structure rebuild. */
 function findLatestRescanMarkers(entries: StoreEntry[]): { plainAt: number; structureAt: number } {
   let plainAt = -1;
@@ -320,7 +320,7 @@ function findLatestRescanMarkers(entries: StoreEntry[]): { plainAt: number; stru
 }
 
 /** Materialize the node graph + id counters + oInitialPrompt from a snapshot. */
-function materializeBase(details: MemkeeperDetails): MemkeeperGraph {
+function materializeBase(details: SessionOwlDetails): SessionOwlGraph {
   const nodes = new Map<NodeId, Node>();
   const observations = new Map<ObsId, Observation>();
   for (const sn of details.nodes) {
@@ -344,7 +344,7 @@ function materializeBase(details: MemkeeperDetails): MemkeeperGraph {
     const obs = decodeObservation(details.oInitialPrompt);
     if (obs !== null) observations.set(obs.id, obs);
   }
-  return new MemkeeperGraph({
+  return new SessionOwlGraph({
     nodes,
     observations,
     nextObsId: details.nextObsId,
@@ -366,7 +366,7 @@ function materializeBase(details: MemkeeperDetails): MemkeeperGraph {
  *    load, so nothing captured is ever dropped.
  *  Each node whose evidence set changed has its range recomputed once.
  *  Returns the number of re-wrapped orphans (a corruption diagnostic). */
-function reconcileLinks(graph: MemkeeperGraph): number {
+function reconcileLinks(graph: SessionOwlGraph): number {
   const touched = new Set<NodeId>();
   let rewrapped = 0;
   // Pass 1: prune phantom listings; collect the surviving listers per record.
@@ -437,7 +437,7 @@ function reconcileLinks(graph: MemkeeperGraph): number {
  *  loads — the id derives from the record id (or the id counter when that id
  *  is taken), so re-derivation mints the identical node. Returns the wrapper
  *  id, or null when the record id carries no numeric sequence (unrepresentable). */
-function rewrapOrphan(graph: MemkeeperGraph, obs: Observation): NodeId | null {
+function rewrapOrphan(graph: SessionOwlGraph, obs: Observation): NodeId | null {
   const seq = parseSeq(obs.id);
   if (seq <= 0) return null;
   const preferred = `n${seq}` as NodeId;
@@ -491,14 +491,14 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
   const positionById = new Map<string, number>();
   for (let i = 0; i < entries.length; i += 1) positionById.set(entries[i].id, i);
 
-  // `/mk:rescan` markers: the latest of ANY mode voids structure at/before it;
+  // `/owl:rescan` markers: the latest of ANY mode voids structure at/before it;
   //  the latest PLAIN marker additionally voids the observation ledger +
   //  frontier (a reuse-mode marker keeps them for the structure rebuild).
   const { plainAt, structureAt } = findLatestRescanMarkers(entries);
 
   // 1. find the latest valid snapshot AFTER the structure cutoff (or start empty)
   const snapshot = findLatestSnapshot(entries, structureAt);
-  let graph: MemkeeperGraph;
+  let graph: SessionOwlGraph;
   let replayFrom = structureAt + 1;
   if (snapshot !== null) {
     graph = materializeBase(snapshot.details);
@@ -507,7 +507,7 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
     storeState.lastCompactionLedger = snapshot.details.lastCompactionLedger ?? null;
     replayFrom = snapshot.index + 1;
   } else {
-    graph = new MemkeeperGraph({
+    graph = new SessionOwlGraph({
       nodes: new Map(),
       observations: new Map(),
       nextObsId: 1,

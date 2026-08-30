@@ -152,7 +152,7 @@ describe("usage-ledger", () => {
 
   describe("reconstruct from delta + snapshot (the load path)", () => {
     it("a delta ledger + a baseline snapshot round-trip into since-last-compaction", () => {
-      // session-start cumulative (what the latest memkeeper.usage delta carries)
+      // session-start cumulative (what the latest session-owl.usage delta carries)
       const ledger: UsageLedger = {
         observe: phase(5000, 3000, 1500, 200, 0.2, 12, 4),
         build: phase(2000, 1500, 700, 90, 0.11, 5, 1),

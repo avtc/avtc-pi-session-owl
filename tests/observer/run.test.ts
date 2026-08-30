@@ -8,13 +8,13 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetGetMemkeeperSettings, _setGetMemkeeperSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { _setDumpHomeForTest, sanitizeForPath } from "../../src/debug-dump.js";
 import { setClock } from "../../src/graph/mutations.js";
 import { _setBaseLoggerForTest } from "../../src/log.js";
 import { type ObserverRunInput, runObserver } from "../../src/observer/run.js";
 import type { TurnPredicate } from "../../src/runtime/agent-loop.js";
-import { _resetSessionAffinity, setMemkeeperSessionBase } from "../../src/runtime/session-affinity.js";
+import { _resetSessionAffinity, setSessionOwlSessionBase } from "../../src/runtime/session-affinity.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import { NO_OP_WIDGET, type WidgetController } from "../../src/widget/tracker.js";
 
@@ -168,9 +168,9 @@ describe("runObserver", () => {
 
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
 
-    // exactly one graph_delta (a batched envelope) + one memkeeper.observation entry
-    const graphDeltas = appended.filter((e) => e.type === "memkeeper.graph_delta");
-    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    // exactly one graph_delta (a batched envelope) + one session-owl.observation entry
+    const graphDeltas = appended.filter((e) => e.type === "session-owl.graph_delta");
+    const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(graphDeltas).toHaveLength(1);
     // the batched envelope carries the chunk's ops in live order: create_node
     // immediately followed by its record_observation (replay re-executes the
@@ -253,7 +253,7 @@ describe("runObserver", () => {
     expect(script.acks[0]).toBe("accepted: all");
   });
 
-  it("writes no memkeeper.usage entry when no chunk reports usage (the hasUsage guard)", async () => {
+  it("writes no session-owl.usage entry when no chunk reports usage (the hasUsage guard)", async () => {
     const { pi, appended } = makeFakePi();
     const ctx = makeFakeCtx();
     // empty unobserved → zero chunks → the stage opens with 0 batches but no
@@ -262,7 +262,7 @@ describe("runObserver", () => {
     const script = scriptedRunStage([]);
     await runObserver(makeArgs({ pi, ctx, unobserved: [], runStageFn: script.fn }));
     expect(script.calls).toBe(0);
-    expect(appended.filter((e) => e.type === "memkeeper.usage")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.usage")).toHaveLength(0);
   });
 
   it("skips + notifies when the model cannot be resolved (no model available)", async () => {
@@ -312,7 +312,7 @@ describe("runObserver", () => {
     expect(script.acks[0]).toBe("accepted: #1\nrejected:\n#2: source id not in this chunk");
 
     // one observation entry with exactly one record
-    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(obsEntries).toHaveLength(1);
     expect((obsEntries[0].data as { records: unknown[] }).records).toHaveLength(1);
   });
@@ -341,7 +341,7 @@ describe("runObserver", () => {
     expect(newNodes).toHaveLength(1);
     expect(script.acks[0]).toBe("accepted: #1\nrejected:\n#2: non-substantive summary\n#3: non-substantive summary");
     // one observation entry with exactly one record (the garbage was dropped)
-    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(obsEntries).toHaveLength(1);
     expect((obsEntries[0].data as { records: unknown[] }).records).toHaveLength(1);
   });
@@ -398,8 +398,8 @@ describe("runObserver", () => {
 
     expect(calls).toBe(1);
     // nothing persisted (no create_node, no observation)
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
-    expect(appended.filter((e) => e.type === "memkeeper.observation")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.observation")).toHaveLength(0);
     // frontier unchanged
     expect(getGraphStore().observerFrontier).toBeNull();
   });
@@ -434,8 +434,8 @@ describe("runObserver", () => {
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
     await runObserver({ ...makeArgs({ pi, ctx, unobserved, runStageFn: fn }), signal: controller.signal });
     expect(calls).toBe(0);
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
-    expect(appended.filter((e) => e.type === "memkeeper.observation")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.observation")).toHaveLength(0);
     expect(getGraphStore().observerFrontier).toBeNull();
   });
 
@@ -451,8 +451,8 @@ describe("runObserver", () => {
       await tool.execute("c1", {
         observations: [{ summary: `chunk ${call}.`, importance: "high", sourceEntryIds: [call === 1 ? "u1" : "a1"] }],
       });
-      // disable memkeeper AFTER the first chunk's stage run (mid-run toggle).
-      if (call === 1) _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+      // disable session-owl AFTER the first chunk's stage run (mid-run toggle).
+      if (call === 1) _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
       return {
         messages: [] as AgentMessage[],
         usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
@@ -467,12 +467,12 @@ describe("runObserver", () => {
 
     // only chunk 1 ran; its record was persisted (per-chunk durability).
     expect(call).toBe(1);
-    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(obsEntries).toHaveLength(1);
     expect((obsEntries[0].data as { coversUpToId: string }).coversUpToId).toBe("u1");
     // frontier advanced to chunk 1 — chunk 2 re-observes on a later run.
     expect(getGraphStore().observerFrontier).toBe("u1");
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
 
   it("maybeBuild fires after each record-bearing chunk; when it runs the Builder the observe stage is re-asserted", async () => {
@@ -540,8 +540,8 @@ describe("runObserver", () => {
     expect(chunk).toBe(1);
     // chunk 1's record WAS persisted (per-chunk durability) — the fix for the
     // old accumulate-then-append that lost everything on abort.
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(1);
-    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(1);
+    const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(obsEntries).toHaveLength(1);
     expect((obsEntries[0].data as { coversUpToId: string }).coversUpToId).toBe("u1");
     // frontier advanced to chunk 1's last entry (chunk 2 re-observed next run)
@@ -576,14 +576,14 @@ describe("runObserver", () => {
 
     // no records, no wrapper nodes — but ONE empty observation entry covering the
     // chunk advances the frontier past it (a completed chunk is never re-observed
-    // automatically; /mk:reobserve-0-obs-chunks is the only retry)
-    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    // automatically; /owl:reobserve-0-obs-chunks is the only retry)
+    const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(obsEntries).toHaveLength(1);
     const entry = obsEntries[0].data as { coversFromId: string | null; coversUpToId: string; records: unknown[] };
     expect(entry.coversFromId).toBe("u1");
     expect(entry.coversUpToId).toBe("a1");
     expect(entry.records).toEqual([]);
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(0);
     expect(getGraphStore().observerFrontier).toBe("a1");
     expect(notify).toHaveBeenCalled();
   });
@@ -601,7 +601,7 @@ describe("runObserver", () => {
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn, thresholdTokens: 1 }));
 
     // per-chunk persistence: TWO observation deltas (one per chunk), each its own range.
-    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(obsEntries).toHaveLength(2);
     const e1 = obsEntries[0].data as {
       coversFromId: string;
@@ -627,7 +627,7 @@ describe("runObserver", () => {
     expect(e1.tokenCount).toBe(Math.ceil(u1Details.length / 4));
     expect(e2.tokenCount).toBe(Math.ceil(a1Details.length / 4));
     // two wrapper create_node deltas — ONE graph_delta envelope per chunk
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(2);
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(2);
     // frontier advanced to the last entry of the whole run
     expect(getGraphStore().observerFrontier).toBe("a1");
   });
@@ -671,7 +671,7 @@ describe("runObserver", () => {
     // only chunks 1 + 2 ran (chunk 3 was never reached)
     expect(chunk).toBe(2);
     // chunk 1's record WAS persisted (partial work kept)
-    const obsEntries = appended.filter((e) => e.type === "memkeeper.observation");
+    const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(obsEntries).toHaveLength(1);
     const entry = obsEntries[0].data as {
       coversFromId: string | null;
@@ -719,7 +719,7 @@ describe("runObserver", () => {
     // stage closed exactly once at the end
     expect(calls.filter((c) => c.method === "endStage")).toHaveLength(1);
     // appended sanity (the run still persisted)
-    expect(appended.some((e) => e.type === "memkeeper.observation")).toBe(true);
+    expect(appended.some((e) => e.type === "session-owl.observation")).toBe(true);
   });
 
   it("closes the observe stage even when a chunk throws (endStage in finally)", async () => {
@@ -815,9 +815,9 @@ describe("runObserver", () => {
     expect(getGraphStore().usageLedger.build.runs).toBe(0);
     expect(getGraphStore().usageLedger.select.runs).toBe(0);
     // the ledger is persisted PER CHUNK (two chunks → two durable
-    // memkeeper.usage entries) so an interrupted run keeps the usage tally for
+    // session-owl.usage entries) so an interrupted run keeps the usage tally for
     // every completed chunk — matching the per-chunk durability of observations.
-    expect(appended.filter((e) => e.type === "memkeeper.usage")).toHaveLength(2);
+    expect(appended.filter((e) => e.type === "session-owl.usage")).toHaveLength(2);
   });
 
   it("persists usage per chunk so a mid-run abort keeps the tally for completed chunks", async () => {
@@ -853,13 +853,13 @@ describe("runObserver", () => {
     // chunk 1's usage WAS persisted (per-chunk) even though the run was aborted —
     // matching the per-chunk durability of its observation. Previously usage was
     // lost (persisted only at run end, which the abort skipped).
-    const usageEntries = appended.filter((e) => e.type === "memkeeper.usage");
+    const usageEntries = appended.filter((e) => e.type === "session-owl.usage");
     expect(usageEntries).toHaveLength(1);
     expect(getGraphStore().usageLedger.observe.input).toBe(1000);
   });
 
   it("forwards a per-stage affinity id (:observe) to runStage when a session base is set", async () => {
-    setMemkeeperSessionBase("sess-7");
+    setSessionOwlSessionBase("sess-7");
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
     const unobserved = [userEntry("u1", "do the thing"), assistantEntry("a1", "ok")];
@@ -932,8 +932,8 @@ describe("runObserver chunk atomicity", () => {
     expect(store.graph.nodes.size).toBe(nodesBefore);
     expect(store.graph.observations.size).toBe(obsBefore);
     // nothing persisted for the chunk
-    expect(appended.filter((e) => e.type === "memkeeper.graph_delta")).toHaveLength(0);
-    expect(appended.filter((e) => e.type === "memkeeper.observation")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.observation")).toHaveLength(0);
     expect(getGraphStore().observerFrontier).toBeNull();
   });
 });
@@ -1018,13 +1018,13 @@ describe("runObserver — record_observations debug logging", () => {
     setClock(() => "2026-07-29T10:05:00.000Z");
     _resetSessionAffinity();
     _setBaseLoggerForTest(sink);
-    _setGetMemkeeperSettings(() => ({ ...DEFAULT_CONFIG, debugLog: true }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, debugLog: true }));
     sink.debug.mockClear();
   });
   afterAll(() => {
     setClock(null);
     _setBaseLoggerForTest(null);
-    _resetGetMemkeeperSettings();
+    _resetGetSessionOwlSettings();
   });
 
   it("logs accepted/rejected counts per record_observations call when debugLog is on", async () => {
@@ -1098,10 +1098,10 @@ describe("runObserver — stage dump", () => {
     const script = scriptedRunStage([
       [{ summary: "Chose vitest for all new tests.", importance: "high", sourceEntryIds: ["a1"] }],
     ]);
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-observer-dump-"));
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-observer-dump-"));
     let seenDumpPath: string | null | undefined;
     const scripted = script.fn as NonNullable<ObserverRunInput["runStageFn"]>;
-    _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/memkeeper/dumps/<project>
+    _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/session-owl/dumps/<project>
     try {
       await runObserver(
         makeArgs({
@@ -1119,8 +1119,8 @@ describe("runObserver — stage dump", () => {
     } finally {
       _setDumpHomeForTest(null);
     }
-    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "dumps"));
-    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
+    expect(seenDumpPath).toContain(path.join(".pi", "session-owl", "dumps"));
+    const debugDir = path.join(dumpRoot, ".pi", "session-owl", "dumps", sanitizeForPath(process.cwd()));
     const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("observe-"));
     expect(files.length).toBe(1);
     const text = fs.readFileSync(path.join(debugDir, files[0] as string), "utf8");
@@ -1139,7 +1139,7 @@ describe("runObserver — stage dump", () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
     const script = scriptedRunStage([]);
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-observer-dump-"));
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-observer-dump-"));
     _setDumpHomeForTest(dumpRoot);
     try {
       await runObserver(
@@ -1155,6 +1155,6 @@ describe("runObserver — stage dump", () => {
     } finally {
       _setDumpHomeForTest(null);
     }
-    expect(fs.existsSync(path.join(dumpRoot, ".pi", "memkeeper", "dumps"))).toBe(false);
+    expect(fs.existsSync(path.join(dumpRoot, ".pi", "session-owl", "dumps"))).toBe(false);
   });
 });

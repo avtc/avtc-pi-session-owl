@@ -43,7 +43,7 @@ export const NO_LOOP_OVERRIDE = null;
  *  duplicate the stage input into the provider request. */
 export const NO_HISTORY: AgentMessage[] = [];
 
-/** Sequential tool execution (memkeeper stages run tools one-by-one). */
+/** Sequential tool execution (session-owl stages run tools one-by-one). */
 export const SEQUENTIAL = "sequential" as const;
 
 /** Empty string constant for the no-progress text check (no bare literals). */
@@ -299,7 +299,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
 
     const config: AgentLoopConfig = {
       model: input.model,
-      // memkeeper stages use standard LLM messages only (no custom message kinds),
+      // session-owl stages use standard LLM messages only (no custom message kinds),
       // so the AgentMessage[]->Message[] transform is an identity cast.
       convertToLlm: (msgs: AgentMessage[]) => msgs as unknown as Message[],
       toolExecution: SEQUENTIAL,

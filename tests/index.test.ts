@@ -8,9 +8,9 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_CONFIG, type MemkeeperConfig } from "../src/config/schema.js";
+import { DEFAULT_CONFIG, type SessionOwlConfig } from "../src/config/schema.js";
 
-// Activate-wiring tests: assert what memkeeperExtension(pi) registers and which
+// Activate-wiring tests: assert what sessionOwlExtension(pi) registers and which
 // stage/hook functions it wires — without running real graph/LLM work (those
 // have their own files). The wiring targets (lifecycle, triggers,
 // compaction/hook, widget/tracker, runtime/stages, todo/wiring) are stubbed via
@@ -21,8 +21,8 @@ import { DEFAULT_CONFIG, type MemkeeperConfig } from "../src/config/schema.js";
 // deterministic deep application, no per-file hoisted vi.mock (which is racy
 // under isolate:false: whichever file loads first decides for the whole
 // process). avtc-pi-settings-ui is doMock'd the same way (importOriginal
-// preserved for settingsFilePaths) so initMemkeeperSettings gets a fake handle
-// reading the hoisted settings holder — no /mk:settings command or reload
+// preserved for settingsFilePaths) so initSessionOwlSettings gets a fake handle
+// reading the hoisted settings holder — no /owl:settings command or reload
 // handler registered against the fake pi.
 
 // The wiring fns the doMock factories install (the extension graph binds THESE
@@ -66,12 +66,12 @@ const wiring = vi.hoisted(() => {
       getContext: () => ({ getInProgress: () => null, getPending: () => [] }),
       getBridge: () => ({ getItems: (): unknown[] => [] }),
     })),
-    // The live settings the fresh graph's getMemkeeperSettings() reads (the
+    // The live settings the fresh graph's getSessionOwlSettings() reads (the
     // fake registerSettingsCommand handle returns this — the doMock stand-in
-    // for the _setGetMemkeeperSettings seam, scoped to the fresh graph).
+    // for the _setGetSessionOwlSettings seam, scoped to the fresh graph).
     // Seeded from DEFAULT_CONFIG in beforeEach (vi.hoisted runs before imports,
     // so the frozen defaults are not referenceable here).
-    settings: { config: undefined as MemkeeperConfig | undefined },
+    settings: { config: undefined as SessionOwlConfig | undefined },
     // The conflict-detection result the fresh graph's detectConflicts() returns
     // (default: no conflicts — the real detector has its own tests and MUST NOT
     // run here: a developer machine with a real conflicting package installed
@@ -165,7 +165,7 @@ async function importMockedExtension(): Promise<typeof import("../src/index.js")
   vi.doMock("avtc-pi-settings-ui", async (importOriginal) => ({
     ...(await importOriginal<typeof import("avtc-pi-settings-ui")>()),
     registerSettingsCommand: (() => ({
-      getSettings: (): MemkeeperConfig => ({ ...(wiring.settings.config ?? { ...DEFAULT_CONFIG, enabled: true }) }),
+      getSettings: (): SessionOwlConfig => ({ ...(wiring.settings.config ?? { ...DEFAULT_CONFIG, enabled: true }) }),
       updateSetting: () => {},
       loadSettingsIntoMemory: () => {},
     })) as unknown as typeof import("avtc-pi-settings-ui").registerSettingsCommand,
@@ -173,11 +173,11 @@ async function importMockedExtension(): Promise<typeof import("../src/index.js")
   return import("../src/index.js");
 }
 
-describe("memkeeperExtension (activate wiring)", () => {
-  let memkeeperExtension: typeof import("../src/index.js").default;
+describe("sessionOwlExtension (activate wiring)", () => {
+  let sessionOwlExtension: typeof import("../src/index.js").default;
 
   beforeAll(async () => {
-    memkeeperExtension = (await importMockedExtension()).default;
+    sessionOwlExtension = (await importMockedExtension()).default;
   });
   afterAll(() => {
     for (const path of MOCKED_PATHS) vi.doUnmock(path);
@@ -186,12 +186,12 @@ describe("memkeeperExtension (activate wiring)", () => {
     vi.clearAllMocks();
     wiring.settings.config = { ...DEFAULT_CONFIG, enabled: true };
     wiring.conflicts = [];
-    memkeeperExtension(makeFakePi());
+    sessionOwlExtension(makeFakePi());
   });
 
   it("registers all four lifecycle hooks", () => {
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const events = [...pi._handlers.keys()];
     expect(events).toContain("session_start");
     expect(events).toContain("session_shutdown");
@@ -199,27 +199,27 @@ describe("memkeeperExtension (activate wiring)", () => {
     expect(events).toContain("session_before_compact");
   });
 
-  it("registers the mk_recall tool (read-only memory drill-down)", () => {
+  it("registers the owl_recall tool (read-only memory drill-down)", () => {
     const pi = makeFakePi() as unknown as ExtensionAPI & { registerTool: ReturnType<typeof vi.fn> };
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     expect(pi.registerTool).toHaveBeenCalledTimes(1);
     const tool = pi.registerTool.mock.calls[0]?.[0] as { name: string };
-    expect(tool.name).toBe("mk_recall");
+    expect(tool.name).toBe("owl_recall");
   });
 
-  it("registers the /mk:* user commands (browse + rescan + reobserve + status)", () => {
+  it("registers the /owl:* user commands (browse + rescan + reobserve + status)", () => {
     const pi = makeFakePi() as unknown as ExtensionAPI & { registerCommand: ReturnType<typeof vi.fn> };
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const names = pi.registerCommand.mock.calls.map((c) => c[0] as string);
     expect(names).toEqual(
       expect.arrayContaining([
-        "mk:ls",
-        "mk:cat",
-        "mk:find",
-        "mk:find-all",
-        "mk:rescan",
-        "mk:reobserve-0-obs-chunks",
-        "mk:status",
+        "owl:ls",
+        "owl:cat",
+        "owl:find",
+        "owl:find-all",
+        "owl:rescan",
+        "owl:reobserve-0-obs-chunks",
+        "owl:status",
       ]),
     );
     expect(pi.registerCommand).toHaveBeenCalledTimes(7);
@@ -229,7 +229,7 @@ describe("memkeeperExtension (activate wiring)", () => {
     // Every background stage must be reachable from activate. A bare
     // `runSelector: async () => {}` stub (the “built but never wired” gap) must
     // not survive: setStageRuns receives each factory's real return.
-    memkeeperExtension(makeFakePi());
+    sessionOwlExtension(makeFakePi());
     expect(wiring.makeObserverRun).toHaveBeenCalled();
     expect(wiring.makeBuilderRun).toHaveBeenCalled();
     expect(wiring.makeSelectorRun).toHaveBeenCalled();
@@ -252,7 +252,7 @@ describe("memkeeperExtension (activate wiring)", () => {
 
   it("session_start handler calls onSessionStart", async () => {
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const handler = pi._handlers.get("session_start")?.[0];
     expect(handler).toBeDefined();
     await handler?.({ type: "session_start", reason: "startup" } as SessionStartEvent, makeCtx());
@@ -261,7 +261,7 @@ describe("memkeeperExtension (activate wiring)", () => {
 
   it("session_shutdown handler calls onSessionShutdown", () => {
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const handler = pi._handlers.get("session_shutdown")?.[0];
     handler?.({ type: "session_shutdown", reason: "quit" }, makeCtx());
     expect(wiring.onSessionShutdown).toHaveBeenCalledTimes(1);
@@ -270,7 +270,7 @@ describe("memkeeperExtension (activate wiring)", () => {
   it("turn_end early-returns when enabled=false (no capture, no onTurnEnd)", () => {
     wiring.settings.config = { ...DEFAULT_CONFIG, enabled: false };
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const handler = pi._handlers.get("turn_end")?.[0];
     handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx());
     expect(wiring.captureInitialPromptAndExtract).not.toHaveBeenCalled();
@@ -279,7 +279,7 @@ describe("memkeeperExtension (activate wiring)", () => {
 
   it("turn_end captures the initial prompt then fires onTurnEnd (enabled)", () => {
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const handler = pi._handlers.get("turn_end")?.[0];
     handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx());
     expect(wiring.captureInitialPromptAndExtract).toHaveBeenCalledTimes(1);
@@ -291,7 +291,7 @@ describe("memkeeperExtension (activate wiring)", () => {
       throw new Error("boom");
     });
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const handler = pi._handlers.get("turn_end")?.[0];
     expect(() => handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx())).not.toThrow();
     expect(wiring.onTurnEnd).toHaveBeenCalledTimes(1);
@@ -302,10 +302,10 @@ describe("memkeeperExtension (activate wiring)", () => {
       throw new Error("trigger boom");
     });
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const handler = pi._handlers.get("turn_end")?.[0];
     // The turn_end handler must not propagate the throw — Pi's emit() catches it,
-    // but the index.ts try/catch surfaces it in the memkeeper log and keeps the
+    // but the index.ts try/catch surfaces it in the session-owl log and keeps the
     // handler returning normally.
     expect(() => handler?.({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, makeCtx())).not.toThrow();
     expect(wiring.captureInitialPromptAndExtract).toHaveBeenCalledTimes(1);
@@ -314,7 +314,7 @@ describe("memkeeperExtension (activate wiring)", () => {
 
   it("session_before_compact delegates to compactionHook", async () => {
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const handler = pi._handlers.get("session_before_compact")?.[0];
     const event = { type: "session_before_compact" } as unknown as SessionBeforeCompactEvent;
     await handler?.(event, makeCtx());
@@ -330,7 +330,7 @@ describe("memkeeperExtension (activate wiring)", () => {
   it("session_before_compact early-returns undefined when enabled=false (Pi native compaction)", async () => {
     wiring.settings.config = { ...DEFAULT_CONFIG, enabled: false };
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const handler = pi._handlers.get("session_before_compact")?.[0];
     const event = { type: "session_before_compact" } as unknown as SessionBeforeCompactEvent;
     const result = await handler?.(event, makeCtx());
@@ -339,11 +339,11 @@ describe("memkeeperExtension (activate wiring)", () => {
   });
 });
 
-describe("memkeeperExtension :ready API (memkeeper:ready)", () => {
-  let memkeeperExtension: typeof import("../src/index.js").default;
+describe("sessionOwlExtension :ready API (session-owl:ready)", () => {
+  let sessionOwlExtension: typeof import("../src/index.js").default;
 
   beforeAll(async () => {
-    memkeeperExtension = (await importMockedExtension()).default;
+    sessionOwlExtension = (await importMockedExtension()).default;
   });
   afterAll(() => {
     for (const path of MOCKED_PATHS) vi.doUnmock(path);
@@ -355,14 +355,14 @@ describe("memkeeperExtension :ready API (memkeeper:ready)", () => {
 
   it("does NOT emit :ready at activate time (deferred to session_start)", () => {
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     const eventsEmit = (pi as unknown as { events: { emit: ReturnType<typeof vi.fn> } }).events.emit;
     expect(eventsEmit).not.toHaveBeenCalled();
   });
 
-  it("emits memkeeper:ready on session_start with the api", async () => {
+  it("emits session-owl:ready on session_start with the api", async () => {
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     // The :ready emitter is the SECOND session_start handler (after onSessionStart).
     const readyHandler = pi._handlers.get("session_start")?.[1];
     expect(readyHandler).toBeDefined();
@@ -371,20 +371,20 @@ describe("memkeeperExtension :ready API (memkeeper:ready)", () => {
     const eventsEmit = (pi as unknown as { events: { emit: ReturnType<typeof vi.fn> } }).events.emit;
     expect(eventsEmit).toHaveBeenCalledTimes(1);
     const [event, api] = eventsEmit.mock.calls[0] ?? [];
-    expect(event).toBe("memkeeper:ready");
+    expect(event).toBe("session-owl:ready");
     expect(api).toBeDefined();
     expect(typeof (api as { reloadConfig: unknown }).reloadConfig).toBe("function");
     expect(typeof (api as { getConfig: unknown }).getConfig).toBe("function");
   });
 
-  it("api.getConfig returns getMemkeeperSettings()", async () => {
+  it("api.getConfig returns getSessionOwlSettings()", async () => {
     const pi = makeFakePi() as FakePiWithHandlers;
-    memkeeperExtension(pi);
+    sessionOwlExtension(pi);
     await pi._handlers.get("session_start")?.[1]?.({ reason: "startup" } as SessionStartEvent, makeCtx());
 
     const api = ((pi as unknown as { events: { emit: ReturnType<typeof vi.fn> } }).events.emit.mock.calls[0] ??
       [])[1] as {
-      getConfig: () => MemkeeperConfig;
+      getConfig: () => SessionOwlConfig;
     };
     // The fake settings handle (beforeEach) pins the read to DEFAULT_CONFIG.
     expect(api.getConfig()).toEqual(DEFAULT_CONFIG);

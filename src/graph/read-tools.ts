@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Shared graph read tools (ls/cat/find) + the `try_finish` convergence gate +
-// the root-view render/measure helpers. These operate on any MemkeeperGraph
+// the root-view render/measure helpers. These operate on any SessionOwlGraph
 // (the Builder's source graph OR the Selector's working copy) and are
 // parameterized by a `viewer` so the shared one-line render honors the
 // viewer-dependent `new`-state glyph rule (Builder sees 🆕; every other consumer
@@ -12,7 +12,7 @@
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import { getMemkeeperSettings } from "../config/schema.js";
+import { getSessionOwlSettings } from "../config/schema.js";
 import { renderDetails } from "../format/details.js";
 import {
   directObsSizeHint,
@@ -30,7 +30,7 @@ import { getGraphStore } from "../store/graph-store.js";
 import {
   estimateContentTokens,
   IMPORTANCE_RANK,
-  type MemkeeperGraph,
+  type SessionOwlGraph,
   N_GOAL,
   N_IRRELEVANT,
   type Node,
@@ -72,7 +72,7 @@ export const TAKE_ALL = 0;
  *  hardening is two-layer: a static `isSafeRegex` fast-reject (known-evil
  *  shapes) plus a worker-thread runtime cap (`findTimeoutMs`, regex-runner.ts)
  *  that kills any residual catastrophic pattern at the configured duration and
- *  returns partial matches. `find` accepts USER input (/mk:find); observations
+ *  returns partial matches. `find` accepts USER input (/owl:find); observations
  *  are condensed (short) and the graph is session-bounded, so the realistic
  *  blast radius is small, and the worker timeout bounds the worst case. */
 const FIND_QUERY_MAX = 500;
@@ -92,7 +92,7 @@ const MODE_DEFAULT_TERSE = false;
 const NO_LINES: string | undefined = undefined;
 
 // --- extraction param schemas (contentPattern / contextLines / lines) -------
-// Shared by `cat`, `find` (and mirrored in mk_recall). `ls` is structure-only,
+// Shared by `cat`, `find` (and mirrored in owl_recall). `ls` is structure-only,
 // so it does NOT take these params.
 
 const ContentPatternSchema = Type.Optional(
@@ -116,7 +116,7 @@ const LinesSchema = Type.Optional(
 
 /** Resolve a contentPattern (compile via the shared guard) into a GrepSpec, or
  *  null when contentPattern is absent. Returns an error string on a bad regex.
- *  Shared by cat/find (read-tools) and mk_recall (recall). */
+ *  Shared by cat/find (read-tools) and owl_recall (recall). */
 export function resolveGrepSpec(
   contentPattern: string | undefined,
   contextLines: number | undefined,
@@ -199,7 +199,7 @@ function footer(lastId: string, remaining: number): string {
 
 /** Actionable message for a stale cursor (the afterId item was removed between
  *  calls) — tells the caller to re-query from null instead of looping. Shared by
- *  the graph read tools and mk_recall (which reads the rendered tree). */
+ *  the graph read tools and owl_recall (which reads the rendered tree). */
 export function staleCursorMessage(afterId: string | null): string {
   return `Cursor afterId=${afterId ?? ""} not found (changed since the last page). Re-query without afterId to start fresh.`;
 }
@@ -266,7 +266,7 @@ export function isVisible(state: Node["state"], includeSuperseded: boolean): boo
 /** Non-obsolete roots, time ascending (oldest first) — the view `ls` renders at
  *  the root and `try_finish` measures. Obsolete roots are hidden by default
  *  (findable via find with includeSuperseded). */
-export function nonObsoleteRoots(graph: MemkeeperGraph): Node[] {
+export function nonObsoleteRoots(graph: SessionOwlGraph): Node[] {
   return nonObsoleteRootsOf(graph.nodes.values()).sort(compareNodeOrder);
 }
 
@@ -294,7 +294,7 @@ export function orderedNonObsoleteRoots<T extends RenderableNode>(nodes: Iterabl
 
 /** Direct child nodes + direct observations of a parent node, ordered
  *  nodes-first then observations — both time ascending (oldest first). */
-export function directChildren(graph: MemkeeperGraph, parent: Node): { nodes: Node[]; observations: Observation[] } {
+export function directChildren(graph: SessionOwlGraph, parent: Node): { nodes: Node[]; observations: Observation[] } {
   const nodes = parent.childNodeIds
     .map((id) => graph.nodes.get(id))
     .filter((n): n is Node => n !== undefined)
@@ -312,7 +312,7 @@ function renderLines(lines: string[]): string {
 
 /** The per-call result token budget (chars/4) from config. */
 function resultTokenBudget(): number {
-  return getMemkeeperSettings().toolResultTokenBudget;
+  return getSessionOwlSettings().toolResultTokenBudget;
 }
 
 /** Apply the token budget to a paginated window of already-rendered one-line
@@ -362,7 +362,7 @@ const LS_PARAMS = Type.Object({
 
 /** Build the `ls` tool bound to `graph`, rendered for `viewer` (the `new`-state
  *  glyph is Builder-only; non-Builder viewers render `new` as `active`). */
-function makeLsTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof LS_PARAMS> {
+function makeLsTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<typeof LS_PARAMS> {
   return {
     name: LS_TOOL,
     description:
@@ -441,7 +441,7 @@ const CAT_PARAMS = Type.Object({
 /** Build the `cat` tool: read full text — observations verbatim, or a node's
  *  header plus its direct observations verbatim (child nodes NOT expanded).
  *  `viewer` controls the node-header glyph rendering (Builder-only `new`). */
-function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof CAT_PARAMS> {
+function makeCatTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<typeof CAT_PARAMS> {
   return {
     name: CAT_TOOL,
     description:
@@ -509,7 +509,7 @@ function makeCatTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typ
       const rendered = await renderBudgeted(window, {
         budget,
         mode: modeRes,
-        findTimeoutMs: getMemkeeperSettings().findTimeoutMs,
+        findTimeoutMs: getSessionOwlSettings().findTimeoutMs,
       });
       const lines: string[] = [rendered.text];
       if (rendered.note !== null) {
@@ -570,7 +570,7 @@ function catBody(obs: Observation): string {
 
 /** Count the observations a single id resolves to: 1 if the id is an
  *  observation, the node's connected-observation count if the id is a node, 0
- *  otherwise. Shared by the agent find/cat path and mk_recall to detect a
+ *  otherwise. Shared by the agent find/cat path and owl_recall to detect a
  *  single-observation uncapped target (one connected observation → returned
  *  whole in any mode). */
 export function countConnectedObservations(
@@ -586,7 +586,7 @@ export function countConnectedObservations(
 /** Sum `countConnectedObservations` over a list of ids against a graph — the
  *  total a target resolves to. A single-observation target (total === 1) is
  *  unbudgeted in any mode. */
-function singleObsTargetCount(graph: MemkeeperGraph, ids: string[]): number {
+function singleObsTargetCount(graph: SessionOwlGraph, ids: string[]): number {
   let total = 0;
   for (const id of ids) {
     total += countConnectedObservations(graph.nodes, graph.observations, id);
@@ -597,7 +597,7 @@ function singleObsTargetCount(graph: MemkeeperGraph, ids: string[]): number {
 /** Build the cat units for a list of requested ids: each node expands to its
  *  direct observations (the node header rides the first as a preamble); each
  *  observation is one unit; unknown ids are a not-found unit. */
-export function buildCatUnits(graph: MemkeeperGraph, ids: string[], viewer: RenderViewer): CatUnit[] {
+export function buildCatUnits(graph: SessionOwlGraph, ids: string[], viewer: RenderViewer): CatUnit[] {
   const units: CatUnit[] = [];
   for (const id of ids) {
     const node = graph.nodes.get(id as NodeId);
@@ -647,7 +647,7 @@ function catUnitToItem(unit: CatUnit): RenderItem {
  *  observation is dropped. Pre-filtered items then go through the shared
  *  budgeted grep renderer (every surviving observation carries excerpts). */
 function buildCatGrepItems(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   ids: readonly string[],
   viewer: RenderViewer,
   summaryMatch: ReadonlySet<string>,
@@ -689,7 +689,7 @@ function buildCatGrepItems(
 /** Compute contentPattern matches (node summaries + observation content) in
  *  ONE worker round-trip, then build the pruned cat grep items. */
 async function buildCatGrepItemsWithMatches(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   ids: readonly string[],
   viewer: RenderViewer,
   grep: Extract<ContentMode, { kind: "grep" }>,
@@ -727,7 +727,7 @@ async function buildCatGrepItemsWithMatches(
     ...obsList.map((o) => searchableText(o.summary, detailsTextFor(o))),
   ];
   // Reuse the shared regex-batch helper (worker-bounded, findTimeoutMs) so the
-  // timeout note matches find/mk_recall exactly instead of a hand-rolled variant.
+  // timeout note matches find/owl_recall exactly instead of a hand-rolled variant.
   const result = await intersectRegexFilters(texts, [grep.pattern]);
   if ("error" in result) return { error: result.error };
   const summaryMatch = new Set<string>();
@@ -797,13 +797,13 @@ export function tryCompileFindRegex(query: string): { regex: RegExp } | { error:
  *  `includeSuperseded=false` (default) applies the parent-state gate: obsolete
  *  nodes and their evidence are skipped. Nodes-first (time ascending, oldest first), then observations (time) — consistent with `ls`. Each match
  *  carries `in <parent>`. Shared by the agent `find` tool and the user
- *  `/mk:find` commands.
+ *  `/owl:find` commands.
  *
  *  Async because the regex tests run in a worker thread bounded by
  *  `findTimeoutMs` (a catastrophic pattern is killed instead of freezing pi).
  *  Returns the matches, or an error string the caller surfaces verbatim. */
 export async function collectFindMatches(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   regexes: readonly RegExp[],
   includeSuperseded: IncludeSuperseded,
   viewer: RenderViewer,
@@ -881,7 +881,7 @@ interface ObsMatch extends FindMatch {
 /** Build the `find` tool: whole-graph regex search over node summaries +
  *  observation content, flat results each carrying `in <parent>`. `viewer`
  *  controls the match glyph rendering (Builder-only `new`). */
-function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<typeof FIND_PARAMS> {
+function makeFindTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<typeof FIND_PARAMS> {
   return {
     name: FIND_TOOL,
     description: "Search the whole memory graph by regex through node summaries and observation content.",
@@ -951,7 +951,7 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
       const rendered = await renderBudgeted(items, {
         budget,
         mode: modeRes,
-        findTimeoutMs: getMemkeeperSettings().findTimeoutMs,
+        findTimeoutMs: getSessionOwlSettings().findTimeoutMs,
       });
       const lines = [rendered.text];
       if (rendered.note !== null) lines.push(rendered.note);
@@ -970,7 +970,7 @@ function makeFindTool(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool<ty
 /** Render the non-obsolete root view (the same lines `ls` shows at the root) for
  *  `viewer`. Shared by try_finish (budget gate), the run's fast-path, and the
  *  per-pass user-message state snapshot. */
-export function renderRootView(graph: MemkeeperGraph, viewer: RenderViewer): string {
+export function renderRootView(graph: SessionOwlGraph, viewer: RenderViewer): string {
   return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer, graph.observations);
 }
 
@@ -989,14 +989,14 @@ export function renderRootViewFromRoots(
 /** Token-estimate of the non-obsolete root view (chars/4), rendered for
  *  `viewer`. Shared by the fast-path (skip-when-under) and try_finish
  *  (within-budget gate). */
-export function measureRootViewTokens(graph: MemkeeperGraph, viewer: RenderViewer): number {
+export function measureRootViewTokens(graph: SessionOwlGraph, viewer: RenderViewer): number {
   return estimateContentTokens(renderRootView(graph, viewer));
 }
 
 // --- try_finish (convergence gate) -----------------------------------------
 
 /** Settings the try_finish gate needs: the budget threshold it checks against.
- *  Decoupled from the full MemkeeperConfig so the same factory serves the
+ *  Decoupled from the full SessionOwlConfig so the same factory serves the
  *  Builder (builderRootViewThreshold) and the Selector
  *  (selectorRootViewThreshold). */
 export interface TryFinishThreshold {
@@ -1011,7 +1011,7 @@ const TRY_FINISH_PARAMS = Type.Object({}, { description: "No parameters." });
  *  terminate:false (keep organizing, call again). Deterministic/mechanical —
  *  no LLM. */
 export function makeTryFinishTool(
-  graph: MemkeeperGraph,
+  graph: SessionOwlGraph,
   threshold: TryFinishThreshold,
   viewer: RenderViewer,
 ): AgentTool<typeof TRY_FINISH_PARAMS> {
@@ -1051,6 +1051,6 @@ export function makeTryFinishTool(
 }
 
 /** Read-only graph tools (ls/cat/find) bound to `graph` for `viewer`. */
-export function makeReadTools(graph: MemkeeperGraph, viewer: RenderViewer): AgentTool[] {
+export function makeReadTools(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool[] {
   return [makeLsTool(graph, viewer), makeCatTool(graph, viewer), makeFindTool(graph, viewer)];
 }

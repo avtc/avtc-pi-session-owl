@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// Tests for /mk:status. The report is built by a pure buildStatusReport(input)
+// Tests for /owl:status. The report is built by a pure buildStatusReport(input)
 // from structured data sources (no pi types) so it is unit-testable without
-// mocking pi; runMkStatus gathers the data + notifies.
+// mocking pi; runOwlStatus gathers the data + notifies.
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG, type MemkeeperConfig } from "../../src/config/schema.js";
+import { DEFAULT_CONFIG, type SessionOwlConfig } from "../../src/config/schema.js";
 import { setConflictHits } from "../../src/conflicts/pause.js";
 import type { SizeHintObservation } from "../../src/format/render.js";
 import { renderRootViewFromRoots } from "../../src/graph/read-tools.js";
@@ -15,7 +15,7 @@ import {
   buildPausedStatusReport,
   buildStatusReport,
   gatherStatusInput,
-  runMkStatus,
+  runOwlStatus,
   type StatusInput,
 } from "../../src/status/command.js";
 import type { UsageLedger } from "../../src/store/codecs.js";
@@ -28,7 +28,7 @@ import { estimateContentTokens } from "../../src/types.js";
  *  matches the fixture, which carries no observations). */
 const EMPTY_SIZE_HINTS: ReadonlyMap<string, SizeHintObservation> = new Map();
 
-function settings(over: Partial<MemkeeperConfig>): MemkeeperConfig {
+function settings(over: Partial<SessionOwlConfig>): SessionOwlConfig {
   return { ...DEFAULT_CONFIG, ...over };
 }
 
@@ -105,12 +105,12 @@ function input(over: Partial<StatusInput>): StatusInput {
 describe("buildStatusReport", () => {
   it("disabled → the disabled message only", () => {
     const report = buildStatusReport(input({ enabled: false }));
-    expect(report).toBe("memkeeper is disabled.");
+    expect(report).toBe("session-owl is disabled.");
   });
 
   it("header + session line with duration + compaction count", () => {
     const report = buildStatusReport(input({ sessionStartMs: Date.now() - 3 * 3600_000, compactionCount: 5 }));
-    expect(report).toContain("🦉 memkeeper — status");
+    expect(report).toContain("🦉 session-owl — status");
     expect(report).toContain("Session");
     expect(report).toContain("· 5 compactions");
     expect(report).toContain("03:00:0"); // ~3h duration (seconds may vary by 1)
@@ -349,7 +349,7 @@ describe("gatherStatusInput", () => {
   });
 });
 
-describe("runMkStatus (handler)", () => {
+describe("runOwlStatus (handler)", () => {
   it("builds the report from live state + notifies via ui.notify", async () => {
     resetForNewSession();
     const notified: { text: string; level: string }[] = [];
@@ -367,10 +367,10 @@ describe("runMkStatus (handler)", () => {
         ],
       },
     } as unknown as ExtensionCommandContext;
-    await runMkStatus("", ctx);
+    await runOwlStatus("", ctx);
     expect(notified).toHaveLength(1);
     expect(notified[0].level).toBe("info");
-    expect(notified[0].text).toContain("🦉 memkeeper — status");
+    expect(notified[0].text).toContain("🦉 session-owl — status");
     expect(notified[0].text).toContain("1 compaction");
   });
 
@@ -381,7 +381,7 @@ describe("runMkStatus (handler)", () => {
       ui: { notify: async (text: string, level: string) => notified.push({ text, level }) },
       sessionManager: { getLeafId: () => "leaf-1", getBranch: () => [] },
     } as unknown as ExtensionCommandContext;
-    await runMkStatus("", ctx);
+    await runOwlStatus("", ctx);
     expect(notified[0].level).toBe("info");
     // duration must be a finite number (NaN would render as “NaN” in the Session line)
     expect(notified[0].text).toContain("Session");
@@ -398,7 +398,7 @@ describe("runMkStatus (handler)", () => {
         getBranch: () => [{ type: "message", timestamp: "not-a-date" }],
       },
     } as unknown as ExtensionCommandContext;
-    await runMkStatus("", ctx);
+    await runOwlStatus("", ctx);
     expect(notified[0].level).toBe("info");
     expect(notified[0].text).toContain("Session");
     expect(notified[0].text).not.toContain("NaN");
@@ -420,7 +420,7 @@ describe("runMkStatus (handler)", () => {
         getBranch: () => [],
       },
     } as unknown as ExtensionCommandContext;
-    await runMkStatus("", ctx);
+    await runOwlStatus("", ctx);
     expect(notified).toHaveLength(1);
     expect(notified[0].level).toBe("error");
     expect(notified[0].text).toContain("boom");
@@ -437,30 +437,30 @@ describe("paused status report (conflict pause)", () => {
     const report = buildPausedStatusReport(HITS);
     expect(report).toBe(
       [
-        "🦉 memkeeper — status",
+        "🦉 session-owl — status",
         "",
         "Paused — another compaction-handling extension is installed:",
         "",
         "  pi-blackhole            npm:pi-blackhole",
         "  pi-observational-memory E:/work/pi/pi-observational-memory",
         "",
-        "Pi's compaction hook is last-registration-wins, so memkeeper stays dormant",
+        "Pi's compaction hook is last-registration-wins, so session-owl stays dormant",
         "this session — it collects no observations and leaves compaction to the",
         "other extension. To resolve: remove the other package and restart pi;",
-        "co-run deliberately via ignoreConflicts in /mk:settings; or turn memkeeper",
-        "off (enabled in /mk:settings) — see README → Conflicts.",
+        "co-run deliberately via ignoreConflicts in /owl:settings; or turn session-owl",
+        "off (enabled in /owl:settings) — see README → Conflicts.",
       ].join("\n"),
     );
   });
 
-  it("runMkStatus shows the paused report when conflict-paused", async () => {
+  it("runOwlStatus shows the paused report when conflict-paused", async () => {
     setConflictHits(HITS);
     const notified: Array<{ text: string; level: string }> = [];
     const ctx = {
       ui: { notify: async (text: string, level: string) => notified.push({ text, level }) },
     } as unknown as ExtensionCommandContext;
     try {
-      await runMkStatus("", ctx);
+      await runOwlStatus("", ctx);
       expect(notified).toHaveLength(1);
       expect(notified[0].level).toBe("info");
       expect(notified[0].text).toContain("Paused — another compaction-handling extension is installed:");

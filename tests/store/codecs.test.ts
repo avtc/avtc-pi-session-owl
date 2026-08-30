@@ -19,7 +19,7 @@ import {
   USAGE_TYPE,
 } from "../../src/store/codecs.js";
 import type { Importance, NodeId, ObsId } from "../../src/types.js";
-import { MemkeeperGraph, makeNode, makeObservation, N_GOAL, O_INITIAL_PROMPT } from "../../src/types.js";
+import { SessionOwlGraph, makeNode, makeObservation, N_GOAL, O_INITIAL_PROMPT } from "../../src/types.js";
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -48,8 +48,8 @@ function sampleNode() {
   });
 }
 
-function emptyGraph(): MemkeeperGraph {
-  return new MemkeeperGraph({
+function emptyGraph(): SessionOwlGraph {
+  return new SessionOwlGraph({
     nodes: new Map(),
     observations: new Map(),
     nextObsId: 1,
@@ -59,10 +59,10 @@ function emptyGraph(): MemkeeperGraph {
 
 describe("customType constants", () => {
   it("uses the documented type names", () => {
-    expect(OBSERVATION_TYPE).toBe("memkeeper.observation");
-    expect(GRAPH_DELTA_TYPE).toBe("memkeeper.graph_delta");
-    expect(SELECTION_TYPE).toBe("memkeeper.selection");
-    expect(USAGE_TYPE).toBe("memkeeper.usage");
+    expect(OBSERVATION_TYPE).toBe("session-owl.observation");
+    expect(GRAPH_DELTA_TYPE).toBe("session-owl.graph_delta");
+    expect(SELECTION_TYPE).toBe("session-owl.selection");
+    expect(USAGE_TYPE).toBe("session-owl.usage");
   });
 });
 
@@ -162,7 +162,7 @@ describe("selection snapshot codec", () => {
     g.observations.set(obs.id, obs);
     const prompt = makeObservation({
       id: O_INITIAL_PROMPT,
-      summary: "build memkeeper",
+      summary: "build session-owl",
       importance: "crit" as Importance,
       sourceEntryIds: [],
       timestamp: "2026-07-29T09:00:00.000Z",
@@ -225,7 +225,7 @@ describe("usage codec", () => {
   });
 
   it("normalizes a legacy persisted ledger using the `passes` field name to `runs`", () => {
-    // older memkeeper builds persisted the per-phase counter as `passes`; the
+    // older session-owl builds persisted the per-phase counter as `passes`; the
     // tolerant reader renames it to `runs` at decode time.
     const legacy = {
       observe: { input: 100, output: 50, cacheRead: 10, cost: 0.02, turns: 3, passes: 1 },
@@ -246,7 +246,7 @@ describe("usage codec", () => {
   });
 });
 
-describe("MemkeeperDetails codec", () => {
+describe("SessionOwlDetails codec", () => {
   it("round-trips the compaction details payload including the version field", () => {
     const g = emptyGraph();
     const node = sampleNode();

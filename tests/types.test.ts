@@ -7,7 +7,7 @@ import {
   CHARS_PER_TOKEN_ESTIMATE,
   estimateContentTokens,
   IMPORTANCE_RANK,
-  MemkeeperGraph,
+  SessionOwlGraph,
   makeNode,
   makeObservation,
   N_GOAL,
@@ -123,7 +123,7 @@ describe("makeNode", () => {
   });
 });
 
-describe("MemkeeperGraph", () => {
+describe("SessionOwlGraph", () => {
   it("exposes maps and counters as a plain data container", () => {
     const graph = createBareGraph();
     expect(graph.nextObsId).toBe(1);
@@ -168,8 +168,8 @@ describe("MemkeeperGraph", () => {
 });
 
 // helper local to this test file
-function createBareGraph(): MemkeeperGraph {
-  return new MemkeeperGraph({
+function createBareGraph(): SessionOwlGraph {
+  return new SessionOwlGraph({
     nodes: new Map(),
     observations: new Map(),
     nextObsId: 1,

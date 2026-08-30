@@ -4,7 +4,7 @@
 // In-memory domain model for the memory graph: plain types + a graph container.
 // No I/O, no singletons, no mutations here (the mutation layer owns those).
 
-/** Chars-per-token estimate (chars/4), memkeeper's own heuristic. */
+/** Chars-per-token estimate (chars/4), session-owl's own heuristic. */
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
 
 /** Root-parent sentinel: a node whose `parentNode` is null lives at the tree root. */
@@ -23,7 +23,7 @@ export const O_INITIAL_PROMPT = "oInitialPrompt" as const;
  */
 export const N_IRRELEVANT = "nIrrelevant" as const;
 /**
- * The rebuild parking node (source-graph special): `/mk:rescan
+ * The rebuild parking node (source-graph special): `/owl:rescan
  * --reuse-observations` parks the collected observation records under it while
  * re-wrapping them into a fresh structure in batches. Immovable/merge-proof
  * (the rebuild owns it), but dissolvable — it auto-dissolves when the last
@@ -230,7 +230,7 @@ export function makeNode(args: {
  * `hasInitialPrompt` getter (never stored — always consistent with the map,
  * survives /reload·/new·fork).
  */
-export class MemkeeperGraph {
+export class SessionOwlGraph {
   nodes: Map<NodeId, Node>;
   observations: Map<ObsId, Observation>;
   nextObsId: number;

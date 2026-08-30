@@ -25,7 +25,7 @@ import { applyCreateNode, applyRecordObservation, setClock } from "../../src/gra
 import { builderSystemPrompt } from "../../src/prompts/builder.js";
 import { type StageRunInput, type StageRunResult, StageTimeoutError } from "../../src/runtime/agent-loop.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
-import type { MemkeeperGraph } from "../../src/types.js";
+import type { SessionOwlGraph } from "../../src/types.js";
 import { makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
 import { NO_OP_WIDGET, recordingWidget, scriptRunStage, scriptRunStageWithError } from "./run-helpers.js";
 
@@ -122,7 +122,7 @@ describe("makeBuilderPassTracker", () => {
 
 /** Seed the singleton graph with nGoal (+oInitialPrompt) and optional `new`
  *  roots. Returns the singleton's graph. */
-function seedGraph(newRoots: Array<{ id: NodeId; summary: string }>): MemkeeperGraph {
+function seedGraph(newRoots: Array<{ id: NodeId; summary: string }>): SessionOwlGraph {
   resetForNewSession();
   const g = getGraphStore().graph;
   applyCreateNode(g, {
@@ -185,7 +185,7 @@ function settings(overrides: Partial<typeof DEFAULT_CONFIG>): typeof DEFAULT_CON
 
 function graphDeltas(appended: { type: string; data: unknown }[]): unknown[] {
   return appended
-    .filter((e) => e.type === "memkeeper.graph_delta")
+    .filter((e) => e.type === "session-owl.graph_delta")
     .map((e) => (e.data as { delta: { type: string } }).delta);
 }
 
@@ -343,13 +343,13 @@ describe("runBuilder", () => {
       debugDumpLimit: 5,
       rootViewTargetNodes: 160,
     });
-    // route the default dump root (~/.pi/memkeeper/dumps/<project>) to a temp
+    // route the default dump root (~/.pi/session-owl/dumps/<project>) to a temp
     // dir so the test never litters the user's home
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mk-builder-dump-"));
+    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-builder-dump-"));
     let seenDumpPath: string | null | undefined;
     let seenPassText = "";
     const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
-    _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/memkeeper/dumps/<project>
+    _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/session-owl/dumps/<project>
     try {
       await runBuilder({
         pi: cap.pi,
@@ -369,12 +369,12 @@ describe("runBuilder", () => {
     } finally {
       _setDumpHomeForTest(null);
     }
-    expect(seenDumpPath).toContain(path.join(".pi", "memkeeper", "dumps"));
+    expect(seenDumpPath).toContain(path.join(".pi", "session-owl", "dumps"));
     // the pass message states node count (with target ratio) + token budget +
     // current usage so the model need not guess or count lines
     expect(seenPassText).toContain("to fit the budget. Root view: 2/160 nodes, ");
     expect(seenPassText).toContain("/40k tokens.\n\nCurrent root view (pass 1):");
-    const debugDir = path.join(dumpRoot, ".pi", "memkeeper", "dumps", sanitizeForPath(process.cwd()));
+    const debugDir = path.join(dumpRoot, ".pi", "session-owl", "dumps", sanitizeForPath(process.cwd()));
     const files = fs.readdirSync(debugDir).filter((f) => f.startsWith("build-"));
     expect(files.length).toBe(1);
     const text = fs.readFileSync(path.join(debugDir, files[0] as string), "utf8");

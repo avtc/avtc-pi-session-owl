@@ -14,7 +14,7 @@ import {
   setClock,
 } from "../../src/graph/mutations.js";
 import type { StoreContext } from "../../src/store/graph-store.js";
-import { MemkeeperGraph, makeObservation, N_GOAL, type NodeId, type ObsId } from "../../src/types.js";
+import { SessionOwlGraph, makeObservation, N_GOAL, type NodeId, type ObsId } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 
@@ -22,9 +22,9 @@ const NOW = "2026-07-29T09:00:00.000Z";
 // roots: nGoal (crit, with oInitialPrompt) + n7 (active, JWT) + n12 (new).
 // n7 has child n8 + observation o5.
 
-function buildGraph(): MemkeeperGraph {
+function buildGraph(): SessionOwlGraph {
   setClock(() => NOW);
-  const g = new MemkeeperGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+  const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
   applyCreateNode(g, {
     id: N_GOAL,
     summary: "the public API must stay stable",
@@ -100,7 +100,7 @@ function makeFakeStore(): { ctx: StoreContext; entries: RecordedEntry[] } {
  *  from their envelope ({ kind, delta }). */
 function graphDeltas(entries: RecordedEntry[]): unknown[] {
   return entries
-    .filter((e) => e.customType === "memkeeper.graph_delta")
+    .filter((e) => e.customType === "session-owl.graph_delta")
     .map((e) => (e.data as { delta: unknown }).delta);
 }
 
@@ -547,7 +547,7 @@ describe("Builder mutate tools", () => {
   describe("pre-op structural gate (corrupt graph)", () => {
     /** A comparable fingerprint of the whole graph — catches ANY in-memory
      *  drift from a rejected call (the applied-but-unpersisted failure mode). */
-    const fingerprint = (g: MemkeeperGraph): string =>
+    const fingerprint = (g: SessionOwlGraph): string =>
       JSON.stringify({
         nodes: [...g.nodes.entries()].map(([id, n]) => [id, n]),
         observations: [...g.observations.entries()].map(([id, o]) => [id, o]),

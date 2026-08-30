@@ -8,7 +8,7 @@
 
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _setGetMemkeeperSettings, type MemkeeperConfig } from "../../src/config/schema.js";
+import { _setGetSessionOwlSettings, type SessionOwlConfig } from "../../src/config/schema.js";
 import { setConflictHits } from "../../src/conflicts/pause.js";
 import { applyCreateNode, applyRecordObservation } from "../../src/graph/mutations.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
@@ -390,11 +390,11 @@ describe("WidgetController conflict mode", () => {
       (tui: unknown, theme: unknown) => { render: (w: number) => string[] },
       { placement: string },
     ];
-    expect(key).toBe("memkeeper_progress");
+    expect(key).toBe("session_owl_progress");
     expect(opts.placement).toBe("aboveEditor");
     const renderable = factory({}, fakeTheme);
     const line = renderable.render(200)[0];
-    expect(line).toContain("⚠ paused — pi-blackhole, pi-vcc also handle compaction (/mk:status)");
+    expect(line).toContain("⚠ paused — pi-blackhole, pi-vcc also handle compaction (/owl:status)");
   });
 
   it("setConflict before setCtx publishes once ctx arrives (session_start order)", () => {
@@ -415,7 +415,7 @@ describe("WidgetController conflict mode", () => {
     widget.render();
     widget.clearCtx();
     const setWidget = (ctx.ui as unknown as { setWidget: ReturnType<typeof vi.fn> }).setWidget;
-    expect(setWidget).toHaveBeenLastCalledWith("memkeeper_progress", undefined, { placement: "aboveEditor" });
+    expect(setWidget).toHaveBeenLastCalledWith("session_owl_progress", undefined, { placement: "aboveEditor" });
   });
 });
 
@@ -430,7 +430,7 @@ describe("WidgetController conflict mode liveness (un-pause mid-session)", () =>
   const fakeTheme = { fg: (_c: string, t: string) => t };
 
   it("the pause line follows the LIVE pause state, not the activation snapshot", () => {
-    _setGetMemkeeperSettings(() => ({ enabled: true, ignoreConflicts: false }) as MemkeeperConfig);
+    _setGetSessionOwlSettings(() => ({ enabled: true, ignoreConflicts: false }) as SessionOwlConfig);
     setConflictHits([{ entry: "npm:x", matched: "pi-observational-memory" }]);
     const widget = initWidget();
     widget.setConflict(["pi-observational-memory"]);
@@ -449,11 +449,11 @@ describe("WidgetController conflict mode liveness (un-pause mid-session)", () =>
 
     // flip ignoreConflicts mid-session: the gate goes live-un-paused — the line
     // must DROP on the next render (stage null → hide), not linger forever
-    _setGetMemkeeperSettings(() => ({ enabled: true, ignoreConflicts: true }) as MemkeeperConfig);
+    _setGetSessionOwlSettings(() => ({ enabled: true, ignoreConflicts: true }) as SessionOwlConfig);
     widget.render();
-    expect(setWidget).toHaveBeenLastCalledWith("memkeeper_progress", undefined, { placement: "aboveEditor" });
+    expect(setWidget).toHaveBeenLastCalledWith("session_owl_progress", undefined, { placement: "aboveEditor" });
 
-    _setGetMemkeeperSettings(null);
+    _setGetSessionOwlSettings(null);
     setConflictHits(null);
   });
 });

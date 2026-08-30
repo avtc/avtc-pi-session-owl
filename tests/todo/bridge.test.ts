@@ -41,7 +41,7 @@ describe("todo bridge adapter", () => {
       expect(pending.length).toBe(1);
       const item = pending[0] as TodoItem;
       expect(item).toEqual({ id: "1", name: "A", status: "pending", details: "do A" });
-      // parentId dropped (not part of memkeeper's TodoItem)
+      // parentId dropped (not part of session-owl's TodoItem)
       expect("parentId" in item).toBe(false);
     });
 

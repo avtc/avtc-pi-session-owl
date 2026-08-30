@@ -3,7 +3,7 @@
 
 // renderSummary: the mechanical compaction-summary renderer. Produces the
 // text Pi injects post-compaction — the agent's memory. Sections: a # Memory
-// header + legend + mk_recall hint, the verbatim initial prompt, the active-set
+// header + legend + owl_recall hint, the verbatim initial prompt, the active-set
 // root one-liners (selected tree or observations root), and recently-touched
 // files. Non-Builder viewer (a `new` node renders like active — no 🆕); obsolete roots excluded; never
 // truncated (bounded by the Selector/Builder try_finish, not here).
@@ -52,7 +52,7 @@ export interface RenderSummaryArgs {
 }
 
 const MEMORY_HEADING = "# Memory";
-const PREAMBLE = "Your session memory — the top level of a tree; each id opens deeper detail via mk_recall.";
+const PREAMBLE = "Your session memory — the top level of a tree; each id opens deeper detail via owl_recall.";
 /** The recall-first guidance section (approved protected text — changes require
  *  re-approval). Sits between the legend and the initial prompt. */
 const MEMORY_USE_HEADING = "## Memory use";
