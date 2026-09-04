@@ -7,7 +7,7 @@ import type { GraphDelta, MergeDelta, MvDelta, SetMetaDelta, SupersedeDelta } fr
 import { applyCreateNode, applyRecordObservation, MUTATE_SOURCE } from "../../src/graph/mutations.js";
 import { applyDelta } from "../../src/graph/replay.js";
 import type { Importance, Node, NodeId, ObsId } from "../../src/types.js";
-import { SessionOwlGraph, makeNode, makeObservation, N_GOAL } from "../../src/types.js";
+import { makeNode, makeObservation, N_GOAL, SessionOwlGraph } from "../../src/types.js";
 
 // --- fixtures ---------------------------------------------------------------
 

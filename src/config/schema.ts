@@ -688,12 +688,12 @@ const REGISTRATION_OPTIONS: RegisterSettingsOptions = {
 };
 
 /** Register the /owl:settings command + tabbed modal once (from activate); stores the handle.
- * The optional onAfterChange is the settings modal's per-edit hook (fired after
+ * The onAfterChange (null for none) is the settings modal's per-edit hook (fired after
  * updateSetting persists) — session-owl uses it to refresh the widget so a live
  * gate flip (enabled / ignoreConflicts) is reflected in the pause line instantly. */
 export function initSessionOwlSettings(
   pi: ExtensionAPI,
-  onAfterChange?: (id: string, newValue: unknown) => void,
+  onAfterChange: ((id: string, newValue: unknown) => void) | null,
 ): SettingsHandle<SessionOwlConfig> {
   handle = registerFn<SessionOwlConfig>(
     pi,

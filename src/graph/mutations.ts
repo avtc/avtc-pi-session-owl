@@ -9,7 +9,6 @@
 import {
   estimateContentTokens,
   type Importance,
-  type SessionOwlGraph,
   N_GOAL,
   N_PENDING,
   type Node,
@@ -18,6 +17,7 @@ import {
   O_INITIAL_PROMPT,
   type Observation,
   type ObsId,
+  type SessionOwlGraph,
 } from "../types.js";
 import {
   childLinksConsistent,

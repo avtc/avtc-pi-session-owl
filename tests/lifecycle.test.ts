@@ -13,10 +13,16 @@ import {
   isUnstuckAutoContinue,
   onSessionShutdown,
   onSessionStart,
+  onSessionTree,
 } from "../src/lifecycle.js";
 import { _setBaseLoggerForTest, clearLogSessionScope, log } from "../src/log.js";
-import { _resetRunLock, acquireOrSkip, type RunHandle } from "../src/runtime/run-lock.js";
-import { _resetSessionAffinity, getStageAffinityId, setSessionOwlSessionBase } from "../src/runtime/session-affinity.js";
+import { _resetRunLock, acquireOrSkip, inFlight, type RunHandle } from "../src/runtime/run-lock.js";
+import {
+  _resetSessionAffinity,
+  getStageAffinityId,
+  setSessionOwlSessionBase,
+} from "../src/runtime/session-affinity.js";
+import { OBSERVATION_TYPE } from "../src/store/codecs.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
 import { N_GOAL, O_INITIAL_PROMPT } from "../src/types.js";
 import type { WidgetController } from "../src/widget/tracker.js";
@@ -289,6 +295,77 @@ describe("onSessionStart", () => {
     expect(graph.nodes.get(N_GOAL)?.summary).toBe("");
     // frontier advanced past the first user message (Observer never re-observes it)
     expect(getGraphStore().observerFrontier).toBe("u1");
+  });
+});
+
+describe("onSessionTree", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    _resetRunLock();
+    _resetGetSessionOwlSettings();
+    _resetSessionAffinity();
+    clearLogSessionScope();
+  });
+  afterEach(() => {
+    _resetGetSessionOwlSettings();
+    clearLogSessionScope();
+  });
+
+  it("aborts + awaits an in-flight run, re-derives the frontier from the new branch (off-branch pointer heals), and rebuilds the resolver", async () => {
+    // the session ran on branch A: initial prompt captured, frontier advanced
+    const branchA = [userEntry("u1", "task"), assistantEntry("a1", "work")];
+    const old = makeCtx(branchA);
+    await onSessionStart({ type: "session_start", reason: "startup" }, old.ctx, old.pi, noopWidget);
+    expect(getGraphStore().observerFrontier).toBe("u1");
+
+    // an observer run is in flight when the user navigates /tree to a new
+    // branch — its chunk ranges belong to the OLD branch, and the in-memory
+    // frontier already points off the new one (the live poison)
+    const handle = acquireOrSkip("observe") as RunHandle;
+    getGraphStore().observerFrontier = "abandoned-tail";
+
+    // the new branch: shared prefix u1..a1, an observation entry that covers
+    // through a1, then new-branch work
+    const obsEntry = {
+      id: "obs-ok",
+      type: "custom",
+      parentId: null,
+      timestamp: "2026-07-28T14:35:00.000Z",
+      customType: OBSERVATION_TYPE,
+      data: { coversFromId: "u1", coversUpToId: "a1", records: [], tokenCount: 0 },
+    } as unknown as (typeof branchA)[number];
+    const branchB = [branchA[0] as (typeof branchA)[number], branchA[1] as (typeof branchA)[number], obsEntry];
+    const next = makeCtx(branchB);
+
+    const treeDone = onSessionTree(
+      { type: "session_tree", newLeafId: "leaf-2", oldLeafId: "leaf-1" },
+      next.ctx,
+      next.pi,
+      noopWidget,
+    );
+    // the run was aborted; it unwinds and releases in its finally
+    expect(handle.abortController.signal.aborted).toBe(true);
+    handle.release();
+    await treeDone;
+
+    // the lock is free again and the frontier re-derived from the NEW branch's
+    // on-branch observation entry — the off-branch pointer is gone
+    expect(inFlight()).toBe(false);
+    expect(getGraphStore().observerFrontier).toBe("a1");
+    // the resolver was rebuilt against the new branch (resolves its entries)
+    const resolver = getGraphStore().resolveEntries;
+    expect(resolver).not.toBeNull();
+    const resolved = (resolver as NonNullable<typeof resolver>)(["u1"]) as Array<{ id: string }>;
+    expect(resolved[0]?.id).toBe("u1");
+  });
+
+  it("no-ops the in-flight abort when idle (a plain navigation between turns)", async () => {
+    const branch = [userEntry("u1", "task"), assistantEntry("a1", "work")];
+    const { ctx, pi } = makeCtx(branch);
+    await onSessionTree({ type: "session_tree", newLeafId: "leaf-2", oldLeafId: "leaf-1" }, ctx, pi, noopWidget);
+    expect(inFlight()).toBe(false);
+    // the graph reloaded (nGoal re-seeded on the empty reconstructed graph)
+    expect(getGraphStore().graph.nodes.has(N_GOAL)).toBe(true);
   });
 });
 

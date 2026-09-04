@@ -19,10 +19,10 @@ import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/typ
 import {
   countLines,
   estimateContentTokens,
-  SessionOwlGraph,
   N_GOAL,
   N_IRRELEVANT,
   O_INITIAL_PROMPT,
+  SessionOwlGraph,
 } from "../../src/types.js";
 
 describe("isSpecial", () => {

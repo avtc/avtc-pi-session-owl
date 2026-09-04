@@ -15,7 +15,6 @@ import type { GraphDelta } from "../graph/mutations.js";
 import {
   IMPORTANCE_VALUES,
   type Importance,
-  type SessionOwlGraph,
   makeNode,
   makeObservation,
   NODE_STATE_VALUES,
@@ -25,6 +24,7 @@ import {
   O_INITIAL_PROMPT,
   type Observation,
   type ObsId,
+  type SessionOwlGraph,
 } from "../types.js";
 
 // --- customType names -----------------------------------------------------

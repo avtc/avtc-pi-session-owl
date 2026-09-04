@@ -11,7 +11,7 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { ImportanceSchema } from "../schema.js";
-import type { Importance, SessionOwlGraph, NodeId, ObsId } from "../types.js";
+import type { Importance, NodeId, ObsId, SessionOwlGraph } from "../types.js";
 import { GraphInvariantError } from "./invariants.js";
 import {
   applyCreateNode,

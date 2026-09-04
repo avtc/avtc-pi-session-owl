@@ -52,15 +52,17 @@ function makeFakePi(): { pi: ExtensionAPI; appended: { type: string; data: unkno
 }
 
 /** A fake ctx whose sessionManager.getLeafId returns the last appended entry's
- *  id (simulating pi assigning the leaf id). The branch is whatever the test
- *  passes (unused by runObserver beyond getLeafId). */
-function makeFakeCtx(): ExtensionContext {
+ *  id (simulating pi assigning the leaf id). The branch is settable: makeArgs
+ *  points it at the test's unobserved slice (the real branch always contains
+ *  the entries the Observer covers — the frontier advance resolves on it). */
+function makeFakeCtx(): ExtensionContext & { setBranchForTest: (entries: SessionEntry[]) => void } {
   let leafId = "seed-leaf";
+  let branch: SessionEntry[] = [];
   const fakeModel = { provider: "test", id: "observer-model" } as unknown as Model<never>;
-  return {
+  const ctx = {
     sessionManager: {
       getLeafId: () => leafId,
-      getBranch: () => [],
+      getBranch: () => branch,
       setLeafId: (id: string) => {
         leafId = id;
       },
@@ -71,7 +73,11 @@ function makeFakeCtx(): ExtensionContext {
     } as unknown as ExtensionContext,
     model: fakeModel,
     ui: { notify: (..._a: unknown[]) => {} } as unknown as ExtensionContext["ui"],
-  } as unknown as ExtensionContext;
+    setBranchForTest: (entries: SessionEntry[]) => {
+      branch = entries;
+    },
+  } as unknown as ExtensionContext & { setBranchForTest: (entries: SessionEntry[]) => void };
+  return ctx;
 }
 
 /** A scripted runStage: each call executes the record_observations tool once
@@ -127,6 +133,12 @@ function makeArgs(opts: {
   widget?: WidgetController;
   maybeBuild?: ObserverRunInput["maybeBuild"];
 }): ObserverRunInput {
+  // point the fake ctx's branch at the unobserved slice (the frontier advance
+  // resolves coversUpToId against it)
+  const withBranch = opts.ctx as ExtensionContext & {
+    setBranchForTest?: (entries: SessionEntry[]) => void;
+  };
+  if (typeof withBranch.setBranchForTest === "function") withBranch.setBranchForTest(opts.unobserved);
   return {
     ctx: opts.ctx,
     pi: opts.pi,

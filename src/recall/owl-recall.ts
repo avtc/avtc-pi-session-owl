@@ -50,7 +50,7 @@ import {
 import { type ContentMode, contentBlock, grepBlock, resolveContentMode } from "../graph/result-render.js";
 import type { SerializedNode, SerializedObservation, SerializedSelection } from "../store/codecs.js";
 import { getGraphStore } from "../store/graph-store.js";
-import { IMPORTANCE_RANK, type Importance, type SessionOwlGraph, type NodeId, type ObsId } from "../types.js";
+import { IMPORTANCE_RANK, type Importance, type NodeId, type ObsId, type SessionOwlGraph } from "../types.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 

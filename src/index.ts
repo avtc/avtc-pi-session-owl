@@ -13,7 +13,7 @@ import { compactionHook } from "./compaction/hook.js";
 import { getSessionOwlSettings, initSessionOwlSettings, reloadSessionOwlConfig } from "./config/schema.js";
 import { detectConflicts } from "./conflicts/detect.js";
 import { getConflictHits, isConflictPaused, setConflictHits } from "./conflicts/pause.js";
-import { captureInitialPromptAndExtract, onSessionShutdown, onSessionStart } from "./lifecycle.js";
+import { captureInitialPromptAndExtract, onSessionShutdown, onSessionStart, onSessionTree } from "./lifecycle.js";
 import { log } from "./log.js";
 import { makeOwlRecallTool } from "./recall/owl-recall.js";
 import {
@@ -28,6 +28,9 @@ import { registerStatusCommand } from "./status/command.js";
 import { createTodoWiring } from "./todo/wiring.js";
 import { onTurnEnd, setStageRuns } from "./triggers.js";
 import { initWidget } from "./widget/tracker.js";
+
+/** detectConflicts with no overrides — scan the real home + cwd + self root. */
+const NO_CONFLICT_SCAN_OPTIONS = null;
 
 export default function sessionOwlExtension(pi: ExtensionAPI): void {
   // Widget first so settings registration can already refresh it: every panel
@@ -63,7 +66,7 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
   // package recovers at the next pi start. The widget line + /owl:status keep
   // the pause visible. (Also clears any pause a previous (re)activation
   // recorded, so state never goes stale.)
-  const conflicts = detectConflicts();
+  const conflicts = detectConflicts(NO_CONFLICT_SCAN_OPTIONS);
   setConflictHits(conflicts.length > 0 ? conflicts : null);
   const activationSettings = getSessionOwlSettings();
   if (conflicts.length > 0 && !activationSettings.enabled) {
@@ -123,6 +126,25 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
     onSessionStart(event, ctx, pi, widget);
   });
   pi.on("session_shutdown", (_event, _ctx) => onSessionShutdown(_event, widget));
+
+  // `/tree` branch navigation: re-derive the store (graph + frontier +
+  // resolver) for the new branch and stop any in-flight stage run whose chunk
+  // ranges belong to the old one. Awaited so the healed frontier is in place
+  // before the next turn's triggers evaluate.
+  pi.on("session_tree", async (event, ctx) => {
+    // Dormant while conflict-paused — keep the pause line honest (mirrors
+    // session_start), but no store re-derivation.
+    if (isConflictPaused()) {
+      widget.setCtx(ctx);
+      widget.render();
+      return;
+    }
+    try {
+      await onSessionTree(event, ctx, pi, widget);
+    } catch (err) {
+      log.error("session_tree: store re-derivation failed", err);
+    }
+  });
 
   pi.on("turn_end", (_event, ctx) => {
     const settings = getSessionOwlSettings();

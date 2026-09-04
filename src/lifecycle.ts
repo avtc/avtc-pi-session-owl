@@ -17,6 +17,7 @@ import type {
   SessionMessageEntry,
   SessionShutdownEvent,
   SessionStartEvent,
+  SessionTreeEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getSessionOwlSettings } from "./config/schema.js";
 import { clearDetailsCache, computeDetailsAndCache, type EntryResolver } from "./format/details.js";
@@ -25,8 +26,8 @@ import { stripAnsi } from "./format/sanitize.js";
 import { abortGoalExtract, runGoalExtract } from "./goal-extract/run.js";
 import { applyCreateNode, applyRecordObservation } from "./graph/mutations.js";
 import { terminateRegexWorker } from "./graph/regex-runner.js";
-import { clearLogSessionScope, setLogSessionScope } from "./log.js";
-import { abortInFlight } from "./runtime/run-lock.js";
+import { clearLogSessionScope, log, setLogSessionScope } from "./log.js";
+import { abortAndAwaitIdle, abortInFlight } from "./runtime/run-lock.js";
 import { clearSessionOwlSessionBase, setSessionOwlSessionBase } from "./runtime/session-affinity.js";
 import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
 import {
@@ -83,7 +84,9 @@ export function buildEntryResolver(ctx: ExtensionContext): EntryResolver {
   // toolCallId → entry-id map for both call and result entries (so a details
   // render that cites only one side of a tool pair pulls in its sibling — the
   // verbatim source must read as complete call+result units, never an orphan).
-  // Built once per resolver (per session); the branch is fixed for a session.
+  // Built once per resolver, on first use — the active branch can change
+  // mid-session (`/tree` navigation), so a branch switch installs a fresh
+  // resolver (see onSessionTree) instead of trusting a cached index.
   let index: BranchToolIndex | null = null;
   const buildIndex = (): BranchToolIndex => {
     if (index !== null) return index;
@@ -335,6 +338,36 @@ export function captureInitialPromptAndExtract(
     widget,
     verbatimText: verbatim,
   });
+}
+
+/** `/tree` branch navigation (session_tree): the store's pointers — the
+ *  Observer frontier and the resolver's cached branch index — belong to the
+ *  branch that was active when they were derived, and an in-flight stage run
+ *  holds chunk ranges from it. Re-derive everything for the new branch:
+ *  abort + await the in-flight run (its completed chunks stay durable on the
+ *  abandoned branch; the in-flight chunk is lost and re-observed here),
+ *  install a fresh resolver, then reload the store from the new branch — every
+ *  record persisted before the branch point (shared ancestry) is kept, records
+ *  appended to abandoned branches drop out, and the frontier re-derives from
+ *  on-branch observation entries only. Post-load steps mirror session_start
+ *  (the nGoal seed + initial-prompt capture are no-ops when the branch already
+ *  carries them). */
+export async function onSessionTree(
+  event: SessionTreeEvent,
+  ctx: ExtensionContext,
+  pi: ExtensionAPI,
+  widget: WidgetController,
+): Promise<void> {
+  log.info(`session_tree: ${event.oldLeafId} -> ${event.newLeafId}; re-deriving store for the new branch`);
+  await abortAndAwaitIdle();
+  widget.setCtx(ctx);
+  setEntryResolver(buildEntryResolver(ctx));
+  const store = toStoreContext(pi, ctx);
+  await load(store);
+  if (getSessionOwlSettings().enabled) {
+    ensureNGoalSeeded(store);
+    captureInitialPromptAndExtract(ctx, pi, widget);
+  }
 }
 
 /** Shutdown: abort any in-flight stage (so it stops wasting LLM tokens on a

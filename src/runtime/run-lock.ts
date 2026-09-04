@@ -107,6 +107,21 @@ export function abortInFlight(): void {
   }
 }
 
+/**
+ * Abort any in-flight run and AWAIT its actual release (the run unwinds at its
+ * next signal check and releases in its `finally`). For host-driven state
+ * swaps that must not race a run's trailing persists (a `/tree` branch switch
+ * re-derives the store for the new branch — an in-flight chunk persisting
+ * against the swapped-out graph state would write stale ids into it). No-op
+ * when idle. Shares the compaction waiter slot (the two flows cannot overlap:
+ * compaction runs inside a turn, tree navigation between turns).
+ */
+export async function abortAndAwaitIdle(): Promise<void> {
+  if (active === null) return;
+  abortInFlight();
+  await waitForIdle();
+}
+
 /** Resolve once the lock is idle (released by `releaseActive` via the waiter). */
 function waitForIdle(): Promise<void> {
   if (active === null) return Promise.resolve();

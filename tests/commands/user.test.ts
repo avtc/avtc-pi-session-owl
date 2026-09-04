@@ -14,7 +14,7 @@ import {
   setClock,
 } from "../../src/graph/mutations.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
-import { SessionOwlGraph, makeObservation, N_GOAL } from "../../src/types.js";
+import { makeObservation, N_GOAL, SessionOwlGraph } from "../../src/types.js";
 import { NO_OP_WIDGET } from "../../src/widget/tracker.js";
 
 const T0 = "2026-07-17T09:00:00.000Z";

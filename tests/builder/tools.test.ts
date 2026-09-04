@@ -14,7 +14,7 @@ import {
   setClock,
 } from "../../src/graph/mutations.js";
 import type { StoreContext } from "../../src/store/graph-store.js";
-import { SessionOwlGraph, makeObservation, N_GOAL, type NodeId, type ObsId } from "../../src/types.js";
+import { makeObservation, N_GOAL, type NodeId, type ObsId, SessionOwlGraph } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 

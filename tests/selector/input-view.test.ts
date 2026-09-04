@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { validateGraph } from "../../src/graph/invariants.js";
 import { buildTail, buildWorkingCopy, type TailContext } from "../../src/selector/input-view.js";
 import type { Node, NodeId, Observation, ObsId } from "../../src/types.js";
-import { SessionOwlGraph, makeNode, makeObservation, N_GOAL, N_IRRELEVANT, O_INITIAL_PROMPT } from "../../src/types.js";
+import { makeNode, makeObservation, N_GOAL, N_IRRELEVANT, O_INITIAL_PROMPT, SessionOwlGraph } from "../../src/types.js";
 
 function g(): SessionOwlGraph {
   const nodes = new Map<NodeId, Node>();

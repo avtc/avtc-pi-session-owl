@@ -30,7 +30,6 @@ import { getGraphStore } from "../store/graph-store.js";
 import {
   estimateContentTokens,
   IMPORTANCE_RANK,
-  type SessionOwlGraph,
   N_GOAL,
   N_IRRELEVANT,
   type Node,
@@ -38,6 +37,7 @@ import {
   type Observation,
   type ObsId,
   ROOT_PARENT,
+  type SessionOwlGraph,
 } from "../types.js";
 import {
   budgetReachedFooter,

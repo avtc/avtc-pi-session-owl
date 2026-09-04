@@ -196,7 +196,9 @@ describe("compactionHook", () => {
     // cancelled with a visible error — never a poisoned snapshot
     expect((result as { cancel?: boolean }).cancel).toBe(true);
     expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining("session-owl compaction failed: encode snapshot: a node references a missing observation"),
+      expect.stringContaining(
+        "session-owl compaction failed: encode snapshot: a node references a missing observation",
+      ),
       "error",
     );
   });

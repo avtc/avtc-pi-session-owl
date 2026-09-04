@@ -20,13 +20,13 @@ import {
   encodeSelection,
   GRAPH_DELTA_TYPE,
   type GraphDeltaEntry,
-  type SessionOwlDetails,
   OBSERVATION_TYPE,
   type ObservationEntry,
   RESCAN_TYPE,
   SELECTION_TYPE,
   type SelectionEntry,
   type SerializedObservation,
+  type SessionOwlDetails,
   USAGE_TYPE,
   type UsageEntry,
 } from "../../src/store/codecs.js";
@@ -45,7 +45,7 @@ import {
   setEntryResolver,
 } from "../../src/store/graph-store.js";
 import type { Importance, NodeId, ObsId } from "../../src/types.js";
-import { SessionOwlGraph, makeNode, makeObservation, N_GOAL } from "../../src/types.js";
+import { makeNode, makeObservation, N_GOAL, SessionOwlGraph } from "../../src/types.js";
 
 // --- fake StoreContext -----------------------------------------------------
 
@@ -175,6 +175,8 @@ describe("persist methods (PERSIST-ONLY)", () => {
   it("appendObservation persists a session-owl.observation entry and advances the frontier", () => {
     freshStore();
     const fake = new FakeStore();
+    // the branch entry the batch covers through (the frontier must resolve on-branch)
+    fake.addCustomAt("e10", "custom", { marker: 1 });
     const batch: ObservationEntry = {
       coversFromId: null,
       coversUpToId: "e10",
@@ -184,8 +186,9 @@ describe("persist methods (PERSIST-ONLY)", () => {
       tokenCount: 1,
     };
     appendObservation(fake, batch);
-    expect(customAt(fake, 0).customType).toBe(OBSERVATION_TYPE);
-    expect(customAt(fake, 0).data).toEqual(batch);
+    // the observation entry appended at the leaf (after the branch entries)
+    expect(customAt(fake, 1).customType).toBe(OBSERVATION_TYPE);
+    expect(customAt(fake, 1).data).toEqual(batch);
     // advancing the frontier mirrors the in-memory cache refresh other persists do
     expect(getGraphStore().observerFrontier).toBe("e10");
   });
@@ -216,6 +219,39 @@ describe("persist methods (PERSIST-ONLY)", () => {
       tokenCount: 0,
     } satisfies ObservationEntry);
     expect(getGraphStore().observerFrontier).toBe("src3");
+  });
+
+  it("appendObservation never adopts a coversUpToId that does not resolve on the active branch (a mid-run branch switch) — the frontier holds", () => {
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("src1", "custom", { marker: 1 });
+    fake.addCustomAt("src2", "custom", { marker: 2 });
+    getGraphStore().observerFrontier = "src2";
+    // an observer run computed its chunk on the abandoned branch; the persist
+    // lands on the new one with a range endpoint that is not on it
+    appendObservation(fake, {
+      coversFromId: "src1",
+      coversUpToId: "abandoned-tail",
+      records: [],
+      tokenCount: 0,
+    } satisfies ObservationEntry);
+    expect(getGraphStore().observerFrontier).toBe("src2"); // held — off-branch never adopted
+  });
+
+  it("appendObservation heals a stale off-branch frontier forward when a resolvable id arrives", () => {
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("src1", "custom", { marker: 1 });
+    // an off-branch pointer (adopted before the branch-resolvable rule): the
+    // next on-branch observation entry must replace it, not hold it forever
+    getGraphStore().observerFrontier = "abandoned-tail";
+    appendObservation(fake, {
+      coversFromId: "src1",
+      coversUpToId: "src1",
+      records: [],
+      tokenCount: 0,
+    } satisfies ObservationEntry);
+    expect(getGraphStore().observerFrontier).toBe("src1"); // adopted — the pointer heals
   });
 
   it("appendGraphDelta persists a session-owl.graph_delta envelope", () => {
@@ -379,6 +415,57 @@ describe("load reconstruction", () => {
     await load(fake);
     // the frontier re-derives to the furthest coverage, not the last-in-file one
     expect(getGraphStore().observerFrontier).toBe("src2");
+  });
+
+  it("replay skips a cross-branch coversUpToId — the frontier re-derives from on-branch ids only, and the poisoned entry's records are kept (reload self-heal)", async () => {
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("src1", "custom", { marker: 1 });
+    fake.addCustomAt("src2", "custom", { marker: 2 });
+    // healthy coverage ending on this branch
+    fake.addCustomAt("obs-ok", OBSERVATION_TYPE, {
+      coversFromId: "src1",
+      coversUpToId: "src2",
+      records: [
+        {
+          id: "o1",
+          summary: "on-branch fact",
+          importance: "high",
+          sourceEntryIds: ["src2"],
+          timestamp: "t",
+          parentNode: "n1",
+        },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    // an observer run whose branch was switched mid-run: the entry landed on
+    // THIS branch but its coversUpToId belongs to the abandoned one
+    fake.addCustomAt("obs-poison", OBSERVATION_TYPE, {
+      coversFromId: "src2",
+      coversUpToId: "abandoned-tail",
+      records: [
+        {
+          id: "o2",
+          summary: "cross-branch fact",
+          importance: "med",
+          sourceEntryIds: ["abandoned-tail"],
+          timestamp: "t",
+          parentNode: "n1",
+        },
+      ],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    // an in-memory pointer already poisoned by the live append — the reload
+    // must not re-adopt it either
+    getGraphStore().observerFrontier = "abandoned-tail";
+    await load(fake);
+    const store = getGraphStore();
+    // poison skipped: the frontier re-derives from the on-branch id only — the
+    // unobserved tail behind it becomes observable again
+    expect(store.observerFrontier).toBe("src2");
+    // the poisoned entry's records are still indexed (the ledger is never pruned)
+    expect(store.graph.observations.has("o1")).toBe(true);
+    expect(store.graph.observations.has("o2")).toBe(true);
   });
 
   it("reconstructs from deltas only when no valid compaction snapshot (empty base)", async () => {
@@ -1476,6 +1563,9 @@ describe("rescan markers (plain vs --reuse-observations)", () => {
   it("a reuse marker voids structure but KEEPS the observation ledger + frontier + usage", async () => {
     freshStore();
     const fake = new FakeStore();
+    // the branch entries the observation batches cover through (resolvable)
+    fake.addCustomAt("u1", "custom", { marker: 1 });
+    fake.addCustomAt("u2", "custom", { marker: 2 });
     // pre-marker structure + records
     fake.addCustomAt("e1", GRAPH_DELTA_TYPE, {
       kind: "graph_delta",
@@ -1560,6 +1650,10 @@ describe("rescan markers (plain vs --reuse-observations)", () => {
   it("a PLAIN marker after a reuse marker voids everything (ledger restarts)", async () => {
     freshStore();
     const fake = new FakeStore();
+    // the branch entries the observation batches cover through (resolvable)
+    fake.addCustomAt("u1", "custom", { marker: 1 });
+    fake.addCustomAt("u3", "custom", { marker: 3 });
+    fake.addCustomAt("u5", "custom", { marker: 5 });
     fake.addCustomAt("e1", OBSERVATION_TYPE, {
       coversFromId: null,
       coversUpToId: "u1",

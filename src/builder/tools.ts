@@ -28,7 +28,7 @@ import { applySetMeta, applySupersede, MUTATE_SOURCE } from "../graph/mutations.
 import { makeReadTools, makeTryFinishTool } from "../graph/read-tools.js";
 import { ImportanceSchema } from "../schema.js";
 import { appendGraphDelta, type StoreContext } from "../store/graph-store.js";
-import type { Importance, SessionOwlGraph, NodeId } from "../types.js";
+import type { Importance, NodeId, SessionOwlGraph } from "../types.js";
 
 // Re-export the Builder toolset names + param schemas so callers (the run, the
 // compaction hook, tests) can name the full Builder surface through the module

@@ -12,8 +12,8 @@ import {
   DEFAULT_CONFIG,
   getSessionOwlSettings,
   initSessionOwlSettings,
-  SESSION_OWL_SCHEMA,
   reloadSessionOwlConfig,
+  SESSION_OWL_SCHEMA,
 } from "../../src/config/schema.js";
 import { ImportanceSchema, NodeStateSchema } from "../../src/schema.js";
 import { IMPORTANCE_VALUES, NODE_STATE_VALUES } from "../../src/types.js";
@@ -284,7 +284,7 @@ describe("getSessionOwlSettings — before init", () => {
 describe("getSessionOwlSettings — initialized", () => {
   const fakePi = {} as ExtensionAPI;
   // Each test initializes its own handle read (init is idempotent via the spy; at(-1) is current).
-  beforeEach(() => initSessionOwlSettings(fakePi));
+  beforeEach(() => initSessionOwlSettings(fakePi, null));
   afterEach(() => _resetGetSessionOwlSettings());
 
   it("initSessionOwlSettings registers the /owl:settings command with the documented options", () => {
@@ -365,7 +365,7 @@ describe("reloadSessionOwlConfig", () => {
   });
 
   it("calls the handle's loadSettingsIntoMemory(undefined, undefined) after init", () => {
-    initSessionOwlSettings({} as ExtensionAPI);
+    initSessionOwlSettings({} as ExtensionAPI, null);
     reloadSessionOwlConfig();
     expect(loadSettingsIntoMemory).toHaveBeenCalledTimes(1);
     expect(loadSettingsIntoMemory).toHaveBeenCalledWith(undefined, undefined);

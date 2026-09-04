@@ -91,6 +91,10 @@ const COMPACT_OVERRIDE_PATTERN =
 
 /** Bounded-scan limits: activation must stay fast even with many packages. */
 const SCAN_MAX_DEPTH = 2;
+/** The depth a fresh scan starts at (explicit at every root call site). */
+const SCAN_ROOT_DEPTH = 0;
+/** A fresh scan budget (explicit at every root call site). */
+const SCAN_ROOT_BUDGET = (): { files: number } => ({ files: SCAN_MAX_FILES_PER_PACKAGE });
 const SCAN_MAX_FILES_PER_PACKAGE = 40;
 const SCAN_MAX_FILE_BYTES = 4 * 1024 * 1024;
 
@@ -100,8 +104,9 @@ function isScannableSource(file: string): boolean {
 }
 
 /** Bounded recursive walk: does any runtime source in `dir` contain an
- *  override-shaped compaction-hook registration? */
-function dirRegistersCompactHook(dir: string, depth = 0, budget = { files: SCAN_MAX_FILES_PER_PACKAGE }): boolean {
+ *  override-shaped compaction-hook registration? The depth + budget are
+ *  explicit at every call site (the roots pass the fresh-scan constants). */
+function dirRegistersCompactHook(dir: string, depth: number, budget: { files: number }): boolean {
   if (depth > SCAN_MAX_DEPTH) return false;
   let entries: Dirent[];
   try {
@@ -172,7 +177,7 @@ function readPackages(settingsFile: string): string[] {
  * legacy user extensions dir — so unknown and future extensions are caught
  * too, not just the curated names.
  */
-export function detectConflicts(options?: { projectDir?: string; selfRoot?: string }): ConflictHit[] {
+export function detectConflicts(options: { projectDir?: string; selfRoot?: string } | null): ConflictHit[] {
   const home = conflictsHomeOverride ?? homedir();
   const projectDir = options?.projectDir ?? process.cwd();
   const selfRoot = options?.selfRoot ?? defaultSelfRoot();
@@ -197,7 +202,12 @@ export function detectConflicts(options?: { projectDir?: string; selfRoot?: stri
     // The avtc-pi-* suite is our own namespace — its members are co-designed
     // companions (passive listeners at most), exempt from the generic net.
     const isSuiteNamespace = lower.includes("avtc-pi-");
-    if (!isSuiteNamespace && dir !== null && !isSelfEntry(dir, selfRoot) && dirRegistersCompactHook(dir)) {
+    if (
+      !isSuiteNamespace &&
+      dir !== null &&
+      !isSelfEntry(dir, selfRoot) &&
+      dirRegistersCompactHook(dir, SCAN_ROOT_DEPTH, SCAN_ROOT_BUDGET())
+    ) {
       seen.add(entry);
       hits.push({ entry, matched: COMPACT_HOOK_MARKER });
     }
@@ -212,7 +222,8 @@ export function detectConflicts(options?: { projectDir?: string; selfRoot?: stri
       if (ent.name.includes("avtc-pi-")) continue; // own suite namespace — see above
       const dir = path.join(extensionsDir, ent.name);
       if (isSelfEntry(dir, selfRoot) || seen.has(dir)) continue;
-      if (dirRegistersCompactHook(dir)) hits.push({ entry: dir, matched: COMPACT_HOOK_MARKER });
+      if (dirRegistersCompactHook(dir, SCAN_ROOT_DEPTH, SCAN_ROOT_BUDGET()))
+        hits.push({ entry: dir, matched: COMPACT_HOOK_MARKER });
     }
   } catch {
     // no legacy extensions dir — fine

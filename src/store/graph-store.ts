@@ -21,7 +21,6 @@ import { type GraphDelta, parseSeq, recomputeRange } from "../graph/mutations.js
 import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
 import {
-  SessionOwlGraph,
   makeNode,
   type Node,
   type NodeId,
@@ -29,6 +28,7 @@ import {
   O_INITIAL_PROMPT,
   type Observation,
   type ObsId,
+  SessionOwlGraph,
 } from "../types.js";
 import {
   cloneLedger,
@@ -40,13 +40,13 @@ import {
   EMPTY_LEDGER,
   GRAPH_DELTA_TYPE,
   type GraphDeltaEntry,
-  type SessionOwlDetails,
   OBSERVATION_TYPE,
   type ObservationEntry,
   RESCAN_MODE_REUSE,
   RESCAN_TYPE,
   SELECTION_TYPE,
   type SerializedSelection,
+  type SessionOwlDetails,
   USAGE_TYPE,
   type UsageLedger,
 } from "./codecs.js";
@@ -141,8 +141,9 @@ export function resetForNewSession(): void {
 }
 
 /** Install the session-entry resolver. Refreshed on every session_start (a
- *  ctx captured once goes stale across session changes) so recall always reads
- *  the active session's entries. */
+ *  ctx captured once goes stale across session changes) and on session_tree
+ *  (branch navigation re-derives the branch index) so recall always reads the
+ *  active session's entries. */
 export function setEntryResolver(resolver: EntryResolver): void {
   getGraphStore().resolveEntries = resolver;
 }
@@ -158,11 +159,16 @@ export function clearEntryResolver(): void {
 /** Persist an observation batch. */
 export function appendObservation(ctx: StoreContext, entry: ObservationEntry): void {
   ctx.appendEntry(OBSERVATION_TYPE, entry);
-  // advance the frontier to this batch's coversUpToId — FORWARD-ONLY: a
-  // re-observe of a skipped (zero-observation) range appends a coversUpToId
-  // that sits EARLIER on the branch than the current frontier; it must not
-  // regress the pointer past already-observed entries (they would re-observe
-  // and duplicate). Mirrors the in-memory cache refresh other persists do.
+  // advance the frontier to this batch's coversUpToId — FORWARD-ONLY and
+  // BRANCH-RESOLVABLE: a re-observe of a skipped (zero-observation) range
+  // appends a coversUpToId that sits EARLIER on the branch than the current
+  // frontier and must not regress the pointer past already-observed entries
+  // (they would re-observe and duplicate); an id that does not resolve on the
+  // active branch at all (the branch moved mid-run — the persist landed on a
+  // new branch while its range belongs to the abandoned one) is never adopted:
+  // an unresolvable frontier reads as "everything observed" and would silence
+  // the Observer permanently. Mirrors the in-memory cache refresh other
+  // persists do.
   const branch = ctx.getBranch(ctx.getLeafId());
   advanceFrontierForward(getGraphStore(), entry.coversUpToId, (id) => entryPosition(branch, id));
 }
@@ -172,11 +178,18 @@ function entryPosition(branch: StoreEntry[], id: string): number {
   return branch.findIndex((e) => e.id === id);
 }
 
-/** Advance `store.observerFrontier` to `coversUpToId` unless it resolves
- *  EARLIER on the branch than the current frontier (a skipped-range re-observe
- *  — hold the pointer). An unresolvable id keeps the legacy assign behavior
- *  (fresh appends' sources are always the newest entries; only repair appends
- *  target older ranges, and those always resolve). */
+/** Advance `store.observerFrontier` to `coversUpToId` when it resolves on the
+ *  active branch at or after the current frontier:
+ *  - an id EARLIER on the branch than the current frontier (a skipped-range
+ *    re-observe) is held — the pointer never regresses past covered entries;
+ *  - an id that does not resolve on the branch AT ALL is never adopted — the
+ *    pointer must always name an entry `computeUnobserved` can find (an
+ *    unresolvable frontier yields an empty unobserved slice and silences the
+ *    Observer). Unresolvable ids come from cross-branch persists (the branch
+ *    moved while a run was in flight) and are simply skipped — the next
+ *    on-branch observation entry still advances normally;
+ *  - an id that resolves while the CURRENT pointer does not (a stale
+ *    off-branch pointer) is adopted — the pointer heals forward. */
 function advanceFrontierForward(
   store: { observerFrontier: string | null },
   coversUpToId: string,
@@ -184,12 +197,11 @@ function advanceFrontierForward(
 ): void {
   const current = store.observerFrontier;
   if (current === coversUpToId) return;
+  const newPos = positionOf(coversUpToId);
+  if (newPos === -1) return; // not on this branch — never adopt
   if (current !== null) {
-    const newPos = positionOf(coversUpToId);
-    if (newPos !== -1) {
-      const curPos = positionOf(current);
-      if (curPos !== -1 && newPos < curPos) return; // earlier on the branch — hold
-    }
+    const curPos = positionOf(current);
+    if (curPos !== -1 && newPos < curPos) return; // earlier on the branch — hold
   }
   store.observerFrontier = coversUpToId;
 }
@@ -532,9 +544,13 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
       const payload = e.data as ObservationEntry | undefined;
       if (payload === undefined) continue;
       if (typeof payload.coversUpToId === "string") {
-        // forward-only (same rule as appendObservation): a repair entry appended
-        // later in file order but covering an older range must not regress the
-        // re-derived frontier past already-observed entries
+        // forward-only, branch-resolvable (same rule as appendObservation): a
+        // repair entry appended later in file order but covering an older range
+        // must not regress the re-derived frontier past already-observed
+        // entries, and a cross-branch coversUpToId (an observation entry that
+        // landed on this branch while its range belongs to an abandoned one)
+        // must not poison it — the frontier re-derives from on-branch ids only,
+        // so a reload self-heals a stale off-branch pointer
         advanceFrontierForward(storeState, payload.coversUpToId, (id) => positionById.get(id) ?? -1);
       }
       if (!Array.isArray(payload.records)) continue;

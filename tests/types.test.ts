@@ -7,7 +7,6 @@ import {
   CHARS_PER_TOKEN_ESTIMATE,
   estimateContentTokens,
   IMPORTANCE_RANK,
-  SessionOwlGraph,
   makeNode,
   makeObservation,
   N_GOAL,
@@ -15,6 +14,7 @@ import {
   nowStoredTimestamp,
   O_INITIAL_PROMPT,
   ROOT_PARENT,
+  SessionOwlGraph,
 } from "../src/types.js";
 
 describe("Importance", () => {

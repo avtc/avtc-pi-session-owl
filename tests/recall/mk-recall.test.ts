@@ -25,7 +25,7 @@ import {
   resetForNewSession,
   setEntryResolver,
 } from "../../src/store/graph-store.js";
-import { SessionOwlGraph, makeObservation, N_GOAL, type Node, type ObsId } from "../../src/types.js";
+import { makeObservation, N_GOAL, type Node, type ObsId, SessionOwlGraph } from "../../src/types.js";
 
 const T0 = "2026-07-17T09:00:00.000Z";
 const T1 = "2026-07-17T14:30:00.000Z";

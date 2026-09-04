@@ -19,7 +19,7 @@ import {
   orderActiveSetRoots,
 } from "../../src/graph/read-tools.js";
 import { clearEntryResolver, setEntryResolver } from "../../src/store/graph-store.js";
-import { SessionOwlGraph, makeObservation, N_GOAL, N_IRRELEVANT, type NodeId, type ObsId } from "../../src/types.js";
+import { makeObservation, N_GOAL, N_IRRELEVANT, type NodeId, type ObsId, SessionOwlGraph } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 

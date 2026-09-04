@@ -21,7 +21,7 @@ import { nodeLineOptions, orderedNonObsoleteRoots } from "../graph/read-tools.js
 import { isUnstuckAutoContinue } from "../lifecycle.js";
 import type { TodoContext } from "../todo/types.js";
 import type { Node, NodeId, Observation, ObsId } from "../types.js";
-import { SessionOwlGraph, makeNode, N_IRRELEVANT, nowStoredTimestamp } from "../types.js";
+import { makeNode, N_IRRELEVANT, nowStoredTimestamp, SessionOwlGraph } from "../types.js";
 
 /**
  * The Selector's working copy: a deep-copied, in-memory graph the Selector

@@ -41,7 +41,7 @@ import { resolveStageModelOrNotify, resolveStageReasoning } from "../runtime/mod
 import { countCompactions } from "../status/command.js";
 // jscpd:ignore-end
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
-import type { SessionOwlGraph, NodeId } from "../types.js";
+import type { NodeId, SessionOwlGraph } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 import { MUTATE_TOOL_NAMES, makeBuilderTools, measureRootViewTokens, renderRootView } from "./tools.js";
 

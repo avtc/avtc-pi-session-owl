@@ -18,7 +18,7 @@ import {
   setClock,
 } from "../../src/graph/mutations.js";
 import type { Importance, Node, NodeId, Observation, ObsId } from "../../src/types.js";
-import { countLines, estimateContentTokens, SessionOwlGraph, makeObservation, N_GOAL } from "../../src/types.js";
+import { countLines, estimateContentTokens, makeObservation, N_GOAL, SessionOwlGraph } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
 

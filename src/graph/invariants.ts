@@ -4,7 +4,7 @@
 // Pure validators over a SessionOwlGraph — no mutation. Used by the mutation
 // engine as the live per-call validation gate, and by tests.
 
-import { type SessionOwlGraph, N_GOAL, N_IRRELEVANT, type Node, O_INITIAL_PROMPT } from "../types.js";
+import { N_GOAL, N_IRRELEVANT, type Node, O_INITIAL_PROMPT, type SessionOwlGraph } from "../types.js";
 
 /** Raised when a structural invariant does not hold. */
 export class GraphInvariantError extends Error {

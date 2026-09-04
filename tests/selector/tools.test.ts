@@ -32,7 +32,6 @@ import {
 } from "../../src/selector/tools.js";
 import type { TodoBridge } from "../../src/todo/types.js";
 import {
-  SessionOwlGraph,
   makeObservation,
   N_GOAL,
   type Node,
@@ -40,6 +39,7 @@ import {
   O_INITIAL_PROMPT,
   type Observation,
   type ObsId,
+  SessionOwlGraph,
 } from "../../src/types.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";

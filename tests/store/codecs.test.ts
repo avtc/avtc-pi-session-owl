@@ -19,7 +19,7 @@ import {
   USAGE_TYPE,
 } from "../../src/store/codecs.js";
 import type { Importance, NodeId, ObsId } from "../../src/types.js";
-import { SessionOwlGraph, makeNode, makeObservation, N_GOAL, O_INITIAL_PROMPT } from "../../src/types.js";
+import { makeNode, makeObservation, N_GOAL, O_INITIAL_PROMPT, SessionOwlGraph } from "../../src/types.js";
 
 // --- fixtures ---------------------------------------------------------------
 

@@ -43,11 +43,11 @@ import {
 import { makeMaybeBuilder } from "../triggers.js";
 import {
   type Importance,
-  type SessionOwlGraph,
   N_GOAL,
   N_PENDING,
   O_INITIAL_PROMPT,
   type Observation,
+  type SessionOwlGraph,
 } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 

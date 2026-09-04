@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   _resetRunLock,
+  abortAndAwaitIdle,
   abortInFlight,
   acquireForCompaction,
   acquireOrSkip,
@@ -42,6 +43,25 @@ describe("run-lock (single run-lock — at most one stage active at a time)", ()
     const next = acquireOrSkip("build");
     expect(next).not.toBeNull();
     expect(current()).toBe("build");
+  });
+
+  it("abortAndAwaitIdle resolves immediately when idle (no run to stop)", async () => {
+    await abortAndAwaitIdle();
+    expect(inFlight()).toBe(false);
+  });
+
+  it("abortAndAwaitIdle aborts the in-flight run and resolves only after it releases", async () => {
+    const handle = acquireOrSkip("observe") as RunHandle;
+    let released = false;
+    const done = abortAndAwaitIdle();
+    // aborted immediately, but the lock is still held until the run unwinds
+    expect(handle.abortController.signal.aborted).toBe(true);
+    expect(inFlight()).toBe(true);
+    handle.release(); // the aborted run's finally
+    released = true;
+    await done;
+    expect(released).toBe(true);
+    expect(inFlight()).toBe(false);
   });
 
   it("each handle owns its own AbortController", () => {

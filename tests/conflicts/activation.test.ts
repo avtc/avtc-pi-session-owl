@@ -159,6 +159,7 @@ describe("sessionOwlExtension (dormant conflict pause)", () => {
       "session_before_compact",
       "session_shutdown",
       "session_start",
+      "session_tree",
       "turn_end",
     ]);
     expect(pi.registerTool).toHaveBeenCalledTimes(1);
