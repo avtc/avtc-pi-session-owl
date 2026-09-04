@@ -362,6 +362,9 @@ export async function onSessionTree(
   await abortAndAwaitIdle();
   widget.setCtx(ctx);
   setEntryResolver(buildEntryResolver(ctx));
+  // Clear the per-observation details cache — size hints + rendered texts from
+  // the old branch must not survive the switch (mirrors session_start).
+  clearDetailsCache();
   const store = toStoreContext(pi, ctx);
   await load(store);
   if (getSessionOwlSettings().enabled) {

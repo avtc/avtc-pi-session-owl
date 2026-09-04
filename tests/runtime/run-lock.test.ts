@@ -64,6 +64,21 @@ describe("run-lock (single run-lock — at most one stage active at a time)", ()
     expect(inFlight()).toBe(false);
   });
 
+  it("wakes EVERY idle waiter on release — compaction and tree navigation waiting concurrently never lose one", async () => {
+    const handle = acquireOrSkip("observe") as RunHandle;
+    // a compaction AND a /tree branch navigation both wait for the same run to
+    // unwind (a single-slot waiter would drop one of them — it would hang forever)
+    const compactionDone = acquireForCompaction();
+    const treeDone = abortAndAwaitIdle();
+    handle.release(); // the aborted run's finally
+    const compactionHandle = await compactionDone;
+    await treeDone;
+    // the compaction acquired the freed lock; releasing it ends the test idle
+    expect(inFlight()).toBe(true);
+    compactionHandle.release();
+    expect(inFlight()).toBe(false);
+  });
+
   it("each handle owns its own AbortController", () => {
     const handle = acquireOrSkip("observe") as RunHandle;
     expect(handle.abortController).toBeInstanceOf(AbortController);

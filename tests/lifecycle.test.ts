@@ -5,6 +5,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
+import { computeDetailsAndCache, renderDetails } from "../src/format/details.js";
 import { runRegexTests } from "../src/graph/regex-runner.js";
 import {
   buildEntryResolver,
@@ -366,6 +367,23 @@ describe("onSessionTree", () => {
     expect(inFlight()).toBe(false);
     // the graph reloaded (nGoal re-seeded on the empty reconstructed graph)
     expect(getGraphStore().graph.nodes.has(N_GOAL)).toBe(true);
+  });
+
+  it("clears the per-observation details cache on navigation (old-branch renders must not survive the switch)", async () => {
+    const source = assistantEntry("a1", "verbatim source");
+    const branch = [userEntry("u1", "task"), source];
+    // seed the cache with a render keyed by an observation id
+    const seeded = computeDetailsAndCache("o-cached", ["a1"], () => [source]);
+    expect(seeded).not.toBeNull();
+    // a read hits the cache: an empty resolver still returns the cached render
+    expect(renderDetails("o-cached", ["a1"], () => [])).not.toBeNull();
+
+    const { ctx, pi } = makeCtx(branch);
+    await onSessionTree({ type: "session_tree", newLeafId: "leaf-2", oldLeafId: "leaf-1" }, ctx, pi, noopWidget);
+
+    // the cache was cleared: the same read now misses and re-resolves (an
+    // empty resolver yields no source — null, not the old-branch render)
+    expect(renderDetails("o-cached", ["a1"], () => [])).toBeNull();
   });
 });
 

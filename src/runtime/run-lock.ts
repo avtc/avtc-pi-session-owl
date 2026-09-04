@@ -11,6 +11,11 @@
 // Each run owns its own AbortController so compaction can cancel it at the next
 // tool-call boundary (the run honors `signal`; release stays in the run's
 // `finally`). Module singleton — accessed via a small interface for testability.
+//
+// Idle waiters (compaction, /tree branch navigation) queue in a LIST: several
+// flows may wait for the same run to unwind concurrently, and every one of
+// them is resolved on release — a single waiter slot would silently drop all
+// but the last, hanging its caller forever.
 
 /** The maintenance stages serialized by the run-lock. */
 export type StageName = "observe" | "build" | "select";
@@ -38,13 +43,13 @@ interface ActiveRun {
 
 let active: ActiveRun | null = null;
 
-/** A compaction waiter: resolved by `release()` so `acquireForCompaction` unblocks. */
-let compactionWaiter: (() => void) | null = null;
+/** Idle waiters: resolved by `release()` so each blocked flow unblocks. */
+const idleWaiters: Array<() => void> = [];
 
-/** Test-only: reset the singleton to idle (no run, no waiter). */
+/** Test-only: reset the singleton to idle (no run, no waiters). */
 export function _resetRunLock(): void {
   active = null;
-  compactionWaiter = null;
+  idleWaiters.length = 0;
 }
 
 /** Whether a run is currently in flight. */
@@ -79,10 +84,10 @@ function releaseActive(run: ActiveRun): void {
   run.released = true;
   if (active === run) {
     active = null;
-    // wake a compaction waiter (if any) now that the lock is free.
-    const waiter = compactionWaiter;
-    compactionWaiter = null;
-    if (waiter !== null) waiter();
+    // wake EVERY idle waiter (any number may queue concurrently — compaction,
+    // branch navigation — each resolves so no flow is dropped)
+    const waiters = idleWaiters.splice(0, idleWaiters.length);
+    for (const waiter of waiters) waiter();
   }
 }
 
@@ -113,8 +118,8 @@ export function abortInFlight(): void {
  * swaps that must not race a run's trailing persists (a `/tree` branch switch
  * re-derives the store for the new branch — an in-flight chunk persisting
  * against the swapped-out graph state would write stale ids into it). No-op
- * when idle. Shares the compaction waiter slot (the two flows cannot overlap:
- * compaction runs inside a turn, tree navigation between turns).
+ * when idle. Safe alongside other idle waiters (a concurrently waiting
+ * compaction is resolved too — see the waiter list in `releaseActive`).
  */
 export async function abortAndAwaitIdle(): Promise<void> {
   if (active === null) return;
@@ -122,11 +127,11 @@ export async function abortAndAwaitIdle(): Promise<void> {
   await waitForIdle();
 }
 
-/** Resolve once the lock is idle (released by `releaseActive` via the waiter). */
+/** Resolve once the lock is idle (released by `releaseActive` via the waiters). */
 function waitForIdle(): Promise<void> {
   if (active === null) return Promise.resolve();
   return new Promise<void>((resolve) => {
-    compactionWaiter = resolve;
+    idleWaiters.push(resolve);
   });
 }
 
