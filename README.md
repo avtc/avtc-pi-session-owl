@@ -1,6 +1,6 @@
 # avtc-pi-session-owl
 
-A working-memory extension for [pi](https://pi.dev) — maintains a knowledge graph across context compactions and renders a task-relative summary into each compaction, so the agent picks up after each compaction with its goal, decisions, and important context intact.
+Background-maintained append-only knowledge graph; roots become the compaction summary; the agent traverses and regex-searches it to recall messages, tool calls, own thinking.
 
 ![session-owl](assets/images/session-owl-hero.webp)
 
@@ -55,6 +55,20 @@ Jul 29 09:15 write src/auth/index.ts
 ```
 
 After compaction the agent continues with this summary alongside pi's own recent-context tail.
+
+## Benchmarks
+
+Self-run benchmarks (one authored scenario, N=3 continuations per arm, LLM-judge scored) against bare pi and pi-observational-memory, driven by our compaction benchmark harness (to be published). Agent glm-5.3; session-owl-builder is the default configuration:
+
+| Recall accuracy | bare pi | om-default | session-owl-builder | session-owl-selector | om-full |
+|---|---|---|---|---|---|
+| Facts the user asked to remember (direct probes) | 100% | 87% | 100% | 100% | 90% |
+| Topics cued from summary, agent has to call tools to recall details | 21% | 23% | 78% | 77% | 43% |
+| No trace in the summary or kept tail, agent has to search through session memory or deduct | 11% | 22% | 100% | 56% | 22% |
+
+Arms: **bare pi** — native compaction summary, no memory extension; **om-default** — pi-observational-memory (v2 fork) at the default threshold, observations fit — Reflector/Pruner stay idle; **om-full** — observations exceed the threshold, Reflector + Pruner run.
+
+Full reports: [agent glm-5.3 · background qwen3.8-27B](docs/benchmarks/report-agent-glm5.3-bg-qwen3.8-27b.md) · [agent qwen3.8-27B fp16 · xhigh](docs/benchmarks/report-qwen3.8-27b-fp16-xhigh-everything.md)
 
 ## The memory graph
 

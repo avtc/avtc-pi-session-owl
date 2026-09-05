@@ -1,7 +1,7 @@
 {
   "name": "avtc-pi-session-owl",
-  "version": "1.1.1",
-  "description": "Preserves task-relevant older context across many compactions in long Pi sessions by continuously maintaining a knowledge graph in the background and rendering a curated active set at compaction.",
+  "version": "1.1.2",
+  "description": "Background-maintained append-only knowledge graph; roots become the compaction summary; the agent traverses and regex-searches it to recall messages, tool calls, own thinking.",
   "type": "module",
   "license": "MIT",
   "keywords": [
