@@ -407,16 +407,13 @@ describe("sessionOwlExtension end-to-end (default profile)", () => {
       assistantEntry("a2", "z".repeat(600)),
     ];
     const state: FakePiState = { branch, appendedEntries: [] };
+    // Default Builder settings for the turn_end phase: the each-N cadence stays
+    // quiet in the background (count far below N, root view within budget — so
+    // the fast-path pairing arm does not fire either).
     settingsHolder.config = {
       ...DEFAULT_CONFIG,
       renderMode: "selected-root",
       observerThresholdTokens: 50,
-      // low Builder threshold → Builder RUNS (fast-path not taken); the scripted
-      // pass applies one mkdir mutate → the run consolidated → its stage-end
-      // flush_new converts the catch-up `new` nodes to active (a no-op pass
-      // would preserve them). Selector builds regardless (no cached tree).
-      builderRootViewThreshold: 1,
-      selectorRootViewThreshold: 100000,
     };
     scriptObserverRecordsOnePerChunk();
     const pi = makeFakePi() as FakePi;
@@ -425,6 +422,17 @@ describe("sessionOwlExtension end-to-end (default profile)", () => {
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
     await pi.emit("turn_end", {}, ctx); // observe the gap (background)
     await new Promise((r) => setTimeout(r, 20));
+
+    // Low Builder threshold from here on: at compaction the root view is over
+    // budget → the fast-path is NOT taken → the Builder RUNS; the scripted
+    // pass applies one mkdir mutate → the run consolidated → its stage-end
+    // flush_new converts the catch-up `new` nodes to active (a no-op pass
+    // would preserve them). Selector builds regardless (no cached tree).
+    settingsHolder.config = {
+      ...settingsHolder.config,
+      builderRootViewThreshold: 1,
+      selectorRootViewThreshold: 100000,
+    };
 
     // Now compact: cut keeps u2/a2 (the tail); u1/a1 are the compacted block.
     const compactEvt: SessionBeforeCompactEvent = {

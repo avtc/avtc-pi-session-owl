@@ -88,7 +88,9 @@ export interface SessionOwlConfig {
   /** The compaction-only fast-path: at compaction, when the root view is
    *  already under builderRootViewThreshold, skip the Builder run entirely
    *  (turn_end trigger runs are never skipped by it — a fired trigger runs).
-   *  Default true. */
+   *  When on, the each-N-observations trigger additionally fires when the root
+   *  view reaches builderRootViewThreshold — the cadence maintains the budget
+   *  this skip relies on. Default true. */
   builderSkipWithinBudget: boolean;
   maxBuilderPasses: number;
   /** Maximum output tokens per Builder LLM call (per turn). */
@@ -498,6 +500,7 @@ const SETTINGS: readonly SettingSchema[] = [
     label: "Skip when within budget",
     description:
       "At compaction only: skip the Builder when the root view is within budget. Background triggers are never skipped. " +
+      "With Every N observations, also run the Builder when the root view reaches the threshold — it keeps the budget this skip relies on. " +
       "Off = the Builder always runs at least once.",
     type: "boolean",
     defaultValue: DEFAULT_CONFIG.builderSkipWithinBudget,

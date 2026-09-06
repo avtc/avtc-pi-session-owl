@@ -226,8 +226,8 @@ function countNewNodes(): number {
 
 /** Measure the non-obsolete ROOT view the same way `try_finish` does — the
  *  rendered node line (icon/id/importance/counts/datetime), chars/4 — so the
- *  on-root-view-threshold trigger and the convergence gate agree on what
- *  counts against `builderRootViewThreshold`. (Summing cached `summaryTokens`
+ *  on-root-view-threshold trigger, the each-N-observations fast-path arm, and
+ *  the convergence gate agree on what counts against `builderRootViewThreshold`. (Summing cached `summaryTokens`
  *  would under-count: it omits every line's framing, so the trigger and the
  *  gate could disagree on whether the root view is over budget.) */
 function computeRootViewTokens(): number {
@@ -307,8 +307,23 @@ function builderTriggerDecision(input: TriggerInput): StageTriggerResult {
   switch (settings.builderMode) {
     case "each-N-observations": {
       const count = countNewNodes();
-      const fire = count >= settings.builderEveryNObservations;
-      return { shouldFire: fire, reason: `${count} new nodes (threshold ${settings.builderEveryNObservations})` };
+      if (count >= settings.builderEveryNObservations) {
+        return { shouldFire: true, reason: `${count} new nodes (threshold ${settings.builderEveryNObservations})` };
+      }
+      // Fast-path pairing: when the compaction skip (builderSkipWithinBudget)
+      // relies on the root view being within budget, the cadence ALSO fires
+      // once the budget is exceeded — the trigger maintains the very invariant
+      // the skip checks (same measure: computeRootViewTokens vs try_finish).
+      if (settings.builderSkipWithinBudget) {
+        const tokens = computeRootViewTokens();
+        if (tokens >= settings.builderRootViewThreshold) {
+          return {
+            shouldFire: true,
+            reason: `root view ${tokens} ≥ ${settings.builderRootViewThreshold} (fast-path budget)`,
+          };
+        }
+      }
+      return { shouldFire: false, reason: `${count} new nodes (threshold ${settings.builderEveryNObservations})` };
     }
     case "on-session-context-threshold": {
       const tokens = contextTokens(input);

@@ -126,8 +126,9 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   // arrivals (no flush: nothing was folded, so the each-N trigger keeps its
   // pending work and retries on the next fire — a skip must not silently
   // discharge the consolidation duty). A turn_end run (scope === null) NEVER
-  // takes this skip: its trigger already decided to fire (each-N reached N,
-  // the session context crossed its threshold), so a budget skip there would
+  // takes this skip: its trigger already decided to fire (each-N reached N or
+  // its fast-path budget arm fired, the session context crossed its threshold),
+  // so a budget skip there would
   // starve the cadence into a fire→skip→retry loop; on-root-view-threshold
   // mode needs no fast-path — its trigger decision itself skips under budget.
   // No stage is opened (no startStage). Default off — the Builder always runs

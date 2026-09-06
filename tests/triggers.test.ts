@@ -437,6 +437,57 @@ describe("evaluateBuilderTrigger", () => {
     expect(res.shouldFire).toBe(false);
   });
 
+  it("each-N-observations + fast-path: fires on the root-view budget even below N", () => {
+    addRootNode("n1" as NodeId, "active");
+    const res = evaluateBuilderTrigger(
+      makeInput({
+        settings: {
+          ...DEFAULT_CONFIG,
+          builderMode: "each-N-observations",
+          builderEveryNObservations: 3,
+          builderSkipWithinBudget: true,
+          builderRootViewThreshold: 10,
+        },
+      }),
+    );
+    expect(res.shouldFire).toBe(true);
+    expect(res.reason).toContain("root view");
+    expect(res.reason).toContain("fast-path budget");
+  });
+
+  it("each-N-observations + fast-path: below N AND within budget → no fire", () => {
+    addRootNode("n1" as NodeId, "new");
+    const res = evaluateBuilderTrigger(
+      makeInput({
+        settings: {
+          ...DEFAULT_CONFIG,
+          builderMode: "each-N-observations",
+          builderEveryNObservations: 3,
+          builderSkipWithinBudget: true,
+          builderRootViewThreshold: 100000,
+        },
+      }),
+    );
+    expect(res.shouldFire).toBe(false);
+    expect(res.reason).toContain("new nodes");
+  });
+
+  it("each-N-observations, fast-path OFF: over-budget root view does NOT fire (strict cadence)", () => {
+    addRootNode("n1" as NodeId, "active");
+    const res = evaluateBuilderTrigger(
+      makeInput({
+        settings: {
+          ...DEFAULT_CONFIG,
+          builderMode: "each-N-observations",
+          builderEveryNObservations: 3,
+          builderSkipWithinBudget: false,
+          builderRootViewThreshold: 10,
+        },
+      }),
+    );
+    expect(res.shouldFire).toBe(false);
+  });
+
   it("on-session-context-threshold: fires when context tokens >= threshold", () => {
     const res = evaluateBuilderTrigger(
       makeInput({
