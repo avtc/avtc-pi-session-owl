@@ -880,9 +880,7 @@ describe("runStage — stage dump seam", () => {
     await runStage(baseInput({ messages: inMsg, loopFn: spyLoop }));
     // pi ≥0.87: the system prompt is the transcript's leading system message; a
     // non-empty history BEYOND it would duplicate the prompts into the request.
-    expect(seenContext?.messages).toEqual([
-      { role: "system", content: "system", timestamp: expect.any(Number) },
-    ]);
+    expect(seenContext?.messages).toEqual([{ role: "system", content: "system", timestamp: expect.any(Number) }]);
   });
 
   it("accepts an absent dumpPath (dumps off) and runs unchanged", async () => {
