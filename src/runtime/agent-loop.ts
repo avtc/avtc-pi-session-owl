@@ -37,12 +37,6 @@ export const NO_EVENT_SINK = null;
 export const NO_STAGE_END_HOOK = null;
 export const NO_LOOP_OVERRIDE = null;
 
-/** Empty context history — a stage call is self-contained: `input.messages`
- *  are the new prompts, and agentLoop builds its LLM context as
- *  `[...context.messages, ...prompts]`, so any non-empty history here would
- *  duplicate the stage input into the provider request. */
-export const NO_HISTORY: AgentMessage[] = [];
-
 /** Sequential tool execution (session-owl stages run tools one-by-one). */
 export const SEQUENTIAL = "sequential" as const;
 
@@ -198,13 +192,16 @@ function emptyUsage(): StageUsage {
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0, elapsedMs: 0 };
 }
 
+/** The completed-turn payload the loop's `finishTurn` hook receives — pi's
+ *  `AgentTurnContext` (assistant message, its tool results, the run context,
+ *  and the messages this loop invocation will return). */
+export type TurnPayload = Parameters<NonNullable<AgentLoopConfig["finishTurn"]>>[0];
+
 /**
- * Build a `shouldStopAfterTurn` that caps a run at `maxTurns` completed turns
- * (counted from `turn_end` callbacks). `null` ⇒ never stop.
+ * Build a turn predicate that caps a run at `maxTurns` completed turns
+ * (one invocation per completed turn). `null` ⇒ never stop.
  */
-export function makeTurnCap(
-  maxTurns: number | null,
-): (context: Parameters<NonNullable<AgentLoopConfig["shouldStopAfterTurn"]>>[0]) => boolean {
+export function makeTurnCap(maxTurns: number | null): (turn: TurnPayload) => boolean {
   if (maxTurns === null) {
     const never = (): boolean => false;
     return never;
@@ -216,10 +213,24 @@ export function makeTurnCap(
   };
 }
 
-/** A `shouldStopAfterTurn` predicate over one completed turn. */
-export type TurnPredicate = (turn: Parameters<NonNullable<AgentLoopConfig["shouldStopAfterTurn"]>>[0]) => boolean;
+/** A stop predicate over one completed turn (consumed via {@link makeFinishTurn}). */
+export type TurnPredicate = (turn: TurnPayload) => boolean;
 
-/** Build a `shouldStopAfterTurn` that stops after `maxSequential` consecutive
+/** Adapt a stop predicate to the loop's `finishTurn` hook (pi ≥0.87 replaced
+ *  `shouldStopAfterTurn` with `finishTurn`; the decision applies after
+ *  `turn_end`). The old hook only ran for normal responses — error and
+ *  aborted turns remain hard exits whose decision is ignored — so those
+ *  turns return undefined WITHOUT invoking the predicate, preserving the old
+ *  invocation contract and keeping predicate side effects off hard-exit
+ *  paths. */
+export function makeFinishTurn(stop: TurnPredicate): NonNullable<AgentLoopConfig["finishTurn"]> {
+  return (turn) => {
+    if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
+    return stop(turn) ? { action: "end" } : undefined;
+  };
+}
+
+/** Build a stop predicate (consumed via {@link makeFinishTurn}) that stops after `maxSequential` consecutive
  *  NO-PROGRESS turns — a turn that did not advance `progress()` (e.g. accepted
  *  records count). Only an ADVANCE resets the streak: streamed text does not
  *  (a model pairing a hallucinated tool call with chatter every turn — the
@@ -263,12 +274,14 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
 
   try {
     const context: AgentContext = {
-      systemPrompt: input.systemPrompt,
-      // input.messages are the NEW prompts for this self-contained stage call —
-      // agentLoop seeds its LLM context with [...context.messages, ...prompts],
-      // so carrying them here too would send every stage input to the provider
-      // TWICE (doubled tokens since the seam's introduction). History is empty.
-      messages: NO_HISTORY,
+      // pi ≥0.87: the system prompt rides as the transcript's LEADING system
+      // message (AgentContext.systemPrompt was removed); the loop folds it
+      // into every provider request. input.messages are the NEW prompts for
+      // this self-contained stage call — agentLoop seeds its LLM context with
+      // [...context.messages, ...prompts], so carrying them here too would
+      // send every stage input to the provider TWICE (doubled tokens since
+      // the seam's introduction). History is otherwise empty.
+      messages: [{ role: "system", content: input.systemPrompt, timestamp: Date.now() }],
       tools: input.tools,
     };
 
@@ -303,7 +316,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       // so the AgentMessage[]->Message[] transform is an identity cast.
       convertToLlm: (msgs: AgentMessage[]) => msgs as unknown as Message[],
       toolExecution: SEQUENTIAL,
-      shouldStopAfterTurn: input.stopAfterTurn ?? makeTurnCap(input.maxTurns),
+      finishTurn: makeFinishTurn(input.stopAfterTurn ?? makeTurnCap(input.maxTurns)),
       getApiKey: () => input.apiKey,
       // Per-turn output cap (applied to every provider request; a truncated
       // response's tool calls are rejected by agentLoop).

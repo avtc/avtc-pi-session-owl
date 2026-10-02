@@ -7,7 +7,7 @@
 // range), and renders <Mon> <DD> <HH:MM> read|write|edit <path>[:ranges]
 // oldest-first.
 
-import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, JsonObject, Message, Usage } from "@earendil-works/pi-ai";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { extractTouchedFiles, renderTouchedFiles, type TouchedFile } from "../../src/compaction/touched-files.js";
@@ -27,7 +27,7 @@ function msg(id: string, ts: string, message: Message): SessionMessageEntry {
   return { type: "message", id, parentId: null, timestamp: ts, message };
 }
 
-function toolCallEntry(id: string, ts: string, name: string, args: Record<string, unknown>): SessionMessageEntry {
+function toolCallEntry(id: string, ts: string, name: string, args: JsonObject): SessionMessageEntry {
   const message: AssistantMessage = {
     role: "assistant",
     content: [{ type: "toolCall", id: `${name}-${id}`, name, arguments: args }],

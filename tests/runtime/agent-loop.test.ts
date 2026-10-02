@@ -713,10 +713,10 @@ describe("runStage — config wiring", () => {
       }),
     );
     expect(captured).toHaveLength(1);
-    expect(captured[0]?.ctx.systemPrompt).toBe("SYS");
+    expect(captured[0]?.ctx.messages[0]).toMatchObject({ role: "system", content: "SYS" });
     expect(captured[0]?.ctx.tools).toBe(tools);
     expect(captured[0]?.cfg.toolExecution).toBe(SEQUENTIAL);
-    expect(typeof captured[0]?.cfg.shouldStopAfterTurn).toBe("function");
+    expect(typeof captured[0]?.cfg.finishTurn).toBe("function");
     expect(captured[0]?.cfg).toHaveProperty("reasoning", "med");
   });
 
@@ -756,10 +756,10 @@ describe("runStage — config wiring", () => {
 });
 
 describe("runStage — stopAfterTurn override", () => {
-  it("forwards stopAfterTurn as the loop's shouldStopAfterTurn (identity)", async () => {
-    const received: AgentLoopConfig["shouldStopAfterTurn"][] = [];
+  it("forwards stopAfterTurn through the finishTurn wrapper (end only when the probe fires)", async () => {
+    const received: AgentLoopConfig["finishTurn"][] = [];
     const spy: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _ctx, cfg) => {
-      received.push(cfg.shouldStopAfterTurn);
+      received.push(cfg.finishTurn);
       const stream = new EventStream<AgentEvent, AgentMessage[]>(
         (e) => e.type === "agent_end",
         (e) => (e.type === "agent_end" ? e.messages : []),
@@ -770,13 +770,22 @@ describe("runStage — stopAfterTurn override", () => {
     const probe = makeNoProgressTurnStop(3, () => 0, "probe");
     await runStage(baseInput({ loopFn: spy, stopAfterTurn: probe }));
     expect(received).toHaveLength(1);
-    expect(received[0]).toBe(probe);
+    expect(received[0]).toBeTypeOf("function");
+    const turn = (stopReason: string): Parameters<NonNullable<AgentLoopConfig["finishTurn"]>>[0] =>
+      ({ message: { stopReason } }) as unknown as Parameters<NonNullable<AgentLoopConfig["finishTurn"]>>[0];
+    // probe fires on the 3rd consecutive no-progress turn → end; earlier turns continue.
+    expect(received[0]?.(turn("stop"))).toBeUndefined();
+    expect(received[0]?.(turn("toolUse"))).toBeUndefined();
+    expect(received[0]?.(turn("stop"))).toEqual({ action: "end" });
+    // error/aborted turns are hard exits: no decision, and the probe is never invoked.
+    expect(received[0]?.(turn("error"))).toBeUndefined();
+    expect(received[0]?.(turn("aborted"))).toBeUndefined();
   });
 
   it("falls back to the maxTurns cap when no override is given", async () => {
-    const received: AgentLoopConfig["shouldStopAfterTurn"][] = [];
+    const received: AgentLoopConfig["finishTurn"][] = [];
     const spy: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _ctx, cfg) => {
-      received.push(cfg.shouldStopAfterTurn);
+      received.push(cfg.finishTurn);
       const stream = new EventStream<AgentEvent, AgentMessage[]>(
         (e) => e.type === "agent_end",
         (e) => (e.type === "agent_end" ? e.messages : []),
@@ -786,7 +795,7 @@ describe("runStage — stopAfterTurn override", () => {
     };
     await runStage(baseInput({ loopFn: spy, maxTurns: NO_TURN_LIMIT }));
     expect(received).toHaveLength(1);
-    expect(received[0]).not.toBe(undefined);
+    expect(received[0]).toBeTypeOf("function");
   });
 });
 
@@ -855,7 +864,7 @@ describe("runStage — stage dump seam", () => {
     expect(text.indexOf("<input>")).toBeLessThan(text.indexOf("<output>"));
   });
 
-  it("passes an EMPTY context history (input.messages are the prompts — agentLoop concatenates)", async () => {
+  it("passes ONLY the system message as context history (input.messages are the prompts — agentLoop concatenates)", async () => {
     const inMsg = [{ role: "user", content: "x", timestamp: 0 }] as unknown as AgentMessage[];
     let seenContext: AgentContext | undefined;
     const spyLoop = ((_prompts: unknown, context: AgentContext) => {
@@ -869,8 +878,11 @@ describe("runStage — stage dump seam", () => {
       );
     }) as unknown as typeof import("@earendil-works/pi-agent-core").agentLoop;
     await runStage(baseInput({ messages: inMsg, loopFn: spyLoop }));
-    // a non-empty history would duplicate the prompts into the provider request
-    expect(seenContext?.messages).toEqual([]);
+    // pi ≥0.87: the system prompt is the transcript's leading system message; a
+    // non-empty history BEYOND it would duplicate the prompts into the request.
+    expect(seenContext?.messages).toEqual([
+      { role: "system", content: "system", timestamp: expect.any(Number) },
+    ]);
   });
 
   it("accepts an absent dumpPath (dumps off) and runs unchanged", async () => {
