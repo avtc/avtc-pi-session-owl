@@ -248,7 +248,7 @@ const ROOT_VIEW_PRESETS: readonly PresetElement[] = [
   ["160K", 160000],
 ];
 const MAX_PASSES_PRESETS: readonly PresetElement[] = [1, 3, 5];
-// Thinking-level presets. settings-ui's thinking-level type defaults to the six
+// Thinking-level presets. settings-ui's thinking-level type defaults to the seven
 // levels; these override to prepend a null "inherit" option (null = fall through
 // to the next tier, mirroring how a null model setting means "use default"). Each
 // entry is a full [label, value] pair — the thinking-level type's parse rejects
@@ -263,6 +263,7 @@ const THINKING_LEVEL_SESSION_PRESETS: readonly PresetElement[] = [
   ["medium", "medium"],
   ["high", "high"],
   ["xhigh", "xhigh"],
+  ["max", "max"],
 ];
 const THINKING_LEVEL_INHERIT_PRESETS: readonly PresetElement[] = [
   ["Inherit default", NO_MODEL],
@@ -272,6 +273,7 @@ const THINKING_LEVEL_INHERIT_PRESETS: readonly PresetElement[] = [
   ["medium", "medium"],
   ["high", "high"],
   ["xhigh", "xhigh"],
+  ["max", "max"],
 ];
 
 // ---------------------------------------------------------------------------

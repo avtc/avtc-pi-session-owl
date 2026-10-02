@@ -84,7 +84,7 @@ function modelDescription(modelSetting: string | null): string {
 
 /** A thinking-level config value: null = inherit the next tier; otherwise one of
  *  the settings-ui thinking-level presets ("off" | "minimal" | "low" | "medium" |
- *  "high" | "xhigh"). */
+ *  "high" | "xhigh" | "max"). */
 export type ThinkingSetting = string | null;
 
 /** Resolve a stage's reasoning level into the agentLoop `reasoning` value
