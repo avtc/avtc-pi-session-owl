@@ -24,7 +24,7 @@ import type {
 import { agentLoop } from "@earendil-works/pi-agent-core";
 import type { Api, CacheRetention, Message, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import { appendDump, NO_DUMP } from "../debug-dump.js";
-import { renderAgentMessages } from "../format/chunk.js";
+import { renderAgentMessages, renderStageInputMessages } from "../format/chunk.js";
 import { log } from "../log.js";
 import { deltaTextOf, deltaTokens, messageEndUsage } from "./streaming-tokens.js";
 
@@ -160,6 +160,19 @@ export class StageTimeoutError extends Error {
     super(`${stage} stopped: an LLM call exceeded the ${limit}`);
     this.name = "StageTimeoutError";
   }
+}
+
+/** The produced tail of an agentLoop result: everything strictly AFTER the
+ *  last prompt message (matched by reference). agentLoop results are seeded
+ * with the context history (leading system message) + the prompts, so a plain
+ * `slice(prompts.length)` drops the system message instead of the seeds and
+ * leaks them; identity matching stays correct whatever the loop prepends. Falls
+ * back to the length slice when no prompt object is found (defensive). */
+function sliceProduced(messages: readonly AgentMessage[], prompts: readonly AgentMessage[]): readonly AgentMessage[] {
+  if (prompts.length === 0) return messages;
+  const lastPrompt = prompts[prompts.length - 1] as AgentMessage;
+  const lastIndex = messages.lastIndexOf(lastPrompt);
+  return lastIndex === -1 ? messages.slice(prompts.length) : messages.slice(lastIndex + 1);
 }
 
 /** A terminal model/runtime failure — the agentLoop stream ended with the final
@@ -340,7 +353,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     // dies mid-call still leaves the input record). Guarded so a disabled
     // dump (null path) never pays the render.
     if (dumpPath !== null) {
-      appendDump(dumpPath, `<input>\n${renderAgentMessages(input.messages)}\n</input>\n`);
+      appendDump(dumpPath, `<input>\n${renderStageInputMessages(input.messages)}\n</input>\n`);
     }
     // pi 0.84.1 made `streamFn` a required `agentLoop` arg. Pass `undefined` (cast to the
     // required type) so pi-agent-core falls back to its process-global default streamFn,
@@ -401,10 +414,13 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       log.debug(`runStage: agentLoop stream done (${usage.turns} turns)`);
       // Stage dump: the full output record (thinking/text/tool calls+results),
       // even for a run that then surfaces a model error below. agentLoop seeds
-      // its result with the prompts — slice them off so <output> holds only what
-      // the call PRODUCED (the input is already in <input>).
+      // its result with the context history (the leading system message) plus
+      // the prompts — slice by the LAST PROMPT'S IDENTITY so exactly the
+      // produced tail remains regardless of what the loop prepends (a length
+      // slice drops the system message instead and leaks the seed into
+      // <output>).
       if (dumpPath !== null) {
-        appendDump(dumpPath, `<output>\n${renderAgentMessages(messages.slice(input.messages.length))}\n</output>\n`);
+        appendDump(dumpPath, `<output>\n${renderAgentMessages(sliceProduced(messages, input.messages))}\n</output>\n`);
       }
       // A terminal model failure: surface it instead of returning a clean
       // no-record result (which would let the stage caller proceed and Pi prune

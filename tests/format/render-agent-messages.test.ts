@@ -7,7 +7,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
-import { renderAgentMessages } from "../../src/format/chunk.js";
+import { renderAgentMessages, renderStageInputMessages } from "../../src/format/chunk.js";
 
 function user(text: string): AgentMessage {
   return { role: "user", content: text, timestamp: 0 } as AgentMessage;
@@ -104,6 +104,15 @@ describe("renderAgentMessages", () => {
     const out = renderAgentMessages([withText, orphan]);
     expect(out).toContain("<ASSISTANT>summary</ASSISTANT>");
     expect(out.indexOf("<ASSISTANT>")).toBeLessThan(out.indexOf("<TOOLRESULT>late result</TOOLRESULT>"));
+  });
+
+  it("renders stage INPUT string-content user messages verbatim (no tag soup over the chunk grammar)", () => {
+    // the Observer stage input is one user message whose content IS chunk-grammar
+    // text; the input dump renders it exactly as the LLM received it — no
+    // message-level wrapper, so no same-name nesting (</USER></USER>) and no
+    // thinking inside a USER tag.
+    const content = "<THINKING entry=a1>plan</THINKING>\n<USER entry=u2>do it</USER>";
+    expect(renderStageInputMessages([user(content)])).toBe(content);
   });
 
   it("keeps full fidelity — no truncation markers on long content", () => {

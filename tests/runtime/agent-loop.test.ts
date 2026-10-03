@@ -852,16 +852,34 @@ describe("runStage — stage dump seam", () => {
         timestamp: 0,
       },
     ] as unknown as AgentMessage[];
-    // faithful to the real agentLoop: stream.result() = [...prompts, ...produced]
-    const result = [...inMsg, ...produced];
+    // faithful to the real agentLoop (pi ≥ 1.0.0): stream.result() =
+    // [context history (leading system message), ...prompts, ...produced]
+    const systemMsg = { role: "system", content: "system", timestamp: 0 } as unknown as AgentMessage;
+    const result = [systemMsg, ...inMsg, ...produced];
     const events = [messageEnd(NO_USAGE), agentEnd(result)];
     await runStage(baseInput({ messages: inMsg, loopFn: makeFakeLoop({ events, messages: result }), dumpPath: dump }));
     const text = fs.readFileSync(dump as string, "utf8");
-    expect(text).toContain("<input>\n<USER>organize</USER>\n</input>\n");
-    // <output> holds ONLY what the call produced — the input is not re-rendered
+    expect(text).toContain("<input>\norganize\n</input>\n");
+    // <output> holds ONLY what the call produced (recall-style blocks) — neither
+    // the loop's leading system message nor the seed prompts are re-rendered
+    // (the identity-based slice; a length slice drops the system message and
+    // leaks the seed)
     expect(text).toContain("<output>\n<ASSISTANT>done</ASSISTANT>\n</output>\n");
     expect(text).not.toContain("</output>\n<USER>");
     expect(text.indexOf("<input>")).toBeLessThan(text.indexOf("<output>"));
+  });
+
+  it("<output> excludes the seed even when the loop result carries no leading system message (fallback shape)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-stagedump-"));
+    const dump = openStageDump("builder", 5, dir);
+    const inMsg = [{ role: "user", content: "organize", timestamp: 0 }] as unknown as AgentMessage[];
+    const produced = [
+      { role: "assistant", content: [{ type: "text", text: "ok" }], stopReason: "stop", timestamp: 0 },
+    ] as unknown as AgentMessage[];
+    const result = [...inMsg, ...produced];
+    await runStage(baseInput({ messages: inMsg, loopFn: makeFakeLoop({ events: [agentEnd(result)], messages: result }), dumpPath: dump }));
+    const text = fs.readFileSync(dump as string, "utf8");
+    expect(text).toContain("<output>\n<ASSISTANT>ok</ASSISTANT>\n</output>\n");
   });
 
   it("passes ONLY the system message as context history (input.messages are the prompts — agentLoop concatenates)", async () => {

@@ -416,6 +416,34 @@ describe("runObserver", () => {
     expect(getGraphStore().observerFrontier).toBeNull();
   });
 
+  it("on signal abort mid-run (chunk returns normally, stream ends aborted): NO empty-verdict persist — the range stays unobserved", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const controller = new AbortController();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    // script a runStage whose stream is aborted mid-call (compaction takeover /
+    // shutdown): it resolves NORMALLY — no throw, stopReason "aborted", zero
+    // records — exactly the shape a non-throwing abort produces.
+    const fn = async () => {
+      controller.abort();
+      return {
+        messages: [] as AgentMessage[],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: true,
+        timedOut: false,
+      };
+    };
+
+    await runObserver({ ...makeArgs({ pi, ctx, unobserved, runStageFn: fn }), signal: controller.signal });
+
+    // no empty-verdict observation: a cancelled call is not a model verdict, so
+    // the chunk's range must remain unobserved for the next run to retry
+    expect(appended.filter((e) => e.type === "session-owl.observation")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(0);
+    expect(getGraphStore().observerFrontier).toBeNull();
+  });
+
   it("aborts during model resolution: post-await guard fires, nothing persisted (carried R23-2)", async () => {
     const { pi, appended } = makeFakePi();
     const controller = new AbortController();

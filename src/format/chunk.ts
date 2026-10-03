@@ -364,8 +364,8 @@ export function hasAssistantText(entry: SessionEntry): boolean {
 
 // --- AgentMessage rendering (stage dumps) ------------------------------------
 
-/** AgentMessages carry no entry ids — the dump render is a recall-style
- *  consumer (no entry= attributes). */
+/** AgentMessages carry no entry ids — the produced-message dump render is a
+ *  recall-style consumer (no entry= attributes). */
 const DUMP_ID = "";
 /** includeEntryId=false for every dump block (same reason as DUMP_ID). */
 const DUMP_OMIT_ENTRY_ID = false;
@@ -383,9 +383,8 @@ function isToolResultMessage(message: AgentMessage): message is ToolResultMessag
 }
 
 /** Render `AgentMessage[]` into the chunk tag grammar, full fidelity (no caps,
- *  thinking included, redacted thinking skipped) — the stage-dump renderer:
- *  what an LLM stage call saw / produced, in the same format the Observer
- *  reads. A tool call's matched result is absorbed right after the call
+ *  thinking included, redacted thinking skipped) — the PRODUCED-message dump
+ *  renderer. A tool call's matched result is absorbed right after the call
  *  (adjacency unit); an orphan result renders standalone in place. Unknown
  *  message shapes are skipped. */
 export function renderAgentMessages(messages: readonly AgentMessage[]): string {
@@ -439,4 +438,26 @@ export function renderAgentMessages(messages: readonly AgentMessage[]): string {
     }
   }
   return blocks.join(BLOCK_SEP);
+}
+
+/** Render the stage INPUT messages verbatim: what the LLM received, exactly as
+ *  it received it. Stage inputs are user messages whose string content already
+ *  carries its own format (the Observer's chunk-grammar text with entry tags,
+ *  the Builder/Selector's rendered views) — wrapping them in message-level tags
+ *  would nest same-name tags over that grammar (`…</USER></USER>`, thinking
+ *  inside a "USER" wrapper), so no wrapper is added at all. A message with
+ *  structured content (not the stage shapes) falls back to the recall-style
+ *  block render. */
+export function renderStageInputMessages(messages: readonly AgentMessage[]): string {
+  const parts: string[] = [];
+  for (const message of messages) {
+    if (isUserMessage(message) && typeof message.content === "string") {
+      const text = stripAnsi(message.content);
+      if (text.length > 0) parts.push(text);
+      continue;
+    }
+    const rendered = renderAgentMessages([message]);
+    if (rendered.length > 0) parts.push(rendered);
+  }
+  return parts.join(BLOCK_SEP);
 }

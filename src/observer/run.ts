@@ -431,6 +431,14 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
           if (built) input.widget.startStage(OBSERVE_STAGE, { batch: { done, total: totalChunks } });
         }
       } else {
+        // 0 records — either the model's verdict, or the call was ABORTED
+        // mid-flight (compaction takeover, shutdown: the stream can end
+        // normally with stopReason "aborted", no throw). An aborted call is
+        // not a verdict: skip the empty-verdict persist so the range stays
+        // unobserved — the next run (the compaction's own catch-up, or the
+        // next trigger) re-observes it. Record-bearing chunks are unaffected:
+        // their records are genuine verdicts and stay durable per-chunk.
+        if (input.signal.aborted) return;
         // 0 records (model verdict, all-rejected, or a no-progress-stopped
         // degenerate turn): persist the empty verdict so the frontier advances
         // and no automatic trigger ever retries this range.
