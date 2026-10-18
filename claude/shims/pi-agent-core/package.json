@@ -1,0 +1,8 @@
+{
+  "name": "@earendil-works/pi-agent-core",
+  "version": "0.0.0-local-shim",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts"
+}

@@ -6,7 +6,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MKDIR_TOOL, MV_TOOL } from "../../src/graph/mutate-tools.js";
 import { LS_TOOL, TRY_FINISH_TOOL } from "../../src/graph/read-tools.js";
 import type { StageRunInput, StageRunResult, StageUsage } from "../../src/runtime/agent-loop.js";
-import { makeConvergenceTracker, runConvergencePass } from "../../src/runtime/convergence.js";
+import {
+  CONVERGENCE_NO_PROGRESS_TURNS,
+  makeConvergenceTracker,
+  runConvergencePass,
+} from "../../src/runtime/convergence.js";
 import { _resetSessionAffinity, setSessionOwlSessionBase } from "../../src/runtime/session-affinity.js";
 
 const NAMES = new Set<string>([MKDIR_TOOL, MV_TOOL]);
@@ -189,8 +193,8 @@ describe("runConvergencePass", () => {
     await runConvergencePass({ ...BASE, stageLabel: "build", onEvent, outcome, runStageFn });
     expect(typeof received).toBe("function");
     const stop = received as NonNullable<StageRunInput["stopAfterTurn"]>;
-    // hallucinated-tool turns apply no mutates: six consecutive stop on the 6th
-    for (let i = 1; i < 6; i += 1) expect(stop(stopTurn(null))).toBe(false);
+    // hallucinated-tool turns apply no mutates: N consecutive stop on the Nth
+    for (let i = 1; i < CONVERGENCE_NO_PROGRESS_TURNS; i += 1) expect(stop(stopTurn(null))).toBe(false);
     expect(stop(stopTurn(null))).toBe(true);
   });
 
@@ -209,10 +213,10 @@ describe("runConvergencePass", () => {
     };
     await runConvergencePass({ ...BASE, stageLabel: "build", onEvent, outcome, runStageFn });
     const stop = received as NonNullable<StageRunInput["stopAfterTurn"]>;
-    for (let i = 1; i < 6; i += 1) stop(stopTurn(null)); // streak 5
+    for (let i = 1; i < CONVERGENCE_NO_PROGRESS_TURNS; i += 1) stop(stopTurn(null)); // streak N-1
     onEvent(endEvent(MKDIR_TOOL, true, false)); // a mutate applied -> progress
     expect(stop(stopTurn(null))).toBe(false); // advance observed -> reset
-    for (let i = 1; i < 6; i += 1) expect(stop(stopTurn(null))).toBe(false); // streak 5 again
+    for (let i = 1; i < CONVERGENCE_NO_PROGRESS_TURNS; i += 1) expect(stop(stopTurn(null))).toBe(false); // streak N-1 again
     expect(stop(stopTurn(null))).toBe(true); // 6th consecutive -> stop
   });
 

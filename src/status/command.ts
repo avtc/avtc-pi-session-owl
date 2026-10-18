@@ -52,7 +52,7 @@ const PHASE_LABEL_WIDTH = 7; // "observe" is the longest phase label
 const REPORT_HEADER = "🦉 session-owl — status";
 const DISABLED_MESSAGE = "session-owl is disabled.";
 
-/** The conflict-pause report (approved text): which packages conflicted and
+/** The conflict-pause report (protected text): which packages conflicted and
  *  how to recover. Pure over the activation-time conflict hits. */
 export function buildPausedStatusReport(hits: Array<{ entry: string; matched: string }>): string {
   const nameWidth = Math.max(...hits.map((h) => h.matched.length));

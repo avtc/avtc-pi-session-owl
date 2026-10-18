@@ -14,7 +14,7 @@ import type { NodeId } from "../../src/types.js";
 import { buildSnapshot, createTracker, type ProgressTracker } from "../../src/widget/tracker.js";
 
 function makeCtx(): ExtensionContext {
-  // contextTokens/window now come from the background agent's message_end usage
+  // contextTokens/window come from the background agent's message_end usage
   // + model registry (NOT the main session's getContextUsage).
   return {
     modelRegistry: {

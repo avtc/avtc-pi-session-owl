@@ -9,9 +9,9 @@ describe("OBSERVER_SYSTEM prompt", () => {
     expect(OBSERVER_SYSTEM.length).toBeGreaterThan(0);
   });
 
-  // String-equality snapshot guard: the prompt is approved protected text from
-  // the design doc. Any change must be a deliberate re-approval, not a drift.
-  it("matches the approved text exactly (drift guard)", () => {
+  // String-equality snapshot guard: the prompt is protected text. Any change
+  // must be a deliberate owner-approved edit, not a drift.
+  it("matches the protected text exactly (drift guard)", () => {
     expect(OBSERVER_SYSTEM).toBe(
       [
         "You read one chunk of a coding session and record observations — each one a",
@@ -25,10 +25,10 @@ describe("OBSERVER_SYSTEM prompt", () => {
         "words and reads the line to judge what the source holds.",
         "",
         "The chunk is a sequence of tagged blocks; each carries its source entry id as",
-        "entry=id:",
-        "- <USER entry=id>  <ASSISTANT entry=id>  <THINKING entry=id>",
-        "- <TOOLCALL:name entry=id> — immediately followed by its own result",
-        "  <TOOLRESULT entry=id> (or <TOOLRESULT entry=id error> when the call failed)",
+        "entryId=id:",
+        "- <USER entryId=id>  <ASSISTANT entryId=id>  <THINKING entryId=id>",
+        "- <TOOLCALL:name entryId=id> — immediately followed by its own result",
+        "  <TOOLRESULT entryId=id> (or <TOOLRESULT entryId=id error> when the call failed)",
         "",
         "Each observation carries an importance — how much it matters if lost, by nature:",
         "- crit — a hard, persistent constraint or correction; losing it would cause",

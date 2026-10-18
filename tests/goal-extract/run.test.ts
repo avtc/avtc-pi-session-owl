@@ -13,12 +13,13 @@ import { _setDumpHomeForTest, sanitizeForPath } from "../../src/debug-dump.js";
 import {
   _resetGoalExtract,
   abortGoalExtract,
+  extractionSettled,
   type GoalExtractInput,
   runGoalExtract,
 } from "../../src/goal-extract/run.js";
 import { applyCreateNode } from "../../src/graph/mutations.js";
 import type { StageRunInput, StageRunResult } from "../../src/runtime/agent-loop.js";
-import { _resetRunLock } from "../../src/runtime/run-lock.js";
+import { _resetRunLock, abortInFlight, acquireOrSkip, current } from "../../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession, type StoreContext } from "../../src/store/graph-store.js";
 import { N_GOAL } from "../../src/types.js";
 import { NO_OP_WIDGET } from "../../src/widget/tracker.js";
@@ -119,6 +120,20 @@ function nGoalSetMetaCount(appended: readonly [string, unknown][]): number {
   ).length;
 }
 
+it("the run rides the OBSERVER knobs: observerMaxTokens cap + observer thinking ladder", async () => {
+  const seen: Array<{ maxTokens?: number; reasoning?: unknown }> = [];
+  await runGoalExtract(
+    makeInput({
+      settings: { ...DEFAULT_CONFIG, observerMaxTokens: 4096, observerThinkingLevel: "high" },
+      runStageFn: async (input) => {
+        seen.push({ maxTokens: input.maxTokens, reasoning: input.reasoning });
+        return assistantResult("Fix the login bug");
+      },
+    }),
+  );
+  expect(seen).toEqual([{ maxTokens: 4096, reasoning: "high" }]);
+});
+
 // --- tests -----------------------------------------------------------------
 
 describe("runGoalExtract", () => {
@@ -131,6 +146,49 @@ describe("runGoalExtract", () => {
   });
   afterEach(() => {
     _resetGetSessionOwlSettings();
+  });
+
+  it("the model resolves the OBSERVER's way: observerModel → defaultModel → session", async () => {
+    const found: string[] = [];
+    const fakeModel = { provider: "test", id: "goal-model" } as unknown as Model<never>;
+    const ctx = {
+      modelRegistry: {
+        find: (provider: string, id: string) => {
+          found.push(`${provider}/${id}`);
+          return fakeModel;
+        },
+        getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }),
+      } as unknown as ExtensionContext["modelRegistry"],
+      model: fakeModel,
+      ui: { notify: () => {} },
+    } as unknown as ExtensionContext;
+    // the observer's stage model wins when set
+    await runGoalExtract(
+      makeInput({
+        ctx,
+        settings: { ...DEFAULT_CONFIG, observerModel: "prov/observer-model" },
+        runStageFn: async () => assistantResult("goal one"),
+      }),
+    );
+    expect(found).toEqual(["prov/observer-model"]);
+    // observer unset → the default model
+    await runGoalExtract(
+      makeInput({
+        ctx,
+        settings: { ...DEFAULT_CONFIG, observerModel: null, defaultModel: "prov/default-model" },
+        runStageFn: async () => assistantResult("goal two"),
+      }),
+    );
+    expect(found).toEqual(["prov/observer-model", "prov/default-model"]);
+    // both unset → the session's model (the registry is never consulted)
+    await runGoalExtract(
+      makeInput({
+        ctx,
+        settings: { ...DEFAULT_CONFIG, observerModel: null, defaultModel: null },
+        runStageFn: async () => assistantResult("goal three"),
+      }),
+    );
+    expect(found).toEqual(["prov/observer-model", "prov/default-model"]);
   });
 
   it("sets nGoal.summary from the assistant's one-line reply + persists set_meta", async () => {
@@ -285,5 +343,127 @@ describe("runGoalExtract — stage dump", () => {
       _setDumpHomeForTest(null);
     }
     expect(fs.existsSync(path.join(dumpRoot, ".pi", "session-owl", "dumps"))).toBe(false);
+  });
+});
+
+describe("runGoalExtract — run-lock stage sequencing", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    _resetGoalExtract();
+    _resetRunLock();
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG }));
+    seedNGoal("");
+  });
+  afterEach(() => {
+    _resetGetSessionOwlSettings();
+  });
+
+  it("takes stage extract SYNCHRONOUSLY — the same-tick trigger skips — and releases on settle", async () => {
+    let releaseCall!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseCall = resolve;
+    });
+    const run = runGoalExtract(
+      makeInput({
+        runStageFn: async () => {
+          await blocked;
+          return assistantResult("Fix the login bug");
+        },
+      }),
+    );
+    // still the capture's synchronous tick: the trailing turn_end trigger sees
+    // the holder and SKIPs (the existing acquireOrSkip contract)
+    expect(current()).toBe("extract");
+    expect(acquireOrSkip("observe")).toBeNull();
+    // extractionSettled stays pending until the run — release included — settles
+    let settled = false;
+    void extractionSettled().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    releaseCall();
+    await run;
+    expect(settled).toBe(true);
+    expect(current()).toBeNull();
+    expect(acquireOrSkip("observe")).not.toBeNull();
+  });
+
+  it("runs un-locked under an existing holder — no steal, no wait, no deadlock", async () => {
+    const held = acquireOrSkip("observe");
+    expect(held).not.toBeNull();
+    let releaseCall!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseCall = resolve;
+    });
+    const run = runGoalExtract(
+      makeInput({
+        runStageFn: async () => {
+          await blocked;
+          return assistantResult("Rebuild the goal");
+        },
+      }),
+    );
+    // the holder keeps its lock the whole time (the rebuild's own hold)
+    expect(current()).toBe("observe");
+    releaseCall();
+    await run;
+    expect(current()).toBe("observe");
+    await extractionSettled(); // settles even when un-locked
+    expect(getGraphStore().graph.nodes.get(N_GOAL)?.summary).toBe("Rebuild the goal");
+    held?.release();
+    expect(current()).toBeNull();
+  });
+
+  it("a compaction-style abort through the lock handle kills the one-shot and releases", async () => {
+    const run = runGoalExtract(
+      makeInput({
+        runStageFn: (input) =>
+          new Promise<StageRunResult>((resolve) => {
+            input.signal.addEventListener("abort", () => resolve({ ...EMPTY_RESULT, aborted: true }), {
+              once: true,
+            });
+          }),
+      }),
+    );
+    expect(current()).toBe("extract");
+    abortInFlight(); // acquireForCompaction's abort path
+    await run;
+    expect(current()).toBeNull();
+    expect(getGraphStore().graph.nodes.get(N_GOAL)?.summary).toBe("");
+  });
+
+  it("extractionSettled resolves immediately when no extraction is pending", async () => {
+    await extractionSettled();
+  });
+
+  it("a second fire waits for the first to settle — never two concurrent runs", async () => {
+    let releaseCall!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseCall = resolve;
+    });
+    const first = runGoalExtract(
+      makeInput({
+        runStageFn: async () => {
+          await blocked;
+          return assistantResult("first");
+        },
+      }),
+    );
+    let secondRan = false;
+    const second = runGoalExtract(
+      makeInput({
+        runStageFn: async () => {
+          secondRan = true;
+          return assistantResult("second");
+        },
+      }),
+    );
+    expect(secondRan).toBe(false); // queued behind the first, not concurrent
+    expect(current()).toBe("extract");
+    releaseCall();
+    await Promise.all([first, second]);
+    expect(secondRan).toBe(true);
+    expect(current()).toBeNull();
   });
 });

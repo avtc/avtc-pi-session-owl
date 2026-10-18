@@ -12,7 +12,7 @@ import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG 
 import { _setDumpHomeForTest, sanitizeForPath } from "../../src/debug-dump.js";
 import { setClock } from "../../src/graph/mutations.js";
 import { _setBaseLoggerForTest } from "../../src/log.js";
-import { type ObserverRunInput, runObserver } from "../../src/observer/run.js";
+import { OBSERVER_NO_PROGRESS_TURNS, type ObserverRunInput, runObserver } from "../../src/observer/run.js";
 import type { TurnPredicate } from "../../src/runtime/agent-loop.js";
 import { _resetSessionAffinity, setSessionOwlSessionBase } from "../../src/runtime/session-affinity.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
@@ -87,9 +87,11 @@ function scriptedRunStage(batchesPerChunk: RecordObservationInput[][]): {
   fn: ObserverRunInput["runStageFn"];
   calls: number;
   acks: string[];
+  ackIsError: boolean[];
 } {
   let calls = 0;
   const acks: string[] = [];
+  const ackIsError: boolean[] = [];
   const fn = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
     const tool = input.tools[0] as AgentTool;
     const batch = batchesPerChunk[calls] ?? [];
@@ -98,6 +100,7 @@ function scriptedRunStage(batchesPerChunk: RecordObservationInput[][]): {
       const result = await tool.execute("call-1", { observations: batch });
       const text = (result.content[0] as { text: string }).text;
       acks.push(text);
+      ackIsError.push(result.isError === true);
     }
     return {
       messages: [] as AgentMessage[],
@@ -113,6 +116,7 @@ function scriptedRunStage(batchesPerChunk: RecordObservationInput[][]): {
       return calls;
     },
     acks,
+    ackIsError,
   };
 }
 
@@ -310,6 +314,7 @@ describe("runObserver", () => {
       [
         { summary: "Every commit must keep the build green.", importance: "crit", sourceEntryIds: ["a1"] }, // good
         { summary: "Foreign fact.", importance: "med", sourceEntryIds: ["ZZZ-not-in-chunk"] }, // foreign id
+        { summary: "Two foreign cites.", importance: "low", sourceEntryIds: ["BAD-1", "a1", "BAD-2"] }, // plural
       ],
     ]);
 
@@ -321,7 +326,11 @@ describe("runObserver", () => {
     const newNodes = [...graph.nodes.values()].filter((n) => n.state === "new");
     expect(newNodes).toHaveLength(1);
     expect(newNodes[0].importance).toBe("crit");
-    expect(script.acks[0]).toBe("accepted: #1\nrejected:\n#2: source id not in this chunk");
+    expect(script.acks[0]).toBe(
+      "accepted: #1\nrejected:\n" +
+        "#2: source id ZZZ-not-in-chunk not in this chunk\n" +
+        "#3: source ids BAD-1, BAD-2 not in this chunk",
+    );
 
     // one observation entry with exactly one record
     const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
@@ -356,6 +365,30 @@ describe("runObserver", () => {
     const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(obsEntries).toHaveLength(1);
     expect((obsEntries[0].data as { records: unknown[] }).records).toHaveLength(1);
+  });
+
+  it("answers an ALL-rejected batch as an ERRORED tool call (isError, not an accepted-looking ack)", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [
+      userEntry("u1", "initial prompt captured mechanically"),
+      assistantEntry("a1", "keep build green; chose vitest"),
+    ];
+    const script = scriptedRunStage([
+      [
+        { summary: "Foreign fact.", importance: "med", sourceEntryIds: ["ZZZ-not-in-chunk"] },
+        { summary: "!!!!!!", importance: "low", sourceEntryIds: ["a1"] },
+      ],
+    ]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    // a batch where NOTHING landed must read as an error to the model, not
+    // a success-shaped listing
+    expect(script.acks[0]).toBe(
+      "rejected:\n#1: source id ZZZ-not-in-chunk not in this chunk\n#2: non-substantive summary",
+    );
+    expect(script.ackIsError[0]).toBe(true);
   });
 
   it("skips a chunk whose every record is rejected: no delta, notify, run continues", async () => {
@@ -578,8 +611,8 @@ describe("runObserver", () => {
 
     // only chunk 1 ran (the top-of-loop abort guard stopped chunk 2)
     expect(chunk).toBe(1);
-    // chunk 1's record WAS persisted (per-chunk durability) — the fix for the
-    // old accumulate-then-append that lost everything on abort.
+    // chunk 1's record WAS persisted (per-chunk durability): an abort loses
+    // only the in-flight chunk.
     expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(1);
     const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
     expect(obsEntries).toHaveLength(1);
@@ -891,8 +924,7 @@ describe("runObserver", () => {
     // only chunk 1 ran (the top-of-loop abort guard stopped chunk 2)
     expect(call).toBe(1);
     // chunk 1's usage WAS persisted (per-chunk) even though the run was aborted —
-    // matching the per-chunk durability of its observation. Previously usage was
-    // lost (persisted only at run end, which the abort skipped).
+    // matching the per-chunk durability of its observation.
     const usageEntries = appended.filter((e) => e.type === "session-owl.usage");
     expect(usageEntries).toHaveLength(1);
     expect(getGraphStore().usageLedger.observe.input).toBe(1000);
@@ -996,7 +1028,7 @@ describe("runObserver — no-progress turn stop", () => {
     setClock(null);
   });
 
-  it("wires a per-chunk stopAfterTurn: 3 consecutive no-progress turns stop; text does not reset", async () => {
+  it("wires a per-chunk stopAfterTurn: N consecutive no-progress turns stop; text does not reset", async () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
@@ -1021,14 +1053,15 @@ describe("runObserver — no-progress turn stop", () => {
     await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: fn }));
 
     // the chunk's stop rule saw records land (0 → 1): the FIRST stop call
-    // observes that advance and resets; then three consecutive no-progress
-    // turns stop on the fourth call
+    // observes that advance and resets; then N consecutive no-progress
+    // turns stop on the (N+1)th call
     expect(seen).not.toBeNull();
     const stop = seen as unknown as TurnPredicate;
     expect(stop(stopTurn(null))).toBe(false); // advance observed -> reset
-    expect(stop(stopTurn(null))).toBe(false); // streak 1
-    expect(stop(stopTurn(null))).toBe(false); // streak 2
-    expect(stop(stopTurn(null))).toBe(true); // streak 3 -> stop
+    for (let i = 1; i < OBSERVER_NO_PROGRESS_TURNS; i += 1) {
+      expect(stop(stopTurn(null))).toBe(false); // streak i
+    }
+    expect(stop(stopTurn(null))).toBe(true); // streak N -> stop
     // a fresh chunk's rule: no records accepted — text beside failing calls is
     // NOT progress, so the streak keeps growing through the text turn
     const fn2 = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
@@ -1044,9 +1077,10 @@ describe("runObserver — no-progress turn stop", () => {
     };
     await runObserver(makeArgs({ pi: makeFakePi().pi, ctx: makeFakeCtx(), unobserved, runStageFn: fn2 }));
     const stop2 = seen as unknown as TurnPredicate;
-    expect(stop2(stopTurn(null))).toBe(false); // streak 1
-    expect(stop2(stopTurn(null))).toBe(false); // streak 2
-    expect(stop2(stopTurn("all rejected — retrying smaller"))).toBe(true); // text ≠ progress -> streak 3 -> stop
+    for (let i = 1; i < OBSERVER_NO_PROGRESS_TURNS; i += 1) {
+      expect(stop2(stopTurn(null))).toBe(false); // streak i
+    }
+    expect(stop2(stopTurn("all rejected — retrying smaller"))).toBe(true); // text ≠ progress -> streak N -> stop
     expect(stops.length).toBeGreaterThanOrEqual(2);
   });
 });
@@ -1058,7 +1092,7 @@ describe("runObserver — record_observations debug logging", () => {
     setClock(() => "2026-07-29T10:05:00.000Z");
     _resetSessionAffinity();
     _setBaseLoggerForTest(sink);
-    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, debugLog: true }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, debugDumpLimit: 3 }));
     sink.debug.mockClear();
   });
   afterAll(() => {
@@ -1067,7 +1101,7 @@ describe("runObserver — record_observations debug logging", () => {
     _resetGetSessionOwlSettings();
   });
 
-  it("logs accepted/rejected counts per record_observations call when debugLog is on", async () => {
+  it("logs accepted/rejected counts per record_observations call when the dump limit is above 0", async () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
     const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];

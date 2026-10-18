@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The Builder's system prompt — approved protected text. Brand-new house
-// voice; positive intent only. Any change requires re-approval.
+// The Builder's system prompt — protected text: any change requires
+// owner approval. House voice; positive intent only.
 
 import { COUNTS_SIZE_LEGEND } from "../format/render.js";
 import { type RootShapeSettings, rootCountSentence, strategyClause } from "./root-shape.js";

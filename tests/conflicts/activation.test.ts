@@ -142,7 +142,13 @@ describe("sessionOwlExtension (dormant conflict pause)", () => {
   beforeAll(async () => {
     sessionOwlExtension = (await importMockedExtension()).default;
   });
-  afterAll(() => {
+  afterAll(async () => {
+    // Every activation in this suite records conflict hits through the real
+    // src/index.ts path — on the POST-resetModules copy this suite's mocked
+    // graph imported, so clear it via the registry itself (the static import
+    // would only reach the pre-reset instance), then leave the mock slots free.
+    const { setConflictHits } = await import("../../src/conflicts/pause.js");
+    setConflictHits(null);
     for (const path of MOCKED_PATHS) vi.doUnmock(path);
   });
   beforeEach(() => {

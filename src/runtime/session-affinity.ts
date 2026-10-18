@@ -15,28 +15,36 @@
 //
 // Session-scoped: a fresh base per session keeps unrelated sessions from coupling
 // on a node (Anthropic) or sharing a cache namespace (Mistral). The base is set
-// on session_start and cleared on session_shutdown (see lifecycle.ts).
+// on session_start and cleared on session_shutdown (see lifecycle.ts). The base
+// is stored PER CONVERSATION KEY (read/write at the active key), so a resident
+// conversation keeps its base across another conversation's visit — pi never
+// activates a key, so its map holds exactly one entry (today's behavior).
 
-/** The session-scoped base; suffixed per stage. null outside an active session. */
-let sessionBase: string | null = null;
+import { currentConversationKey } from "./conversation-key.js";
+
+/** The session-scoped base per conversation; suffixed per stage. Absent outside
+ *  an active session for that conversation. */
+const sessionBases = new Map<string, string>();
 
 /** Set the per-session base id (called once on session_start). */
 export function setSessionOwlSessionBase(id: string): void {
-  sessionBase = id;
+  sessionBases.set(currentConversationKey(), id);
 }
 
-/** Clear the base (called on session_shutdown). */
+/** Clear the base of the ACTIVE conversation (called on session_shutdown). */
 export function clearSessionOwlSessionBase(): void {
-  sessionBase = null;
+  sessionBases.delete(currentConversationKey());
 }
 
-/** The per-stage affinity id for a maintenance stage, or null outside a session.
- *  `stage` is the run's stage label ("observe"/"build"/"select"). */
+/** The per-stage affinity id for a maintenance stage of the ACTIVE
+ *  conversation, or null outside a session. `stage` is the run's stage label
+ *  ("observe"/"build"/"select"). */
 export function getStageAffinityId(stage: string): string | null {
-  return sessionBase === null ? null : `${sessionBase}:${stage}`;
+  const base = sessionBases.get(currentConversationKey());
+  return base === undefined ? null : `${base}:${stage}`;
 }
 
-/** Test-only: reset to the no-session state. */
+/** Test-only: reset every conversation to the no-session state. */
 export function _resetSessionAffinity(): void {
-  sessionBase = null;
+  sessionBases.clear();
 }

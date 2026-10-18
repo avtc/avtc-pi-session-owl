@@ -1,0 +1,195 @@
+{
+  "name": "doors-basics",
+  "description": "One row per model-visible door: prompt, response-assistant, response-user (a tool-flow continuation), tool-result, delivery, command; and the skipped doors: attachment, hook-context, notice.",
+  "rows": [
+    {
+      "uuid": "u-prompt-1",
+      "parentUuid": null,
+      "door": "prompt",
+      "origin": {
+        "kind": "composer"
+      },
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Read the config and summarize"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T10:00:00.000Z"
+    },
+    {
+      "uuid": "u-assistant-1",
+      "parentUuid": "u-prompt-1",
+      "door": "response",
+      "origin": {
+        "kind": "model",
+        "model": "claude-sonnet-4"
+      },
+      "message": {
+        "type": "assistant",
+        "id": "resp-1",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "Plan: read config first"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T10:00:01.000Z"
+    },
+    {
+      "uuid": "u-assistant-2",
+      "parentUuid": "u-assistant-1",
+      "door": "response",
+      "origin": {
+        "kind": "model",
+        "model": "claude-sonnet-4"
+      },
+      "message": {
+        "type": "assistant",
+        "id": "resp-1",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call-1",
+            "name": "Read",
+            "input": {
+              "path": "config.json"
+            }
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T10:00:02.000Z"
+    },
+    {
+      "uuid": "u-response-user-1",
+      "parentUuid": "u-assistant-2",
+      "door": "response",
+      "origin": {
+        "kind": "tool"
+      },
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "tool flow continuation"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T10:00:08.000Z"
+    },
+    {
+      "uuid": "u-toolresult-1",
+      "parentUuid": "u-assistant-2",
+      "door": "tool-result",
+      "origin": {
+        "kind": "tool",
+        "tool": "Read"
+      },
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call-1",
+            "content": "{\n  \"theme\": \"dark\"\n}"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T10:00:03.000Z"
+    },
+    {
+      "uuid": "u-delivery-1",
+      "parentUuid": "u-toolresult-1",
+      "door": "delivery",
+      "origin": {
+        "kind": "bridge"
+      },
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Peer message: the build finished"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T10:00:04.000Z"
+    },
+    {
+      "uuid": "u-command-1",
+      "parentUuid": "u-delivery-1",
+      "door": "command",
+      "origin": {
+        "kind": "plugin",
+        "plugin": "other-mod",
+        "command": "report"
+      },
+      "message": {
+        "type": "user",
+        "text": "report: 3 files changed",
+        "content": []
+      },
+      "timestamp": "2026-10-06T10:00:05.000Z"
+    },
+    {
+      "uuid": "u-attachment-1",
+      "parentUuid": "u-command-1",
+      "door": "attachment",
+      "origin": {
+        "kind": "attachment",
+        "attachment": "paste"
+      },
+      "message": {
+        "type": "attachment",
+        "content": [
+          {
+            "type": "text",
+            "text": "@config.json attached"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T10:00:06.000Z"
+    },
+    {
+      "uuid": "u-hookcontext-1",
+      "parentUuid": "u-attachment-1",
+      "door": "hook-context",
+      "origin": {
+        "kind": "engine"
+      },
+      "message": {
+        "type": "system",
+        "content": [
+          {
+            "type": "text",
+            "text": "hook state"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T10:00:07.000Z"
+    },
+    {
+      "uuid": "u-notice-1",
+      "parentUuid": "u-hookcontext-1",
+      "door": "notice",
+      "origin": {
+        "kind": "engine"
+      },
+      "message": {
+        "type": "system",
+        "content": [
+          {
+            "type": "text",
+            "text": "Auto-update installed"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T10:00:08.000Z"
+    }
+  ]
+}

@@ -15,7 +15,7 @@ describe("rootCountSentence", () => {
     expect(rootCountSentence(null)).toBeNull();
   });
 
-  it("a target → the approved count-hint sentence", () => {
+  it("a target → the count-hint sentence", () => {
     expect(rootCountSentence(40)).toBe("Aim to have no more than 40 nodes at root level.");
     // singular grammar at N=1 (the schema floor)
     expect(rootCountSentence(1)).toBe("Aim to have no more than 1 node at root level.");
@@ -27,7 +27,7 @@ describe("strategyClause", () => {
     expect(strategyClause("balanced")).toBeNull();
   });
 
-  it("carries the five approved clauses", () => {
+  it("carries the five strategy clauses", () => {
     expect(strategyClause("by-task")).toBe(
       "Organize roots by task, in the order tasks occurred: one root per task (past, current, upcoming); merge only within a task; a completed task folds into one line.",
     );

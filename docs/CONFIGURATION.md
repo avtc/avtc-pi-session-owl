@@ -14,22 +14,22 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | boolean | `true` | Master switch for session-owl. Off = session-owl stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected). |
-| `ignoreConflicts` | boolean | `false` | Register even when a conflicting compaction extension is detected (pi compaction is last-wins — for deliberate co-runs, e.g. benchmarking). |
-| `defaultModel` | model | `null` | One model for all components. `null`/unset uses the current session model. Per-component models override this. |
+| `enabled` | boolean | `true` | Master switch for session-owl. Off = session-owl stops capturing memory and stops adding its compaction summary (the engine's own compaction and other extensions are unaffected). |
+| `subagentMode` | string | `on-compaction` | How session-owl treats subagents. Inherited = the same treatment as the main conversation; On compaction = their memory is captured only when the subagent itself compacts (small subagents that never compact are skipped entirely); Disabled = session-owl is off for subagents. When session-owl is disabled, it is off for subagents as well. |
+| `ignoreConflicts` | boolean | `false` | Register even when a conflicting compaction extension is detected (for deliberate co-runs, e.g. benchmarking). |
+| `defaultModel` | model | `null` | One model for all components. `null`/unset uses the current session model. Per-component models override this. On the Claude port the default is `haiku`. |
 | `defaultThinkingLevel` | thinking-level | `null` | Thinking level for all components. `null`/Session default = use the session's thinking level; `off` = no thinking. Per-component levels override this. |
-| `renderMode` | string | `observations-root` | What session-owl injects after compaction (and what `/owl:*` recall reads). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the root view of the memory graph. |
+| `renderMode` | string | `observations-root` | What session-owl injects after compaction (the recall commands read the same view). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the root view of the memory graph. |
 | `observerMode` | string | `on-threshold` | When the Observer captures memory. `on-threshold` = throughout the session, after a turn once enough new text accumulates; `on-compaction` = all at once, at compaction time only. |
 | `builderMode` | string | `each-N-observations` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
 | `selectorMode` | string | `on-compaction` | When the Selector runs (only if `renderMode=selected-root`): `on-compaction` or `on-session-context-threshold`. |
 | `rootViewTargetNodes` | number | `null` | Advice for the Builder and Selector on how many roots to keep. A number = aim for about that many roots — a soft target, the token budget wins. No target = no advice; the agent shapes the root view on its own. |
 | `rootViewStrategy` | string | `balanced` | How the Builder and Selector organize roots. Balanced = organize arrivals and consolidate related; By task = one root per task, in order; By category = roots by kind (requests, decisions, code understanding, work state, pitfalls, environment — open list); By recency = granular recent, compact older; By importance = dedicated roots for crit/high; By topic = one root per distinct subject. |
-| `commandResultCap` | number | `50` | Max items a `/owl:*` command shows before a `... +N more` footer. `null` = show all. |
+| `commandResultCap` | number | `50` | Max items an owl command shows before a `... +N more` footer. `null` = show all. |
 | `findTimeoutMs` | duration | `30000` | Max duration a `find`/`owl_recall` search may run before it is stopped. |
 | `llmCallTimeoutMs` | duration | `1200000` | Aborts any Observer, Builder, or Selector LLM call that runs longer than this. `null` = no limit. |
 | `toolResultTokenBudget` | number | `6000` | Max size (in tokens) of a single `cat`/`find`/`ls`/`owl_recall` result. A larger result shows fewer items or less detail (each item stays whole); reading one observation in full is never cut off. |
-| `debugLog` | boolean | `false` | Write detailed trace logs to the log file. |
-| `debugDumpLimit` | number | `0` | Maximum per-stage dump files kept under `~/.pi/session-owl/dumps/<project>/` (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format. |
+| `debugDumpLimit` | number | `0` | Maximum per-stage dump files kept under `<harnessDir>/session-owl/dumps/<project>/` (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format. |
 
 ## Observer
 
@@ -92,3 +92,24 @@ Each component resolves its thinking level by the first of:
 
 - **`/owl:settings`** opens the tabbed modal (General · Observer · Builder · Selector). Changes apply live.
 - **`PI_SETTINGS_SESSION_OWL`** — the merged session+project config is serialized into this env var so subagents inherit it.
+- **One active session per session file** — sharing a single session's storage between multiple active sessions is unsupported: observation and node ids are sequential per session, so concurrent writes can corrupt, duplicate, or mis-merge records during builder/selector stages. Fork or branch instead — each gets its own session file and storage.
+
+
+## Claude Code port
+
+The Claude Code port (the repo's `claude/` directory) uses the same settings schema, stored under Claude's own paths:
+
+| Scope | Path |
+|---|---|
+| Global | `~/.claude/avtc-session-owl-settings.json` |
+| Project | `<project>/.claude/avtc-session-owl-settings.json` |
+| Session | in-memory (bootstrapped from the `CLAUDE_SETTINGS_SESSION_OWL` environment variable) |
+
+Everything else in this document applies unchanged. The knobs below exist only in the port:
+
+- **`keepRecentTokens`** (number, default `20000`) — tokens of recent conversation kept verbatim alongside the memory summary when session-owl answers a compaction. Answered at the compaction seam; editable from the settings pane.
+- **`mirrorRetentionDays`** (number, default `null` = keep forever — full-text recall never expires) — a number enables the startup retention sweep (expired sessions and sessions whose transcript is gone are truly deleted); the follow-cleanup mode tracks Claude Code's own `cleanupPeriodDays` instead.
+- **`keptTailAggregatedThinking`** (boolean, default `true`) — folds the kept tail's thinking blocks into the memory summary as an attributed-reasoning section named "## Reasoning from earlier turns (attributed)"; `off` keeps the summary text only (this platform's compaction has no thinking field of its own).
+- **`injectedSummaryRow`** (boolean, default `false`) — after a compaction, echoes the injected memory summary as one visible assistant row above the compaction command. Invisible to the agent.
+
+The retention sweep runs as a Node helper at session start on CLI surfaces; non-CLI surfaces defer it to the next CLI run. Dry-run by default: `node claude/helpers/prune.mjs --days N [--apply]`.

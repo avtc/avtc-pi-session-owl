@@ -9,9 +9,15 @@
 // empty — the Builder is the backstop (it refines/sets the goal as the session
 // matures).
 //
-// Owns NO run-lock and opens NO widget stage: a sub-second one-shot, not a
-// multi-pass/multi-chunk maintenance stage. A module-level AbortController is
-// aborted on session shutdown so a discarded session's pending extraction stops.
+// When the run-lock is idle it is taken (stage "extract") so the capture's
+// same-tick turn_end trigger SKIPs until the goal lands (the goal-first stage
+// sequencing); when a holder already exists — the reuse rebuild fires this
+// under its own compaction-class hold — it runs un-locked under that holder's
+// authority (waiting would deadlock against the holder's release while a
+// rescan awaits the extraction's settle on the other side). Opens NO widget
+// stage: a one-shot, not a multi-pass/multi-chunk maintenance stage. A
+// module-level AbortController is aborted on session shutdown so a discarded
+// session's pending extraction stops.
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { CacheRetention } from "@earendil-works/pi-ai";
@@ -25,26 +31,25 @@ import { GOAL_EXTRACT_SYSTEM } from "../prompts/goal-extract.js";
 import {
   NO_EVENT_SINK,
   NO_LOOP_OVERRIDE,
-  NO_REASONING,
   NO_STAGE_END_HOOK,
   runStage,
   type StageRunInput,
   type StageRunResult,
 } from "../runtime/agent-loop.js";
-import { resolveStageModel } from "../runtime/model.js";
+import { resolveStageModel, resolveStageReasoning } from "../runtime/model.js";
+import { acquireForExtract } from "../runtime/run-lock.js";
 import { appendGraphDelta, getGraphStore, type StoreContext } from "../store/graph-store.js";
 import { N_GOAL } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
-/** A one-line goal needs no deliberation: disable thinking so the call is fast,
- *  cheap, and never truncated by a thinking budget eating the output cap. */
-const GOAL_REASONING = NO_REASONING;
 /** One turn: the model replies once (no tools), then the loop stops. */
 const GOAL_MAX_TURNS = 1;
-/** Generous cap for a one-line reply (no thinking tokens to consume it). */
-const GOAL_MAX_TOKENS = 512;
+/* Output cap + thinking level: the goal call rides the OBSERVER's knobs —
+ *  settings.observerMaxTokens for the cap and the observer thinking-level
+ *  ladder for reasoning (a one-line goal needs no deliberation by default;
+ *  the knobs decide, not literals). */
 /** One-shot extraction: its prefix never recurs, so disable prompt-cache writes
  *  (no wasted cache write that is never read). No session-affinity id either. */
 const GOAL_CACHE_RETENTION: CacheRetention = "none";
@@ -53,7 +58,8 @@ const GOAL_CACHE_RETENTION: CacheRetention = "none";
 const GOAL_DUMP_STAGE = "goal-extract";
 
 /** Input to `runGoalExtract`. The run honors its own abort controller (aborted
- *  on shutdown); it takes no run-lock. */
+ *  on shutdown); with an idle run-lock it holds stage "extract" until it
+ *  settles (see `extractionSettled`). */
 export interface GoalExtractInput {
   ctx: ExtensionContext;
   settings: SessionOwlConfig;
@@ -81,6 +87,24 @@ export function abortGoalExtract(): void {
 /** Test-only: reset the singleton to idle (test isolation). */
 export function _resetGoalExtract(): void {
   active = null;
+  inflight = null;
+}
+
+/** The in-flight extraction's promise (settle includes the run-lock release).
+ *  Rescan and catch-up flows await it — via `extractionSettled` — BEFORE
+ *  acquiring the run-lock: never hold the lock while awaiting an extraction
+ *  (the no-deadlock order). */
+let inflight: Promise<void> | null = null;
+
+/** Resolve once the in-flight extraction settles (or immediately when none is
+ *  pending). */
+export function extractionSettled(): Promise<void> {
+  return inflight ?? Promise.resolve();
+}
+
+/** Test seam — mark an extraction as in flight (drives `extractionSettled`). */
+export function _setGoalExtractInFlightForTest(promise: Promise<void> | null): void {
+  inflight = promise;
 }
 
 /**
@@ -89,13 +113,43 @@ export function _resetGoalExtract(): void {
  * nGoal.summary is still empty — set_meta it (persisted + rendered). On any
  * failure (model unavailable, timeout, abort, empty reply) the summary stays
  * empty; the Builder backstop refines/sets it later. Never throws — logs.
+ *
+ * One extraction at a time: a second fire waits for the first to settle, never
+ * two concurrent runs racing the `active` controller. The run-lock is taken in
+ * the synchronous prefix (see `executeGoalExtract`) — before any await — so the
+ * capture's trailing turn_end trigger, evaluated later in the same tick, sees
+ * the holder and SKIPs.
  */
-export async function runGoalExtract(input: GoalExtractInput): Promise<void> {
+export function runGoalExtract(input: GoalExtractInput): Promise<void> {
+  const current = (async () => {
+    if (inflight !== null) await inflight;
+    return executeGoalExtract(input);
+  })();
+  inflight = current;
+  const clear = (): void => {
+    if (inflight === current) inflight = null;
+  };
+  void current.then(clear, clear);
+  return current;
+}
+
+async function executeGoalExtract(input: GoalExtractInput): Promise<void> {
+  // The run-lock (the goal-first sequencing rule): taken HERE — in the sync
+  // prefix, before the first await — so the same-tick trailing trigger skips.
+  // Null = a holder already exists: run under its authority (never wait — a
+  // rescan flow holding that holder awaits this extraction's settle).
+  const lock = acquireForExtract();
   // Abort any prior extraction (defensive — capture is one-shot, so a prior in
   // flight is unexpected; still, never run two at once).
   if (active !== null) active.abort();
   const controller = new AbortController();
   active = controller;
+  // Compaction/shutdown aborts through the LOCK handle (abortInFlight aborts
+  // the holder's controller): the one-shot dies too; release rides the finally.
+  if (lock !== null) {
+    if (lock.abortController.signal.aborted) controller.abort();
+    else lock.abortController.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
   // Stage dump (debugDumpLimit): opened inside the try after the skips (an
   // aborted / model-gap one-shot leaves no file); the footer closes it in the
   // finally.
@@ -104,11 +158,12 @@ export async function runGoalExtract(input: GoalExtractInput): Promise<void> {
   try {
     if (controller.signal.aborted) return;
 
-    // Model resolution uses the default model (null → session model). A
-    // fire-and-forget one-shot's model gap is invisible to the user and covered
-    // by the Builder backstop, so it logs (no user notification — that would be
-    // noise for a background best-effort call).
-    const resolved = await resolveStageModel(input.ctx, input.settings.defaultModel);
+    // Model resolution rides the OBSERVER's chain (the extractor's
+    // model resolves exactly as observerModel does — stage setting → default
+    // model → session). A fire-and-forget one-shot's model gap is invisible to
+    // the user and covered by the Builder backstop, so it logs (no user
+    // notification — that would be noise for a background best-effort call).
+    const resolved = await resolveStageModel(input.ctx, input.settings.observerModel ?? input.settings.defaultModel);
     if (!resolved.ok) {
       log.warn(`goal extract skipped: ${resolved.error}`);
       return;
@@ -128,9 +183,13 @@ export async function runGoalExtract(input: GoalExtractInput): Promise<void> {
       model: resolved.model,
       apiKey: resolved.apiKey,
       signal: controller.signal,
-      reasoning: GOAL_REASONING,
+      reasoning: resolveStageReasoning(
+        input.settings.observerThinkingLevel,
+        input.settings.defaultThinkingLevel,
+        input.ctx.thinkingLevel,
+      ),
       maxTurns: GOAL_MAX_TURNS,
-      maxTokens: GOAL_MAX_TOKENS,
+      maxTokens: input.settings.observerMaxTokens,
       timeoutMs: input.settings.llmCallTimeoutMs,
       onEvent: NO_EVENT_SINK,
       onStageEnd: NO_STAGE_END_HOOK,
@@ -162,6 +221,7 @@ export async function runGoalExtract(input: GoalExtractInput): Promise<void> {
     log.error("goal extract run failed", cause);
   } finally {
     if (dumpHeaderWritten) appendDump(dumpPath, DUMP_FOOTER);
+    if (lock !== null) lock.release();
     if (active === controller) active = null;
   }
 }

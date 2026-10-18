@@ -3,7 +3,7 @@
 
 // renderDetails / computeDetailsCounts: re-render an observation's verbatim
 // source ("details") from its sourceEntryIds, UNTRUNCATED, in the Observer's
-// chunk tag format — but as a recall consumer (no entry=id attribute, since the
+// chunk tag format — but as a recall consumer (no entryId=id attribute, since the
 // agent/Builder/Selector have no use for raw session entry ids).
 //
 // FULL VERBATIM: thinking is ALWAYS included and tool args/results are NEVER
@@ -17,6 +17,7 @@
 // list is rendered together.
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { currentConversationKey } from "../runtime/conversation-key.js";
 import { countLines, estimateContentTokens } from "../types.js";
 import { BLOCK_SEP, type ChunkOptions, renderBlocks } from "./chunk.js";
 
@@ -41,9 +42,23 @@ export type EntryResolver = (ids: readonly string[]) => readonly unknown[];
 // per-session). Pre-warmed at capture (computeDetailsAndCache renders the
 // verbatim source once for the size counts AND caches the text, so the first
 // recall of a session hits a hot cache) and re-warmed on demand by recall.
-const detailsCache = new Map<string, DetailsRender>();
+// Bucketed PER CONVERSATION: obs ids are per-graph, so two conversations may
+// legitimately collide on `o<N>` — one key's render must never serve another
+// (pi never activates a key ⇒ its map holds exactly one bucket, today's
+// behavior).
+const detailsCaches = new Map<string, Map<string, DetailsRender>>();
 
-/** Render options for the verbatim-source details render: full, no entry=id. */
+function cacheForActiveConversation(): Map<string, DetailsRender> {
+  const key = currentConversationKey();
+  let cache = detailsCaches.get(key);
+  if (cache === undefined) {
+    cache = new Map<string, DetailsRender>();
+    detailsCaches.set(key, cache);
+  }
+  return cache;
+}
+
+/** Render options for the verbatim-source details render: full, no entryId=id. */
 const DETAILS_OPTIONS: ChunkOptions = {
   tokenThreshold: Number.POSITIVE_INFINITY,
   toolBlockCapTokens: null, // untruncated — full verbatim
@@ -79,7 +94,7 @@ export function computeDetailsAndCache(
 ): { lines: number; tokens: number } | null {
   const render = renderDetailsText(sourceEntryIds, resolveEntries);
   if (render === null) return null;
-  detailsCache.set(obsId, render);
+  cacheForActiveConversation().set(obsId, render);
   return { lines: render.lines, tokens: render.tokens };
 }
 
@@ -95,16 +110,25 @@ export function renderDetails(
   sourceEntryIds: readonly string[],
   resolveEntries: EntryResolver,
 ): DetailsRender | null {
-  const cached = detailsCache.get(obsId);
+  const cache = cacheForActiveConversation();
+  const cached = cache.get(obsId);
   if (cached !== undefined) return cached;
   const render = renderDetailsText(sourceEntryIds, resolveEntries);
   if (render === null) return null;
-  detailsCache.set(obsId, render);
+  cache.set(obsId, render);
   return render;
 }
 
-/** Clear the per-observation details cache. Called on session_start (refresh)
- *  and session_shutdown (drop) so entry ids never collide across sessions. */
+/** Clear the ACTIVE conversation's per-observation details bucket. Called on
+ *  session_start (refresh) and session_shutdown (drop) so entry ids never
+ *  collide across sessions of that conversation. */
 export function clearDetailsCache(): void {
-  detailsCache.clear();
+  const cache = detailsCaches.get(currentConversationKey());
+  if (cache !== undefined) cache.clear();
+}
+
+/** Drop every conversation's bucket — the process-wide reset (test/teardown
+ *  seam; graph-store's resetConversationStates calls this). */
+export function clearAllDetailsCaches(): void {
+  detailsCaches.clear();
 }

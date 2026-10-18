@@ -22,6 +22,7 @@ import {
   NON_BUILDER,
   type RenderViewer,
 } from "../format/render.js";
+import { extractionSettled } from "../goal-extract/run.js";
 import {
   buildCatUnits,
   collectFindMatches,
@@ -315,6 +316,10 @@ export async function runOwlRescan(args: string, ctx: ExtensionCommandContext, d
     "Discard the current memory graph (observations, nodes, selected tree) and re-observe the entire session from the start? This cannot be undone.",
   );
   if (!ok) return;
+  // goal-first stage sequencing: settle any in-flight goal extraction BEFORE
+  // the reset wipes the graph it writes into and the catch-up chain acquires
+  // the run-lock (await before acquiring — never while holding).
+  await extractionSettled();
   resetGraphForRescan(toStoreContext(deps.pi, ctx));
   notify(ctx, "Rescanning — observing the session from the start…", "info");
   // fire-and-forget the Observer catch-up (frontier is now null → the whole

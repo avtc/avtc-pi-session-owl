@@ -8,7 +8,7 @@ import { shapeSettings } from "./run-helpers.js";
 const shape = shapeSettings;
 
 describe("builderSystemPrompt", () => {
-  it("opens with the stakes framing the approved text carries", () => {
+  it("opens with the stakes framing the pinned text carries", () => {
     expect(builderSystemPrompt(shape({})).startsWith("You keep the memory graph")).toBe(true);
   });
 
@@ -20,9 +20,9 @@ describe("builderSystemPrompt", () => {
   });
 
   // String-equality snapshot guard: the no-advice baseline (null target,
-  // balanced strategy) is approved protected text. Any change must be a
-  // deliberate re-approval, not a drift.
-  it("matches the approved baseline exactly (null target + balanced, drift guard)", () => {
+  // balanced strategy) is protected text. Any change must be a deliberate
+  // owner-approved edit, not a drift.
+  it("matches the protected baseline exactly (null target + balanced, drift guard)", () => {
     expect(builderSystemPrompt(shape({}))).toBe(
       [
         "You keep the memory graph coherent and bounded across compactions. The top level",
@@ -75,7 +75,7 @@ describe("builderSystemPrompt", () => {
     expect(prompt).not.toContain("Aim to have no more than");
   });
 
-  it("a target → the approved count-hint sentence follows the opening clause", () => {
+  it("a target → the count-hint sentence follows the opening clause", () => {
     const prompt = builderSystemPrompt(shape({ rootViewTargetNodes: 40 }));
     expect(prompt).toContain("so the roots must read clearly. Aim to have no more than 40 nodes at root level.");
     expect(prompt).not.toContain("stay within budget");

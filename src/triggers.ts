@@ -18,7 +18,7 @@ import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./format/chu
 import { BUILDER } from "./format/render.js";
 import { measureRootViewTokens } from "./graph/read-tools.js";
 import { log } from "./log.js";
-import { acquireOrSkip, inFlight, type StageName } from "./runtime/run-lock.js";
+import { acquireOrSkip, armRearmOnRelease, inFlight, type StageName } from "./runtime/run-lock.js";
 import { OBSERVATION_TYPE, type ObservationEntry } from "./store/codecs.js";
 import { getGraphStore } from "./store/graph-store.js";
 import { estimateContentTokens } from "./types.js";
@@ -435,7 +435,8 @@ export function resetStageRuns(): void {
  *  Observer's freshly-created `new` nodes. This avoids starving the Builder when
  *  the Observer holds the lock (the old per-stage launch made a colliding
  *  Builder/Selector SKIP). A turn_end that collides with a run already in flight
- *  still SKIPS (the gap batches on the next trigger). */
+ *  still SKIPS — and arms the gap: that chain's release re-evaluates it once
+ *  (settings re-read live at re-entry). */
 export function onTurnEnd(input: TriggerInput): void {
   if (!input.settings.enabled) return;
 
@@ -471,7 +472,11 @@ export function onTurnEnd(input: TriggerInput): void {
   if (!observer.shouldFire && !builder.shouldFire && !selector.shouldFire) return;
   const handle = acquireOrSkip(firstFiringStage(observer.shouldFire, builder.shouldFire));
   if (handle === null) {
-    log.debug("turn_end: run already in flight — SKIP (gap batches on next trigger)");
+    // The gap re-evaluates ONCE the chain releases (settings re-read live at
+    // re-entry, so a disable takes effect there) — the collision no longer
+    // drops its evaluation.
+    log.debug("turn_end: run already in flight — SKIP (rearm armed; the gap re-evaluates on release)");
+    armRearmOnRelease(() => onTurnEnd({ ...input, settings: getSessionOwlSettings() }));
     return;
   }
   log.info("turn_end: lock acquired, starting chained background run");

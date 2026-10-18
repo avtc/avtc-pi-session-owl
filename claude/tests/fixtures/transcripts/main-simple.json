@@ -1,0 +1,109 @@
+{
+  "description": "Main-loop transcript, 2.5 turns: typed prompt (string content), thinking + tool_use rows of one API response (message.id shared, apiBlockIndex split), tool_result with sourceToolAssistantUUID, assistant text, second prompt (block-array content), final assistant; metadata rows (date, cost-state, last-prompt tip) interleaved; every row carries sessionId/parentUuid/timestamp.",
+  "rows": [
+    {
+      "kind": "metadata",
+      "uuid": null,
+      "raw": "{\"type\":\"date\",\"date\":\"2026-10-06\"}"
+    },
+    {
+      "kind": "prompt",
+      "uuid": "m-1",
+      "parentUuid": null,
+      "sessionId": "sess-main",
+      "timestamp": "2026-10-06T11:00:01.000Z",
+      "type": "user",
+      "message": { "role": "user", "content": "Read the config and report the theme" }
+    },
+    {
+      "kind": "thinking",
+      "uuid": "m-2",
+      "parentUuid": "m-1",
+      "sessionId": "sess-main",
+      "timestamp": "2026-10-06T11:00:03.000Z",
+      "type": "assistant",
+      "message": {
+        "id": "resp-1",
+        "model": "glm-5.1",
+        "apiBlockIndex": 0,
+        "content": [{ "type": "thinking", "thinking": "Plan: read then report", "signature": "sig-1" }]
+      }
+    },
+    {
+      "kind": "tool_use",
+      "uuid": "m-3",
+      "parentUuid": "m-2",
+      "sessionId": "sess-main",
+      "timestamp": "2026-10-06T11:00:03.000Z",
+      "type": "assistant",
+      "message": {
+        "id": "resp-1",
+        "model": "glm-5.1",
+        "apiBlockIndex": 1,
+        "content": [{ "type": "tool_use", "id": "call-1", "name": "Read", "input": { "path": "config.json" } }]
+      }
+    },
+    {
+      "kind": "tool_result",
+      "uuid": "m-4",
+      "parentUuid": "m-3",
+      "sessionId": "sess-main",
+      "timestamp": "2026-10-06T11:00:04.000Z",
+      "type": "user",
+      "sourceToolAssistantUUID": "m-3",
+      "toolUseResult": { "theme": "dark" },
+      "message": {
+        "role": "user",
+        "content": [{ "type": "tool_result", "tool_use_id": "call-1", "content": "{\\n  \"theme\": \"dark\"\\n}" }]
+      }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "m-5",
+      "parentUuid": "m-4",
+      "sessionId": "sess-main",
+      "timestamp": "2026-10-06T11:00:06.000Z",
+      "type": "assistant",
+      "message": {
+        "id": "resp-2",
+        "model": "glm-5.1",
+        "stop_reason": "end_turn",
+        "usage": { "input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 5, "cache_creation_input_tokens": 3 },
+        "content": [{ "type": "text", "text": "The theme is dark." }]
+      }
+    },
+    {
+      "kind": "metadata",
+      "uuid": null,
+      "raw": "{\"type\":\"cost-state\",\"totalCostUsd\":0.01}"
+    },
+    {
+      "kind": "prompt",
+      "uuid": "m-6",
+      "parentUuid": "m-5",
+      "sessionId": "sess-main",
+      "timestamp": "2026-10-06T11:01:00.000Z",
+      "type": "user",
+      "message": { "role": "user", "content": [{ "type": "text", "text": "Now summarize in one word" }] }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "m-7",
+      "parentUuid": "m-6",
+      "sessionId": "sess-main",
+      "timestamp": "2026-10-06T11:01:02.000Z",
+      "type": "assistant",
+      "message": {
+        "id": "resp-3",
+        "model": "glm-5.1",
+        "stop_reason": "end_turn",
+        "content": [{ "type": "text", "text": "Dark." }]
+      }
+    },
+    {
+      "kind": "metadata-tip",
+      "uuid": null,
+      "raw": "{\"type\":\"last-prompt\",\"sessionId\":\"sess-main\",\"leafUuid\":\"m-7\"}"
+    }
+  ]
+}

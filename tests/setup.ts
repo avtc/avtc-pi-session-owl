@@ -30,11 +30,12 @@
  * deterministically; vi.doUnmock in afterEach releases the registrations.
  */
 
+import "./log-backend-setup.js"; // FIRST — installs the claude-logger backend the rewritten vendored core needs at log.ts load
 import { afterAll, beforeEach, vi } from "vitest";
 import { _resetSessionOwlSettingsHandle, _setRegisterSettingsCommand } from "../src/config/schema.js";
 import { _setBaseLoggerForTest } from "../src/log.js";
 import { _resetSessionAffinity } from "../src/runtime/session-affinity.js";
-import { resetForNewSession } from "../src/store/graph-store.js";
+import { resetConversationStates } from "../src/store/graph-store.js";
 
 // Tests must NEVER write to the real production log file (~/.pi/logs/...). The
 // real avtc-pi-logger is created at log.ts module load (shared under
@@ -58,10 +59,16 @@ beforeEach(() => {
 
 // Reset module singletons + stub state after each test FILE (the isolate:false
 // leak boundary). Runs after the file's own afterAll.
-afterAll(() => {
+afterAll(async () => {
   vi.useRealTimers();
   _resetSessionOwlSettingsHandle();
   _setRegisterSettingsCommand(null);
   _resetSessionAffinity();
-  resetForNewSession();
+  resetConversationStates(); // every resident graph state + details bucket + the active key
+  // The conflict-pause singleton is recorded by the real activation path and
+  // read live by the status/widget gates. A file that ran vi.resetModules() spun
+  // fresh module copies, so a static import here could miss the instance the
+  // registry now holds — reach the CURRENT one through the registry itself.
+  const { setConflictHits } = await import("../src/conflicts/pause.js");
+  setConflictHits(null);
 });

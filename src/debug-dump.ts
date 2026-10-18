@@ -16,7 +16,7 @@
 // dumps never land in a repo (.pi is not gitignored by default in user
 // projects) and survive the project being moved/cleaned. The sanitized cwd
 // (path separators → "-", filename-safe chars only) keeps per-project dumps
-// separate, mirroring the featyard artifact-path convention.
+// separate.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -37,9 +37,9 @@ let dumpCounter = 0;
  *  by the first `appendDump` (dir creation + prune happen there, not at open). */
 const pendingDumps = new Map<string, { dir: string; stage: string; limit: number }>();
 
-/** Sanitize an absolute path for use as a single directory name (featyard
- *  artifact-path convention: strip traversal, separators → "-", keep only
- *  filename-safe chars, collapse/trim hyphens). */
+/** Sanitize an absolute path for use as a single directory name (strip
+ *  traversal, separators → "-", keep only filename-safe chars, collapse/trim
+ *  hyphens). */
 export function sanitizeForPath(value: string): string {
   return value
     .replace(/\.\./g, "") // path traversal

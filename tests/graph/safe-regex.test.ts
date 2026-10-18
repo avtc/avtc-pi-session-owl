@@ -63,8 +63,8 @@ describe("isSafeRegex", () => {
   });
 
   it("rejects overlapping alternation nested one group deep under a quantifier", () => {
-    // wrapping the evil alternation in one extra group hid it from the old
-    // top-level-only check
+    // wrapping the evil alternation in one extra group must still be caught
+    // (the scan recurses into nested groups)
     expect(isSafeRegex("((a|a))+")).toBe(false);
     expect(isSafeRegex("((a|ab))+")).toBe(false);
     expect(isSafeRegex("((?:a|a))+")).toBe(false);
@@ -74,7 +74,7 @@ describe("isSafeRegex", () => {
 
   it("rejects an imprecise alternation nested under a plain (non-capturing-free) quantified group", () => {
     // the inner (a|a)+ is itself quantified but sits inside a non-quantified
-    // outer group — the old scanner skipped past the outer group's contents
+    // outer group — the scan must not skip the outer group's contents
     expect(isSafeRegex("((a|a)+)")).toBe(false);
     expect(isSafeRegex("((a|ab)+)x")).toBe(false);
     expect(isSafeRegex("x((?:a|a)*)y")).toBe(false);
@@ -92,8 +92,8 @@ describe("isSafeRegex", () => {
   });
 
   it("rejects overlapping alternation where a branch starts with a wildcard/class", () => {
-    // firstLiteralChar returned null for . / [..] / \d / \w so these evaded the
-    // literal-overlap check, yet each is catastrophic backtracking.
+    // `.` / [..] / \d / \w operands have no literal first char — the class
+    // overlap check must catch them; each is catastrophic backtracking.
     expect(isSafeRegex("(a|.)+")).toBe(false); // . overlaps a
     expect(isSafeRegex("(a|\\w)+")).toBe(false); // \w overlaps a
     expect(isSafeRegex("(\\d|[0-9])+")).toBe(false); // \d overlaps [0-9]

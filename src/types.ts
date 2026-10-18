@@ -22,12 +22,12 @@ export const O_INITIAL_PROMPT = "oInitialPrompt" as const;
  * is uniform (a no-op in the source graph, which never contains it).
  */
 export const N_IRRELEVANT = "nIrrelevant" as const;
-/**
- * The rebuild parking node (source-graph special): `/owl:rescan
- * --reuse-observations` parks the collected observation records under it while
- * re-wrapping them into a fresh structure in batches. Immovable/merge-proof
- * (the rebuild owns it), but dissolvable — it auto-dissolves when the last
- * batch moves its records out.
+/** A legacy rebuild parking node from older stores: records collected for a
+ *  `/owl:rescan --reuse-observations` rebuild were parked under it until their
+ *  batch re-wrapped them (current rebuilds keep the records detached — no
+ *  parking node). Guarded immovable/merge-proof so a legacy node still present
+ *  after load drains undisturbed; dissolvable — it auto-dissolves when the
+ *  last batch moves its records out.
  */
 export const N_PENDING = "nPending" as const;
 
@@ -235,6 +235,14 @@ export class SessionOwlGraph {
   observations: Map<ObsId, Observation>;
   nextObsId: number;
   nextNodeId: number;
+  /** True while a `rescan --reuse-observations` rebuild is in progress: the
+   *  not-yet-re-wrapped records are deliberately DETACHED (they join the tree
+   *  batch by batch as fresh `new` roots — there is no parking node). While
+   *  set, the per-op structural assert relaxes `everyObservationAttached` (the
+   *  soft invariants still hold); the rebuild clears the flag and asserts full
+   *  attachment at completion. Derived (not stored): resetGraphForReuse arms
+   *  it, load re-derives it from the reuse marker + detached records. */
+  rebuildPending = false;
 
   constructor(args: {
     nodes: Map<NodeId, Node>;

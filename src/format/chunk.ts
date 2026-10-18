@@ -14,7 +14,7 @@ import { stripAnsi } from "./sanitize.js";
 
 /**
  * One rendered tag-block in the Observer's XML-tagged chunk format. A block is
- * the atomic citation unit (carries entry=entryId). Within an entry's group, a
+ * the atomic citation unit (carries the entryId attribute). Within an entry's group, a
  * tool-call block is always immediately followed by its result block so the
  * pair reads as one adjacency unit.
  */
@@ -39,9 +39,15 @@ export interface ChunkOptions {
   readonly toolBlockCapTokens: number | null;
   /** Include non-redacted thinking blocks (redacted always skipped). */
   readonly includeThinking: boolean;
-  /** Emit the `entry=id` attribute on each tag (the Observer cites source ids;
+  /** Emit the `entryId=id` attribute on each tag (the Observer cites source ids;
    *  recall consumers — Builder/Selector/agent — have no use for raw entry ids). */
   readonly includeEntryId: boolean;
+  /** Renumber the chunk's `entryId=` attributes as chunk-scoped sequential shorts
+   *  form in first-appearance order) for the model to cite — long stored ids
+   *  are costly to copy and easy to mangle. The chunk reports the mapping
+   *  via `RenderedChunk.idMap` (short → stored id); `allowedIds` and the
+   *  first/last range stay the stored ids. Default: ids as stored. */
+  readonly shortEntryIds?: boolean;
 }
 
 export interface RenderedChunk {
@@ -54,6 +60,9 @@ export interface RenderedChunk {
    *  the observer frontier over the contiguous successful prefix. Captured at
    *  flush time (blocks are in entry order) so callers need not re-scan the gap. */
   readonly lastEntryId: string;
+  /** Present when `shortEntryIds` rendered the chunk: this chunk's short →
+   *  stored id map (the validator accepts either form and persists stored). */
+  readonly idMap?: ReadonlyMap<string, string>;
 }
 
 // --- constants --------------------------------------------------------------
@@ -105,10 +114,10 @@ function cleanText(content: string | readonly (TextContent | { readonly type: st
 
 // --- block constructors (final inner text already cleaned/capped) -----------
 
-/** A simple-tag block: <TAG [entry=id]>inner</TAG>. Shared by the plain text/
+/** A simple-tag block: <TAG [entryId=id]>inner</TAG>. Shared by the plain text/
  *  thinking tags (they differ only in the tag name). */
 function tagBlock(tag: string, id: string, inner: string, includeEntryId: boolean): RenderBlock {
-  const attr = includeEntryId ? ` entry=${id}` : "";
+  const attr = includeEntryId ? ` entryId=${id}` : "";
   return { entryId: id, text: `<${tag}${attr}>${inner}</${tag}>` };
 }
 
@@ -120,12 +129,12 @@ const tBlock = (id: string, inner: string, includeEntryId: boolean): RenderBlock
   tagBlock("THINKING", id, inner, includeEntryId);
 
 function cBlock(id: string, toolName: string, inner: string, includeEntryId: boolean): RenderBlock {
-  const attr = includeEntryId ? ` entry=${id}` : "";
+  const attr = includeEntryId ? ` entryId=${id}` : "";
   return { entryId: id, text: `<TOOLCALL:${toolName}${attr}>${inner}</TOOLCALL>` };
 }
 
 function rBlock(id: string, inner: string, isError: boolean, includeEntryId: boolean): RenderBlock {
-  const entryAttr = includeEntryId ? ` entry=${id}` : "";
+  const entryAttr = includeEntryId ? ` entryId=${id}` : "";
   const attr = isError ? `${entryAttr} ${ATTR_ERROR}` : entryAttr;
   return { entryId: id, text: `<TOOLRESULT${attr}>${inner}</TOOLRESULT>` };
 }
@@ -305,7 +314,7 @@ export function renderBlocks(entries: readonly SessionEntry[], options: ChunkOpt
 
 /**
  * Split entries into entry-bounded, token-gated chunks. A whole entry (its
- * group) is never split across chunks. Each chunk reports `allowedIds`: the entry=
+ * group) is never split across chunks. Each chunk reports `allowedIds`: the entryId=
  * ids cited in its blocks (the allowed source-id set the Observer's
  * `record_observations` must draw from).
  */
@@ -317,11 +326,33 @@ export function buildChunks(entries: readonly SessionEntry[], options: ChunkOpti
 
   const flush = (): void => {
     if (current.length === 0) return;
-    const text = current.map((block) => block.text).join(BLOCK_SEP);
+    let text = current.map((block) => block.text).join(BLOCK_SEP);
     const allowedIds = new Set(current.map((block) => block.entryId));
     const firstEntryId = current[FIRST_INDEX]?.entryId ?? "";
     const lastEntryId = current[current.length - 1]?.entryId ?? "";
-    chunks.push({ text, allowedIds, firstEntryId, lastEntryId });
+    // short-id mode: renumber this chunk's entryId= attributes as sequential
+    // shorts in first-appearance order and report the short→stored map — the
+    // model cites shorts, every stored id stays real (the attr precedes the
+    // inner text in every block shape, so the first occurrence per block is
+    // always the attribute itself)
+    let idMap: ReadonlyMap<string, string> | undefined;
+    if (options.shortEntryIds === true) {
+      const shortOf = new Map<string, string>();
+      const map = new Map<string, string>();
+      text = current
+        .map((block) => {
+          let short = shortOf.get(block.entryId);
+          if (short === undefined) {
+            short = `e${shortOf.size + 1}`;
+            shortOf.set(block.entryId, short);
+            map.set(short, block.entryId);
+          }
+          return block.text.replace(` entryId=${block.entryId}>`, ` entryId=${short}>`);
+        })
+        .join(BLOCK_SEP);
+      idMap = map;
+    }
+    chunks.push({ text, allowedIds, firstEntryId, lastEntryId, idMap });
     current = [];
     currentTokens = 0;
   };
@@ -343,7 +374,7 @@ export function buildChunks(entries: readonly SessionEntry[], options: ChunkOpti
  * (text-only — thinking/tool calls dropped), one block per text part (matching
  * the chunk pipeline), with the same ANSI sanitization. Returns "" when the
  * message carries no text. Used by the Selector tail pairing (text-only
- * preceding-agent prelude) — a recall consumer, so it omits `entry=id`.
+ * preceding-agent prelude) — a recall consumer, so it omits `entryId=id`.
  */
 export function renderAssistantTextBlock(entry: SessionEntry, includeEntryId: boolean): string {
   if (entry.type !== "message") return "";
@@ -365,7 +396,7 @@ export function hasAssistantText(entry: SessionEntry): boolean {
 // --- AgentMessage rendering (stage dumps) ------------------------------------
 
 /** AgentMessages carry no entry ids — the produced-message dump render is a
- *  recall-style consumer (no entry= attributes). */
+ *  recall-style consumer (no entryId= attributes). */
 const DUMP_ID = "";
 /** includeEntryId=false for every dump block (same reason as DUMP_ID). */
 const DUMP_OMIT_ENTRY_ID = false;

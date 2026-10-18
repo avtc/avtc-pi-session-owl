@@ -1,0 +1,141 @@
+{
+  "name": "plugin-and-compaction",
+  "description": "Plugin-origin split (user -> custom_message, system -> skipped, isMeta NOT a gate), note-door split, compaction row, tool-message dispatch (string + array tool_result content, is_error).",
+  "rows": [
+    {
+      "uuid": "c-0",
+      "parentUuid": null,
+      "door": "prompt",
+      "origin": {
+        "kind": "composer"
+      },
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "start"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T12:00:00.000Z"
+    },
+    {
+      "uuid": "c-1-plugin-user",
+      "parentUuid": "c-0",
+      "door": "note",
+      "origin": {
+        "kind": "plugin",
+        "plugin": "todo-bridge"
+      },
+      "message": {
+        "type": "user",
+        "isMeta": true,
+        "content": [
+          {
+            "type": "text",
+            "text": "Todos updated: 2 of 5 done"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T12:00:01.000Z"
+    },
+    {
+      "uuid": "c-2-plugin-system",
+      "parentUuid": "c-1-plugin-user",
+      "door": "note",
+      "origin": {
+        "kind": "plugin",
+        "plugin": "notify-mod"
+      },
+      "message": {
+        "type": "system",
+        "isMeta": true,
+        "content": [
+          {
+            "type": "text",
+            "text": "notice the model never reads"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T12:00:02.000Z"
+    },
+    {
+      "uuid": "c-3-note-engine",
+      "parentUuid": "c-2-plugin-system",
+      "door": "note",
+      "origin": {
+        "kind": "engine"
+      },
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "SubagentHandback instructions here"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T12:00:03.000Z"
+    },
+    {
+      "uuid": "c-4-compaction",
+      "parentUuid": "c-3-note-engine",
+      "door": "compaction",
+      "origin": {
+        "kind": "engine"
+      },
+      "message": {
+        "type": "user",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Native summary: earlier work condensed."
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T12:00:04.000Z"
+    },
+    {
+      "uuid": "c-5-toolmessage-result",
+      "parentUuid": "c-4-compaction",
+      "door": "tool-message",
+      "origin": {
+        "kind": "tool",
+        "tool": "TodoWrite"
+      },
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call-9",
+            "is_error": true,
+            "content": "failed to write"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T12:00:05.000Z"
+    },
+    {
+      "uuid": "c-6-toolmessage-text",
+      "parentUuid": "c-5-toolmessage-result",
+      "door": "tool-message",
+      "origin": {
+        "kind": "tool",
+        "tool": "Report"
+      },
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "tool-emitted model-visible text"
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T12:00:06.000Z"
+    }
+  ]
+}

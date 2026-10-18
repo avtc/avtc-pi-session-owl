@@ -39,9 +39,9 @@ describe("selectorSystemPrompt", () => {
   });
 
   // String-equality snapshot guard: the no-advice baseline (null target,
-  // balanced strategy) is approved protected text. Any change must be a
-  // deliberate re-approval, not a drift.
-  it("matches the approved baseline exactly (null target + balanced, drift guard)", () => {
+  // balanced strategy) is protected text. Any change must be a deliberate
+  // owner-approved edit, not a drift.
+  it("matches the protected baseline exactly (null target + balanced, drift guard)", () => {
     expect(selectorSystemPrompt(shape({}))).toBe(
       [
         "You build the active-set — the task-focused memory the agent continues its work from",

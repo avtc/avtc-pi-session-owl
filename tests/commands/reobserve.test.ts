@@ -5,6 +5,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type ReobserveDeps, runOwlReobserve } from "../../src/commands/reobserve.js";
 import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _setGoalExtractInFlightForTest } from "../../src/goal-extract/run.js";
 import { _resetRunLock, acquireOrSkip } from "../../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import { makeObservation } from "../../src/types.js";
@@ -146,6 +147,27 @@ describe("/owl:reobserve-0-obs-chunks", () => {
     const { ctx, messages } = makeCtx([userEntry("u1"), assistantEntry("a1")], null);
     await runOwlReobserve("", ctx, deps);
     expect(messages).toEqual([{ message: "session-owl is disabled (enable it first).", type: "warning" }]);
+  });
+
+  it("settles an in-flight goal extraction BEFORE acquiring the lock (goal-first sequencing)", async () => {
+    getGraphStore().observerFrontier = "a1"; // a closed hole exists → ranges to rebuild
+    const { deps, launched } = makeDeps();
+    const { ctx } = makeCtx([userEntry("u1"), assistantEntry("a1")], null);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    _setGoalExtractInFlightForTest(pending);
+    try {
+      const run = runOwlReobserve("", ctx, deps);
+      // suspended BEFORE acquireOrSkip — no stage launches while the extraction is in flight
+      expect(launched).toHaveLength(0);
+      release();
+      await run;
+      expect(launched).toHaveLength(1);
+    } finally {
+      _setGoalExtractInFlightForTest(null);
+    }
   });
 
   it("notifies and runs nothing when every range is covered", async () => {

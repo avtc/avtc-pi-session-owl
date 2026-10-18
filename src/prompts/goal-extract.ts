@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The Goal-extract prompt — approved protected text. Brand-new house voice;
-// positive intent only. Any change requires re-approval.
+// The Goal-extract prompt — protected text: any change requires owner
+// approval. House voice; positive intent only.
 
 /** The system prompt for the one-shot goal-extraction call: distill the verbatim
  *  initial user message into a single goal line for `nGoal.summary`. */

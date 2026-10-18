@@ -4,6 +4,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearDetailsCache, computeDetailsAndCache, renderDetails } from "../../src/format/details.js";
+import { activateConversation, resetConversationStates } from "../../src/store/graph-store.js";
 import { estimateContentTokens } from "../../src/types.js";
 
 // --- fake session entries (SessionEntry-shaped) ----------------------------
@@ -71,12 +72,12 @@ function resolverFor(entries: SessionEntry[]): (ids: readonly string[]) => reado
 describe("renderDetails", () => {
   beforeEach(() => clearDetailsCache());
 
-  it("renders the verbatim source from sourceEntryIds, untruncated, in the chunk tag format WITHOUT entry=id", () => {
+  it("renders the verbatim source from sourceEntryIds, untruncated, in the chunk tag format WITHOUT entryId=id", () => {
     const { call, result } = toolPair("c1", "bash", { command: "npm test" }, "r1", "all passing", false);
     const resolve = resolverFor([call, result]);
     const out = renderDetails("o1", ["c1", "r1"], resolve);
     expect(out).not.toBeNull();
-    // toolcall+result paired (interleaved), full verbatim, NO entry= attribute (recall consumer)
+    // toolcall+result paired (interleaved), full verbatim, NO entryId= attribute (recall consumer)
     expect(out?.text).toBe('<TOOLCALL:bash>{"command":"npm test"}</TOOLCALL>\n<TOOLRESULT>all passing</TOOLRESULT>');
   });
 
@@ -174,5 +175,33 @@ describe("computeDetailsAndCache (capture-time pre-warm)", () => {
     // same id must re-resolve (and re-return null), proving nothing was cached.
     const cachedRender = renderDetails("oMiss", ["9", "x"], resolve);
     expect(cachedRender).toBeNull();
+  });
+
+  it("cache buckets per conversation: one key's render never serves another (colliding obs ids)", () => {
+    activateConversation("dtA");
+    const resolveA = resolverFor([userEntry("u1", "TEXT-FROM-A")]);
+    const first = renderDetails("oCollide", ["u1"], resolveA);
+    expect(first?.text).toContain("TEXT-FROM-A");
+
+    activateConversation("dtB");
+    let bCalls = 0;
+    const resolveB = (ids: readonly string[]) => {
+      bCalls += 1;
+      return ids.map(() => userEntry("u1", "TEXT-FROM-B"));
+    };
+    const second = renderDetails("oCollide", ["u1"], resolveB);
+    // a single shared map would return A's cached render without consulting B
+    expect(bCalls).toBeGreaterThan(0);
+    expect(second?.text).toContain("TEXT-FROM-B");
+
+    // flipping back: A's own bucket still serves its cached render (no re-resolve)
+    activateConversation("dtA");
+    const aCallsBefore = 0; // resolveA not reused — count via a fresh spy-free probe
+    const back = renderDetails("oCollide", ["u1"], (ids) => {
+      throw new Error(`A's cache must not re-resolve (ids=${ids.join(",")})`);
+    });
+    expect(back?.text).toContain("TEXT-FROM-A");
+    expect(aCallsBefore).toBe(0);
+    resetConversationStates();
   });
 });

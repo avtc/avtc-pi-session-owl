@@ -53,8 +53,8 @@ export interface RenderSummaryArgs {
 
 const MEMORY_HEADING = "# Memory";
 const PREAMBLE = "Your session memory — the top level of a tree; each id opens deeper detail via owl_recall.";
-/** The recall-first guidance section (approved protected text — changes require
- *  re-approval). Sits between the legend and the initial prompt. */
+/** The recall-first guidance section (protected text — changes require owner
+ *  approval). Sits between the legend and the initial prompt. */
 const MEMORY_USE_HEADING = "## Memory use";
 const MEMORY_USE =
   'The root view is a navigation index into retained session memory: the lines name what exists; the detail, evidence, rationale, and results live in the tree behind them, across the whole session (see the totals). Recall before relying on session-derived understanding: search memory, or expand a visible related id — a complete-looking label still summarizes only the surface, and relevant context often sits deeper than the root. Use {"ids":["n23"]} to expand, {"query":"…"} to search, and add "fullDetails":true when exact messages, tool output, or rationale matter.';

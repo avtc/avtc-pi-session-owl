@@ -25,7 +25,7 @@ import {
   everyObservationAttached,
   GraphInvariantError,
   noCycles,
-  observationParentingError,
+  observationParentingErrorPendingAware,
 } from "./invariants.js";
 
 /** Whether special-node protection (nGoal/oInitialPrompt) is enforced. */
@@ -110,8 +110,14 @@ function requireNode(graph: SessionOwlGraph, id: NodeId, what: string): Node {
  *  never frozen into `details`). Throws `GraphInvariantError` naming the first
  *  violation. */
 export function assertGraphStructure(graph: SessionOwlGraph, what: string): void {
-  if (!everyObservationAttached(graph)) throw new GraphInvariantError(`${what}: an observation is detached`);
-  const parenting = observationParentingError(graph);
+  // During a reuse rebuild the pending records are deliberately detached
+  // (no parking node — batches attach progressively); the soft
+  // invariants still hold for every LISTED record, full attachment re-arms at
+  // the rebuild's completion.
+  const pending = graph.rebuildPending === true;
+  if (!pending && !everyObservationAttached(graph))
+    throw new GraphInvariantError(`${what}: an observation is detached`);
+  const parenting = observationParentingErrorPendingAware(graph, pending);
   if (parenting !== null) throw new GraphInvariantError(`${what}: ${parenting}`);
   if (!childLinksConsistent(graph)) throw new GraphInvariantError(`${what}: a containment child-link is inconsistent`);
   if (!noCycles(graph)) throw new GraphInvariantError(`${what}: the containment tree has a cycle`);

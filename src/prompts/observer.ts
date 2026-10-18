@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The Observer's system prompt — approved protected text. Brand-new house
-// voice; positive intent only. Any change requires re-approval.
+// The Observer's system prompt — protected text: any change requires owner
+// approval. House voice; positive intent only.
 
 export const OBSERVER_SYSTEM = `You read one chunk of a coding session and record observations — each one a
 piece of information worth keeping, captured concisely as its essential meaning.
@@ -15,10 +15,10 @@ its decision, result, status, or failed approach — a later agent searches thes
 words and reads the line to judge what the source holds.
 
 The chunk is a sequence of tagged blocks; each carries its source entry id as
-entry=id:
-- <USER entry=id>  <ASSISTANT entry=id>  <THINKING entry=id>
-- <TOOLCALL:name entry=id> — immediately followed by its own result
-  <TOOLRESULT entry=id> (or <TOOLRESULT entry=id error> when the call failed)
+entryId=id:
+- <USER entryId=id>  <ASSISTANT entryId=id>  <THINKING entryId=id>
+- <TOOLCALL:name entryId=id> — immediately followed by its own result
+  <TOOLRESULT entryId=id> (or <TOOLRESULT entryId=id error> when the call failed)
 
 Each observation carries an importance — how much it matters if lost, by nature:
 - crit — a hard, persistent constraint or correction; losing it would cause

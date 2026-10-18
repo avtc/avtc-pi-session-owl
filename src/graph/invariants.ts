@@ -52,7 +52,18 @@ export function exactlyOneNodePerObservation(graph: SessionOwlGraph): boolean {
  * logs) what broke — a phantom listing, a double listing, a parent/list drift,
  * or an unlisted observation — instead of one conflated message.
  */
+/** The strict-mode flag: every observation must be listed (pending disabled). */
+const REQUIRE_LISTED = false;
+
 export function observationParentingError(graph: SessionOwlGraph): string | null {
+  return observationParentingErrorPendingAware(graph, REQUIRE_LISTED);
+}
+
+/** The rebuild-pending variant: UNLISTED observations are the reuse rebuild's
+ *  detached pool (outside the tree until their batch attaches them) — not a
+ *  violation. Every LISTED observation still needs exactly-one-listing and
+ *  parent/list agreement. */
+export function observationParentingErrorPendingAware(graph: SessionOwlGraph, allowUnlisted: boolean): string | null {
   const ownerOf = new Map<string, Node>();
   for (const node of graph.nodes.values()) {
     for (const obsId of node.observationIds) {
@@ -63,7 +74,12 @@ export function observationParentingError(graph: SessionOwlGraph): string | null
       ownerOf.set(obsId, node);
     }
   }
-  if (ownerOf.size !== graph.observations.size) return "an observation is not listed under any node";
+  if (ownerOf.size !== graph.observations.size) {
+    // pending mode: unlisted records are the detached pool — their stale
+    // parentNode (the reset voided the old structure; ids may even be
+    // recycled by fresh wrappers) is garbage by design and not inspected
+    if (!allowUnlisted) return "an observation is not listed under any node";
+  }
   return null;
 }
 

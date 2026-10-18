@@ -40,6 +40,7 @@ afterAll(() => _setRegisterSettingsCommand(null));
 const EXPECTED_IDS = [
   // General
   "enabled",
+  "subagentMode",
   "ignoreConflicts",
   "defaultModel",
   "defaultThinkingLevel",
@@ -53,7 +54,6 @@ const EXPECTED_IDS = [
   "findTimeoutMs",
   "llmCallTimeoutMs",
   "toolResultTokenBudget",
-  "debugLog",
   "debugDumpLimit",
   // Observer
   "observerModel",
@@ -111,6 +111,26 @@ describe("SESSION_OWL_SCHEMA", () => {
         expect(ids.has(id), `tab '${tab.label}' references unknown id '${id}'`).toBe(true);
       }
     }
+  });
+
+  it("places Subagent mode right after Enabled, with the pinned wording", () => {
+    const general = SESSION_OWL_SCHEMA.tabs.find((t) => t.label === "General");
+    expect(general?.settingIds.slice(0, 2)).toEqual(["enabled", "subagentMode"]);
+    const knob = SESSION_OWL_SCHEMA.settings.find((s) => s.id === "subagentMode");
+    expect(knob?.label).toBe("Subagent mode");
+    expect(knob?.description).toBe(
+      "How session-owl treats subagents. Inherited = the same treatment as the main conversation; " +
+        "On compaction = their memory is captured only when the subagent itself compacts " +
+        "(small subagents that never compact are skipped entirely); Disabled = session-owl is off " +
+        "for subagents. When session-owl is disabled, it is off for subagents as well.",
+    );
+    expect(knob?.type).toBe("string");
+    expect(knob?.defaultValue).toBe("on-compaction");
+    expect(knob?.presets).toEqual([
+      ["Inherited", "inherited"],
+      ["Disabled", "disabled"],
+      ["On compaction", "on-compaction"],
+    ]);
   });
 
   it("every setting id is covered by exactly one tab", () => {
@@ -171,6 +191,7 @@ describe("SESSION_OWL_SCHEMA", () => {
   it("declares the correct `type` for every setting", () => {
     const expectedType: Record<string, string> = {
       enabled: "boolean",
+      subagentMode: "string",
       ignoreConflicts: "boolean",
       defaultModel: "model",
       defaultThinkingLevel: "thinking-level",
@@ -184,7 +205,6 @@ describe("SESSION_OWL_SCHEMA", () => {
       findTimeoutMs: "duration",
       llmCallTimeoutMs: "duration",
       toolResultTokenBudget: "number",
-      debugLog: "boolean",
       debugDumpLimit: "number",
       observerModel: "model",
       observerThresholdTokens: "number",
@@ -249,6 +269,7 @@ describe("DEFAULT_CONFIG parity with schema defaults", () => {
 
   it("has the documented default profile", () => {
     expect(DEFAULT_CONFIG.enabled).toBe(true);
+    expect(DEFAULT_CONFIG.subagentMode).toBe("on-compaction");
     expect(DEFAULT_CONFIG.observerMode).toBe("on-threshold");
     expect(DEFAULT_CONFIG.builderMode).toBe("each-N-observations");
     expect(DEFAULT_CONFIG.selectorMode).toBe("on-compaction");

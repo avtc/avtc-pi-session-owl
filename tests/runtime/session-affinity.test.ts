@@ -1,15 +1,23 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   _resetSessionAffinity,
   clearSessionOwlSessionBase,
   getStageAffinityId,
   setSessionOwlSessionBase,
 } from "../../src/runtime/session-affinity.js";
+import { activateConversation, resetConversationStates } from "../../src/store/graph-store.js";
 
 describe("session-affinity singleton", () => {
+  // isolate:false shares module state across files in a worker — the fresh
+  // premise is OWNED here, not assumed (a base leaked by another suite's
+  // stage run would otherwise fail the first assertion)
+  beforeEach(() => {
+    _resetSessionAffinity();
+  });
+
   afterEach(() => {
     _resetSessionAffinity();
   });
@@ -41,5 +49,24 @@ describe("session-affinity singleton", () => {
     expect(getStageAffinityId("build")).toBe("first:build");
     setSessionOwlSessionBase("second");
     expect(getStageAffinityId("build")).toBe("second:build");
+  });
+
+  it("bases partition per conversation: flips never cross-contaminate", () => {
+    activateConversation("afA");
+    setSessionOwlSessionBase("base-a");
+    activateConversation("afB");
+    setSessionOwlSessionBase("base-b");
+    expect(getStageAffinityId("observe")).toBe("base-b:observe");
+
+    activateConversation("afA");
+    // a single shared slot would lose B's base under A's key
+    expect(getStageAffinityId("observe")).toBe("base-a:observe");
+
+    // a clear drops the ACTIVE conversation's entry; the other key keeps its own
+    clearSessionOwlSessionBase();
+    expect(getStageAffinityId("observe")).toBeNull();
+    activateConversation("afB");
+    expect(getStageAffinityId("observe")).toBe("base-b:observe");
+    resetConversationStates();
   });
 });

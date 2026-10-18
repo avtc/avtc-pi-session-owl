@@ -212,11 +212,11 @@ afterEach(async () => {
   await new Promise((r) => setTimeout(r, 0));
 });
 
-/** Parse the `entry=<id>` citation markers out of a chunk's text (the Observer's
+/** Parse the `entryId=<id>` citation markers out of a chunk's text (the Observer's
  *  record_observations tool validates sourceEntryIds against exactly these). */
 function parseChunkIds(text: string): string[] {
   const ids: string[] = [];
-  const re = /entry=(\S+?)>/g;
+  const re = /entryId=(\S+?)>/g;
   let m: RegExpExecArray | null = re.exec(text);
   while (m !== null) {
     ids.push(m[1] as string);
@@ -375,7 +375,10 @@ describe("sessionOwlExtension end-to-end (default profile)", () => {
     sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
-    await pi.emit("turn_end", {}, ctx); // captures oInitialPrompt + fires Observer
+    await pi.emit("turn_end", {}, ctx); // captures oInitialPrompt; the goal extraction holds the
+    // run-lock synchronously → this turn's trigger SKIPs (goal-first sequencing)
+    await new Promise((r) => setTimeout(r, 20)); // the one-shot settles (the no-op mock)
+    await pi.emit("turn_end", {}, ctx); // lock free again → the Observer runs
 
     // the background Observer run is fire-and-forget; await the run-lock release.
     await new Promise((r) => setTimeout(r, 20));
@@ -496,6 +499,8 @@ describe("sessionOwlExtension end-to-end (default profile)", () => {
     sessionOwlExtension(pi);
     const ctx = makeFakeCtx(state);
     await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
+    await pi.emit("turn_end", {}, ctx); // capture (the extraction holds the lock → trigger SKIPs)
+    await new Promise((r) => setTimeout(r, 20)); // the one-shot settles
     await pi.emit("turn_end", {}, ctx); // observe → new wrapper nodes at root
     await new Promise((r) => setTimeout(r, 20));
     // sanity: there is at least one `new` node from the catch-up before compaction.

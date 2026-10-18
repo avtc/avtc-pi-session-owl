@@ -2,8 +2,8 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // Map session-owl's per-phase usage (PhaseUsage) into pi's `Usage` shape so the
-// session_before_compact hook can return `compaction.usage` (UD32 — makes the
-// bench's metric measurable for the session-owl arms). pi's `addUsageToTotals`
+// session_before_compact hook can return `compaction.usage` (the bench's
+// metric, measurable per session-owl arm). pi's `addUsageToTotals`
 // has NO nullish guards, so every field MUST be a finite number (0, never
 // undefined/omitted) and `cost` MUST be an object with `total: number`.
 //

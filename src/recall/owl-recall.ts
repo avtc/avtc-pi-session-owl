@@ -268,7 +268,7 @@ function serializedObservationToView(so: SerializedObservation): RecallObservati
 }
 
 /** Resolve an observation's verbatim-source details text (full render, no
- *  entry=id) from its sourceEntryIds via the session resolver. Returns null
+ *  entryId=id) from its sourceEntryIds via the session resolver. Returns null
  *  when source is unavailable (source_unavailable — the one-line summary
  *  still renders; only the verbatim body is gone). Lazily cached per obs by
  *  renderDetails. */
@@ -710,6 +710,12 @@ interface OwlRecallParams {
   afterId?: string;
 }
 
+/** The disabled reject reason — the phrasing commands/user.ts speaks, brought
+ *  to the tool as an error result (the model reads why recall refuses;
+ *  details.error renders it in full, the sibling read-tools' convention).
+ *  Conflict-paused sessions are NOT rejected — they serve. */
+const OWL_RECALL_DISABLED_REASON = "session-owl is disabled (enable it first).";
+
 /** Build the owl_recall ToolDefinition. Reads the graph store + renderMode live
  *  (closures; needs no ExtensionContext). Read-only — never mutates. */
 export function makeOwlRecallTool(): ToolDefinition<typeof OWL_RECALL_PARAMS> {
@@ -719,6 +725,12 @@ export function makeOwlRecallTool(): ToolDefinition<typeof OWL_RECALL_PARAMS> {
     description: OWL_RECALL_DESCRIPTION,
     parameters: OWL_RECALL_PARAMS,
     async execute(_toolCallId, params) {
+      if (!getSessionOwlSettings().enabled) {
+        return {
+          content: [{ type: "text", text: OWL_RECALL_DISABLED_REASON }],
+          details: { error: true },
+        };
+      }
       const result = await executeRecall(params as OwlRecallParams);
       return {
         content: [{ type: "text", text: result.text }],

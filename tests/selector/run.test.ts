@@ -451,8 +451,8 @@ describe("runSelector", () => {
   });
 
   it("fast-path: reuses an over-threshold cached tree when it still covers the block (budget gate dropped)", async () => {
-    // The budget fast-path is gone: a cached tree that covers the compacted-away
-    // block is reused even if its root view exceeds selectorRootViewThreshold.
+    // A cached tree that covers the compacted-away block is reused even when
+    // its root view exceeds selectorRootViewThreshold (coverage decides, not budget).
     const branch = [
       { id: "e0", type: "message" },
       { id: "e1", type: "message" },
@@ -472,7 +472,7 @@ describe("runSelector", () => {
       } as unknown as ExtensionContext,
       pi: recordingPi().pi,
       // threshold deliberately LOW — the cached tree exceeds it, yet it covers
-      // the block, so it must be reused (the budget gate no longer rebuilds).
+      // the block, so it must be reused (coverage decides, not budget).
       settings: settings({ selectorRootViewThreshold: 1 }),
       signal: new AbortController().signal,
       widget: NO_OP_WIDGET,

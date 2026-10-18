@@ -1,0 +1,16 @@
+{
+  "name": "avtc-pi-session-owl",
+  "owner": {
+    "name": "avtc"
+  },
+  "plugins": [
+    {
+      "name": "session-owl",
+      "source": "./claude"
+    },
+    {
+      "name": "session-owl-subagent-support",
+      "source": "./claude-subagent-support"
+    }
+  ]
+}

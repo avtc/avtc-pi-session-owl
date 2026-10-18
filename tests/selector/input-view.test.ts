@@ -199,7 +199,7 @@ describe("buildWorkingCopy", () => {
     const source = new SessionOwlGraph({ nodes, observations, nextObsId: 1, nextNodeId: 10 });
     const { graph } = buildWorkingCopy(source);
     expect(graph.nodes.has("n9")).toBe(false); // obsolete dropped
-    // No phantom child link — nGoal no longer references the dropped n9.
+    // No phantom child link — nGoal does not reference the dropped n9.
     expect(graph.nodes.get(N_GOAL)?.childNodeIds).toEqual([]);
     // The working copy is structurally valid (no dangling child links).
     expect(() => validateGraph(graph)).not.toThrow();
@@ -664,7 +664,7 @@ describe("buildSelectorInputView", () => {
     expect(view.indexOf("the ask")).toBeLessThan(view.indexOf("n.. node"));
   });
 
-  it("includes the tree legend (RENDER_LEGEND) and the tail legend WITHOUT entry=", () => {
+  it("includes the tree legend (RENDER_LEGEND) and the tail legend WITHOUT entryId=", () => {
     const view = assemble(
       buildSelectorInputView({
         sourceGraph: sourceGraphForAssembly(),
@@ -678,10 +678,10 @@ describe("buildSelectorInputView", () => {
     );
     expect(view).toContain("n.. node"); // tree legend present
     expect(view).toContain("<USER>"); // tail legend present (self-documenting uppercase tags)
-    // The tail legend line has no entry= attribute (redundant for the Selector).
+    // The tail legend line has no entryId= attribute (redundant for the Selector).
     const legendLine = view.split("\n").find((line) => line.includes("<USER>"));
     expect(legendLine).toBeDefined();
-    expect(legendLine?.includes("entry=")).toBe(false);
+    expect(legendLine?.includes("entryId=")).toBe(false);
   });
 
   it("omits the todo section entirely when the bridge is absent (null)", () => {

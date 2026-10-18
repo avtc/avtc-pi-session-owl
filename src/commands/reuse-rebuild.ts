@@ -3,34 +3,34 @@
 
 // The `/owl:rescan --reuse-observations` rebuild: re-build the graph STRUCTURE
 // from the already-collected observation records, in their original capture
-// order, WITHOUT re-running the Observer LLM over the session. The collected
-// records are parked under a dedicated `nPending` root, then re-wrapped into
-// fresh `new` roots in batches; after each batch the Builder runs per the
-// configured cadence (plus the compaction-style root-view safeguard — the root
-// view stays bounded so the Builder never faces thousands of roots at once).
+// order, WITHOUT re-running the Observer LLM over the session. Records live
+// OUTSIDE the tree until their batch — no parking node; each batch attaches
+// them as fresh `new` roots, after which the Builder runs per the configured
+// cadence (plus the compaction-style root-view safeguard — the root view stays
+// bounded so the Builder never faces thousands of roots at once).
 //
 // Durability + resumability: every step persists at call time (marker, re-seed,
-// parking attaches, per-batch create+mv). A crash mid-rebuild reloads to the
-// parking state (structure ≤ the marker replays from the log); re-running the
-// command CONTINUES (the parking node is non-empty) instead of restarting.
-// When the last batch empties the parking node it auto-dissolves; the run
-// stops there — the tail (`new` nodes below the cadence) is picked up by the
-// normal triggers (threshold / compaction), per the command's contract.
+// per-batch create+mv). A crash mid-rebuild reloads to the detached-pool
+// state (structure ≤ the marker replays from the log); re-running the
+// command CONTINUES (the pending pool is non-empty) instead of restarting.
+// When the last batch empties the pool the run stops there — the tail (`new`
+// nodes below the cadence) is picked up by the normal triggers (threshold /
+// compaction), per the command's contract.
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionOwlConfig } from "../config/schema.js";
 import { getSessionOwlSettings } from "../config/schema.js";
+import { extractionSettled, runGoalExtract } from "../goal-extract/run.js";
 import {
   applyAttachObservation,
   applyCreateNode,
   applyMv,
-  applySetMeta,
   assertGraphStructure,
   type GraphDelta,
   MUTATE_SOURCE,
   parseSeq,
 } from "../graph/mutations.js";
-import { toStoreContext } from "../lifecycle.js";
+import { captureInitialPromptIfAbsent, toStoreContext } from "../lifecycle.js";
 import { log } from "../log.js";
 import { RESCAN_MODE_REUSE, RESCAN_TYPE } from "../store/codecs.js";
 import {
@@ -41,21 +41,12 @@ import {
   type StoreContext,
 } from "../store/graph-store.js";
 import { makeMaybeBuilder } from "../triggers.js";
-import {
-  type Importance,
-  N_GOAL,
-  N_PENDING,
-  O_INITIAL_PROMPT,
-  type Observation,
-  type SessionOwlGraph,
-} from "../types.js";
+import { N_GOAL, N_PENDING, O_INITIAL_PROMPT, type Observation } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
 const WRAP_STAGE = "observe" as const;
-const PARKING_SUMMARY = "pending re-wrap (rescan --reuse-observations)";
-const PARKING_IMPORTANCE: Importance = "low";
 const NO_RECORDS = 0;
 const FIRST_BATCH = 0;
 
@@ -100,97 +91,123 @@ function persist(store: StoreContext, delta: GraphDelta): void {
   appendGraphDelta(store, delta.type === "record_observation" ? { ...delta, obs: { ...delta.obs } } : delta);
 }
 
-/** Fresh-start preamble: void the old structure (reuse marker), re-seed nGoal +
- *  oInitialPrompt (+ the distilled goal summary), and park every collected
- *  record (except oInitialPrompt) under `nPending` in capture order. Returns
- *  the parked records, or an empty list when there is nothing to rebuild. */
-function startFresh(_input: ReuseRebuildInput, store: StoreContext): Observation[] {
+/** Fresh-start preamble: void the old structure (reuse marker), then re-seed
+ *  the graph from its ground-truth record: a new nGoal wraps the FINAL
+ *  initial prompt (fresh or carried) with an EMPTY summary, and the goal
+ *  extraction re-fires on it — the same flow a fresh capture uses (one-shot
+ *  distillation, don't-clobber, Builder backstop); a carried distillation
+ *  never rides the rebuild. A carried oInitialPrompt whose source is NOT the
+ *  branch's head user row is stale (captured from a scrambled view or a
+ *  rolled-back load): it is dropped and the capture re-runs from the true
+ *  head BEFORE the re-seed, so the new nGoal always wraps the final record.
+ *  The collected records stay DETACHED and attach progressively in batches
+ *  (no parking node; the Builder organizes). Returns the
+ *  pending records, or an empty list when there is nothing to rebuild. */
+function startFresh(input: ReuseRebuildInput, store: StoreContext): Observation[] {
   const before = getGraphStore().graph;
-  const goalSummary = before.nodes.get(N_GOAL)?.summary ?? "";
-  const promptObs = before.observations.get(O_INITIAL_PROMPT) ?? null;
+  let promptObs = before.observations.get(O_INITIAL_PROMPT) ?? null;
+
+  // the provenance check: the initial prompt must cite the branch's head
+  // user entry (the same selection the capture itself uses)
+  const branch = input.ctx.sessionManager.getBranch(input.ctx.sessionManager.getLeafId() ?? undefined);
+  const firstUser = branch.find(
+    (entry): entry is SessionMessageEntry => entry.type === "message" && entry.message.role === "user",
+  );
+  const headId = firstUser?.id ?? null;
+  const carriedSource = promptObs?.sourceEntryIds[0] ?? null;
+  const stale = promptObs !== null && headId !== null && carriedSource !== headId;
+  if (stale) {
+    log.info(
+      `reuse-rebuild: stale initial prompt (source ${carriedSource ?? "none"} ≠ head ${headId}) — re-capturing from the head`,
+    );
+    promptObs = null;
+  }
 
   resetGraphForReuse(store);
 
   const graph = getGraphStore().graph;
-  // the re-seed ops run while the records are still detached (nodes wiped,
-  // records kept) — the structural asserts re-arm after the parking batch
-  // lands every record under nGoal/nPending (asserted at the end of startFresh)
-  persist(
-    store,
-    applyCreateNode(graph, {
-      id: N_GOAL,
-      summary: goalSummary,
-      importance: "crit",
-      parentNode: null,
-      state: "active",
-      skipStructural: true,
-    }),
-  );
-  if (promptObs !== null) {
-    persist(store, applyAttachObservation(graph, { obsId: O_INITIAL_PROMPT, parentNode: N_GOAL }));
-  }
-  if (goalSummary !== "") {
-    persist(
-      store,
-      applySetMeta(
-        graph,
-        { nodeId: N_GOAL, importance: null, archived: null, obsolete: null, summary: goalSummary },
-        MUTATE_SOURCE,
-        { skipStructural: true },
-      ),
-    );
+  if (stale) {
+    // the reset keeps collected records — remove the stale one in-memory so
+    // the capture gate re-arms; the fresh capture's delta supersedes the
+    // stale one in every later replay (append order)
+    graph.observations.delete(O_INITIAL_PROMPT);
   }
 
-  // park every collected record except oInitialPrompt, in capture order
-  const pending = [...graph.observations.values()].filter((o) => o.id !== O_INITIAL_PROMPT).sort(captureOrder);
-  if (pending.length === NO_RECORDS) return pending;
-  persist(
-    store,
-    applyCreateNode(graph, {
-      id: N_PENDING,
-      summary: PARKING_SUMMARY,
-      importance: PARKING_IMPORTANCE,
-      parentNode: null,
-      state: "active",
-      skipStructural: true,
-    }),
-  );
-  const parkOps: GraphDelta[] = [];
-  for (const obs of pending) {
-    parkOps.push(applyAttachObservation(graph, { obsId: obs.id, parentNode: N_PENDING }));
+  // a stale (or lost) initial prompt re-captures from the true head BEFORE
+  // the re-seed — capture ONLY (the extraction fires once, below, on the
+  // final record — the same flow a fresh capture uses)
+  if ((stale || promptObs === null) && headId !== null) {
+    captureInitialPromptIfAbsent(input.ctx, input.pi);
   }
-  appendGraphDeltaBatch(
-    store,
-    parkOps.map((d) => (d.type === "record_observation" ? { ...d, obs: { ...d.obs } } : d)),
-  );
-  // every record is now listed (nGoal ∘ nPending) — the invariant re-arms
-  assertGraphStructure(graph, "reuse_rebuild_park");
+
+  // the re-seed: the new nGoal wraps the FINAL initial-prompt record —
+  // fresh or carried — with an EMPTY summary (the extraction below is the
+  // seed's producer, exactly as at first capture). The re-seed ops run while
+  // the records are still detached (nodes wiped, records kept) — the
+  // structural asserts re-arm after the batches land every record
+  const finalPrompt = graph.observations.get(O_INITIAL_PROMPT) ?? null;
+  if (!graph.nodes.has(N_GOAL)) {
+    persist(
+      store,
+      applyCreateNode(graph, {
+        id: N_GOAL,
+        summary: "",
+        importance: "crit",
+        parentNode: null,
+        state: "active",
+        skipStructural: true,
+      }),
+    );
+  }
+  if (finalPrompt !== null && !graph.nodes.get(N_GOAL)?.observationIds.includes(O_INITIAL_PROMPT)) {
+    persist(store, applyAttachObservation(graph, { obsId: O_INITIAL_PROMPT, parentNode: N_GOAL }));
+  }
+
+  // the goal extraction fires ONCE on the final record — the same flow the
+  // capture uses (fire-and-forget one-shot; don't-clobber protects anything
+  // that lands first; a failure leaves the slot for the Builder backstop)
+  if (finalPrompt !== null) {
+    void runGoalExtract({
+      ctx: input.ctx,
+      settings: getSessionOwlSettings(),
+      store: toStoreContext(input.pi, input.ctx),
+      widget: input.widget,
+      verbatimText: finalPrompt.summary,
+    });
+  }
+
+  // The pending pool: every collected record except oInitialPrompt stays
+  // DETACHED (they are outside the tree — the reset already voided their old
+  // parents; there is no parking node). Batches attach them progressively;
+  // graph.rebuildPending (armed by the reset) keeps the relaxed assert live.
+  const pending = [...graph.observations.values()].filter((o) => o.id !== O_INITIAL_PROMPT).sort(captureOrder);
   return pending;
 }
 
-/** Resume path: the pending records are those still parked under `nPending`
- *  (in listing order), plus any collected-but-unparked strays (a crash between
- *  the marker and the parking batch — re-park them now). */
-function resumeParked(store: StoreContext): Observation[] | null {
+/** Resume path: the pending records are the DETACHED ones (the rebuild pool —
+ *  outside the tree until their batch), plus any records still parked under a
+ *  legacy `nPending` node from an older store (its records drain as ordinary
+ *  pending; the emptied node dissolves automatically on the last mv). Returns
+ *  null when nothing is pending (a completed rebuild re-runs as nothing-to-do). */
+function resumePending(): Observation[] | null {
   const graph = getGraphStore().graph;
-  const parking = graph.nodes.get(N_PENDING);
-  if (parking === undefined) return null;
-  const parked = parking.observationIds
-    .map((id) => graph.observations.get(id))
-    .filter((o): o is Observation => o !== undefined);
-  // strays: collected records listed under NO node (post-reload reconcile may
-  // have re-wrapped them as fresh roots — those count as already re-wrapped,
-  // not strays; only truly unlisted records re-park here)
   const listed = new Set<string>();
-  for (const node of graph.nodes.values()) for (const id of node.observationIds) listed.add(id);
-  const strays = [...graph.observations.values()].filter((o) => o.id !== O_INITIAL_PROMPT && !listed.has(o.id));
-  if (strays.length > NO_RECORDS) {
-    for (const obs of strays) {
-      persist(store, applyAttachObservation(graph, { obsId: obs.id, parentNode: N_PENDING }));
-    }
-    return [...parked, ...strays];
+  for (const node of graph.nodes.values()) {
+    for (const id of node.observationIds) listed.add(id);
+    if (node.id !== N_PENDING) continue;
   }
-  return parked;
+  const detached = [...graph.observations.values()]
+    .filter((o) => o.id !== O_INITIAL_PROMPT && !listed.has(o.id))
+    .sort(captureOrder);
+  const legacy = graph.nodes.get(N_PENDING);
+  const legacyPending =
+    legacy === undefined
+      ? []
+      : legacy.observationIds.map((id) => graph.observations.get(id)).filter((o): o is Observation => o !== undefined);
+  const pending = [...detached, ...legacyPending];
+  if (pending.length === NO_RECORDS && legacy === undefined) return null;
+  graph.rebuildPending = true; // the relaxed assert stays live until completion
+  return pending;
 }
 
 // --- the run ---------------------------------------------------------------
@@ -204,16 +221,26 @@ function resumeParked(store: StoreContext): Observation[] | null {
 export async function runReuseRebuild(input: ReuseRebuildInput): Promise<void> {
   if (input.signal.aborted) return;
   const store = toStoreContext(input.pi, input.ctx);
-  const graph: SessionOwlGraph = getGraphStore().graph;
 
-  // resume when a previous rebuild parked records and never finished; otherwise
-  // a fresh start (void structure, re-seed, park)
-  const resumable = latestMarkerIsReuse(input.ctx) && graph.nodes.get(N_PENDING) !== undefined;
-  const pending = resumable ? resumeParked(store) : startFresh(input, store);
+  // resume when a previous rebuild actually left records parked (the detached
+  // pool, or a legacy parked nPending); the MARKER alone never decides — a
+  // completed rebuild's marker stays (the fresh path appends it, completion
+  // never clears it), so an empty pool under a stale marker must take the
+  // fresh start (void structure, re-seed, re-fire the extraction) instead of
+  // a silent 'nothing collected to rebuild' no-op
+  const parked = latestMarkerIsReuse(input.ctx) ? resumePending() : null;
+  const pending = parked !== null && parked.length !== NO_RECORDS ? parked : startFresh(input, store);
   if (pending === null || pending.length === NO_RECORDS) {
     log.info("reuse-rebuild: nothing collected to rebuild");
     return;
   }
+  if (input.signal.aborted) return;
+  // goal-first stage sequencing: the fresh start fires the goal extraction
+  // (under this run's own compaction-class hold, un-locked) — settle it BEFORE
+  // the batches and maybeBuild engage. Safe here: this run already holds the
+  // lock, and awaiting while holding would be the deadlock the extraction's
+  // un-locked branch avoids on purpose.
+  await extractionSettled();
   if (input.signal.aborted) return;
 
   const batchSize = Math.max(1, input.settings.builderEveryNObservations);
@@ -271,10 +298,18 @@ export async function runReuseRebuild(input: ReuseRebuildInput): Promise<void> {
       if (input.signal.aborted) return;
       if (built) input.widget.startStage(WRAP_STAGE, { batch: { done, total: totalBatches } });
     }
+    // full attachment re-arms: every collected record now lives in the tree —
+    // read through the store: the fresh start swapped the graph object, so an
+    // entry-captured reference would clear the STALE one and leave the live
+    // flag armed (the relaxed assert never tightens again)
+    const live = getGraphStore().graph;
+    live.rebuildPending = false;
+    assertGraphStructure(live, "reuse_rebuild_complete");
     log.info(`reuse-rebuild: complete (${pending.length} records in ${totalBatches} batches)`);
   } catch (cause) {
-    // applied batches are durable; the remainder stays parked — never throw
-    log.error("reuse-rebuild failed (remainder stays parked; re-run continues)", cause);
+    // applied batches are durable; the remainder stays detached (pending) —
+    // never throw; a re-run continues from the pool
+    log.error("reuse-rebuild failed (remainder stays pending; re-run continues)", cause);
   } finally {
     if (stageOpened) input.widget.endStage();
   }

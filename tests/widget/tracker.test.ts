@@ -266,9 +266,9 @@ describe("ProgressTracker state", () => {
     });
 
     it("progresses during thinking: a stale primary does not freeze the counter (the fallback rises and max shows it)", () => {
-      // Reproduces the freeze: provider reports output=1 once early, then goes
-      // silent during extended thinking while thinking deltas stream. Under the
-      // old primary-wins rule the counter stuck at 1; max shows the rising fallback.
+      // The failure mode: a provider reports output=1 once early, then goes
+      // silent during extended thinking while thinking deltas stream — max shows
+      // the rising fallback where primary-wins would stick at 1.
       tracker.startStage("build", { pass: 1 });
       tracker.onEvent({ type: "message_update", message: { usage: { output: 1 } } } as unknown as AgentEvent);
       expect(tracker.streamingOutputTokens).toBe(1);
@@ -432,28 +432,32 @@ describe("WidgetController conflict mode liveness (un-pause mid-session)", () =>
   it("the pause line follows the LIVE pause state, not the activation snapshot", () => {
     _setGetSessionOwlSettings(() => ({ enabled: true, ignoreConflicts: false }) as SessionOwlConfig);
     setConflictHits([{ entry: "npm:x", matched: "pi-observational-memory" }]);
-    const widget = initWidget();
-    widget.setConflict(["pi-observational-memory"]);
-    const ctx = makeTuiCtx();
-    widget.setCtx(ctx);
-    widget.render();
-    const setWidget = (ctx.ui as unknown as { setWidget: ReturnType<typeof vi.fn> }).setWidget;
-    expect(setWidget).toHaveBeenCalledTimes(1);
-    const factory1 = setWidget.mock.calls[0]?.[1] as (
-      tui: unknown,
-      theme: unknown,
-    ) => {
-      render: (w: number) => string[];
-    };
-    expect(factory1({}, fakeTheme).render(200)[0]).toContain("⚠ paused");
+    try {
+      const widget = initWidget();
+      widget.setConflict(["pi-observational-memory"]);
+      const ctx = makeTuiCtx();
+      widget.setCtx(ctx);
+      widget.render();
+      const setWidget = (ctx.ui as unknown as { setWidget: ReturnType<typeof vi.fn> }).setWidget;
+      expect(setWidget).toHaveBeenCalledTimes(1);
+      const factory1 = setWidget.mock.calls[0]?.[1] as (
+        tui: unknown,
+        theme: unknown,
+      ) => {
+        render: (w: number) => string[];
+      };
+      expect(factory1({}, fakeTheme).render(200)[0]).toContain("⚠ paused");
 
-    // flip ignoreConflicts mid-session: the gate goes live-un-paused — the line
-    // must DROP on the next render (stage null → hide), not linger forever
-    _setGetSessionOwlSettings(() => ({ enabled: true, ignoreConflicts: true }) as SessionOwlConfig);
-    widget.render();
-    expect(setWidget).toHaveBeenLastCalledWith("session_owl_progress", undefined, { placement: "aboveEditor" });
-
-    _setGetSessionOwlSettings(null);
-    setConflictHits(null);
+      // flip ignoreConflicts mid-session: the gate goes live-un-paused — the line
+      // must DROP on the next render (stage null → hide), not linger forever
+      _setGetSessionOwlSettings(() => ({ enabled: true, ignoreConflicts: true }) as SessionOwlConfig);
+      widget.render();
+      expect(setWidget).toHaveBeenLastCalledWith("session_owl_progress", undefined, { placement: "aboveEditor" });
+    } finally {
+      // an assertion mid-test must not leak either singleton past this file
+      // (the shared registry runs the next file here)
+      _setGetSessionOwlSettings(null);
+      setConflictHits(null);
+    }
   });
 });

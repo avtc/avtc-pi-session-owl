@@ -18,6 +18,10 @@ Background-maintained append-only knowledge graph; roots become the compaction s
 pi install npm:avtc-pi-session-owl
 ```
 
+## Claude Code port
+
+A full port to Claude Code's plugin (mods) system lives in [`claude/README.md`](claude/README.md).
+
 ## How it works
 
 session-owl runs three maintenance stages:
@@ -58,7 +62,7 @@ After compaction the agent continues with this summary alongside pi's own recent
 
 ## Benchmarks
 
-Self-run benchmarks (one authored scenario, N=3 continuations per arm, LLM-judge scored) against bare pi and pi-observational-memory, driven by our compaction benchmark harness (to be published). Agent glm-5.3; session-owl-builder is the default configuration:
+Self-run benchmarks (one authored scenario, N=3 continuations per arm, LLM-judge scored) against bare pi and pi-observational-memory, driven by our compaction benchmark harness. Agent glm-5.3; session-owl-builder is the default configuration:
 
 | Recall accuracy | bare pi | om-default | session-owl-builder | session-owl-selector | om-full |
 |---|---|---|---|---|---|
@@ -123,7 +127,7 @@ While session-owl works, a footer line shows the active stage, its progress, and
 
 ## Configuration
 
-Four independent mode axes, all live-toggleable mid-session:
+Five independent mode axes, all live-toggleable mid-session:
 
 | Setting | Options | Default |
 |---|---|---|
@@ -131,6 +135,7 @@ Four independent mode axes, all live-toggleable mid-session:
 | `builderMode` | `on-compaction` · `each-N-observations` · `on-session-context-threshold` · `on-root-view-threshold` | `each-N-observations` |
 | `selectorMode` | `on-compaction` · `on-session-context-threshold` | `on-compaction` |
 | `renderMode` | `selected-root` (Selector curates) · `observations-root` (the Builder's root view) | `observations-root` |
+| `subagentMode` | `inherited` (same as the main conversation) · `on-compaction` (captured only when the subagent itself compacts) · `disabled` | `on-compaction` |
 
 The defaults keep the observations graph in shape, so when a compaction is triggered the summary is immediately provided — tune the modes and thresholds to your model and workload. Two shape knobs — `rootViewTargetNodes` (how many roots to aim for; no target = the agent shapes the root view on its own) and `rootViewStrategy` (task · category · recency · importance · topic) — advise the Builder and Selector on the root view's organization. See [CONFIGURATION.md](docs/CONFIGURATION.md) for the full schema reference (every knob, defaults, per-component model presets).
 

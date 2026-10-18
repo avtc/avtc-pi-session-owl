@@ -83,6 +83,11 @@ const TOKEN_RES = [
   /(?<!\w)#[1-9]\d+\b/g,
   /\biter-\d+\b/gi,
   /\bPhase [AB]\b/g,
+  // prose pointers at the design doc itself with no numbered section ("see
+  // the design doc's capture section", "per design doc") — the de-numbered
+  // residue the §N patterns above leave behind when a fixer strips the id.
+  /\b(?:see|per|via|in) the design doc/i,
+  /\bdesign doc'?s?\b/i,
 ];
 
 /** Does `text` contain any ref token? Returns the first match or null. */

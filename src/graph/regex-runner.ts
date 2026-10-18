@@ -133,10 +133,9 @@ export type RegexTestOutcome =
   | { results: boolean[]; testedCount: number; timedOutMs: number }
   | { error: string };
 
-/** A floor on the configured timeout: even when a legacy/persisted config
- *  carries 0 (the removed "Off" preset), the worker kill timer is armed at
- *  least this long so a catastrophic pattern cannot freeze the reused worker
- *  and brick every later search. */
+/** A floor on the configured timeout: even when a persisted config carries
+ *  0, the worker kill timer is armed at least this long so a catastrophic
+ *  pattern cannot freeze the reused worker and brick every later search. */
 const MIN_TIMEOUT_MS = 1000;
 
 /** Test `regex` against each string in `strings`, returning a boolean[] in the

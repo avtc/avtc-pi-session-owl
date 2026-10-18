@@ -111,7 +111,7 @@ describe("renderAgentMessages", () => {
     // text; the input dump renders it exactly as the LLM received it — no
     // message-level wrapper, so no same-name nesting (</USER></USER>) and no
     // thinking inside a USER tag.
-    const content = "<THINKING entry=a1>plan</THINKING>\n<USER entry=u2>do it</USER>";
+    const content = "<THINKING entryId=a1>plan</THINKING>\n<USER entryId=u2>do it</USER>";
     expect(renderStageInputMessages([user(content)])).toBe(content);
   });
 

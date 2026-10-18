@@ -1047,7 +1047,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     });
 
     it("contentPattern ids grep-tree pruning keeps a node as structural header when a child matches", async () => {
-      // #51: n7's summary has no 'stateless', and n8 (child node) has no match,
+      // n7's summary has no 'stateless', and n8 (child node) has no match,
       // but o5 (child obs) content does → n7 is kept as the structural parent
       // header, o5 shows its excerpt, n8 is dropped.
       seedSource();
@@ -1060,7 +1060,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     });
 
     it("contentPattern ids grep-tree pruning drops a node with no summary or descendant match", async () => {
-      // #51: nothing under n7 matches 'XYZ' → the whole node is dropped → empty.
+      // nothing under n7 matches 'XYZ' → the whole node is dropped → empty.
       seedSource();
       const out = text(await recall(tool(), { ids: ["n7"], contentPattern: "XYZ" }));
       expect(out).not.toContain("n7");
@@ -1068,7 +1068,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     });
 
     it("contentPattern ids drops a non-matching standalone observation", async () => {
-      // #51: a requested obs whose content lacks the contentPattern is dropped.
+      // a requested obs whose content lacks the contentPattern is dropped.
       seedSource();
       const out = text(await recall(tool(), { ids: ["o5"], contentPattern: "XYZ" }));
       expect(out).not.toContain("o5");
@@ -1092,8 +1092,8 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     });
 
     it("search-path contentPattern timeout surfaces a timeout note", async () => {
-      // The search path has its own note plumbing. With contentPattern-alone now
-      // a filtered search, the catastrophic contentPattern runs as the obs filter
+      // The search path has its own note plumbing. With contentPattern-alone a
+      // filtered search, the catastrophic contentPattern runs as the obs filter
       // (runRegexTests) during candidate-building and times out there — surfacing
       // the search-timeout note (not the ids-path grep note).
       _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 300 }));
@@ -1124,7 +1124,7 @@ Third line that concludes the lengthy multi-line observation body fully.`;
     // --- contentPattern-alone filters to matching observations (not a root-browse no-op) ---
 
     it("contentPattern alone matches node summaries + obs content (not root browse)", async () => {
-      // #51: No ids, no query, no bounds — contentPattern FILTERS over node
+      // No ids, no query, no bounds — contentPattern FILTERS over node
       // summaries + observation content. 'JWT' matches n7's summary AND o5's
       // content → both appear (n7 as a header, o5 with grep excerpts).
       // Non-matching items are filtered out (not a root-browse fallback).
@@ -1361,5 +1361,18 @@ describe("owl_recall description — recall-before-relying close", () => {
     expect(description).toContain("recall before relying on session-derived understanding");
     expect(description).toContain("fullDetails for exact source");
     expect(description).not.toContain("before redoing work or assuming a decision");
+  });
+});
+
+describe("owl_recall when session-owl is disabled", () => {
+  afterEach(() => {
+    _setGetSessionOwlSettings(null);
+  });
+
+  it("forbids the call: pi's reason text delivered as an error result (details.error)", async () => {
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    const out = await recall(makeOwlRecallTool(), {});
+    expect(out.content[0]?.text).toBe("session-owl is disabled (enable it first).");
+    expect(out.details).toEqual({ error: true });
   });
 });

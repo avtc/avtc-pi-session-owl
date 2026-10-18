@@ -36,8 +36,13 @@ export type RootViewStrategy = "balanced" | "by-task" | "by-category" | "by-rece
 export interface SessionOwlConfig {
   // General
   enabled: boolean;
+  /** How session-owl treats subagents: inherited = the same treatment as
+   *  the main conversation; on-compaction = their memory is captured only
+   *  when the subagent itself compacts (small subagents that never compact
+   *  are skipped entirely); disabled = session-owl is off for subagents. */
+  subagentMode: "inherited" | "disabled" | "on-compaction";
   /** Register even when a conflicting compaction extension is detected
-   *  (deliberate last-wins co-run, e.g. benchmarking). */
+   *  (deliberate co-run, e.g. benchmarking). */
   ignoreConflicts: boolean;
   defaultModel: string | null;
   /** Thinking level for all stages when a stage doesn't override. null = reuse
@@ -66,10 +71,7 @@ export interface SessionOwlConfig {
    *  text. Overflow pages with afterId (terse list) or stops expansion
    *  (fullDetails/grep); a single-observation target is unbudgeted in any mode.*/
   toolResultTokenBudget: number;
-  /** Write debug-level trace logs (trigger decisions, per-stage stream start/end)
-   *  to the log file. Off by default — enable to diagnose a stall. */
-  debugLog: boolean;
-  /** Max dump files kept per stage under ~/.pi/session-owl/dumps/<project>/ (0 = off). */
+  /** Max dump files kept per stage under <harnessDir>/session-owl/dumps/<project>/ (0 = off). */
   debugDumpLimit: number;
   // Observer
   observerModel: string | null;
@@ -137,11 +139,11 @@ const MIN_MAX_TOKENS = 1;
 const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
 const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
 const DEFAULT_FAST_PATH = true;
-const DEBUG_LOG_DEFAULT = false;
 
 export const DEFAULT_CONFIG: Readonly<SessionOwlConfig> = Object.freeze({
   // General
   enabled: true,
+  subagentMode: "on-compaction",
   ignoreConflicts: false,
   defaultModel: NO_MODEL,
   defaultThinkingLevel: NO_MODEL,
@@ -155,7 +157,6 @@ export const DEFAULT_CONFIG: Readonly<SessionOwlConfig> = Object.freeze({
   findTimeoutMs: DEFAULT_FIND_TIMEOUT_MS,
   llmCallTimeoutMs: DEFAULT_LLM_CALL_TIMEOUT_MS,
   toolResultTokenBudget: DEFAULT_TOOL_RESULT_TOKEN_BUDGET,
-  debugLog: DEBUG_LOG_DEFAULT,
   debugDumpLimit: 0,
   // Observer
   observerModel: NO_MODEL,
@@ -192,6 +193,11 @@ const RENDER_MODE_PRESETS: readonly PresetElement[] = [
 ];
 const OBSERVER_MODE_PRESETS: readonly PresetElement[] = [
   ["On threshold", "on-threshold"],
+  ["On compaction", "on-compaction"],
+];
+const SUBAGENT_MODE_PRESETS: readonly PresetElement[] = [
+  ["Inherited", "inherited"],
+  ["Disabled", "disabled"],
   ["On compaction", "on-compaction"],
 ];
 const BUILDER_MODE_PRESETS: readonly PresetElement[] = [
@@ -290,14 +296,25 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("enabled", {
     label: "Enabled",
     description:
-      "Master switch for session-owl. Off = session-owl stops capturing memory and stops adding its compaction summary (pi's compaction and other extensions are unaffected).",
+      "Master switch for session-owl. Off = session-owl stops capturing memory and stops adding its compaction summary (the engine's own compaction and other extensions are unaffected).",
     type: "boolean",
     defaultValue: DEFAULT_CONFIG.enabled,
+  }),
+  setting("subagentMode", {
+    label: "Subagent mode",
+    description:
+      "How session-owl treats subagents. Inherited = the same treatment as the main conversation; " +
+      "On compaction = their memory is captured only when the subagent itself compacts " +
+      "(small subagents that never compact are skipped entirely); Disabled = session-owl is off " +
+      "for subagents. When session-owl is disabled, it is off for subagents as well.",
+    type: "string",
+    defaultValue: DEFAULT_CONFIG.subagentMode,
+    presets: SUBAGENT_MODE_PRESETS,
   }),
   setting("ignoreConflicts", {
     label: "Ignore conflicts",
     description:
-      "Register even when a conflicting compaction extension is detected (pi compaction is last-wins — for deliberate co-runs, e.g. benchmarking).",
+      "Register even when a conflicting compaction extension is detected (for deliberate co-runs, e.g. benchmarking).",
     type: "boolean",
     defaultValue: DEFAULT_CONFIG.ignoreConflicts,
   }),
@@ -318,7 +335,7 @@ const SETTINGS: readonly SettingSchema[] = [
   setting("renderMode", {
     label: "Render mode",
     description:
-      "What session-owl injects after compaction (and what /owl:* recall reads). " +
+      "What session-owl injects after compaction (the recall commands read the same view). " +
       "Selected root = a focused, task-relevant view the Selector builds; " +
       "Observations root = the root view of the memory graph.",
     type: "string",
@@ -372,7 +389,7 @@ const SETTINGS: readonly SettingSchema[] = [
   }),
   setting("commandResultCap", {
     label: "Command result cap",
-    description: "Max items a /owl:* command shows before a '... +N more' footer. No limit = show all.",
+    description: "Max items an owl command shows before a '... +N more' footer. No limit = show all.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.commandResultCap,
     min: 0,
@@ -403,16 +420,10 @@ const SETTINGS: readonly SettingSchema[] = [
     min: MIN_TOOL_RESULT_TOKEN_BUDGET,
     presets: TOOL_RESULT_TOKEN_BUDGET_PRESETS,
   }),
-  setting("debugLog", {
-    label: "Debug log",
-    description: "Write detailed trace logs to the log file.",
-    type: "boolean",
-    defaultValue: DEFAULT_CONFIG.debugLog,
-  }),
   setting("debugDumpLimit", {
     label: "Debug dump limit",
     description:
-      "Maximum per-stage dump files kept under ~/.pi/session-owl/dumps/<project>/ (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format.",
+      "Maximum per-stage dump files kept under <harnessDir>/session-owl/dumps/<project>/ (0 = no dumps). Each dump captures what an Observer/Builder/Selector LLM run saw (system prompt, tools, per-call input) and produced (thinking, text, tool calls, results), in the tagged memory format.",
     type: "number",
     defaultValue: DEFAULT_CONFIG.debugDumpLimit,
     min: 0,
@@ -584,6 +595,7 @@ const TABS: readonly SettingsTabSchema[] = [
     label: "General",
     settingIds: [
       "enabled",
+      "subagentMode",
       "ignoreConflicts",
       "defaultModel",
       "defaultThinkingLevel",
@@ -597,7 +609,6 @@ const TABS: readonly SettingsTabSchema[] = [
       "findTimeoutMs",
       "llmCallTimeoutMs",
       "toolResultTokenBudget",
-      "debugLog",
       "debugDumpLimit",
     ],
   },
@@ -692,7 +703,7 @@ const REGISTRATION_OPTIONS: RegisterSettingsOptions = {
   envVar: "PI_SETTINGS_SESSION_OWL",
 };
 
-/** Register the /owl:settings command + tabbed modal once (from activate); stores the handle.
+/** Register the settings command + tabbed modal once (from activate); stores the handle.
  * The onAfterChange (null for none) is the settings modal's per-edit hook (fired after
  * updateSetting persists) — session-owl uses it to refresh the widget so a live
  * gate flip (enabled / ignoreConflicts) is reflected in the pause line instantly. */

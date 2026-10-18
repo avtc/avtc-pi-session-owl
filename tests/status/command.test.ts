@@ -128,7 +128,7 @@ describe("buildStatusReport", () => {
       }),
     );
     expect(report).toContain("Memory");
-    // exact approved lines (labels padded to one column, · separators)
+    // exact lines (labels padded to one column, · separators)
     expect(report).toContain("  Observations  2");
     expect(report).toContain("         Nodes  2 (2 levels)");
     expect(report).toContain("       Details  6.0k tokens 400 lines");

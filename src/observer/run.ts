@@ -18,9 +18,7 @@
 // /owl:reobserve-0-obs-chunks is the only retry path for it.
 // An abort loses only the in-flight chunk — completed chunks are durable and the
 // frontier has already advanced past them, so a re-run skips them (idempotent by
-// coverage range). Reverses the earlier accumulate-then-append (one delta per
-// run, abort = lose everything), which lost all work on any run longer than the
-// abort window.
+// coverage range).
 
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -68,7 +66,7 @@ const OBSERVE_STAGE = "observe" as const;
 /** Consecutive no-progress turns (no accepted records; streamed text does NOT
  *  count — a model pairing chatter with failing tool calls must stay bounded)
  *  allowed before a chunk's agentLoop is stopped. Normal chunks take 1–2 turns. */
-const OBSERVER_NO_PROGRESS_TURNS = 3;
+export const OBSERVER_NO_PROGRESS_TURNS = 5;
 /** Log label for the Observer's no-progress stop warn line. */
 const OBSERVER_STOP_LABEL = "observer";
 const NO_SOURCE_ENTRY: SessionEntry | undefined = undefined;
@@ -149,12 +147,16 @@ function dumpRecordsForLog(summaries: readonly string[]): string {
 
 /**
  * Build a fresh `record_observations` tool bound to one chunk's allowed-id set.
- * Each record is validated per-observation: every cited `sourceEntryId` must be
- * in `allowedIds` (a foreign id rejects that one record only, not the whole
- * batch) and the summary must be substantive. Valid records accumulate on
- * `records`.
+ * Each record is validated per-observation: every cited `sourceEntryId` must
+ * resolve into `allowedIds` — a chunk short through `idMap` (when the chunk
+ * was rendered with short ids) or an exact stored id — (a foreign id rejects
+ * that one record only, not the whole batch) and the summary must be
+ * substantive. Valid records accumulate on `records` with STORED ids.
  */
-function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool {
+function makeRecordObservationsTool(
+  allowedIds: ReadonlySet<string>,
+  idMap: ReadonlyMap<string, string> | null,
+): RecordTool {
   const records: RecordObservation[] = [];
   let attempted = 0;
   const tool: AgentTool<typeof RECORD_OBS_PARAMS> = {
@@ -168,9 +170,19 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
       const callSummaries: string[] = [];
       params.observations.forEach((raw, index) => {
         attempted += 1;
-        // per-record validation — a bad record drops alone, the batch continues
-        if (raw.sourceEntryIds.some((srcId: string) => !allowedIds.has(srcId))) {
-          failures.push(`#${index + 1}: source id not in this chunk`);
+        // per-record validation — a bad record drops alone, the batch
+        // continues. Accept-both: a chunk short resolves through the map to
+        // its stored id; an exact stored id passes through unchanged. The
+        // failure names the positional item AND every exact wrong cite.
+        const badCites: string[] = [];
+        const resolved = raw.sourceEntryIds.map((srcId: string) => {
+          const real = idMap?.get(srcId) ?? srcId;
+          if (!allowedIds.has(real) && !badCites.includes(srcId)) badCites.push(srcId);
+          return real;
+        });
+        if (badCites.length > 0) {
+          const kind = badCites.length === 1 ? "id" : "ids";
+          failures.push(`#${index + 1}: source ${kind} ${badCites.join(", ")} not in this chunk`);
           return;
         }
         if (!isSubstantiveSummary(raw.summary)) {
@@ -180,7 +192,7 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
         records.push({
           summary: raw.summary,
           importance: raw.importance as Importance,
-          sourceEntryIds: [...raw.sourceEntryIds],
+          sourceEntryIds: resolved,
         });
         acceptedIndexes.push(index + 1);
         callSummaries.push(raw.summary);
@@ -200,11 +212,19 @@ function makeRecordObservationsTool(allowedIds: ReadonlySet<string>): RecordTool
         lines.push(...failures);
       }
       const ack = lines.join("\n");
+      // an ALL-rejected batch answers as an ERRORED tool call: a success-shaped
+      // text ack reads positive to the model — the error flag is the
+      // unambiguous signal that NOTHING landed
+      const allRejected = accepted === EMPTY_RECORDS && failures.length > EMPTY_RECORDS;
       log.debug(`observer: record_observations accepted=${accepted} rejected=${rejected}`);
       if (accepted > EMPTY_RECORDS) {
         log.debug(`observer: recorded ${accepted} — ${dumpRecordsForLog(callSummaries)}`);
       }
-      return { content: [{ type: "text", text: ack }], details: { accepted, rejected } };
+      return {
+        content: [{ type: "text", text: ack }],
+        details: { accepted, rejected },
+        ...(allRejected ? { isError: true } : {}),
+      };
     },
   };
   return {
@@ -317,7 +337,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       appendDump(
         dumpPath,
         stageDumpHeader(OBSERVE_STAGE, new Date().toISOString(), OBSERVER_SYSTEM, [
-          makeRecordObservationsTool(chunks[0].allowedIds).tool,
+          makeRecordObservationsTool(chunks[0].allowedIds, chunks[0].idMap ?? null).tool,
         ]),
       );
       dumpHeaderWritten = true;
@@ -333,7 +353,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         log.info(`observer: stopping: session-owl disabled (after ${done}/${totalChunks} chunks)`);
         return;
       }
-      const recordTool = makeRecordObservationsTool(chunk.allowedIds);
+      const recordTool = makeRecordObservationsTool(chunk.allowedIds, chunk.idMap ?? null);
       // chunk forensics: brackets the chunk's record_observations calls in the
       // log (coverage range + rendered size — the sanity denominator for how
       // many records a chunk can plausibly yield).
@@ -380,7 +400,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       // chunk (the model infers them from the chunk text; rejections trace here)
       appendDump(
         dumpPath,
-        `<chunk i="${chunkIndex + 1}/${totalChunks}">\n<allowed>\n${[...chunk.allowedIds].join("\n")}\n</allowed>\n`,
+        `<chunk i="${chunkIndex + 1}/${totalChunks}">\n<allowed>\n${[...(chunk.idMap?.keys() ?? chunk.allowedIds)].join("\n")}\n</allowed>\n`,
       );
       try {
         const result = await run(stageInput);

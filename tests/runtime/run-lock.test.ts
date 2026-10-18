@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _resetRunLock,
   abortAndAwaitIdle,
   abortInFlight,
   acquireForCompaction,
+  acquireForExtract,
   acquireOrSkip,
+  armRearmOnRelease,
   current,
   inFlight,
   type RunHandle,
 } from "../../src/runtime/run-lock.js";
+import { activateConversation, resetConversationStates } from "../../src/store/graph-store.js";
 
 describe("run-lock (single run-lock — at most one stage active at a time)", () => {
   // Each test starts from a clean idle lock (module singleton shared across tests
@@ -32,6 +35,29 @@ describe("run-lock (single run-lock — at most one stage active at a time)", ()
     expect(second).toBeNull();
     // the first run is still the active one
     expect(current()).toBe("observe");
+  });
+
+  it("acquireForExtract takes stage extract synchronously when idle (same-tick skip)", () => {
+    const handle = acquireForExtract();
+    expect(handle).not.toBeNull();
+    expect(current()).toBe("extract");
+    // the capture's trailing turn_end trigger in the same tick skips
+    expect(acquireOrSkip("observe")).toBeNull();
+    handle?.release();
+    expect(current()).toBeNull();
+    expect(acquireOrSkip("observe")).not.toBeNull();
+  });
+
+  it("acquireForExtract returns null under an existing holder — no steal, no wait", () => {
+    const holder = acquireOrSkip("observe");
+    expect(holder).not.toBeNull();
+    expect(acquireForExtract()).toBeNull();
+    // the holder keeps the lock (the extraction runs under its authority)
+    expect(current()).toBe("observe");
+    holder?.release();
+    expect(current()).toBeNull();
+    expect(acquireForExtract()).not.toBeNull();
+    expect(current()).toBe("extract");
   });
 
   it("release allows a new run to acquire", () => {
@@ -179,5 +205,124 @@ describe("run-lock (single run-lock — at most one stage active at a time)", ()
     const skipped = acquireOrSkip("observe");
     expect(skipped).toBeNull();
     compactionHandle.release();
+  });
+});
+
+// A boundary evaluation that collides with an in-flight chain arms ONE
+// coalesced re-entry; the holder's successful release fires it outside the
+// release call (microtask), and an aborted holder drops it.
+describe("run-lock settle-rearm (the skipped gap re-evaluates on release)", () => {
+  beforeEach(() => _resetRunLock());
+
+  const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+
+  it("fires the armed re-entry exactly once, AFTER the lock cleared — never inside release", async () => {
+    const handle = acquireOrSkip("observe");
+    expect(handle).not.toBeNull();
+    const calls: boolean[] = [];
+    armRearmOnRelease(() => {
+      calls.push(inFlight()); // the state the re-entry observes
+    });
+
+    handle?.release();
+    expect(calls).toEqual([]); // dispatch is deferred past this call
+    expect(inFlight()).toBe(false);
+
+    await tick();
+    expect(calls).toEqual([false]); // once, with the lock already free
+
+    handle?.release(); // idempotent release: no second dispatch
+    await tick();
+    expect(calls).toEqual([false]);
+  });
+
+  it("a later arm replaces the earlier one (coalesced, latest gap wins)", async () => {
+    const handle = acquireOrSkip("observe");
+    const fired: string[] = [];
+    armRearmOnRelease(() => fired.push("first"));
+    armRearmOnRelease(() => fired.push("second"));
+
+    handle?.release();
+    await tick();
+    expect(fired).toEqual(["second"]);
+  });
+
+  it("an ABORTED holder's release drops the armed re-entry", async () => {
+    const handle = acquireOrSkip("observe");
+    const vi2 = vi.fn();
+    armRearmOnRelease(vi2);
+
+    abortInFlight(); // the takeover aborts the holder…
+    handle?.release(); // …the run unwinds and releases from its finally
+    await tick();
+
+    expect(vi2).not.toHaveBeenCalled();
+    expect(inFlight()).toBe(false);
+  });
+
+  it("dispatch works in a runtime without a queueMicrotask global", async () => {
+    // some worker scopes lack the identifier; the dispatch must not depend on
+    // it (Promise-based microtask only)
+    vi.stubGlobal("queueMicrotask", undefined);
+    try {
+      const handle = acquireOrSkip("observe");
+      let fired = false;
+      armRearmOnRelease(() => {
+        fired = true;
+      });
+      handle?.release();
+      await tick();
+      expect(fired).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("run-lock — per-conversation partitions (resident conversation states)", () => {
+  beforeEach(() => {
+    _resetRunLock();
+    resetConversationStates();
+    activateConversation("default-again"); // settle the ambient key (returns to default in teardown)
+  });
+
+  it("locks partition by conversation: another key holds its own run in parallel", () => {
+    activateConversation("rkA");
+    const hA = acquireOrSkip("observe");
+    expect(hA).not.toBeNull();
+    expect(acquireOrSkip("build")).toBeNull(); // same key: SKIP
+    expect(acquireForExtract()).toBeNull(); // same key: no steal
+
+    activateConversation("rkB");
+    const hB = acquireOrSkip("observe");
+    expect(hB).not.toBeNull(); // RED today: one global lock ⇒ null
+    expect(acquireOrSkip("select")).toBeNull(); // B is also serialized with itself
+
+    hA?.release();
+    activateConversation("rkA");
+    expect(acquireOrSkip("build")).not.toBeNull(); // A idle again after its own release
+    resetConversationStates();
+  });
+
+  it("each key's armed gap fires on ITS OWN release (never a foreign key's)", async () => {
+    const fired: string[] = [];
+    activateConversation("rmA");
+    const hA = acquireOrSkip("observe");
+    armRearmOnRelease(() => fired.push("A"));
+
+    activateConversation("rmB");
+    const hB = acquireOrSkip("observe");
+    armRearmOnRelease(() => fired.push("B"));
+
+    hB?.release(); // owns only B's arm
+    await Promise.resolve().then(() => undefined);
+    await Promise.resolve().then(() => undefined);
+    expect(fired).toEqual(["B"]); // A's arm must NOT ride B's release
+
+    hA?.release(); // and A's own release fires A's arm
+    await Promise.resolve().then(() => undefined);
+    await Promise.resolve().then(() => undefined);
+    expect(fired).toEqual(["B", "A"]);
+    resetConversationStates();
   });
 });

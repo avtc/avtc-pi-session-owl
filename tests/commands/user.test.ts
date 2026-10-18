@@ -5,6 +5,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { formatList, runOwlCat, runOwlFind, runOwlFindAll, runOwlLs, runOwlRescan } from "../../src/commands/user.js";
 import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
+import { _setGoalExtractInFlightForTest } from "../../src/goal-extract/run.js";
 import {
   applyCreateNode,
   applyRecordObservation,
@@ -506,6 +507,29 @@ describe("/owl:rescan", () => {
     await runOwlRescan("", ctx, harness.deps);
     expect(confirmTitle()).toBe("Rescan memory");
     expect(getGraphStore().observerFrontier).toBe("some-entry"); // declined -> untouched
+  });
+
+  it("plain mode: the reset waits for an in-flight goal extraction to settle (goal-first sequencing)", async () => {
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: true }) as typeof DEFAULT_CONFIG);
+    const { ctx, messages } = makeRescanCtx(true);
+    const harness = makeDeps();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    _setGoalExtractInFlightForTest(pending);
+    try {
+      const run = runOwlRescan("", ctx, harness.deps);
+      await new Promise((r) => setImmediate(r));
+      // suspended at the settle await — nothing reset, notified, or launched
+      expect(messages.some((m) => m.includes("Rescanning"))).toBe(false);
+      expect(harness.launched).toHaveLength(0);
+      release();
+      await run;
+      expect(messages.some((m) => m.includes("Rescanning"))).toBe(true); // proceeds once settled
+    } finally {
+      _setGoalExtractInFlightForTest(null);
+    }
   });
 
   it("disabled: warns and does nothing", async () => {

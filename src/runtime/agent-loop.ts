@@ -47,8 +47,8 @@ const TOOL_LOG_TEXT_CAP = 200;
 const ELLIPSIS = "…";
 
 /** Debug-log one completed tool call: name + ok/error (+ collapsed, capped
- *  error text). Gives tool-level visibility (rejected/truncated calls, what
- *  the model got wrong) when `debugLog` is on. */
+ *  error text). Gives tool-level visibility: rejected/truncated calls, what
+ *  the model got wrong. */
 function logToolExecutionEnd(toolName: string, isError: boolean, result: unknown): void {
   const status = isError ? "error" : "ok";
   const text = isError ? firstResultText(result) : EMPTY_TEXT;
@@ -114,9 +114,12 @@ export interface StageRunInput {
    *  provider request; a response hitting it is truncated and its tool calls
    *  rejected. Bounds runaway generation. */
   maxTokens: number;
-  /** Per-LLM-call wall-clock timeout (ms), or `null` = no limit. Re-armed each
-   *  turn via the transformContext seam; aborting the in-flight fetch ends the
-   *  run. Bounds stalled/slow generation. */
+  /** Inter-token stall timeout (ms), or `null` = no limit. The window bounds
+   *  the silence between consecutive stream events — the request→first-byte
+   *  gap and every byte→byte gap mid-response alike — and re-arms on every
+   *  event, so an active stream never trips it regardless of total duration.
+   *  Aborting the in-flight fetch ends the run. Bounds stalled/silent
+   *  generation, never slow generation. */
   timeoutMs: number | null;
   /** Widget/ledger event sink, or `NO_EVENT_SINK`. */
   onEvent: ((event: AgentEvent) => void) | null;
@@ -229,13 +232,11 @@ export function makeTurnCap(maxTurns: number | null): (turn: TurnPayload) => boo
 /** A stop predicate over one completed turn (consumed via {@link makeFinishTurn}). */
 export type TurnPredicate = (turn: TurnPayload) => boolean;
 
-/** Adapt a stop predicate to the loop's `finishTurn` hook (pi ≥0.87 replaced
- *  `shouldStopAfterTurn` with `finishTurn`; the decision applies after
- *  `turn_end`). The old hook only ran for normal responses — error and
- *  aborted turns remain hard exits whose decision is ignored — so those
- *  turns return undefined WITHOUT invoking the predicate, preserving the old
- *  invocation contract and keeping predicate side effects off hard-exit
- *  paths. */
+/** Adapt a stop predicate to the loop's `finishTurn` hook (the decision
+ *  applies after `turn_end`). The hook only runs for normal responses — error
+ *  and aborted turns are hard exits whose decision is ignored — so those
+ *  turns return undefined WITHOUT invoking the predicate, keeping predicate
+ *  side effects off hard-exit paths. */
 export function makeFinishTurn(stop: TurnPredicate): NonNullable<AgentLoopConfig["finishTurn"]> {
   return (turn) => {
     if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
@@ -287,13 +288,12 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
 
   try {
     const context: AgentContext = {
-      // pi ≥0.87: the system prompt rides as the transcript's LEADING system
-      // message (AgentContext.systemPrompt was removed); the loop folds it
+      // The system prompt rides as the transcript's LEADING system
+      // message; the loop folds it
       // into every provider request. input.messages are the NEW prompts for
       // this self-contained stage call — agentLoop seeds its LLM context with
       // [...context.messages, ...prompts], so carrying them here too would
-      // send every stage input to the provider TWICE (doubled tokens since
-      // the seam's introduction). History is otherwise empty.
+      // send every stage input to the provider TWICE. History is otherwise empty.
       messages: [{ role: "system", content: input.systemPrompt, timestamp: Date.now() }],
       tools: input.tools,
     };
@@ -301,9 +301,11 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     // Per-LLM-call timeout: a dedicated controller whose signal is passed to
     // the loop (so aborting it cancels the in-flight fetch and ends the run).
     // `input.signal` (run/compaction abort) is forwarded into it. The timer is
-    // RE-ARMED each turn via transformContext (the only "before each LLM call"
-    // seam agentLoop exposes), so a normal multi-turn run never accumulates — a
-    // single runaway/stalled turn gets killed. null = no timeout.
+    // armed before the first call and RE-ARMED on every stream event (the
+    // inter-token rule) — the window bounds the silence between consecutive
+    // pipeline events, never the total duration of a healthy stream. A
+    // stalled provider or broken stream (silence > window while the response
+    // is unfinished) is killed. null = no timeout.
     const turnTimeout = new AbortController();
     const forwardAbort = (): void => {
       if (!turnTimeout.signal.aborted) turnTimeout.abort(input.signal.reason);
@@ -355,7 +357,7 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
     if (dumpPath !== null) {
       appendDump(dumpPath, `<input>\n${renderStageInputMessages(input.messages)}\n</input>\n`);
     }
-    // pi 0.84.1 made `streamFn` a required `agentLoop` arg. Pass `undefined` (cast to the
+    // `streamFn` is a required `agentLoop` arg. Pass `undefined` (cast to the
     // required type) so pi-agent-core falls back to its process-global default streamFn,
     // which pi-coding-agent installs at startup — that default dispatches through the
     // coding-agent model runtime, preserving resolved auth and custom providers. A test
@@ -376,6 +378,14 @@ export async function runStage(input: StageRunInput): Promise<StageRunResult> {
       let lastAssistantErrorMessage: string | undefined;
 
       for await (const event of stream) {
+        // Inter-token re-arm: every event the pipeline yields is progress —
+        // the request→first-byte gap and every byte→byte gap mid-response
+        // are each bounded by the window (silence longer than timeoutMs between
+        // tokens, while the response is unfinished, is a stall); an active stream
+        // — however slow its total — never trips.
+        // Tool executions yield events too, so owl's fast in-process tools
+        // keep the window re-armed across turn boundaries.
+        armTurnTimeout();
         if (input.onEvent !== null) input.onEvent(event);
 
         if (event.type === "message_end") {

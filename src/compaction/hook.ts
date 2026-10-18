@@ -44,12 +44,12 @@ import { renderSummary } from "./summary.js";
 import { extractTouchedFiles } from "./touched-files.js";
 import { aggregateLedgerUsage, ledgerToStageUsages } from "./usage-map.js";
 
-// --- seams (testability + later-task wiring) --------------------------------
+// --- seams (testability) ------------------------------------------------------
 
 /** Injectable stage runs so tests pass fakes. The Selector run takes the full
  *  SelectorRunInput (ctx + pi + settings + signal + widget + scope + todo); the
- *  hook builds it from its own inputs (todo/todoBridge are null until the
- *  avtc-pi-todo bridge lands). */
+ *  hook builds it from its own inputs (todo/todoBridge forward the live todo
+ *  wiring — null when no todo extension is installed). */
 export interface CompactionStageRuns {
   runObserver: (input: ObserverRunInput) => Promise<void>;
   runBuilder: (input: BuilderRunInput) => Promise<void>;
@@ -64,7 +64,7 @@ let stageRuns: CompactionStageRuns = {
   runSelector: realRunSelector,
 };
 
-/** Override the stage runs (tests + later-task wiring). */
+/** Override the stage runs (tests). */
 export function setCompactionStageRuns(runs: CompactionStageRuns): void {
   stageRuns = runs;
 }
@@ -133,7 +133,7 @@ export async function compactionHook(
   try {
     // Snapshot the cumulative ledger BEFORE the ensure-ready stages run, so the
     // post-stages delta isolates THIS compaction's Observer/Builder/Selector cost
-    // (the bench's metric, UD32). Cloned (deep) — the stages mutate usageLedger in place.
+    // (the bench's metric). Cloned (deep) — the stages mutate usageLedger in place.
     const preStageLedger = cloneLedger(getGraphStore().usageLedger);
     // (a) Observer catch-up — GAP-DRIVEN (regardless of observerMode): observe
     // the renderable entries strictly between the frontier and the compaction
@@ -219,14 +219,14 @@ export async function compactionHook(
     // not mutate the captured baseline).
     store.lastCompactionLedger = snapshotAtCompaction(store.usageLedger).lastCompactionLedger;
 
-    //  (UD32): isolate THIS compaction's stage cost (post-stages − pre-stages)
-    // + map to pi's Usage shape. The bench reads compaction.usage for totals
+    // Isolate THIS compaction's stage cost (post-stages − pre-stages) + map to
+    // pi's Usage shape. The bench reads compaction.usage for totals
     // + details.compactionStages for the per-stage breakdown table.
     const compactionDelta = sinceLastCompaction(store.usageLedger, preStageLedger);
     const compactionStages = ledgerToStageUsages(compactionDelta);
     const compactionUsage = aggregateLedgerUsage(compactionDelta);
     const details = encodeDetails(store.graph, store.selectedTree, store.usageLedger);
-    // attach the per-stage breakdown (additive details field; the bench reads it for)
+    // attach the per-stage breakdown (additive details field; the bench's table reads it)
     details.compactionStages = compactionStages;
 
     return {

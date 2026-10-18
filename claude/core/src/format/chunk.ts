@@ -1,0 +1,494 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
+
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage, TextContent, ToolCall, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type {
+  BranchSummaryEntry,
+  CustomMessageEntry,
+  SessionEntry,
+  SessionMessageEntry,
+} from "@earendil-works/pi-coding-agent";
+import { CHARS_PER_TOKEN_ESTIMATE } from "../types.js";
+import { stripAnsi } from "./sanitize.js";
+
+/**
+ * One rendered tag-block in the Observer's XML-tagged chunk format. A block is
+ * the atomic citation unit (carries the entryId attribute). Within an entry's group, a
+ * tool-call block is always immediately followed by its result block so the
+ * pair reads as one adjacency unit.
+ */
+export interface RenderBlock {
+  readonly text: string;
+  readonly entryId: string;
+}
+
+/**
+ * One entry's rendered blocks kept together as an atomic chunking unit (a whole
+ * entry is never split across chunks). An assistant entry carrying tool calls
+ * absorbs each call's matched tool-result entry into its group.
+ */
+export interface RenderGroup {
+  readonly blocks: readonly RenderBlock[];
+}
+
+export interface ChunkOptions {
+  /** Emit a chunk once accumulated entry-groups reach this many tokens (chars/4). */
+  readonly tokenThreshold: number;
+  /** Cap each tool arg/result block to this many tokens (head/tail + marker); null = no cap. */
+  readonly toolBlockCapTokens: number | null;
+  /** Include non-redacted thinking blocks (redacted always skipped). */
+  readonly includeThinking: boolean;
+  /** Emit the `entryId=id` attribute on each tag (the Observer cites source ids;
+   *  recall consumers — Builder/Selector/agent — have no use for raw entry ids). */
+  readonly includeEntryId: boolean;
+  /** Renumber the chunk's `entryId=` attributes as chunk-scoped sequential shorts
+   *  form in first-appearance order) for the model to cite — long stored ids
+   *  are costly to copy and easy to mangle. The chunk reports the mapping
+   *  via `RenderedChunk.idMap` (short → stored id); `allowedIds` and the
+   *  first/last range stay the stored ids. Default: ids as stored. */
+  readonly shortEntryIds?: boolean;
+}
+
+export interface RenderedChunk {
+  readonly text: string;
+  readonly allowedIds: ReadonlySet<string>;
+  /** The lowest-branch-position source entry id in this chunk — the start of the
+   *  chunk's coverage range (coversFromId). Captured at flush time. */
+  readonly firstEntryId: string;
+  /** The highest-branch-position source entry id in this chunk — used to advance
+   *  the observer frontier over the contiguous successful prefix. Captured at
+   *  flush time (blocks are in entry order) so callers need not re-scan the gap. */
+  readonly lastEntryId: string;
+  /** Present when `shortEntryIds` rendered the chunk: this chunk's short →
+   *  stored id map (the validator accepts either form and persists stored). */
+  readonly idMap?: ReadonlyMap<string, string>;
+}
+
+// --- constants --------------------------------------------------------------
+
+/** Entry types the Observer renders as citation sources (the chunk input). */
+const RENDERABLE_ENTRY_TYPES: ReadonlySet<string> = new Set(["message", "custom_message", "branch_summary"]);
+
+/** Whether an entry is an Observer-renderable source (message/custom_message/branch_summary). */
+export function isRenderableEntry(entry: SessionEntry): boolean {
+  return RENDERABLE_ENTRY_TYPES.has(entry.type);
+}
+
+const TRUNCATION_MARKER = "[…truncated…]";
+const THINKING_PREFIX_PATTERN = /^Thinking:\s*/;
+const ATTR_ERROR = "error";
+/** Separator between rendered blocks (each tag on its own line — readability for
+ *  the Observer LLM and recall consumers; the inner text is already cleaned). */
+export const BLOCK_SEP = "\n";
+const FIRST_INDEX = 0;
+
+// --- sanitization & truncation ---------------------------------------------
+
+function sanitizeThinking(text: string): string {
+  return stripAnsi(text).replace(THINKING_PREFIX_PATTERN, "");
+}
+
+/** Cap a tool block's inner text to `capTokens` tokens (chars/4): keep head + tail. null = no cap. */
+function capBlock(text: string, capTokens: number | null): string {
+  if (capTokens === null) return text;
+  const budgetChars = capTokens * CHARS_PER_TOKEN_ESTIMATE;
+  if (text.length <= budgetChars) return text;
+  const half = Math.trunc(budgetChars / 2);
+  const head = text.slice(0, half);
+  const tail = text.slice(text.length - half);
+  return `${head}${TRUNCATION_MARKER}${tail}`;
+}
+
+/** Extract joinable text from a content array (skip images), then strip ANSI. */
+function cleanText(content: string | readonly (TextContent | { readonly type: string })[]): string {
+  const raw =
+    typeof content === "string"
+      ? content
+      : content
+          .filter((part): part is TextContent => part.type === "text")
+          .map((part) => part.text)
+          .join("");
+  return stripAnsi(raw);
+}
+
+// --- block constructors (final inner text already cleaned/capped) -----------
+
+/** A simple-tag block: <TAG [entryId=id]>inner</TAG>. Shared by the plain text/
+ *  thinking tags (they differ only in the tag name). */
+function tagBlock(tag: string, id: string, inner: string, includeEntryId: boolean): RenderBlock {
+  const attr = includeEntryId ? ` entryId=${id}` : "";
+  return { entryId: id, text: `<${tag}${attr}>${inner}</${tag}>` };
+}
+
+const uBlock = (id: string, inner: string, includeEntryId: boolean): RenderBlock =>
+  tagBlock("USER", id, inner, includeEntryId);
+const aBlock = (id: string, inner: string, includeEntryId: boolean): RenderBlock =>
+  tagBlock("ASSISTANT", id, inner, includeEntryId);
+const tBlock = (id: string, inner: string, includeEntryId: boolean): RenderBlock =>
+  tagBlock("THINKING", id, inner, includeEntryId);
+
+function cBlock(id: string, toolName: string, inner: string, includeEntryId: boolean): RenderBlock {
+  const attr = includeEntryId ? ` entryId=${id}` : "";
+  return { entryId: id, text: `<TOOLCALL:${toolName}${attr}>${inner}</TOOLCALL>` };
+}
+
+function rBlock(id: string, inner: string, isError: boolean, includeEntryId: boolean): RenderBlock {
+  const entryAttr = includeEntryId ? ` entryId=${id}` : "";
+  const attr = isError ? `${entryAttr} ${ATTR_ERROR}` : entryAttr;
+  return { entryId: id, text: `<TOOLRESULT${attr}>${inner}</TOOLRESULT>` };
+}
+
+// --- per-entry group rendering ----------------------------------------------
+
+function renderCustomMessageGroup(entry: CustomMessageEntry, includeEntryId: boolean): RenderGroup | null {
+  const text = cleanText(entry.content);
+  if (text.length === 0) return null;
+  return { blocks: [uBlock(entry.id, text, includeEntryId)] };
+}
+
+function renderBranchSummaryGroup(entry: BranchSummaryEntry, includeEntryId: boolean): RenderGroup | null {
+  const text = stripAnsi(entry.summary);
+  if (text.length === 0) return null;
+  return { blocks: [uBlock(entry.id, text, includeEntryId)] };
+}
+
+/**
+ * Render the entry list into entry-bounded groups. Each renderable entry is one
+ * group (its blocks never split across chunks). An assistant entry's tool calls
+ * absorb their matched tool-result entries into the group (C immediately
+ * followed by its R); matched results are consumed and skipped when reached.
+ */
+export function renderGroups(entries: readonly SessionEntry[], options: ChunkOptions): RenderGroup[] {
+  const cap = options.toolBlockCapTokens;
+  const includeEntryId = options.includeEntryId;
+  const resultByCallId = buildResultIndex(entries);
+  const consumedResultIds = new Set<string>();
+  const groups: RenderGroup[] = [];
+
+  for (const entry of entries) {
+    switch (entry.type) {
+      case "message": {
+        const blocks = renderMessageBlocks(entry, options, cap, resultByCallId, consumedResultIds);
+        if (blocks.length > 0) groups.push({ blocks });
+        break;
+      }
+      case "custom_message": {
+        const group = renderCustomMessageGroup(entry, includeEntryId);
+        if (group !== null) groups.push(group);
+        break;
+      }
+      case "branch_summary": {
+        const group = renderBranchSummaryGroup(entry, includeEntryId);
+        if (group !== null) groups.push(group);
+        break;
+      }
+      // operational entries (model_change, thinking_level_change, label,
+      // session_info, custom) are not renderable Observer sources — skip.
+      default:
+        break;
+    }
+  }
+  return groups;
+}
+
+function buildResultIndex(entries: readonly SessionEntry[]): Map<string, SessionMessageEntry> {
+  const resultByCallId = new Map<string, SessionMessageEntry>();
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (typeof message === "object" && message !== null && message.role === "toolResult") {
+      resultByCallId.set(message.toolCallId, entry);
+    }
+  }
+  return resultByCallId;
+}
+
+function renderMessageBlocks(
+  entry: SessionMessageEntry,
+  options: ChunkOptions,
+  cap: number | null,
+  resultByCallId: Map<string, SessionMessageEntry>,
+  consumedResultIds: Set<string>,
+): RenderBlock[] {
+  const message = entry.message;
+  if (typeof message !== "object" || message === null) return [];
+  const id = entry.id;
+  const includeEntryId = options.includeEntryId;
+
+  if (message.role === "user") {
+    const text = cleanText(message.content);
+    return text.length > 0 ? [uBlock(id, text, includeEntryId)] : [];
+  }
+
+  if (message.role === "toolResult") {
+    if (consumedResultIds.has(id)) return []; // already absorbed into its call's group
+    const text = capBlock(cleanText(message.content), cap);
+    return [rBlock(id, text, message.isError, includeEntryId)];
+  }
+
+  if (message.role === "assistant") {
+    return renderAssistantBlocks(message, id, options, cap, resultByCallId, consumedResultIds);
+  }
+  return [];
+}
+
+/** The cleaned non-empty text of each text part of an assistant message, in
+ *  content order (thinking / tool-call parts skipped). Shared by the chunk
+ *  pipeline's assistant renderer and the Selector's text-only preceding-agent
+ *  prelude so the text-extraction logic lives in one place. */
+function assistantTextParts(message: AssistantMessage): string[] {
+  const out: string[] = [];
+  for (const part of message.content) {
+    if (part.type !== "text") continue;
+    const text = cleanText([part]);
+    if (text.length > 0) out.push(text);
+  }
+  return out;
+}
+
+function renderAssistantBlocks(
+  message: AssistantMessage,
+  id: string,
+  options: ChunkOptions,
+  cap: number | null,
+  resultByCallId: Map<string, SessionMessageEntry>,
+  consumedResultIds: Set<string>,
+): RenderBlock[] {
+  const includeEntryId = options.includeEntryId;
+  const blocks: RenderBlock[] = [];
+  for (const part of message.content) {
+    switch (part.type) {
+      case "text": {
+        const text = cleanText([part]);
+        if (text.length > 0) blocks.push(aBlock(id, text, includeEntryId));
+        break;
+      }
+      case "thinking": {
+        if (!options.includeThinking) break;
+        if (part.redacted === true) break; // redacted always skipped
+        const cleaned = sanitizeThinking(part.thinking);
+        if (cleaned.length > 0) blocks.push(tBlock(id, cleaned, includeEntryId));
+        break;
+      }
+      case "toolCall": {
+        emitToolCallPair(part, id, cap, includeEntryId, resultByCallId, consumedResultIds, blocks);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return blocks;
+}
+
+function emitToolCallPair(
+  call: ToolCall,
+  callEntryId: string,
+  cap: number | null,
+  includeEntryId: boolean,
+  resultByCallId: Map<string, SessionMessageEntry>,
+  consumedResultIds: Set<string>,
+  blocks: RenderBlock[],
+): void {
+  // args are structured JSON (not free text) — capped but not ANSI-stripped
+  const argsText = capBlock(JSON.stringify(call.arguments), cap);
+  blocks.push(cBlock(callEntryId, call.name, argsText, includeEntryId));
+
+  const resultEntry = resultByCallId.get(call.id);
+  if (resultEntry === undefined) return; // orphan call (result absent mid-stream)
+  const result = resultEntry.message;
+  if (typeof result !== "object" || result === null || result.role !== "toolResult") return;
+  const resultText = capBlock(cleanText(result.content), cap);
+  blocks.push(rBlock(resultEntry.id, resultText, result.isError, includeEntryId));
+  consumedResultIds.add(resultEntry.id);
+}
+
+// --- public: flat block list (for render verification) ---------------------
+
+export function renderBlocks(entries: readonly SessionEntry[], options: ChunkOptions): RenderBlock[] {
+  return renderGroups(entries, options).flatMap((group) => group.blocks);
+}
+
+// --- chunk splitting (entry-bounded) ----------------------------------------
+
+/**
+ * Split entries into entry-bounded, token-gated chunks. A whole entry (its
+ * group) is never split across chunks. Each chunk reports `allowedIds`: the entryId=
+ * ids cited in its blocks (the allowed source-id set the Observer's
+ * `record_observations` must draw from).
+ */
+export function buildChunks(entries: readonly SessionEntry[], options: ChunkOptions): RenderedChunk[] {
+  const groups = renderGroups(entries, options);
+  const chunks: RenderedChunk[] = [];
+  let current: RenderBlock[] = [];
+  let currentTokens = 0;
+
+  const flush = (): void => {
+    if (current.length === 0) return;
+    let text = current.map((block) => block.text).join(BLOCK_SEP);
+    const allowedIds = new Set(current.map((block) => block.entryId));
+    const firstEntryId = current[FIRST_INDEX]?.entryId ?? "";
+    const lastEntryId = current[current.length - 1]?.entryId ?? "";
+    // short-id mode: renumber this chunk's entryId= attributes as sequential
+    // shorts in first-appearance order and report the short→stored map — the
+    // model cites shorts, every stored id stays real (the attr precedes the
+    // inner text in every block shape, so the first occurrence per block is
+    // always the attribute itself)
+    let idMap: ReadonlyMap<string, string> | undefined;
+    if (options.shortEntryIds === true) {
+      const shortOf = new Map<string, string>();
+      const map = new Map<string, string>();
+      text = current
+        .map((block) => {
+          let short = shortOf.get(block.entryId);
+          if (short === undefined) {
+            short = `e${shortOf.size + 1}`;
+            shortOf.set(block.entryId, short);
+            map.set(short, block.entryId);
+          }
+          return block.text.replace(` entryId=${block.entryId}>`, ` entryId=${short}>`);
+        })
+        .join(BLOCK_SEP);
+      idMap = map;
+    }
+    chunks.push({ text, allowedIds, firstEntryId, lastEntryId, idMap });
+    current = [];
+    currentTokens = 0;
+  };
+
+  for (const group of groups) {
+    current.push(...group.blocks);
+    // chars/4 over the group's joined text (same as estimateContentTokens on the
+    // join) — computed by summing block lengths, avoiding the temp string alloc.
+    const groupChars = group.blocks.reduce((sum, block) => sum + block.text.length, 0);
+    currentTokens += Math.ceil(groupChars / CHARS_PER_TOKEN_ESTIMATE);
+    if (currentTokens >= options.tokenThreshold) flush();
+  }
+  flush(); // trailing remainder
+  return chunks;
+}
+
+/**
+ * Render an assistant message's TEXT as `<ASSISTANT>text</ASSISTANT>` blocks
+ * (text-only — thinking/tool calls dropped), one block per text part (matching
+ * the chunk pipeline), with the same ANSI sanitization. Returns "" when the
+ * message carries no text. Used by the Selector tail pairing (text-only
+ * preceding-agent prelude) — a recall consumer, so it omits `entryId=id`.
+ */
+export function renderAssistantTextBlock(entry: SessionEntry, includeEntryId: boolean): string {
+  if (entry.type !== "message") return "";
+  if (entry.message.role !== "assistant") return "";
+  return assistantTextParts(entry.message)
+    .map((text) => aBlock(entry.id, text, includeEntryId).text)
+    .join("");
+}
+
+/** Cheap presence predicate: true when the entry is an assistant message with
+ *  at least one non-empty cleaned text part. Avoids the full render+join of
+ *  `renderAssistantTextBlock` when only presence is needed (e.g. a scan). */
+export function hasAssistantText(entry: SessionEntry): boolean {
+  if (entry.type !== "message") return false;
+  if (entry.message.role !== "assistant") return false;
+  return assistantTextParts(entry.message).length > 0;
+}
+
+// --- AgentMessage rendering (stage dumps) ------------------------------------
+
+/** AgentMessages carry no entry ids — the produced-message dump render is a
+ *  recall-style consumer (no entryId= attributes). */
+const DUMP_ID = "";
+/** includeEntryId=false for every dump block (same reason as DUMP_ID). */
+const DUMP_OMIT_ENTRY_ID = false;
+
+function isUserMessage(message: AgentMessage): message is UserMessage {
+  return (message as UserMessage).role === "user";
+}
+
+function isAssistantMessage(message: AgentMessage): message is AssistantMessage {
+  return (message as AssistantMessage).role === "assistant";
+}
+
+function isToolResultMessage(message: AgentMessage): message is ToolResultMessage {
+  return (message as ToolResultMessage).role === "toolResult";
+}
+
+/** Render `AgentMessage[]` into the chunk tag grammar, full fidelity (no caps,
+ *  thinking included, redacted thinking skipped) — the PRODUCED-message dump
+ *  renderer. A tool call's matched result is absorbed right after the call
+ *  (adjacency unit); an orphan result renders standalone in place. Unknown
+ *  message shapes are skipped. */
+export function renderAgentMessages(messages: readonly AgentMessage[]): string {
+  const resultByCallId = new Map<string, ToolResultMessage>();
+  for (const message of messages) {
+    if (isToolResultMessage(message)) resultByCallId.set(message.toolCallId, message);
+  }
+  const consumedResultIds = new Set<string>();
+  const blocks: string[] = [];
+
+  const emitResult = (result: ToolResultMessage): void => {
+    blocks.push(rBlock(DUMP_ID, cleanText(result.content), result.isError, DUMP_OMIT_ENTRY_ID).text);
+    consumedResultIds.add(result.toolCallId);
+  };
+
+  for (const message of messages) {
+    if (isToolResultMessage(message)) {
+      if (consumedResultIds.has(message.toolCallId)) continue; // absorbed into its call
+      emitResult(message);
+      continue;
+    }
+    if (isUserMessage(message)) {
+      const text = cleanText(message.content);
+      if (text.length > 0) blocks.push(uBlock(DUMP_ID, text, DUMP_OMIT_ENTRY_ID).text);
+      continue;
+    }
+    if (!isAssistantMessage(message)) continue;
+    for (const part of message.content) {
+      switch (part.type) {
+        case "text": {
+          const text = cleanText([part]);
+          if (text.length > 0) blocks.push(aBlock(DUMP_ID, text, DUMP_OMIT_ENTRY_ID).text);
+          break;
+        }
+        case "thinking": {
+          if (part.redacted === true) break; // redacted always skipped
+          const cleaned = sanitizeThinking(part.thinking);
+          if (cleaned.length > 0) blocks.push(tBlock(DUMP_ID, cleaned, DUMP_OMIT_ENTRY_ID).text);
+          break;
+        }
+        case "toolCall": {
+          // args are structured JSON — full fidelity, not ANSI-stripped
+          blocks.push(cBlock(DUMP_ID, part.name, JSON.stringify(part.arguments), DUMP_OMIT_ENTRY_ID).text);
+          const result = resultByCallId.get(part.id);
+          if (result !== undefined) emitResult(result);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  }
+  return blocks.join(BLOCK_SEP);
+}
+
+/** Render the stage INPUT messages verbatim: what the LLM received, exactly as
+ *  it received it. Stage inputs are user messages whose string content already
+ *  carries its own format (the Observer's chunk-grammar text with entry tags,
+ *  the Builder/Selector's rendered views) — wrapping them in message-level tags
+ *  would nest same-name tags over that grammar (`…</USER></USER>`, thinking
+ *  inside a "USER" wrapper), so no wrapper is added at all. A message with
+ *  structured content (not the stage shapes) falls back to the recall-style
+ *  block render. */
+export function renderStageInputMessages(messages: readonly AgentMessage[]): string {
+  const parts: string[] = [];
+  for (const message of messages) {
+    if (isUserMessage(message) && typeof message.content === "string") {
+      const text = stripAnsi(message.content);
+      if (text.length > 0) parts.push(text);
+      continue;
+    }
+    const rendered = renderAgentMessages([message]);
+    if (rendered.length > 0) parts.push(rendered);
+  }
+  return parts.join(BLOCK_SEP);
+}

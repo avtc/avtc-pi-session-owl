@@ -90,7 +90,7 @@ describe("runRegexTests", () => {
   });
 
   it("timeout 0 is clamped to the minimum floor (a fast pattern still completes)", async () => {
-    // a configured/legacy 0 (the removed "Off" preset) is floored to the
+    // a configured/legacy 0 is floored to the
     // minimum so a catastrophic pattern cannot freeze the reused worker; a
     // fast pattern completes well within the floor and returns normally.
     const res = await runRegexTests(/foo/, ["foobar"], 0);

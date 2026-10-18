@@ -33,7 +33,7 @@ export const FIRST_PASS = 1;
  *  hallucinated tool names under a degraded local model), not work — each turn
  *  completes well under the per-call timeout, so nothing else bounds the pass
  *  (maxTurns is NO_TURN_LIMIT). */
-export const CONVERGENCE_NO_PROGRESS_TURNS = 6;
+export const CONVERGENCE_NO_PROGRESS_TURNS = 50;
 
 /** A per-pass outcome: applied mutate count + whether try_finish converged. */
 export interface ConvergenceOutcome {

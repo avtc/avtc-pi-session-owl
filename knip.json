@@ -4,13 +4,16 @@
     "index.ts",
     "scripts/no-optional-params.cjs",
     "scripts/no-bare-literals.cjs",
-    "scripts/test-low-priority.cjs"
+    "scripts/test-low-priority.cjs",
+    "claude/hooks/register.ts"
   ],
   "project": [
     "index.ts",
     "src/**/*.ts",
     "tests/**/*.ts",
-    "scripts/**/*.{cjs,mjs,js,ts}"
+    "scripts/**/*.{cjs,mjs,js,ts}",
+    "claude/hooks/**/*.{js,ts}",
+    "claude/host/**/*.ts"
   ],
   "ignore": [
     "**/docs/**"

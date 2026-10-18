@@ -548,7 +548,7 @@ export interface CatUnit {
 }
 
 /** Resolve an observation's verbatim-source details text (full render, no
- *  entry=id) for the cat/find body. Uses the GraphStore session resolver; returns
+ *  entryId=id) for the cat/find body. Uses the GraphStore session resolver; returns
  *  the one-line summary when the verbatim source is unavailable (source_unavailable)
  *  so the body still has something to show. Returns undefined for an unknown id. */
 function detailsTextFor(obs: Observation): string {

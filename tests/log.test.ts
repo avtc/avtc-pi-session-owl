@@ -1,20 +1,11 @@
-// log: `debug` honors the live `debugLog` setting (read each call so toggling it
-// in /owl:settings takes effect immediately). info/warn/error always write.
+// log: trace logs are ALWAYS on (nothing gates them; the dump limit
+// governs dump files only).
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  _resetGetSessionOwlSettings,
-  _resetSessionOwlSettingsHandle,
-  _setGetSessionOwlSettings,
-  type SessionOwlConfig,
-} from "../src/config/schema.js";
+import { _resetGetSessionOwlSettings, _resetSessionOwlSettingsHandle } from "../src/config/schema.js";
 import { _setBaseLoggerForTest, clearLogSessionScope, log, setLogSessionScope } from "../src/log.js";
 
 // Swap in a spy sink so we observe calls without touching the real log file.
 const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-
-function settingsWith(debugLog: boolean): void {
-  _setGetSessionOwlSettings(() => ({ debugLog }) as unknown as SessionOwlConfig);
-}
 
 describe("log", () => {
   beforeEach(() => {
@@ -30,33 +21,15 @@ describe("log", () => {
     _resetSessionOwlSettingsHandle();
   });
 
-  it("writes a debug message only when debugLog is on", () => {
+  it("always writes debug trace logs (nothing gates them)", () => {
     _setBaseLoggerForTest(sink);
-    settingsWith(false);
-    log.debug("off");
-    expect(sink.debug).not.toHaveBeenCalled();
-
-    settingsWith(true);
-    log.debug("on");
+    log.debug("trace");
     expect(sink.debug).toHaveBeenCalledTimes(1);
-    expect(sink.debug).toHaveBeenCalledWith("on");
+    expect(sink.debug).toHaveBeenCalledWith("trace");
   });
 
-  it("reads debugLog live each call (a mid-session toggle takes effect immediately)", () => {
+  it("always writes info/warn/error", () => {
     _setBaseLoggerForTest(sink);
-    settingsWith(false);
-    log.debug("a"); // suppressed
-    settingsWith(true);
-    log.debug("b"); // written
-    settingsWith(false);
-    log.debug("c"); // suppressed again
-    expect(sink.debug).toHaveBeenCalledTimes(1);
-    expect(sink.debug).toHaveBeenCalledWith("b");
-  });
-
-  it("always writes info/warn/error regardless of debugLog", () => {
-    _setBaseLoggerForTest(sink);
-    settingsWith(false);
     log.info("i");
     log.warn("w");
     log.error("e", new Error("boom"));
@@ -68,24 +41,9 @@ describe("log", () => {
   it("tags every line with the session scope ([s-<first 6 chars>]) once set", () => {
     _setBaseLoggerForTest(sink);
     setLogSessionScope("01a02596-de2e-707b-8016-1df74d3f13ce");
-    settingsWith(false);
     log.info("hello");
-    // the scope must not change the debug gating — debug stays suppressed
-    log.debug("suppressed");
-    expect(sink.debug).not.toHaveBeenCalled();
-    settingsWith(true);
     log.debug("dbg");
     expect(sink.info).toHaveBeenCalledWith("[s-01a025] hello");
     expect(sink.debug).toHaveBeenCalledWith("[s-01a025] dbg");
-  });
-
-  it("clearLogSessionScope drops the tag; a short id is kept whole", () => {
-    _setBaseLoggerForTest(sink);
-    setLogSessionScope("abc");
-    log.info("short");
-    clearLogSessionScope();
-    log.info("plain");
-    expect(sink.info).toHaveBeenCalledWith("[s-abc] short");
-    expect(sink.info).toHaveBeenCalledWith("plain");
   });
 });

@@ -452,7 +452,7 @@ describe("captureInitialPromptIfAbsent", () => {
   });
 
   it("leaves nGoal.summary empty for the goal-extract stage (no mechanical seed)", async () => {
-    // The capture no longer seeds nGoal.summary from the first line — the
+    // The capture leaves nGoal.summary empty — the
     // goal-extract stage distills it from the verbatim prompt. The summary
     // stays empty here (no goal-extract model wired in this unit test).
     const branch = [userEntry("u1", "  \nBuild the memory extension\nDetails follow")];

@@ -1,0 +1,132 @@
+{
+  "name": "parallel-batch",
+  "description": "t12 shape: one API response (message.id resp-p) carrying thinking + 3 tool_use rows; three tool_result rows (array-of-blocks content); renders through the vendored renderGroups as adjacent call+result pairs.",
+  "rows": [
+    {
+      "uuid": "p-0",
+      "parentUuid": null,
+      "door": "prompt",
+      "origin": { "kind": "composer" },
+      "message": { "type": "user", "content": [{ "type": "text", "text": "Check all three services" }] },
+      "timestamp": "2026-10-06T11:00:00.000Z"
+    },
+    {
+      "uuid": "p-1",
+      "parentUuid": "p-0",
+      "door": "response",
+      "origin": { "kind": "model", "model": "claude-sonnet-4" },
+      "message": {
+        "type": "assistant",
+        "id": "resp-p",
+        "apiBlockIndex": 0,
+        "content": [{ "type": "thinking", "thinking": "All three are independent — parallel calls" }]
+      },
+      "timestamp": "2026-10-06T11:00:01.000Z"
+    },
+    {
+      "uuid": "p-2",
+      "parentUuid": "p-1",
+      "door": "response",
+      "origin": { "kind": "model", "model": "claude-sonnet-4" },
+      "message": {
+        "type": "assistant",
+        "id": "resp-p",
+        "apiBlockIndex": 1,
+        "content": [{ "type": "tool_use", "id": "call-a", "name": "Check", "input": { "service": "api" } }]
+      },
+      "timestamp": "2026-10-06T11:00:02.000Z"
+    },
+    {
+      "uuid": "p-3",
+      "parentUuid": "p-2",
+      "door": "response",
+      "origin": { "kind": "model", "model": "claude-sonnet-4" },
+      "message": {
+        "type": "assistant",
+        "id": "resp-p",
+        "apiBlockIndex": 2,
+        "content": [{ "type": "tool_use", "id": "call-b", "name": "Check", "input": { "service": "db" } }]
+      },
+      "timestamp": "2026-10-06T11:00:03.000Z"
+    },
+    {
+      "uuid": "p-4",
+      "parentUuid": "p-3",
+      "door": "response",
+      "origin": { "kind": "model", "model": "claude-sonnet-4" },
+      "message": {
+        "type": "assistant",
+        "id": "resp-p",
+        "apiBlockIndex": 3,
+        "content": [{ "type": "tool_use", "id": "call-c", "name": "Check", "input": { "service": "cache" } }]
+      },
+      "timestamp": "2026-10-06T11:00:04.000Z"
+    },
+    {
+      "uuid": "p-5",
+      "parentUuid": "p-4",
+      "door": "tool-result",
+      "origin": { "kind": "tool", "tool": "Check" },
+      "sourceToolAssistantUUID": "p-2",
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call-a",
+            "content": [{ "type": "text", "text": "api: ok" }]
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T11:00:05.000Z"
+    },
+    {
+      "uuid": "p-6",
+      "parentUuid": "p-5",
+      "door": "tool-result",
+      "origin": { "kind": "tool", "tool": "Check" },
+      "sourceToolAssistantUUID": "p-3",
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call-b",
+            "content": [{ "type": "text", "text": "db: degraded" }]
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T11:00:06.000Z"
+    },
+    {
+      "uuid": "p-7",
+      "parentUuid": "p-6",
+      "door": "tool-result",
+      "origin": { "kind": "tool", "tool": "Check" },
+      "sourceToolAssistantUUID": "p-4",
+      "message": {
+        "type": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call-c",
+            "content": [{ "type": "text", "text": "cache: ok" }]
+          }
+        ]
+      },
+      "timestamp": "2026-10-06T11:00:07.000Z"
+    },
+    {
+      "uuid": "p-8",
+      "parentUuid": "p-7",
+      "door": "response",
+      "origin": { "kind": "model", "model": "claude-sonnet-4" },
+      "message": {
+        "type": "assistant",
+        "id": "resp-p2",
+        "content": [{ "type": "text", "text": "All checks complete; db degraded." }]
+      },
+      "timestamp": "2026-10-06T11:00:08.000Z"
+    }
+  ]
+}

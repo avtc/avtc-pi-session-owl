@@ -1,0 +1,110 @@
+{
+  "description": "Subagent (sidechain) transcript at <parent>/subagents/agent-<hash>.jsonl: task prompt, a system-reminder isMeta row, thinking/tool_use/tool_result rows, final output row \u2014 every row isSidechain:true.",
+  "rows": [
+    {
+      "kind": "prompt",
+      "uuid": "s-1",
+      "parentUuid": null,
+      "sessionId": "sess-main",
+      "agentId": "a0036ff",
+      "isSidechain": true,
+      "timestamp": "2026-10-06T11:05:01.000Z",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "List the config keys"
+      }
+    },
+    {
+      "kind": "meta-user",
+      "uuid": "s-2",
+      "parentUuid": "s-1",
+      "sessionId": "sess-main",
+      "agentId": "a0036ff",
+      "isSidechain": true,
+      "isMeta": true,
+      "timestamp": "2026-10-06T11:05:01.000Z",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "<system-reminder>you are a subagent</system-reminder>"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "tool_use",
+      "uuid": "s-3",
+      "parentUuid": "s-2",
+      "sessionId": "sess-main",
+      "agentId": "a0036ff",
+      "isSidechain": true,
+      "timestamp": "2026-10-06T11:05:03.000Z",
+      "type": "assistant",
+      "message": {
+        "id": "sresp-1",
+        "model": "glm-5.1",
+        "apiBlockIndex": 0,
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "scall-1",
+            "name": "Read",
+            "input": {
+              "path": "config.json"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "tool_result",
+      "uuid": "s-4",
+      "parentUuid": "s-3",
+      "sessionId": "sess-main",
+      "agentId": "a0036ff",
+      "isSidechain": true,
+      "timestamp": "2026-10-06T11:05:04.000Z",
+      "type": "user",
+      "sourceToolAssistantUUID": "s-3",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "scall-1",
+            "content": "theme, language"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "s-5",
+      "parentUuid": "s-4",
+      "sessionId": "sess-main",
+      "agentId": "a0036ff",
+      "isSidechain": true,
+      "timestamp": "2026-10-06T11:05:06.000Z",
+      "type": "assistant",
+      "message": {
+        "id": "sresp-2",
+        "model": "glm-5.1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Keys: theme, language."
+          }
+        ]
+      }
+    },
+    {
+      "kind": "metadata-tip",
+      "uuid": null,
+      "raw": "{\"type\":\"last-prompt\",\"sessionId\":\"sess-main\",\"leafUuid\":\"s-5\"}"
+    }
+  ]
+}

@@ -391,7 +391,7 @@ describe("renderSummary — ## Memory use section (recall-before-relying guidanc
     expect(useIdx).toBeLessThan(promptIdx);
   });
 
-  it("the preamble keeps only the tree sentence — the old redo/assume sentence is gone (subsumed)", () => {
+  it("the preamble carries only the tree sentence (no redo/assume sentence)", () => {
     const out = renderSummary({
       graph: emptyGraph(),
       selectedTree: null,

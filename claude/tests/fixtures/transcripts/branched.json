@@ -1,0 +1,73 @@
+{
+  "description": "Rewind/branch transcript: chain m-1..m-5, then a dead tail m-6 (abandoned after a rewind) SIBLING m-6b off m-5 — last-prompt names m-6b as the leaf. The live path excludes the dead m-6 row even though it sits earlier in file order.",
+  "rows": [
+    {
+      "kind": "prompt",
+      "uuid": "m-1",
+      "parentUuid": null,
+      "sessionId": "sess-br",
+      "timestamp": "2026-10-06T12:00:01.000Z",
+      "type": "user",
+      "message": { "role": "user", "content": "start" }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "m-2",
+      "parentUuid": "m-1",
+      "sessionId": "sess-br",
+      "timestamp": "2026-10-06T12:00:02.000Z",
+      "type": "assistant",
+      "message": { "id": "r1", "model": "glm-5.1", "content": [{ "type": "text", "text": "one" }] }
+    },
+    {
+      "kind": "prompt",
+      "uuid": "m-3",
+      "parentUuid": "m-2",
+      "sessionId": "sess-br",
+      "timestamp": "2026-10-06T12:00:03.000Z",
+      "type": "user",
+      "message": { "role": "user", "content": "two" }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "m-4",
+      "parentUuid": "m-3",
+      "sessionId": "sess-br",
+      "timestamp": "2026-10-06T12:00:04.000Z",
+      "type": "assistant",
+      "message": { "id": "r2", "model": "glm-5.1", "content": [{ "type": "text", "text": "two-answer" }] }
+    },
+    {
+      "kind": "prompt",
+      "uuid": "m-5",
+      "parentUuid": "m-4",
+      "sessionId": "sess-br",
+      "timestamp": "2026-10-06T12:00:05.000Z",
+      "type": "user",
+      "message": { "role": "user", "content": "three" }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "m-6",
+      "parentUuid": "m-5",
+      "sessionId": "sess-br",
+      "timestamp": "2026-10-06T12:00:06.000Z",
+      "type": "assistant",
+      "message": { "id": "r3", "model": "glm-5.1", "content": [{ "type": "text", "text": "abandoned answer (dead tail)" }] }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "m-6b",
+      "parentUuid": "m-5",
+      "sessionId": "sess-br",
+      "timestamp": "2026-10-06T12:00:07.000Z",
+      "type": "assistant",
+      "message": { "id": "r3b", "model": "glm-5.1", "content": [{ "type": "text", "text": "rewound answer (live)" }] }
+    },
+    {
+      "kind": "metadata-tip",
+      "uuid": null,
+      "raw": "{\"type\":\"last-prompt\",\"sessionId\":\"sess-br\",\"leafUuid\":\"m-6b\"}"
+    }
+  ]
+}

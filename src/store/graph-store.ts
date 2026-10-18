@@ -10,7 +10,7 @@
 // mutators (apply-then-persist), then call the store to record the delta. The
 // store applies mutations ONLY during load() reconstruction (event-sourcing).
 
-import { clearDetailsCache, type EntryResolver } from "../format/details.js";
+import { clearAllDetailsCaches, clearDetailsCache, type EntryResolver } from "../format/details.js";
 import {
   childLinksConsistent,
   everyObservationAttached,
@@ -20,6 +20,11 @@ import {
 import { type GraphDelta, parseSeq, recomputeRange } from "../graph/mutations.js";
 import { applyDelta } from "../graph/replay.js";
 import { log } from "../log.js";
+import {
+  currentConversationKey as ambientConversationKey,
+  DEFAULT_CONVERSATION_KEY,
+  setActiveConversationKey,
+} from "../runtime/conversation-key.js";
 import {
   makeNode,
   type Node,
@@ -50,6 +55,8 @@ import {
   USAGE_TYPE,
   type UsageLedger,
 } from "./codecs.js";
+
+export { currentConversationKey, DEFAULT_CONVERSATION_KEY } from "../runtime/conversation-key.js";
 
 // --- StoreContext port (narrow, for DI/testability) ------------------------
 
@@ -113,6 +120,51 @@ export interface GraphStore {
 
 let store: GraphStore | null = null;
 
+/** Resident conversation states: key → live store. Activation is a pointer
+ *  flip — no disk, no reset when the key is resident. NO count pressure:
+ *  every parallel subagent stays resident (no LRU, no cap) — a state drops
+ *  only on an event: session.end teardown, a subagent handoff, a failed swap.
+ *  A miss costs the ordinary cold load, never more than today's swap. */
+const residentStores = new Map<string, GraphStore>();
+
+/** Insert/refresh a resident state (recency bookkeeping only — eviction is
+ *  event-driven, never size-driven). */
+function noteResident(key: string, state: GraphStore): void {
+  residentStores.delete(key);
+  residentStores.set(key, state);
+}
+
+/** Point the singleton at `key`. A resident hit is a pure pointer flip (the
+ *  caller must apply its own per-process seams); a miss evicts nothing and
+ *  lets the next `getGraphStore()` lazily create the key's fresh state. */
+export function activateConversation(key: string): { resident: boolean } {
+  setActiveConversationKey(key);
+  const hit = residentStores.get(key);
+  if (hit !== undefined) {
+    noteResident(key, hit); // recency bookkeeping (no size cap)
+    store = hit;
+    return { resident: true };
+  }
+  store = null;
+  return { resident: false };
+}
+
+/** Drop one key's resident state (session.end teardown, subagent handoff,
+ *  failed swap). */
+export function evictConversation(key: string): void {
+  residentStores.delete(key);
+  if (ambientConversationKey() === key) store = null;
+}
+
+/** Drop EVERY resident state and return to the default key (process reset /
+ *  test seam). */
+export function resetConversationStates(): void {
+  residentStores.clear();
+  store = null;
+  setActiveConversationKey(DEFAULT_CONVERSATION_KEY);
+  clearAllDetailsCaches();
+}
+
 /** Access the module singleton (lazily created). */
 export function getGraphStore(): GraphStore {
   if (store === null) {
@@ -129,13 +181,16 @@ export function getGraphStore(): GraphStore {
       observerFrontier: null,
       resolveEntries: null,
     };
+    noteResident(ambientConversationKey(), store);
   }
   return store;
 }
 
-/** Drop all in-memory state (`/new` starts a fresh graph). Also clears the
- *  per-observation details cache (entry ids + renders are per-session). */
+/** Drop all in-memory state for the ACTIVE key (`/new` starts a fresh
+ *  graph). Also clears the per-observation details cache (entry ids + renders
+ *  are per-session). */
 export function resetForNewSession(): void {
+  residentStores.delete(ambientConversationKey());
   store = null;
   clearDetailsCache();
 }
@@ -269,6 +324,7 @@ export function resetGraphForReuse(ctx: StoreContext): void {
     nextObsId: s.graph.nextObsId,
     nextNodeId: 1,
   });
+  s.graph.rebuildPending = true; // detached records attach batch by batch (no parking node)
   s.selectedTree = null;
 }
 
@@ -297,7 +353,7 @@ function findLatestSnapshot(
     // wrote (type === "session-owl") that fails decode is genuine corruption (warn).
     // A foreign snapshot (another extension's compaction details, a native compaction,
     // or a future unknown producer) legitimately fails decode — expected when
-    // switching extensions, so it stays debug-level (silent unless debugLog on)
+    // switching extensions, so it stays debug-level instead of warning on every load.
     // instead of flooding the log on every load.
     const raw = e.details as { type?: unknown };
     if (raw.type === DETAILS_TYPE) {
@@ -378,7 +434,7 @@ function materializeBase(details: SessionOwlDetails): SessionOwlGraph {
  *    load, so nothing captured is ever dropped.
  *  Each node whose evidence set changed has its range recomputed once.
  *  Returns the number of re-wrapped orphans (a corruption diagnostic). */
-function reconcileLinks(graph: SessionOwlGraph): number {
+function reconcileLinks(graph: SessionOwlGraph, reusePending: boolean): number {
   const touched = new Set<NodeId>();
   let rewrapped = 0;
   // Pass 1: prune phantom listings; collect the surviving listers per record.
@@ -422,8 +478,17 @@ function reconcileLinks(graph: SessionOwlGraph): number {
   // Pass 3: unlisted records. oInitialPrompt is nGoal's permanent seed — the
   // session-start seeding owns it when nGoal itself is absent (a fresh branch
   // recaptures the prompt), so it is never re-wrapped or dropped here.
+  // Behind a reuse rescan marker, unlisted records are the rebuild's PENDING
+  // pool (deliberately detached until their batch attaches them) — they are
+  // neither relisted nor re-wrapped, and the graph is marked rebuild-pending.
+  let sawPending = false;
   for (const [obsId, obs] of graph.observations) {
     if (listersOf.has(obsId)) continue;
+    if (reusePending) {
+      if (obs.id === O_INITIAL_PROMPT) continue;
+      sawPending = true;
+      continue;
+    }
     const parent = graph.nodes.get(obs.parentNode);
     if (parent !== undefined) {
       if (!parent.observationIds.includes(obsId)) parent.observationIds.push(obsId);
@@ -437,6 +502,7 @@ function reconcileLinks(graph: SessionOwlGraph): number {
       rewrapped += 1;
     }
   }
+  if (sawPending) graph.rebuildPending = true;
   for (const id of touched) {
     const n = graph.nodes.get(id);
     if (n !== undefined) recomputeRange(graph, n);
@@ -581,8 +647,12 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
   }
 
   // 3. reconcile observation links (node lists are the authority; unlisted
-  //    records link into their wrapper or are re-wrapped in a fresh root).
-  const rewrappedOrphans = reconcileLinks(graph);
+  //    records link into their wrapper or are re-wrapped in a fresh root —
+  //    EXCEPT behind a reuse rescan marker, where unlisted = the rebuild's
+  //    pending pool). The latest marker's mode decides: plainAt === structureAt
+  //    means the latest rescan marker is a plain one (no reuse pending).
+  const latestIsReuse = structureAt !== -1 && plainAt !== structureAt;
+  const rewrappedOrphans = reconcileLinks(graph, latestIsReuse);
 
   // 4. Guarantee the id counters are past every loaded node/observation id.
   //    The snapshot fields + graph_delta replay advance them in the common case,
@@ -608,8 +678,8 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
   //    genuinely corrupt/truncated delta sequence. Structural invariants only
   //    (not nGoal/seed — those hold via seedNGoal). WARN, not throw (tolerant).
   const structurallyValid =
-    everyObservationAttached(graph) &&
-    exactlyOneNodePerObservation(graph) &&
+    (graph.rebuildPending || everyObservationAttached(graph)) &&
+    (graph.rebuildPending || exactlyOneNodePerObservation(graph)) &&
     childLinksConsistent(graph) &&
     noCycles(graph);
   if (!structurallyValid) {

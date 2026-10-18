@@ -739,9 +739,9 @@ describe("evaluateSelectorTrigger", () => {
 describe("onTurnEnd chained launch", () => {
   // A single turn_end acquires the lock ONCE and runs observe → build → select
   // (each stage that fires) as one chained run, re-evaluating Builder/Selector
-  // AFTER the Observer completes so they see the Observer's new nodes. This fixes
-  // the starvation where a Builder/Selector that fired on the same turn as the
-  // Observer used to SKIP because the Observer held the lock.
+  // AFTER the Observer completes so they see the Observer's new nodes (a
+  // per-stage launch would starve the Builder/Selector that fired on the same
+  // turn as the Observer).
   it("runs observe → build → select in order when all three fire (one lock)", async () => {
     const order: string[] = [];
     setStageRuns({
@@ -820,7 +820,7 @@ describe("onTurnEnd chained launch", () => {
     );
     await new Promise((r) => setTimeout(r, 10));
     // The Builder ran ONLY because the re-eval saw the Observer's new nodes —
-    // the pre-eval (0 new nodes) would have skipped it (the starvation bug).
+    // the pre-eval (0 new nodes) would have skipped it (the starvation this guards).
     expect(builderRan).toBe(true);
     expect(runLockInFlight()).toBe(false);
   });
@@ -850,7 +850,7 @@ describe("onTurnEnd chained launch", () => {
     expect(runLockInFlight()).toBe(false);
   });
 
-  it("SKIPs the whole turn when a run is already in flight (no queue)", async () => {
+  it("SKIPs while a run is in flight; the gap re-evaluates ONCE the chain releases (settle-rearm)", async () => {
     const handle = acquireOrSkip("observe"); // occupy the lock
     if (handle === null) throw new Error("lock not acquired");
     const order: string[] = [];
@@ -870,11 +870,23 @@ describe("onTurnEnd chained launch", () => {
       getContextUsage: () => ({ tokens: 100000, contextWindow: 200000, percent: 50 }),
       sessionManager: { getLeafId: () => "leaf-1", getBranch: () => entries },
     } as unknown as ExtensionContext;
+    // the armed gap re-reads the LIVE settings at re-entry (production gate
+    // semantics) — pin the module config to this test's profile
+    _setGetSessionOwlSettings(() => ({
+      ...DEFAULT_CONFIG,
+      renderMode: "selected-root",
+      observerThresholdTokens: 1,
+      builderMode: "on-session-context-threshold",
+      builderSessionContextThresholdTokens: 1,
+      selectorMode: "on-session-context-threshold",
+      selectorSessionContextThresholdTokens: 1,
+    }));
     onTurnEnd(
       makeInput({
         ctx,
         settings: {
           ...DEFAULT_CONFIG,
+          renderMode: "selected-root",
           observerThresholdTokens: 1,
           builderMode: "on-session-context-threshold",
           builderSessionContextThresholdTokens: 1,
@@ -884,8 +896,12 @@ describe("onTurnEnd chained launch", () => {
       }),
     );
     await new Promise((r) => setTimeout(r, 10));
-    expect(order).toEqual([]); // skipped — nothing ran; the gap batches on the next trigger
+    expect(order).toEqual([]); // skipped — nothing ran while the holder owns the lock
     handle.release();
+    await new Promise((r) => setTimeout(r, 10));
+    // the armed gap re-entered and ran the full chain after the release
+    expect(order).toEqual(["observe", "build", "select"]);
+    expect(runLockInFlight()).toBe(false);
   });
 
   it("skips the remaining phases when `enabled` flips off mid-run (live master switch, between-phase re-check)", async () => {

@@ -22,10 +22,9 @@ export interface ConflictHit {
 }
 
 /**
- * Known compaction-handling packages (source-verified 2026-08 — see
- * .featyard/research/2026-08-26-pi-compaction-memory-landscape.md). Matched as
- * substrings against settings entries, so forks and local checkouts (path or
- * git sources) match too.
+ * Known compaction-handling packages (source-verified). Matched as substrings
+ * against settings entries, so forks and local checkouts (path or git sources)
+ * match too.
  */
 export const CONFLICT_PACKAGE_MARKERS: readonly string[] = [
   "pi-observational-memory",
@@ -83,7 +82,7 @@ const COMPACT_HOOK_MARKER = "session_before_compact";
  * avtc-pi-notification rings a bell on compaction) — so the generic net looks
  * for the override return shape, not the registration alone. Best-effort by
  * nature (indirect/delegated returns defeat syntax matching — those live on
- * the curated list); validated 2026-08 against 30 real packages: 9/16 known
+ * the curated list); validated against 30 real packages: 9/16 known
  * overriders matched, zero false positives on observers.
  */
 const COMPACT_OVERRIDE_PATTERN =

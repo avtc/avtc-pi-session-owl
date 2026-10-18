@@ -77,7 +77,7 @@ describe("extractTouchedFiles", () => {
       toolCallEntry("e4", "2026-07-28T10:07:00Z", "read", { path: "/c.ts" }),
     ];
     const files = extractTouchedFiles(ctxWith(entries), NO_CUT);
-    // the tool name IS the op — edit is distinct from write (today both were "write").
+    // the tool name IS the op — edit is distinct from write.
     expect(files).toEqual([
       { path: "/a.ts", timestamp: "2026-07-28T10:05:00.000Z", op: "write" },
       { path: "/b.ts", timestamp: "2026-07-28T10:06:00.000Z", op: "edit" },

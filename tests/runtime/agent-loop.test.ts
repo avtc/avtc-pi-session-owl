@@ -525,6 +525,54 @@ describe("runStage — per-LLM-call bounds (maxTokens + timeout)", () => {
     const result = await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }), timeoutMs: 50 }));
     expect(result.aborted).toBe(false);
   });
+
+  it("inter-token: a slow trickle (every event gap under the window) never aborts, however long the total", async () => {
+    // 10 events, 15ms apart, window 50ms — total 150ms OVER the window, yet
+    // every gap is under it: the window re-arms per event and never fires.
+    const events: AgentEvent[] = Array.from({ length: 10 }, (_, i) => messageEnd(usageOf(i + 1, 1, 0, 0, 0)));
+    events.push(agentEnd([]));
+    const slowTrickle: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _c, _cfg, signal) => {
+      const stream = new EventStream<AgentEvent, AgentMessage[]>(
+        (e) => e.type === "agent_end",
+        () => [],
+      );
+      let i = 0;
+      const pushNext = () => {
+        if (signal?.aborted || i >= events.length) {
+          stream.end([]);
+          return;
+        }
+        stream.push(events[i]);
+        i += 1;
+        setTimeout(pushNext, 15);
+      };
+      setTimeout(pushNext, 15);
+      return stream;
+    };
+    const result = await runStage(baseInput({ loopFn: slowTrickle, timeoutMs: 50 }));
+    expect(result.aborted).toBe(false);
+  });
+
+  it("inter-token: silence longer than the window mid-stream aborts (stuck between tokens while the response is unfinished)", async () => {
+    // first event lands, then silence forever — the re-armed window fires.
+    const stallingAfterFirst: typeof import("@earendil-works/pi-agent-core").agentLoop = (_p, _c, _cfg, signal) => {
+      const stream = new EventStream<AgentEvent, AgentMessage[]>(
+        (e) => e.type === "agent_end",
+        () => [],
+      );
+      stream.push(messageEnd(usageOf(1, 1, 0, 0, 0)));
+      if (signal) {
+        const onAbort = (): void => {
+          stream.end([]);
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }
+      return stream;
+    };
+    const result = await runStage(baseInput({ loopFn: stallingAfterFirst, timeoutMs: 50 }));
+    expect(result.aborted).toBe(true);
+  });
 });
 
 describe("runStage — error propagation", () => {
@@ -806,9 +854,9 @@ describe("runStage — tool-call debug logging", () => {
     _resetGetSessionOwlSettings();
   });
 
-  it("logs each tool_execution_end (name + ok/error + bounded error text) when debugLog is on", async () => {
+  it("logs each tool_execution_end (name + ok/error + bounded error text) when the dump limit is above 0", async () => {
     _setBaseLoggerForTest(sink);
-    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, debugLog: true }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, debugDumpLimit: 3 }));
     sink.debug.mockClear();
     const events = [
       toolExecutionEnd("record_observations", false, "accepted: all"),
@@ -825,13 +873,13 @@ describe("runStage — tool-call debug logging", () => {
     expect((errLine ?? "").split("\n")).toHaveLength(1); // one physical line
   });
 
-  it("logs nothing when debugLog is off", async () => {
+  it("still writes trace logs when the dump limit is 0 (logs are never disabled)", async () => {
     _setBaseLoggerForTest(sink);
-    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, debugLog: false }));
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, debugDumpLimit: 0 }));
     sink.debug.mockClear();
     const events = [toolExecutionEnd("record_observations", false, "accepted: all"), agentEnd([])];
     await runStage(baseInput({ loopFn: makeFakeLoop({ events, messages: [] }) }));
-    expect(sink.debug).not.toHaveBeenCalled();
+    expect(sink.debug).toHaveBeenCalled();
   });
 });
 
@@ -852,7 +900,7 @@ describe("runStage — stage dump seam", () => {
         timestamp: 0,
       },
     ] as unknown as AgentMessage[];
-    // faithful to the real agentLoop (pi ≥ 1.0.0): stream.result() =
+    // faithful to the real agentLoop: stream.result() =
     // [context history (leading system message), ...prompts, ...produced]
     const systemMsg = { role: "system", content: "system", timestamp: 0 } as unknown as AgentMessage;
     const result = [systemMsg, ...inMsg, ...produced];
@@ -877,7 +925,13 @@ describe("runStage — stage dump seam", () => {
       { role: "assistant", content: [{ type: "text", text: "ok" }], stopReason: "stop", timestamp: 0 },
     ] as unknown as AgentMessage[];
     const result = [...inMsg, ...produced];
-    await runStage(baseInput({ messages: inMsg, loopFn: makeFakeLoop({ events: [agentEnd(result)], messages: result }), dumpPath: dump }));
+    await runStage(
+      baseInput({
+        messages: inMsg,
+        loopFn: makeFakeLoop({ events: [agentEnd(result)], messages: result }),
+        dumpPath: dump,
+      }),
+    );
     const text = fs.readFileSync(dump as string, "utf8");
     expect(text).toContain("<output>\n<ASSISTANT>ok</ASSISTANT>\n</output>\n");
   });
@@ -896,7 +950,7 @@ describe("runStage — stage dump seam", () => {
       );
     }) as unknown as typeof import("@earendil-works/pi-agent-core").agentLoop;
     await runStage(baseInput({ messages: inMsg, loopFn: spyLoop }));
-    // pi ≥0.87: the system prompt is the transcript's leading system message; a
+    // The system prompt is the transcript's leading system message; a
     // non-empty history BEYOND it would duplicate the prompts into the request.
     expect(seenContext?.messages).toEqual([{ role: "system", content: "system", timestamp: expect.any(Number) }]);
   });

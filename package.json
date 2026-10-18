@@ -1,6 +1,6 @@
 {
   "name": "avtc-pi-session-owl",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Background-maintained append-only knowledge graph; roots become the compaction summary; the agent traverses and regex-searches it to recall messages, tool calls, own thinking.",
   "type": "module",
   "license": "MIT",
@@ -40,14 +40,22 @@
     "lint": "biome check .",
     "lint:optional-params": "node scripts/no-optional-params.cjs src/ tests/",
     "lint:bare-literals": "node scripts/no-bare-literals.cjs src/ index.ts",
-    "lint:design-refs": "node scripts/no-design-refs.cjs src/ index.ts README.md docs/CONFIGURATION.md",
+    "lint:design-refs": "node scripts/no-design-refs.cjs src/ index.ts claude/ README.md docs/CONFIGURATION.md",
     "knip": "knip --production",
-    "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc.tsbuildinfo",
+    "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc.tsbuildinfo && tsc -p tsconfig.claude.json",
     "test:unit": "node scripts/test-low-priority.cjs vitest run",
-    "test": "node scripts/test-low-priority.cjs \"node scripts/run-parallel.cjs \"npm run lint:optional-params :: npm run lint:bare-literals :: npm run lint:design-refs :: npm run lint:as-never :: npm run lint:bundled-imports :: npm run lint :: npm run typecheck :: npm run knip :: npm run dupes\" && vitest run\"",
+    "test": "node scripts/test-low-priority.cjs \"node scripts/run-parallel.cjs \"npm run lint:optional-params :: npm run lint:bare-literals :: npm run lint:design-refs :: npm run lint:as-never :: npm run lint:bundled-imports :: npm run lint :: npm run typecheck :: npm run knip :: npm run dupes :: npm run claude:sync-check :: npm run claude:validate :: npm run smokes :: npm run acceptance:checklist\" && npm run claude:test && vitest run\"",
     "dupes": "jscpd src/ --exit-code --threshold 0.01",
     "lint:as-never": "node scripts/no-as-never.cjs src/ tests/ index.ts",
-    "lint:bundled-imports": "node scripts/no-bundled-extension-imports.cjs src/ index.ts"
+    "lint:bundled-imports": "node scripts/no-bundled-extension-imports.cjs src/ index.ts",
+    "claude:sync": "node scripts/claude-sync.mjs",
+    "claude:sync-check": "node scripts/claude-sync.mjs --check",
+    "claude:validate": "node scripts/claude-validate.cjs",
+    "claude:test": "node scripts/claude-test.cjs",
+    "live:smoke": "node scripts/live-smoke.mjs",
+    "inertness:smoke": "node scripts/inertness-smoke.mjs",
+    "smokes": "node scripts/live-smoke.mjs && node scripts/inertness-smoke.mjs",
+    "acceptance:checklist": "node scripts/acceptance-checklist.cjs"
   },
   "dependencies": {
     "avtc-pi-logger": "^1.0.3",
@@ -64,7 +72,9 @@
     "knip": "^6.17.1",
     "typebox": "^1.1.38",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "avtc-claude-logger": "file:../avtc-pi-logger/claude",
+    "avtc-claude-settings-ui": "file:../avtc-pi-settings-ui/claude"
   },
   "author": "avtc <tarasenkov@gmail.com>",
   "repository": {

@@ -695,7 +695,7 @@ describe("load reconstruction", () => {
   });
 
   it("deltas-only load advances nextObsId past loaded observation records (no collision on the next Observer run)", async () => {
-    // Reproduces the production crash: a deltas-only reconstruction (no valid
+    // A deltas-only reconstruction (no valid
     // snapshot — e.g. a session whose snapshots are foreign, or background
     // Observer runs before the first compaction snapshot) loaded observations
     // directly without advancing nextObsId, so the seed (1) stayed and the next
@@ -1193,7 +1193,7 @@ function obsRecord(id: string, parentNode: string, timestamp: string): Serialize
 
 describe("load reconciliation (node lists authoritative)", () => {
   it("repairs a pre-snapshot moved observation instead of dropping it (poison-free reload)", async () => {
-    // The incident shape: the Builder mv'd/merged o1 off its wrapper n1 into a
+    // The scenario: the Builder mv'd/merged o1 off its wrapper n1 into a
     // container n2 BEFORE the snapshot. The snapshot lists o1 under n2; the
     // immutable record still says parentNode n1 — and n1 dissolved at the merge.
     freshStore();

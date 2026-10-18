@@ -234,7 +234,7 @@ export function buildTodo(ctx: TodoContext): string {
 
 // --- full input-view assembly ----------------------------------------------
 
-/** The tail legend — the self-documenting uppercase tag forms (no entry=id:
+/** The tail legend — the self-documenting uppercase tag forms (no entryId=id:
  *  the Selector is a recall consumer, not a citator). */
 const TAIL_LEGEND_NO_ENTRY = "<USER> · <ASSISTANT> · <THINKING> · <TOOLCALL:name> · <TOOLRESULT>";
 

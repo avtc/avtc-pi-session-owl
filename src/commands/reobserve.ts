@@ -20,6 +20,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getSessionOwlSettings } from "../config/schema.js";
+import { extractionSettled } from "../goal-extract/run.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
 import type { ObserverRunInput } from "../observer/run.js";
@@ -63,6 +64,9 @@ export async function runOwlReobserve(_args: string, ctx: ExtensionCommandContex
     notify(ctx, "No skipped or unobserved ranges — nothing to re-observe.", "info");
     return;
   }
+  // goal-first stage sequencing: an in-flight goal extraction settles FIRST
+  // (await before acquiring — never while holding the lock)
+  await extractionSettled();
   const handle = acquireOrSkip("observe");
   if (handle === null) {
     notify(ctx, "A maintenance run is in flight — try again once it finishes.", "warning");

@@ -566,9 +566,9 @@ describe("nonObsoleteRootsOf (shared root filter)", () => {
 });
 
 describe("orderActiveSetRoots — canonical active-set ordering", () => {
-  // Renders directly the contract loop-7 routed /owl:ls and owl_recall browse
-  // through (nGoal first, nIrrelevant last, the rest by importance then
-  // recency) — a partition regression would otherwise pass the whole suite.
+  // Renders directly the ordering /owl:ls and owl_recall browse share (nGoal
+  // first, nIrrelevant last, the rest by importance then recency) — a partition
+  // regression would otherwise pass the whole suite.
   const R = (over: Partial<Record<string, unknown>> & { id: string }) =>
     over as unknown as import("../../src/format/render.js").RenderableNode;
   const HIGH_RECENT = R({ id: "n7", importance: "high", timestamps: { rangeEnd: "2026-07-29T09:00:00Z" } });
@@ -715,7 +715,7 @@ describe("result token budget + extraction", () => {
   });
 
   it("cat contentPattern on a node keeps it as a structural header when a child obs matches", async () => {
-    // #51: n7's summary has no 'secret', but its child o5 content does → n7 is
+    // n7's summary has no 'secret', but its child o5 content does → n7 is
     // kept as the structural parent header and o5 shows its excerpt.
     const out = textOf(
       await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["n7"], contentPattern: "secret" }),
@@ -725,7 +725,7 @@ describe("result token budget + extraction", () => {
   });
 
   it("cat contentPattern drops a node with no summary or child match", async () => {
-    // #51: nothing under n7 matches 'XYZ' → the whole node is dropped → empty.
+    // nothing under n7 matches 'XYZ' → the whole node is dropped → empty.
     const out = textOf(
       await callTool(makeBuilderReadTools(grepGraph()), "cat", { ids: ["n7"], contentPattern: "XYZ" }),
     );
@@ -794,7 +794,7 @@ describe("result token budget + extraction", () => {
   });
 
   it("find contentPattern-alone matches node summaries too (not obs-only)", async () => {
-    // #51: contentPattern filters over node summaries + observation content.
+    // contentPattern filters over node summaries + observation content.
     // 'JWT|token' matches n7's summary (JWT) AND o5's content (token) → both
     // appear (n7 as a header, o5 with grep excerpts).
     const out = textOf(await callTool(makeBuilderReadTools(grepGraph()), "find", { contentPattern: "JWT|token" }));
@@ -823,7 +823,7 @@ describe("result token budget + extraction", () => {
   });
 
   it("find query + contentPattern intersects (both filter — non-matches dropped)", async () => {
-    // #51: both query and contentPattern filter over summaries+content. n7 matches
+    // both query and contentPattern filter over summaries+content. n7 matches
     // query 'JWT|token' (summary) but NOT contentPattern 'secret' → DROPPED.
     // o5 matches BOTH (content has 'token' AND 'secret') → kept with excerpts.
     // (o5's line carries 'in n7' as parent context — that's expected; n7 itself
