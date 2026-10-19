@@ -95,12 +95,12 @@ describe("makeSelectorRun (Selector stage wiring)", () => {
     const settings = { marker: "settings" } as unknown as Parameters<typeof runFn>[0]["settings"];
 
     // before avtc-pi-todo appears: todo context + bridge are null.
-    await runFn({ ctx, settings, signal, scope: null, unobserved: null });
+    await runFn({ ctx, settings, signal, scope: null, ensureReady: false, unobserved: null });
 
     // now avtc-pi-todo fires pi-todo:ready — the live read picks it up.
     todoContext = { marker: "todo-context" } as unknown;
     todoBridge = { marker: "todo-bridge" } as unknown;
-    await runFn({ ctx, settings, signal, scope: { firstKeptEntryId: "cut-1" }, unobserved: null });
+    await runFn({ ctx, settings, signal, scope: { firstKeptEntryId: "cut-1" }, ensureReady: false, unobserved: null });
 
     expect(captured.length).toBe(2);
     // first call: ctx/settings/signal forwarded by identity, background scope

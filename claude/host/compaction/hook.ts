@@ -58,7 +58,14 @@ export interface CompactionRuns {
     signal: AbortSignal;
     maybeBuild: () => Promise<boolean>;
   }) => Promise<void>;
-  runBuilder: (input: { signal: AbortSignal; scope: { firstKeptEntryId: string | null } | null }) => Promise<void>;
+  runBuilder: (input: {
+    signal: AbortSignal;
+    scope: { firstKeptEntryId: string | null } | null;
+    /** True only for the final post-catch-up call (the sole call eligible for
+     *  the builderSkipWithinBudget fast-path); the mid-catch-up closure passes
+     *  false so folding always runs. */
+    ensureReady: boolean;
+  }) => Promise<void>;
   runSelector: (input: { signal: AbortSignal; scope: { firstKeptEntryId: string | null } | null }) => Promise<void>;
 }
 
@@ -217,7 +224,7 @@ async function runGate(
         settings: deps.settings,
         signal: held.signal,
         scope: held.scope,
-        runBuilder: () => deps.runs.runBuilder({ signal: held.signal, scope: held.scope }),
+        runBuilder: () => deps.runs.runBuilder({ signal: held.signal, scope: held.scope, ensureReady: false }),
       });
       // the vendored decision reads the store singletons mid-Observer — after
       // the Observer's long awaits another conversation's swap may hold them,
@@ -237,8 +244,10 @@ async function runGate(
       return "pass";
     }
 
-    // (b) the Builder — always invoked; it owns its fast-path
-    await deps.runs.runBuilder({ signal: held.signal, scope: held.scope });
+    // (b) the Builder — always invoked; it owns its fast-path (the final
+    // post-catch-up call — ensureReady — may skip within budget; the
+    // mid-catch-up folding above never does)
+    await deps.runs.runBuilder({ signal: held.signal, scope: held.scope, ensureReady: true });
     if (held.signal.aborted) return "cancel";
     if (!deps.getSettings().enabled) {
       log("compaction: session-owl disabled mid-gate — leaving (native compaction)");

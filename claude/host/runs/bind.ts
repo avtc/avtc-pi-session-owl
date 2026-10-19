@@ -324,6 +324,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         signal,
         widget,
         scope: null,
+        ensureReady: false,
         flushLedger: async () => {
           await storage.ledger.flush();
         },
@@ -453,7 +454,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
             dumps: dumps(),
           });
         },
-        runBuilder: async ({ signal, scope }) => {
+        runBuilder: async ({ signal, scope, ensureReady }) => {
           await runBuilder({
             core: await pinCore(),
             store: (await preparedCtx()).ctx,
@@ -461,6 +462,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
             signal,
             widget,
             scope,
+            ensureReady,
             flushLedger: async () => {
               await storage.ledger.flush();
             },

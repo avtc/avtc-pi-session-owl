@@ -60,6 +60,7 @@ export function makeObserverRun(
           settings: args.settings,
           signal: args.signal,
           scope: args.scope,
+          ensureReady: false,
           unobserved: null,
         }),
     });
@@ -92,6 +93,7 @@ export function makeBuilderRun(pi: ExtensionAPI, widget: WidgetController, runBu
       settings: args.settings,
       signal: args.signal,
       scope: args.scope,
+      ensureReady: args.ensureReady,
       widget,
     });
   };

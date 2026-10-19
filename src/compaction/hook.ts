@@ -145,13 +145,16 @@ export async function compactionHook(
       // Mid-catch-up Builder: at compaction the Builder runs after the Observer
       // anyway, so folding the accumulated `new` roots whenever the root view
       // crosses the threshold keeps a long catch-up bounded instead of ballooning
-      // to hundreds of roots before one giant pass.
+      // to hundreds of roots before one giant pass. Mid-catch-up folding never
+      // takes the builderSkipWithinBudget fast-path (ensureReady false) — only
+      // the final post-catch-up call below can.
       const maybeBuild = makeMaybeBuilder({
         ctx,
         settings,
         signal,
         scope: { firstKeptEntryId },
-        runBuilder: () => stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget }),
+        runBuilder: () =>
+          stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, ensureReady: false, widget }),
       });
       await stageRuns.runObserver({ ctx, pi, settings, unobserved: gap, signal, widget, maybeBuild });
       log.info("compaction: observer catch-up end");
@@ -165,11 +168,11 @@ export async function compactionHook(
       return undefined;
     }
 
-    // (b) Builder — always called; it owns the internal fast-path (root view
-    // under threshold → skip LLM passes; `new` arrivals stay `new` — nothing was
-    // folded). Processing all `new` nodes across the whole graph (no firstKeptEntryId filtering).
+    // (b) Builder — always called; it owns the internal ensure-ready fast-path
+    // (root view under threshold → skip LLM passes; `new` arrivals stay `new` —
+    // nothing was folded). Processing all `new` nodes across the whole graph (no firstKeptEntryId filtering).
     log.info("compaction: builder start");
-    await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, widget });
+    await stageRuns.runBuilder({ ctx, pi, settings, signal, scope: { firstKeptEntryId }, ensureReady: true, widget });
     log.info("compaction: builder end");
     if (signal.aborted) return cancelAborted(ctx);
     // live master switch (between phases): a disable after the Builder leaves

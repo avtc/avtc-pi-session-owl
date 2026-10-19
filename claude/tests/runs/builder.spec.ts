@@ -167,12 +167,25 @@ describe("runBuilder — fast-path (compaction scope only)", () => {
     }
   });
 
-  test("under budget + builderSkipWithinBudget + scope ⇒ no spawn, `new` preserved", async () => {
+  test("under budget + builderSkipWithinBudget + scope + ensureReady ⇒ no spawn, `new` preserved", async () => {
     const rig = await rigUp("b-fast");
     seedNode(rig, "n9", "new");
-    const fx = await run(rig, FAST_SETTINGS, [mkNode("x")], { scope: { firstKeptEntryId: "e1" } });
+    const fx = await run(rig, FAST_SETTINGS, [mkNode("x")], {
+      scope: { firstKeptEntryId: "e1" },
+      ensureReady: true,
+    });
     expect(fx.calls).toHaveLength(0); // no LLM pass
     expect(getGraphStore().graph.nodes.get("n9" as never)?.state).toBe("new"); // preserved
+  });
+
+  test("mid-catch-up (ensureReady false, scope, flag ON, under budget) ⇒ the pass runs", async () => {
+    const rig = await rigUp("b-fast-mid");
+    seedNode(rig, "n9", "new");
+    const fx = await run(rig, FAST_SETTINGS, [finish], {
+      scope: { firstKeptEntryId: "e1" },
+      ensureReady: false,
+    });
+    expect(fx.calls).toHaveLength(1); // the folding pass ran — not skipped
   });
 
   test("turn_end scope NEVER takes the skip (the trigger already decided)", async () => {
@@ -239,6 +252,7 @@ describe("runBuilder — convergence loop", () => {
       signal: controller.signal,
       widget: NO_OP_WIDGET,
       scope: null,
+      ensureReady: false,
       compactionCount: 0,
       runStageFn: async (input) => {
         const out = await fx.runner(input);
@@ -288,6 +302,7 @@ describe("runBuilder — convergence loop", () => {
       signal: new AbortController().signal,
       widget: NO_OP_WIDGET,
       scope: null,
+      ensureReady: false,
       compactionCount: 0,
       runStageFn: async (input) => {
         input.onStageEnd?.({ input: 7, output: 3, cacheRead: 0, cacheWrite: 0, cost: 0.002, turns: 1, elapsedMs: 4 });

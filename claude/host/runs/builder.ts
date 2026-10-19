@@ -79,7 +79,7 @@ const CONVERGENCE_NO_PROGRESS_TURNS = 50;
 // --- run input -------------------------------------------------------------
 
 /** Input to `runBuilder`. The run honors `signal` only — the caller owns the
- *  run-lock. `scope` gates the compaction-only fast-path (null at turn_end). */
+ *  run-lock. `scope` is the compaction cut (null at turn_end). */
 export interface BuilderRunInput {
   core: StageCore;
   store: StoreContext;
@@ -88,6 +88,11 @@ export interface BuilderRunInput {
   widget: StageWidget;
   /** The compaction cut; null at turn_end. */
   scope: { firstKeptEntryId: string | null } | null;
+  /** True ONLY for the final post-catch-up (ensure-ready) call at compaction —
+   *  the sole call eligible for the builderSkipWithinBudget fast-path. The
+   *  Observer's mid-catch-up folding and every turn_end trigger run never
+   *  skip: a fired trigger must run. */
+  ensureReady: boolean;
   /** Test seam — fake stage runner. */
   runStageFn?: (input: EngineStageRunInput) => Promise<StageRunResultLike>;
   /** The dump seam (null/undefined = no dump — debugDumpLimit 0 or
@@ -100,9 +105,10 @@ export interface BuilderRunInput {
 // --- the run ---------------------------------------------------------------
 
 /**
- * Run the Builder: ensure-ready fast-path (compaction scope only), then a
- * multi-pass convergence loop over the source graph, then a conditional
- * flush of `new` nodes. Honors `signal`; never flushes on an abnormal end.
+ * Run the Builder: ensure-ready fast-path (final post-catch-up call at
+ * compaction only), then a multi-pass convergence loop over the source graph,
+ * then a conditional flush of `new` nodes. Honors `signal`; never flushes on
+ * an abnormal end.
  */
 export async function runBuilder(input: BuilderRunInput): Promise<void> {
   if (input.signal.aborted) return;
@@ -123,12 +129,16 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   const model = input.settings.builderModel ?? input.settings.defaultModel;
   const run = input.runStageFn ?? runStage;
 
-  // Ensure-ready fast-path (opt-in via builderSkipWithinBudget, COMPACTION
-  // ONLY): under the threshold the view is render-ready — skip the LLM passes
-  // and PRESERVE `new` (the each-N trigger keeps its pending work).
+  // Ensure-ready fast-path (builderSkipWithinBudget, final post-catch-up call
+  // only — scope !== null AND ensureReady): under the threshold the view is
+  // render-ready — skip the LLM passes and PRESERVE `new` (the each-N trigger
+  // keeps its pending work). The Observer's mid-catch-up folding never takes
+  // it: folding the accumulated `new` roots during a long catch-up is what
+  // keeps it bounded.
   if (input.signal.aborted) return;
   if (
     input.scope !== null &&
+    input.ensureReady &&
     input.settings.builderSkipWithinBudget &&
     measureRootViewTokens(graph, BUILDER) < input.settings.builderRootViewThreshold
   ) {

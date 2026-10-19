@@ -524,6 +524,58 @@ describe("sessionOwlExtension end-to-end (default profile)", () => {
     expect(stillNew.length).toBeGreaterThan(0);
   });
 
+  it("mid-catch-up Builder runs during compaction catch-up even when within budget (flag ON)", async () => {
+    // Only the FINAL post-catch-up (ensure-ready) call may take the
+    // builderSkipWithinBudget skip — the Observer's mid-catch-up folding always
+    // runs its passes, so a long catch-up folds incrementally instead of
+    // ballooning to hundreds of unbuilt roots.
+    const branch: FakeEntry[] = [
+      userEntry("u1", "Fix the login bug"),
+      assistantEntry("a1", "x".repeat(600)),
+      userEntry("u2", "keep working"),
+      assistantEntry("a2", "z".repeat(600)),
+    ];
+    const state: FakePiState = { branch, appendedEntries: [] };
+    settingsHolder.config = {
+      ...DEFAULT_CONFIG,
+      observerThresholdTokens: 50,
+      // each-N = 1 → the mid-catch-up trigger fires after the first chunk;
+      // HIGH root-view threshold + skip-within-budget ON → the ONLY way a
+      // Builder pass runs is the mid-catch-up call not taking the skip.
+      builderSkipWithinBudget: true,
+      builderEveryNObservations: 1,
+      builderRootViewThreshold: 1_000_000,
+      selectorRootViewThreshold: 1_000_000,
+    };
+    scriptObserverRecordsOnePerChunk();
+    const pi = makeFakePi() as FakePi;
+    sessionOwlExtension(pi);
+    const ctx = makeFakeCtx(state);
+    await pi.emit("session_start", { type: "session_start", reason: "new" } as SessionStartEvent, ctx);
+    await pi.emit("turn_end", {}, ctx); // capture (the extraction holds the lock → trigger SKIPs)
+    await new Promise((r) => setTimeout(r, 20)); // the one-shot settles
+    await pi.emit("turn_end", {}, ctx); // observe → new wrapper nodes at root
+    await new Promise((r) => setTimeout(r, 20));
+
+    const compactEvt: SessionBeforeCompactEvent = {
+      type: "session_before_compact",
+      preparation: { firstKeptEntryId: "u2", tokensBefore: 50000 } as SessionBeforeCompactEvent["preparation"],
+      branchEntries: branch as unknown as SessionEntry[],
+      reason: "threshold",
+      willRetry: false,
+      signal: new AbortController().signal,
+    } as unknown as SessionBeforeCompactEvent;
+    await pi.emit("session_before_compact", compactEvt, ctx);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // at least one Builder pass ran (a runStage call whose tools carry the
+    // Builder's supersede tool) — the mid-catch-up folding was not skipped.
+    const builderCalls = agentLoopStub.runStage.mock.calls.filter(([input]) =>
+      (input as StageRunInput).tools.some((t) => t.name === SUPERSEDE_TOOL),
+    );
+    expect(builderCalls.length).toBeGreaterThan(0);
+  });
+
   it("enabled=false off-path: turn_end no-ops + compaction returns undefined (Pi native)", async () => {
     settingsHolder.config = { ...DEFAULT_CONFIG, enabled: false };
     const state: FakePiState = {

@@ -88,7 +88,14 @@ export async function runOwlReobserve(_args: string, ctx: ExtensionCommandContex
     signal,
     scope: { firstKeptEntryId: null },
     runBuilder: () =>
-      deps.runBuilderStage({ ctx, settings: getSessionOwlSettings(), signal, scope: null, unobserved: null }),
+      deps.runBuilderStage({
+        ctx,
+        settings: getSessionOwlSettings(),
+        signal,
+        scope: null,
+        ensureReady: false,
+        unobserved: null,
+      }),
   });
   const launch = (async () => {
     let recovered = 0;

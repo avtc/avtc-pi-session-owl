@@ -73,12 +73,16 @@ export interface BuilderRunInput {
   settings: SessionOwlConfig;
   signal: AbortSignal;
   widget: WidgetController;
-  /** The compaction cut; null at turn_end. Gates the compaction-only
-   *  builderSkipWithinBudget fast-path (a turn_end trigger that fired must
-   *  run). The Observer uses it for its gap-driven catch-up; the Builder
-   *  otherwise ignores it — in either scope it processes ALL `new` nodes across
-   *  the whole graph, not just the compacted block. */
+  /** The compaction cut; null at turn_end. The Observer uses it for its
+   *  gap-driven catch-up; the Builder otherwise ignores it — in either scope it
+   *  processes ALL `new` nodes across the whole graph, not just the compacted
+   *  block. */
   scope: { firstKeptEntryId: string | null } | null;
+  /** True ONLY for the final post-catch-up (ensure-ready) call at compaction —
+   *  the sole call eligible for the builderSkipWithinBudget fast-path. The
+   *  Observer's mid-catch-up folding and every turn_end trigger run never
+   *  skip: a fired trigger must run. */
+  ensureReady: boolean;
   /** Test seam — fake stage runner, or omitted for the real `runStage`. */
   runStageFn?: (input: StageRunInput) => Promise<StageRunResult>;
 }
@@ -92,8 +96,8 @@ export interface BuilderRunInput {
  * Flush semantics: `new` nodes flush to `active` only when the run ended
  * NORMALLY and actually consolidated — try_finish convergence or ≥1 applied
  * mutate (covers max-passes / context-limit runs that did work). A no-op run
- * (0 mutates, not converged), a compaction-only fast-path skip (the root view
- * under builderRootViewThreshold), an ABNORMAL end (signal abort, or an error
+ * (0 mutates, not converged), an ensure-ready fast-path skip (the final
+ * post-catch-up call with the root view under builderRootViewThreshold), an ABNORMAL end (signal abort, or an error
  * that ends the run), and a model-unavailable skip all PRESERVE `new` — a
  * build that folded nothing must not discharge the each-N trigger's pending
  * arrivals; they retry on the next fire. `new` renders as 🆕 for the Builder viewer only,
@@ -120,24 +124,28 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   const graph = getGraphStore().graph;
   const runStageFn = input.runStageFn ?? runStage;
 
-  // Ensure-ready fast-path (opt-in via builderSkipWithinBudget, COMPACTION
-  // ONLY — scope !== null): when the root view is already under the threshold
-  // it is render-ready — skip the LLM passes entirely and PRESERVE `new`
-  // arrivals (no flush: nothing was folded, so the each-N trigger keeps its
-  // pending work and retries on the next fire — a skip must not silently
-  // discharge the consolidation duty). A turn_end run (scope === null) NEVER
-  // takes this skip: its trigger already decided to fire (each-N reached N or
-  // its fast-path budget arm fired, the session context crossed its threshold),
-  // so a budget skip there would
+  // Ensure-ready fast-path (builderSkipWithinBudget, COMPACTION ONLY — scope
+  // !== null AND ensureReady): only the FINAL post-catch-up call takes it —
+  // when the root view is already under the threshold it is render-ready —
+  // skip the LLM passes entirely and PRESERVE `new` arrivals (no flush:
+  // nothing was folded, so the each-N trigger keeps its pending work and
+  // retries on the next fire — a skip must not silently discharge the
+  // consolidation duty). The Observer's mid-catch-up folding NEVER takes this
+  // skip: folding the accumulated `new` roots during a long catch-up is what
+  // keeps it bounded. A turn_end run (scope === null) NEVER takes it either:
+  // its trigger already decided to fire (each-N reached N or its fast-path
+  // budget arm fired, the session context crossed its threshold), so a budget
+  // skip there would
   // starve the cadence into a fire→skip→retry loop; on-root-view-threshold
   // mode needs no fast-path — its trigger decision itself skips under budget.
-  // No stage is opened (no startStage). Default off — the Builder always runs
-  // at least one pass. Re-check abort after the model-resolution await:
+  // No stage is opened (no startStage). Default on — but the ensure-ready call
+  // is its only eligible site. Re-check abort after the model-resolution await:
   // compaction may have signalled during it, and abort must preserve `new`
   // (mirrors the convergence-loop guard).
   if (input.signal.aborted) return;
   if (
     input.scope !== null &&
+    input.ensureReady &&
     input.settings.builderSkipWithinBudget &&
     measureRootViewTokens(graph, BUILDER) < input.settings.builderRootViewThreshold
   ) {

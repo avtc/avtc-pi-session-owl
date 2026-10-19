@@ -213,6 +213,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: true }),
       signal: new AbortController().signal,
       widget,
+      ensureReady: true,
       scope: { firstKeptEntryId: null },
       runStageFn: scriptRunStage({ passes: [] }),
     });
@@ -222,6 +223,33 @@ describe("runBuilder", () => {
     expect(flushNewCount(cap.appended)).toBe(0);
     // fast-path opens NO stage (no startStage/endStage) — balanced widget contract
     expect(widget.calls).toEqual([]);
+  });
+
+  it("mid-catch-up (ensureReady false, compaction scope, flag ON, under budget): runs its pass", async () => {
+    // the Observer's mid-catch-up folding must never take the budget skip —
+    // only the final post-catch-up (ensure-ready) call can skip within budget.
+    seedGraph([{ id: "n3", summary: "fresh arrival" }]);
+    const cap = makeFakePi();
+    const widget = recordingWidget();
+    let passCount = 0;
+    const scripted = scriptRunStage({
+      passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }],
+    });
+    await runBuilder({
+      pi: cap.pi,
+      ctx: makeFakeCtx(),
+      settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: true }),
+      signal: new AbortController().signal,
+      widget,
+      ensureReady: false,
+      scope: { firstKeptEntryId: null },
+      runStageFn: (input) => {
+        passCount += 1;
+        return scripted(input);
+      },
+    });
+    expect(passCount).toBe(1);
+    expect(widget.calls[0]).toBe("start:build:1");
   });
 
   it("fast-path ON + over-budget (compaction scope): does NOT skip — runs passes (carried R21-1)", async () => {
@@ -240,6 +268,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 1, builderSkipWithinBudget: true }),
       signal: new AbortController().signal,
       widget,
+      ensureReady: false,
       scope: { firstKeptEntryId: null },
       runStageFn: (input) => {
         passCount += 1;
@@ -269,6 +298,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: true }),
       signal: new AbortController().signal,
       widget,
+      ensureReady: false,
       scope: null,
       runStageFn: (input) => {
         passCount += 1;
@@ -297,6 +327,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: false }),
       signal: new AbortController().signal,
       widget,
+      ensureReady: false,
       scope: { firstKeptEntryId: null },
       runStageFn: (input) => {
         passCount += 1;
@@ -321,6 +352,7 @@ describe("runBuilder", () => {
       settings: cfg,
       signal: new AbortController().signal,
       widget,
+      ensureReady: false,
       scope: { firstKeptEntryId: null },
       runStageFn: (input) => {
         seen = input.systemPrompt;
@@ -357,6 +389,7 @@ describe("runBuilder", () => {
         settings: cfg,
         signal: new AbortController().signal,
         widget,
+        ensureReady: false,
         scope: { firstKeptEntryId: null },
         // capture the dumpPath the run threads into runStage (the sections
         // themselves are appended inside runStage — covered by agent-loop tests)
@@ -419,6 +452,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
       signal: new AbortController().signal,
       widget,
+      ensureReady: false,
       scope: null,
       runStageFn: countingRunStage,
     });
@@ -448,6 +482,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
       signal: new AbortController().signal,
       widget: NO_OP_WIDGET,
+      ensureReady: false,
       scope: null,
       runStageFn: countingRunStage,
     });
@@ -480,6 +515,7 @@ describe("runBuilder", () => {
         settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
         signal: new AbortController().signal,
         widget: NO_OP_WIDGET,
+        ensureReady: false,
         scope: null,
         runStageFn: timeoutRunStage,
       }),
@@ -505,6 +541,7 @@ describe("runBuilder", () => {
         settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
         signal: new AbortController().signal,
         widget: NO_OP_WIDGET,
+        ensureReady: false,
         scope: null,
         runStageFn: countingRunStage,
       }),
@@ -534,6 +571,7 @@ describe("runBuilder", () => {
         settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
         signal: new AbortController().signal,
         widget: NO_OP_WIDGET,
+        ensureReady: false,
         scope: null,
         runStageFn: countingRunStage,
       }),
@@ -566,6 +604,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 2 }),
       signal: new AbortController().signal,
       widget: NO_OP_WIDGET,
+      ensureReady: false,
       scope: null,
       runStageFn: countingRunStage,
     });
@@ -588,6 +627,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 0 }),
       signal: ac.signal,
       widget: NO_OP_WIDGET,
+      ensureReady: false,
       scope: null,
       runStageFn: countingRunStage,
     });
@@ -622,6 +662,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 1_000_000, builderSkipWithinBudget: true }),
       signal: ac.signal,
       widget: recordingWidget(),
+      ensureReady: false,
       scope: null,
       runStageFn: scriptRunStage({ passes: [] }),
     });
@@ -652,6 +693,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 0, maxBuilderPasses: 5 }),
       signal: ac.signal,
       widget: NO_OP_WIDGET,
+      ensureReady: false,
       scope: null,
       runStageFn: countingRunStage,
     });
@@ -673,6 +715,7 @@ describe("runBuilder", () => {
       settings: settings({ builderRootViewThreshold: 0, builderModel: "badmodel" }),
       signal: new AbortController().signal,
       widget: NO_OP_WIDGET,
+      ensureReady: false,
       scope: null,
       runStageFn: () => {
         runStageCalls += 1;

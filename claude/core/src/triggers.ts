@@ -42,6 +42,9 @@ export type RunFn = (args: {
   signal: AbortSignal;
   /** The compaction cut; null at turn_end (set only by the compaction hook). */
   scope: { firstKeptEntryId: string | null } | null;
+  /** True only for the final post-catch-up Builder call at compaction (the
+   *  sole call eligible for the builderSkipWithinBudget fast-path). */
+  ensureReady: boolean;
   /** The Observer frontier slice; null for Builder/Selector. */
   unobserved: SessionEntry[] | null;
 }) => Promise<void>;
@@ -488,7 +491,7 @@ export function onTurnEnd(input: TriggerInput): void {
       if (observer.shouldFire) {
         handle.setStage("observe");
         log.info("background run: observer start");
-        await stageRuns.runObserver({ ctx, settings, signal, scope: null, unobserved });
+        await stageRuns.runObserver({ ctx, settings, signal, scope: null, ensureReady: false, unobserved });
         log.info("background run: observer end");
       }
       if (signal.aborted) {
@@ -505,7 +508,7 @@ export function onTurnEnd(input: TriggerInput): void {
       if (builderTriggerDecision(withCtx).shouldFire) {
         handle.setStage("build");
         log.info("background run: builder start");
-        await stageRuns.runBuilder({ ctx, settings, signal, scope: null, unobserved: null });
+        await stageRuns.runBuilder({ ctx, settings, signal, scope: null, ensureReady: false, unobserved: null });
         log.info("background run: builder end");
       }
       if (signal.aborted) {
@@ -521,7 +524,7 @@ export function onTurnEnd(input: TriggerInput): void {
       if (selectorTriggerDecision(withCtx).shouldFire) {
         handle.setStage("select");
         log.info("background run: selector start");
-        await stageRuns.runSelector({ ctx, settings, signal, scope: null, unobserved: null });
+        await stageRuns.runSelector({ ctx, settings, signal, scope: null, ensureReady: false, unobserved: null });
         log.info("background run: selector end");
       }
     } catch (err) {

@@ -299,7 +299,14 @@ export async function runOwlRescan(args: string, ctx: ExtensionCommandContext, d
           signal,
           widget: deps.widget,
           runBuilder: () =>
-            deps.runBuilderStage({ ctx, settings: getSessionOwlSettings(), signal, scope: null, unobserved: null }),
+            deps.runBuilderStage({
+              ctx,
+              settings: getSessionOwlSettings(),
+              signal,
+              scope: null,
+              ensureReady: false,
+              unobserved: null,
+            }),
         });
       } catch (err) {
         log.error("rescan --reuse-observations: rebuild failed", err);
