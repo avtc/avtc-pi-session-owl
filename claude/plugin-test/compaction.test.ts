@@ -97,9 +97,10 @@ describe("compaction surface — engine-run twin", () => {
     const binding = getBinding(key, key, null);
     try {
       expect(binding.key).toBe(key);
-      const deps = binding.compactionDeps();
+      const deps = binding.compactionDeps({ rewindCheck: async () => {} });
       expect(deps.key).toBe(key);
       expect(typeof deps.getSettings).toBe("function");
+      expect(typeof deps.rewindCheck).toBe("function");
       expect(typeof deps.runs.runObserver).toBe("function");
       expect(typeof deps.runs.runBuilder).toBe("function");
       expect(typeof deps.runs.runSelector).toBe("function");

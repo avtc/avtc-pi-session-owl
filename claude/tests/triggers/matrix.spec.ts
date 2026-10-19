@@ -13,6 +13,7 @@ import { clearDetailsCache } from "../../core/src/format/details.js";
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { makeNode, nowStoredTimestamp } from "../../core/src/types.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
+import { ownSummariesFor } from "../../host/storage/summary-identity.js";
 import { _resetMeasureSnapshots, recordMeasure } from "../../host/triggers/context.js";
 import { evaluateAndLaunch, type TriggerHostDeps } from "../../host/triggers/eval.js";
 import { _resetRunLocks } from "../../host/triggers/run-locks.js";
@@ -54,6 +55,7 @@ async function launch(settings: SessionOwlConfig, rows: SessionEntry[] = entries
     isEnabled: () => true,
     cheapGateClean: () => true,
     getObserverFrontier: () => getGraphStore().observerFrontier,
+    getOwnSummaries: () => ownSummariesFor(getGraphStore()),
     pinCore: async () => {},
     runs: {
       runObserver: async () => {
@@ -67,7 +69,7 @@ async function launch(settings: SessionOwlConfig, rows: SessionEntry[] = entries
       },
     },
   };
-  await evaluateAndLaunch(deps);
+  await evaluateAndLaunch(deps, false);
   await tick();
   return stages;
 }

@@ -51,6 +51,40 @@ export function forgetSpawn(agentId: string): void {
   spawnRegistry.delete(agentId);
 }
 
+// ---- machinery loops (plugin-spawned agents) --------------------------------
+
+/** Agent ids the roster attributed to a plugin's spawn (any plugin's, not
+ *  only ours): machinery loops collect nothing — no conversation, no mirror,
+ *  no store dir; the turn-end/compaction work paths skip them the same way
+ *  the spawn registry skips ours. */
+const pluginSpawnedAgents = new Set<string>();
+
+/** Agent ids already probed against the roster (one probe per id — the
+ *  verdict sticks; our own spawns are covered by the registry from their
+ *  second row on regardless). */
+const rosterProbed = new Set<string>();
+
+export function isKnownPluginSpawned(agentId: string): boolean {
+  return pluginSpawnedAgents.has(agentId);
+}
+
+export function markPluginSpawned(agentId: string): void {
+  pluginSpawnedAgents.add(agentId);
+}
+
+export function markRosterProbed(agentId: string): void {
+  rosterProbed.add(agentId);
+}
+
+export function isRosterProbed(agentId: string): boolean {
+  return rosterProbed.has(agentId);
+}
+
+/** A machinery loop: ours (spawn registry) or any plugin's (roster verdict). */
+export function isMachineryLoop(agentId: string): boolean {
+  return spawnRegistry.has(agentId) || pluginSpawnedAgents.has(agentId);
+}
+
 // ---- turn.complete{agentId} routing ---------------------------------------
 
 /** The usage a turn.complete carries (the API's four counts + model id). */

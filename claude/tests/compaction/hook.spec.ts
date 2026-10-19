@@ -13,11 +13,12 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { DEFAULT_CONFIG, type SessionOwlConfig } from "../../core/src/config/schema.js";
 import { clearDetailsCache } from "../../core/src/format/details.js";
 import { cloneLedger, EMPTY_LEDGER } from "../../core/src/store/codecs.js";
-import { resetForNewSession } from "../../core/src/store/graph-store.js";
+import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { makeNode, nowStoredTimestamp } from "../../core/src/types.js";
-import { type CompactionHookDeps, compactionTakeover } from "../../host/compaction/hook.js";
+import { type CompactionHookDeps, compactionTakeover, observerCatchUpGap } from "../../host/compaction/hook.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { ModelUnavailableError } from "../../host/runs/seams.js";
+import { noteOwnSummary } from "../../host/storage/summary-identity.js";
 import { _resetMeasureSnapshots, recordMeasure } from "../../host/triggers/context.js";
 import { _resetRunLocks, inFlight } from "../../host/triggers/run-locks.js";
 
@@ -100,6 +101,7 @@ function makeHarness(over: Partial<CompactionHookDeps> = {}): Harness {
     settings,
     getSettings: () => settings,
     isPaused: () => false,
+    rewindCheck: async () => {},
     keepRecentTokens: 6, // drops the first two messages (each ~5 tokens) -> cut at the third, catch-up gap [second]
     keptTailAggregatedThinking: true,
     injectedSummaryRow: false,
@@ -315,6 +317,66 @@ describe("compaction takeover — transparent paths", () => {
   });
 });
 
+describe("compaction takeover — the pre-gate rewind check", () => {
+  test("the check runs before the gate reads the store (a rewind re-folds first)", async () => {
+    const h = makeHarness();
+    const seq: string[] = [];
+    const deps = {
+      ...h.deps,
+      rewindCheck: async () => {
+        seq.push("rewind-check");
+      },
+      runs: {
+        ...h.deps.runs,
+        runObserver: async (input: { unobserved: SessionEntry[] }) => {
+          seq.push("observer");
+          expect(input.unobserved.length).toBeGreaterThan(0);
+        },
+        runBuilder: async () => {
+          seq.push("builder");
+        },
+        runSelector: async () => {
+          seq.push("selector");
+        },
+      },
+    };
+    const outcome = await compactionTakeover({ ...EVENT, messages: compactableMessages() }, deps as never);
+    expect(outcome.kind).toBe("answer");
+    expect(seq[0]).toBe("rewind-check");
+    expect(seq.indexOf("rewind-check")).toBeLessThan(seq.indexOf("observer"));
+  });
+
+  test("a failed check degrades to a log line — the compaction still answers", async () => {
+    const h = makeHarness();
+    const logs: string[] = [];
+    const deps = {
+      ...h.deps,
+      log: (m: string) => logs.push(m),
+      rewindCheck: async () => {
+        throw new Error("api view unreadable");
+      },
+    };
+    const outcome = await compactionTakeover({ ...EVENT, messages: compactableMessages() }, deps as never);
+    expect(outcome.kind).toBe("answer");
+    expect(logs.some((m) => m.includes("rewind check before compaction failed"))).toBe(true);
+  });
+
+  test("the disabled master switch skips the check entirely", async () => {
+    const h = makeHarness();
+    let ran = false;
+    const deps = {
+      ...h.deps,
+      settings: { ...h.deps.settings, enabled: false },
+      rewindCheck: async () => {
+        ran = true;
+      },
+    };
+    const outcome = await compactionTakeover({ ...EVENT, messages: compactableMessages() }, deps as never);
+    expect(outcome.kind).toBe("pass");
+    expect(ran).toBe(false);
+  });
+});
+
 describe("compaction takeover — failure paths", () => {
   test("a stage failure ⇒ {skip} + notify, conversation untouched, lock released", async () => {
     const h = makeHarness();
@@ -342,6 +404,9 @@ describe("compaction takeover — failure paths", () => {
 
   test("a prior owl summary row never rides the kept tail (exactly one '# Memory' row in the answer)", async () => {
     const h = makeHarness();
+    const ownText =
+      "# Memory\n\nYour session memory — the top level of a tree; each id opens deeper detail via owl_recall.";
+    noteOwnSummary(h.store as never, ownText);
     const messages = [
       message("seed row — swallowed by the cut"),
       message("# Memory\n\nYour session memory — the top level of a tree; each id opens deeper detail via owl_recall."),
@@ -650,5 +715,240 @@ describe("compaction takeover — scoping + instructions", () => {
     );
     expect(outcome.kind).toBe("answer");
     expect(h.logs.some((l) => l.includes("focus on the parser work"))).toBe(true);
+  });
+});
+
+describe("compaction takeover — own-summary identity (exact-text matching)", () => {
+  test("the kept tail drops a message whose EXACT text is a recorded own summary; a look-alike stays", async () => {
+    const h = makeHarness();
+    h.deps.keepRecentTokens = 12; // the tail keeps both summary-shaped rows (the two old rows fall to the cut)
+    const ownText = "# Memory\nthe recorded render";
+    noteOwnSummary(h.store as never, ownText);
+    const messages = [
+      message("old one — pad 1234"),
+      message("old two — pad 1234"),
+      message("# Memory\na look-alike that is not ours"),
+      message(ownText),
+    ];
+    const deps = {
+      ...h.deps,
+      runs: {
+        runObserver: async () => {},
+        runBuilder: async () => {},
+        runSelector: async () => {},
+      },
+    };
+    const result = (await compactionTakeover({ ...EVENT, messages }, deps as never)) as {
+      kind: string;
+      result?: { messages?: Array<{ text?: string }> };
+    };
+    const tailTexts = (result.result?.messages ?? []).map((m) => String(m.text ?? ""));
+    expect(tailTexts).toContain("# Memory\na look-alike that is not ours");
+    expect(tailTexts).not.toContain(ownText);
+  });
+
+  test("the catch-up gap is bounded by the newest own-summary entry on the branch", async () => {
+    const h = makeHarness();
+    const ownText = "# Memory\nthe boundary render";
+    noteOwnSummary(h.store as never, ownText);
+    const summaryEntry = {
+      id: "e0",
+      timestamp: "e0-ts",
+      type: "message",
+      message: { role: "user", content: ownText },
+    } as unknown as SessionEntry;
+    h.deps.getBranch = () => [summaryEntry, ...h.branch];
+    const seen: number[] = [];
+    const deps = {
+      ...h.deps,
+      runs: {
+        runObserver: async (input: { unobserved: SessionEntry[] }) => {
+          seen.push(input.unobserved.length);
+        },
+        runBuilder: async () => {},
+        runSelector: async () => {},
+      },
+    };
+    await compactionTakeover({ ...EVENT, messages: compactableMessages() }, deps as never);
+    // the gap starts strictly AFTER the own-summary row: the observed slice
+    // never includes the summary row or anything before it
+    expect(seen[0]).toBeLessThanOrEqual(h.branch.length);
+  });
+});
+
+describe("observerCatchUpGap — the ceiling invariant (never past the live/rewound tip)", () => {
+  function gapDeps(branch: SessionEntry[], frontier: string | null): CompactionHookDeps {
+    return {
+      key: "ceiling",
+      settings: DEFAULT_CONFIG,
+      getSettings: () => DEFAULT_CONFIG,
+      isPaused: () => false,
+      rewindCheck: async () => {},
+      keepRecentTokens: 20000,
+      keptTailAggregatedThinking: false,
+      injectedSummaryRow: false,
+      getBranch: () => branch,
+      getObserverFrontier: () => frontier,
+      getGraphStore: () => ({}) as never,
+    } as unknown as CompactionHookDeps;
+  }
+
+  function row(id: string, text: string): SessionEntry {
+    return { type: "message", id, message: { role: "user", content: text } } as unknown as SessionEntry;
+  }
+
+  test("a stale off-branch frontier yields an empty gap — never rows past the tip", () => {
+    const branch = [row("u1", "first"), row("a1", "answer"), row("u2", "second")];
+    // frontier id lives on a dead branch: nothing strictly-after it on the
+    // served path, and nothing is invented past the tip
+    const gap = observerCatchUpGap(gapDeps(branch, "dead-branch-id"), null);
+    expect(gap).toEqual([]);
+  });
+
+  test("the gap is a slice of the served branch: bounded by the floor above and the tip below", () => {
+    resetForNewSession();
+    const summaryText = "# Memory\nceiling shape";
+    const store = getGraphStore();
+    noteOwnSummary(store, summaryText);
+    const branch = [
+      row("u1", "condensed"),
+      row("summary-1", summaryText),
+      row("u2", "after the boundary"),
+      row("a2", "tail answer"),
+    ];
+    const deps = {
+      ...gapDeps(branch, null),
+      getGraphStore: () => store as never,
+    } as unknown as CompactionHookDeps;
+    const gap = observerCatchUpGap(deps, null);
+    // strictly after the own summary, ending AT the tip — the last served
+    // row is the ceiling, nothing beyond it can enter the scope. The first
+    // user message after the boundary is the block's anchor (the initial
+    // prompt of the reshaped conversation) and is never an observation
+    // target, exactly like a fresh session's first prompt.
+    expect(gap.map((e) => e.id)).toEqual(["a2"]);
+  });
+});
+
+describe("observerCatchUpGap — the on-file summary floor (walk from the tip)", () => {
+  function row(id: string, text: string): SessionEntry {
+    return { type: "message", id, message: { role: "user", content: text } } as unknown as SessionEntry;
+  }
+
+  /** A branch compaction entry: the chrome row a compaction boundary
+   *  groups into, carrying the rendered summary text. An owl-answered
+   *  compaction opens with the rendered heading; a native engine summary
+   *  never does. */
+  function compactionRow(id: string, summary: string): SessionEntry {
+    return {
+      id,
+      timestamp: `${id}-ts`,
+      type: "compaction",
+      summary,
+      firstKeptEntryId: "",
+      tokensBefore: 0,
+    } as unknown as SessionEntry;
+  }
+
+  function depsWith(branch: SessionEntry[], frontier: string | null, store: unknown): CompactionHookDeps {
+    return {
+      key: "on-file-floor",
+      settings: DEFAULT_CONFIG,
+      getSettings: () => DEFAULT_CONFIG,
+      isPaused: () => false,
+      rewindCheck: async () => {},
+      keepRecentTokens: 20000,
+      keptTailAggregatedThinking: false,
+      injectedSummaryRow: false,
+      getBranch: () => branch,
+      getObserverFrontier: () => frontier,
+      getGraphStore: () => store as never,
+    } as unknown as CompactionHookDeps;
+  }
+
+  test("the newest on-file own summary bounds the walk: the condensed history below it never re-enters", () => {
+    // the rewound-line shape: morning originals, an owl compaction, its dead
+    // kept-tail originals, a second owl compaction, restore copies and
+    // afternoon above it — the walk from the tip stops at the NEWEST own
+    // summary on the chain
+    const branch = [
+      row("m1", "morning one"),
+      row("m2", "morning two"),
+      row("m3", "morning three"),
+      compactionRow("own1", "# Memory\nthe first answered render"),
+      row("t1", "kept-tail original one"),
+      row("t2", "kept-tail original two"),
+      compactionRow("own2", "# Memory\nthe second answered render"),
+      row("c1", "restore copy one"),
+      row("c2", "restore copy two"),
+      row("a1", "afternoon one"),
+    ];
+    const deps = depsWith(branch, null, {});
+    const gap = observerCatchUpGap(deps, null);
+    // strictly after own2, minus the block's anchor (the first user
+    // message of the reshaped conversation, never an observation target):
+    // the morning, both summary rows and the dead tail originals are all
+    // below the floor and never observed
+    expect(gap.map((e) => e.id)).toEqual(["c2", "a1"]);
+  });
+
+  test("the cut still bounds the block above the floor", () => {
+    const branch = [
+      row("m1", "morning one"),
+      compactionRow("own1", "# Memory\nthe first answered render"),
+      row("c1", "restore copy one"),
+      compactionRow("own2", "# Memory\nthe second answered render"),
+      row("c2", "restore copy two"),
+      row("a1", "afternoon one"),
+      row("a2", "afternoon two"),
+    ];
+    const deps = depsWith(branch, null, {});
+    // the last row sits past the cut: the block ends one short of it, the
+    // floor still bounds below, and the block's anchor row is never an
+    // observation target
+    const gap = observerCatchUpGap(deps, "a2");
+    expect(gap.map((e) => e.id)).toEqual(["a1"]);
+  });
+
+  test("a native engine summary is no floor: the material below it stays observable", () => {
+    const branch = [
+      row("m1", "morning one"),
+      row("m2", "morning two"),
+      compactionRow("native1", "The conversation so far: engine-shaped summary"),
+      row("t1", "kept-tail original one"),
+      row("c1", "restore copy one"),
+    ];
+    const deps = depsWith(branch, null, {});
+    const gap = observerCatchUpGap(deps, null);
+    // no own summary anywhere: the walk runs to the initial message — the
+    // native row itself is chrome and never renders, the content around it
+    // stays observable (the full-session re-observation native summaries
+    // require)
+    expect(gap.map((e) => e.id)).toEqual(["m2", "t1", "c1"]);
+  });
+
+  test("recorded and on-file witnesses combine — the newer position wins", () => {
+    // the store recorded only the FIRST summary's text; the file carries
+    // both rows — the newest on-file position bounds the scope
+    resetForNewSession();
+    const store = getGraphStore();
+    noteOwnSummary(store, "# Memory\nthe first answered render");
+    const branch = [
+      row("m1", "morning one"),
+      compactionRow("own1", "# Memory\nthe first answered render"),
+      row("t1", "kept-tail original one"),
+      compactionRow("own2", "# Memory\nthe second answered render"),
+      row("c1", "restore copy one"),
+    ];
+    const deps = depsWith(branch, null, store);
+    const gap = observerCatchUpGap(deps, null);
+    expect(gap).toEqual([]);
+  });
+
+  test("no summary anywhere: the whole block stays the scope", () => {
+    const branch = [row("u1", "first"), row("a1", "answer"), row("u2", "second")];
+    const deps = depsWith(branch, null, {});
+    const gap = observerCatchUpGap(deps, null);
+    expect(gap.map((e) => e.id)).toEqual(["a1", "u2"]);
   });
 });

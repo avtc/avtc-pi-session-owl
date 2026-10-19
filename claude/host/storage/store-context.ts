@@ -52,6 +52,7 @@ import {
 } from "./ledger.js";
 import { type MirroredRow, MirrorWriter, type SweepResult, sweepMirror } from "./mirror.js";
 import { resolveConsistentSnapshot } from "./snapshot.js";
+import { SUMMARY_RECORD_TYPE } from "./summary-identity.js";
 
 export type { SessionMarker } from "./session-marker.js";
 export { SESSION_MARKER_FILENAME } from "./session-marker.js";
@@ -65,6 +66,7 @@ const KIND_TO_TYPE: Record<string, string> = {
   usage: USAGE_TYPE,
   selection: SELECTION_TYPE,
   rescan: RESCAN_TYPE,
+  summary: SUMMARY_RECORD_TYPE,
 };
 const TYPE_TO_KIND: Record<string, string> = Object.fromEntries(Object.entries(KIND_TO_TYPE).map(([k, t]) => [t, k]));
 

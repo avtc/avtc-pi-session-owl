@@ -64,6 +64,9 @@ export function createHarness() {
 
   const turnAborts: Array<{ turnId: string }> = [];
   const spawned: Spec[] = [];
+  // The engine roster `$.agent.list()` answers — tests shape it per scenario
+  // (entry shape: { id, spawnedBy?, ... }).
+  let agentRoster: Spec[] = [];
   const toolCalls: Spec[] = [];
   // Registration-refusal knob: simulates the engine's mode refusal
   // ($.tool.register unbound at the startup classic start) — the queue
@@ -146,6 +149,7 @@ export function createHarness() {
       },
     },
     agent: {
+      list: async () => agentRoster.slice(),
       register: async (spec: Spec) => {
         registered.agents.push(spec);
         return { ok: true };
@@ -464,6 +468,9 @@ export function createHarness() {
       },
     },
     registryKeys: () => [...(state.registry.keys() as Iterable<string>)],
+    setAgentRoster: (entries: Spec[]) => {
+      agentRoster = entries;
+    },
     onTeardown: (fn: () => void) => {
       harnessTeardown.push(fn);
     },

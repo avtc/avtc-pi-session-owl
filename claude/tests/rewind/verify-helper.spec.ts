@@ -91,3 +91,27 @@ describe("helpers/verify.mjs — the streaming over-cap pass", () => {
     await expect(run(process.execPath, [HELPER])).rejects.toMatchObject({ code: 2 });
   });
 });
+
+describe("helpers/verify.mjs — compaction-boundary logical edges", () => {
+  test("a compact_boundary row's edge is its logicalParentUuid (null parentUuid + logical link)", async () => {
+    const file = tempTranscript(
+      [
+        '{"uuid":"m-1","parentUuid":null}',
+        '{"uuid":"m-2","parentUuid":"m-1"}',
+        '{"uuid":"m-3","parentUuid":"m-2"}', // the abandoned invocation
+        '{"uuid":"m-2b","parentUuid":"m-2"}', // the rewound sibling
+        '{"uuid":"sys-a","type":"system","subtype":"informational","parentUuid":"m-2b"}',
+        '{"uuid":"sys-b","type":"system","subtype":"compact_boundary","parentUuid":null,"logicalParentUuid":"sys-a"}',
+        '{"uuid":"m-5","parentUuid":"sys-b"}', // the summary row
+        '{"uuid":"m-6","parentUuid":"m-5"}',
+        '{"type":"last-prompt","sessionId":"s","leafUuid":"m-6"}',
+        "",
+      ].join("\n"),
+    );
+    const report = await verify(file);
+    expect(report.ok).toBe(true);
+    const byUuid = new Map(report.edges.map((e: [string, string | null]) => [e[0], e[1]] as const));
+    expect(byUuid.get("sys-b")).toBe("sys-a");
+    expect(byUuid.get("m-5")).toBe("sys-b");
+  });
+});

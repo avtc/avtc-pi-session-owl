@@ -8,7 +8,7 @@
 //
 // Usage:
 //   node helpers/bootstrap.mjs <transcript.jsonl> [--config-dir <dir>]
-//        [--session-id <id>] [--after <uuid>] [--page-bytes N] [--limit K]
+//        [--session-id <id>] [--after <uuid>] [--live-path] [--page-bytes N] [--limit K]
 //
 // Row derivation: transcript rows carry type/isMeta/compact_boundary where
 // the live event carries door/origin — the same outcome mapping as the
@@ -37,7 +37,7 @@ const stringFlag = (name, def) => {
   if (raw === null) return def;
   if (typeof raw !== "string" || raw === "undefined" || raw.startsWith("--")) {
     process.stderr.write(
-      "usage: node helpers/bootstrap.mjs <transcript.jsonl> [--config-dir <dir>] [--session-id <id>] [--after <uuid>] [--page-bytes N] [--limit K]\n" +
+      "usage: node helpers/bootstrap.mjs <transcript.jsonl> [--config-dir <dir>] [--session-id <id>] [--after <uuid>] [--live-path] [--page-bytes N] [--limit K]\n" +
         `note: --${name} needs a value that is not another flag\n`,
     );
     process.exit(2);
@@ -57,7 +57,7 @@ const numericFlag = (name, def) => {
 
 if (file === undefined) {
   process.stderr.write(
-    "usage: node helpers/bootstrap.mjs <transcript.jsonl> [--config-dir <dir>] [--session-id <id>] [--after <uuid>] [--page-bytes N] [--limit K]\n" +
+    "usage: node helpers/bootstrap.mjs <transcript.jsonl> [--config-dir <dir>] [--session-id <id>] [--after <uuid>] [--live-path] [--page-bytes N] [--limit K]\n" +
       "note: a rerun re-writes rows (no absent-check here — pass --after <lastMirroredUuid> to bound it)\n",
   );
   process.exit(2);
@@ -88,12 +88,13 @@ if (afterPresent && (typeof afterRaw !== "string" || afterRaw === "undefined" ||
   // silently mirror NOTHING (exit 0, zero rows) — reject it like the
   // sibling helpers reject malformed values
   process.stderr.write(
-    "usage: node helpers/bootstrap.mjs <transcript.jsonl> [--config-dir <dir>] [--session-id <id>] [--after <uuid>] [--page-bytes N] [--limit K]\n" +
+    "usage: node helpers/bootstrap.mjs <transcript.jsonl> [--config-dir <dir>] [--session-id <id>] [--after <uuid>] [--live-path] [--page-bytes N] [--limit K]\n" +
       "note: a rerun re-writes rows (no absent-check here — pass --after <lastMirroredUuid> to bound it)\n",
   );
   process.exit(2);
 }
 const afterUuid = afterPresent ? afterRaw : null;
+const livePathMode = argv.includes("--live-path");
 const pageBytes = numericFlag("page-bytes", 3 * 1024 * 1024); // stay under the 4 MiB cap
 const limit = numericFlag("limit", Infinity);
 
@@ -148,11 +149,14 @@ function metaText(row) {
  *  is metadata and skipped upstream). The isMeta split matches the host's
  *  rowFromTranscript exactly: reminder-tag rows are the skipped engine
  *  class, other isMeta USER rows are plugin appends (the note door with a
- *  plugin origin — the grouper's custom_message split). */
-function deriveRow(row) {
+ *  plugin origin — the grouper's custom_message split). The compaction
+ *  door rides the row's own flag OR the pending-boundary carry — this
+ *  build writes the boundary as a preceding system row and stamps nothing
+ *  on the summary row itself. */
+function deriveRow(row, atBoundary) {
   let door = "prompt";
   let origin = { kind: "composer" };
-  if (row.compact_boundary === true) {
+  if (row.compact_boundary === true || atBoundary) {
     door = "compaction";
     origin = { kind: "system" };
   } else if (row.isMeta === true && metaText(row).includes("<system-reminder")) {
@@ -176,7 +180,7 @@ function deriveRow(row) {
   }
   return {
     uuid: row.uuid,
-    parentUuid: row.parentUuid ?? null,
+    parentUuid: row.parentUuid ?? row.logicalParentUuid ?? null,
     agentId: typeof row.agentId === "string" ? row.agentId : undefined,
     door,
     origin,
@@ -204,8 +208,86 @@ function writeBatch() {
   bytes = 0;
 }
 
+// Normalized file edges for EVERY uuid-bearing row (chrome included):
+// parentUuid, else the logical link (compaction-boundary rows), else null.
+// Mirror rows resolve their parents THROUGH the chrome this helper never
+// writes onto the nearest mirrored ancestor — a raw file parent would dangle
+// at every skipped system row and later chain walks would bridge it by
+// arrival order, which can cross a rewind fork onto the abandoned branch.
+const fileEdges = new Map();
+const mirrored = new Set();
+function resolveParent(uuid) {
+  let cur = uuid;
+  const seen = new Set();
+  while (cur !== null && !mirrored.has(cur) && !seen.has(cur) && fileEdges.has(cur)) {
+    seen.add(cur);
+    cur = fileEdges.get(cur) ?? null;
+  }
+  return cur;
+}
+
 let streamError = null;
-const rl = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
+
+// --live-path: pass 1 streams the file once to collect every uuid-bearing
+// edge, the carried (user/assistant) set, and the LAST last-prompt leaf;
+// the live chain then resolves through chrome onto the nearest carried row
+// (the mirror of the host reader's livePath), and the mirroring pass keeps
+// only that lineage — an abandoned fork's rows never mirror. The edges are
+// COMPLETE before any row mirrors, so parent resolution never dangles.
+const carriedSet = new Set();
+let tipLeaf = null;
+if (livePathMode) {
+  const rl0 = createInterface({ input: createReadStream(file, { encoding: "utf-8" }), crlfDelay: Infinity });
+  for await (const line0 of rl0) {
+    if (line0.length === 0) continue;
+    let row0;
+    try {
+      row0 = JSON.parse(line0);
+    } catch {
+      continue;
+    }
+    if (row0.type === "last-prompt") {
+      if (typeof row0.leafUuid === "string") tipLeaf = row0.leafUuid;
+      continue;
+    }
+    const uuid0 = typeof row0.uuid === "string" ? row0.uuid : null;
+    if (uuid0 === null) continue;
+    if (!fileEdges.has(uuid0)) {
+      fileEdges.set(
+        uuid0,
+        typeof row0.parentUuid === "string"
+          ? row0.parentUuid
+          : typeof row0.logicalParentUuid === "string"
+            ? row0.logicalParentUuid
+            : null,
+      );
+    }
+    if (row0.type === "user" || row0.type === "assistant") carriedSet.add(uuid0);
+  }
+}
+const liveSet = new Set();
+if (livePathMode) {
+  let leaf = tipLeaf;
+  if (leaf !== null && !carriedSet.has(leaf)) {
+    let cur = leaf;
+    const seenResolve = new Set();
+    while (cur !== null && !carriedSet.has(cur) && !seenResolve.has(cur) && fileEdges.has(cur)) {
+      seenResolve.add(cur);
+      cur = fileEdges.get(cur) ?? null;
+    }
+    leaf = cur;
+  }
+  let cursor = leaf;
+  const seenChain = new Set();
+  while (cursor !== null && !seenChain.has(cursor)) {
+    seenChain.add(cursor);
+    liveSet.add(cursor);
+    cursor = fileEdges.has(cursor) ? (fileEdges.get(cursor) ?? null) : null;
+  }
+}
+
+const rl = createInterface({ input: createReadStream(file, { encoding: "utf-8" }), crlfDelay: Infinity });
+let pendingBoundary = false; // a seen system compact_boundary awaits its carrier row
 try {
   for await (const line of rl) {
     if (line.length === 0) continue;
@@ -217,13 +299,35 @@ try {
     }
     const uuid = typeof row.uuid === "string" ? row.uuid : null;
     if (uuid === null) continue; // metadata row kinds are not conversation rows
+    if (!fileEdges.has(uuid)) {
+      fileEdges.set(
+        uuid,
+        typeof row.parentUuid === "string"
+          ? row.parentUuid
+          : typeof row.logicalParentUuid === "string"
+            ? row.logicalParentUuid
+            : null,
+      );
+    }
+    if (row.type === "system" && row.subtype === "compact_boundary") {
+      pendingBoundary = true;
+      continue;
+    }
     if (row.type !== "user" && row.type !== "assistant") continue; // same filter as the host reader
+    if (livePathMode && !liveSet.has(uuid)) continue; // off the tip's lineage
     if (!seenAfter) {
       if (uuid === afterUuid) seenAfter = true;
       continue;
     }
     if (n >= limit) break;
-    const plain = JSON.stringify({ uuid, parentUuid: row.parentUuid ?? null, row: deriveRow(row) });
+    mirrored.add(uuid);
+    const rawParent = typeof row.parentUuid === "string" ? row.parentUuid : null;
+    const plain = JSON.stringify({
+      uuid,
+      parentUuid: rawParent === null ? null : resolveParent(rawParent),
+      row: deriveRow(row, pendingBoundary),
+    });
+    pendingBoundary = false;
     out += BigInt(byteLength(line));
     n += 1;
     const lineBytes = byteLength(plain) + 1;

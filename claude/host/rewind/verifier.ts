@@ -60,7 +60,13 @@ export function parseTranscript(text: string): TranscriptPass {
       continue;
     }
     if (typeof row.uuid !== "string") continue; // metadata without a chain slot
-    rows.push({ uuid: row.uuid, parentUuid: typeof row.parentUuid === "string" ? row.parentUuid : null });
+    // the normalized parent: parentUuid, else the logical link (the
+    // compaction-boundary system rows carry null parentUuid +
+    // logicalParentUuid — the chain continues on the logical edge)
+    let parent: string | null = null;
+    if (typeof row.parentUuid === "string") parent = row.parentUuid;
+    else if (typeof row.logicalParentUuid === "string") parent = row.logicalParentUuid;
+    rows.push({ uuid: row.uuid, parentUuid: parent });
   }
   if (tip === null && rows.length > 0) {
     const parents = new Set(rows.map((r) => r.parentUuid).filter((p): p is string => p !== null));

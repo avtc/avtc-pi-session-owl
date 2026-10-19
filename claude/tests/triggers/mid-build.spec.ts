@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { DEFAULT_CONFIG, type SessionOwlConfig } from "../../core/src/config/schema.js";
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
+import { ownSummariesFor } from "../../host/storage/summary-identity.js";
 import { _resetMeasureSnapshots } from "../../host/triggers/context.js";
 import { evaluateAndLaunch, type TriggerHostDeps } from "../../host/triggers/eval.js";
 import { _resetRunLocks } from "../../host/triggers/run-locks.js";
@@ -57,6 +58,7 @@ describe("the chained Observer's mid-run Builder", () => {
       isEnabled: () => true,
       cheapGateClean: () => true,
       getObserverFrontier: () => getGraphStore().observerFrontier,
+      getOwnSummaries: () => ownSummariesFor(getGraphStore()),
       pinCore: async () => {},
       runs: {
         runObserver: async (args) => {
@@ -76,7 +78,7 @@ describe("the chained Observer's mid-run Builder", () => {
         runSelector: async () => {},
       },
     };
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     await tick();
     expect(events).toContain("mid-build-ran");
     expect(events.indexOf("builder-run")).toBeGreaterThan(events.indexOf("observer-enter"));
@@ -101,6 +103,7 @@ describe("the chained Observer's mid-run Builder", () => {
       isEnabled: () => true,
       cheapGateClean: () => true,
       getObserverFrontier: () => getGraphStore().observerFrontier,
+      getOwnSummaries: () => ownSummariesFor(getGraphStore()),
       pinCore: async () => {},
       runs: {
         runObserver: async (args) => {
@@ -112,7 +115,7 @@ describe("the chained Observer's mid-run Builder", () => {
         runSelector: async () => {},
       },
     };
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     await tick();
     expect(events).not.toContain("builder-run");
     expect(events).toContain(false); // maybeBuild answered false — no fire

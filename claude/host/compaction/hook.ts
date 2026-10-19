@@ -35,10 +35,12 @@ import type { GraphStore } from "../../core/src/store/graph-store.js";
 import { computeUnobserved, makeMaybeBuilder } from "../../core/src/triggers.js";
 import { O_INITIAL_PROMPT } from "../../core/src/types.js";
 import { ModelUnavailableError } from "../runs/seams.js";
+import { normalizeSummaryText, ownSummariesFor } from "../storage/summary-identity.js";
 import { contextTokensFor, makeTriggerCtx } from "../triggers/context.js";
 import { acquireForCompaction, acquireOrSkip } from "../triggers/run-locks.js";
 import { buildSkip, buildTakeover, estimateTokensAfter, summaryMessage } from "./answer.js";
 import { computeKeptTail } from "./cut.js";
+import { ownCompactionFloorIndex, ownSummaryFloorIndex } from "./floor.js";
 import { collectTailThinking, renderThinkingSection } from "./thinking.js";
 
 /** The compact event slice the takeover reads (the engine's input shape). */
@@ -77,6 +79,12 @@ export interface CompactionHookDeps {
   settings: SessionOwlConfig;
   /** The live settings (re-read between phases — the mid-gate disable). */
   getSettings: () => SessionOwlConfig;
+  /** The layered rewind check's compaction entry, awaited BEFORE the gate
+   *  reads the store: a rewind that happened since the last check-point
+   *  re-folds here, so the takeover renders from the rewound state instead
+   *  of the abandoned line's records. A throw degrades to a logged
+   *  skip-and-continue (the check's own last-resort rule). */
+  rewindCheck: () => Promise<void>;
   /** The conflict-pause live predicate (true ⇒ hooks pass through). */
   isPaused: () => boolean;
   /** The kept-tail budget (the ported keepRecentTokens setting). */
@@ -101,8 +109,9 @@ export interface CompactionHookDeps {
   getGraphStore: () => GraphStore;
   runs: CompactionRuns;
   /** Persists the encoded snapshot BEFORE the answer (the storage layer's
-   *  snapshot writer, bound by the wiring). */
-  persistSnapshot: (details: unknown, compactionId: string) => Promise<void>;
+   *  snapshot writer, bound by the wiring) and records the answered
+   *  summary's exact text as owl's own (branch record identity). */
+  persistSnapshot: (details: unknown, compactionId: string, summaryText: string) => Promise<void>;
   /** Appends the transcript display row for the summary (the engine writes
    *  none of its own for a hook-answered compaction — the row lands
    *  model-invisible and renders in the transcript view). A failure is
@@ -140,6 +149,18 @@ export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDe
     if (deps.isPaused()) return { kind: "pass" };
     // (2) disabled ⇒ transparent (the engine's own compaction runs)
     if (!deps.settings.enabled) return { kind: "pass" };
+    // (2b) the layered rewind check: a rewind since the last check-point
+    // re-folds BEFORE the gate reads the store — the cut, the scope and the
+    // ensure-ready phases then work on the rewound conversation's own
+    // records, never the abandoned line's. A failed check degrades to a
+    // log line (the compaction still runs; the next check-point retries).
+    try {
+      await deps.rewindCheck();
+    } catch (cause) {
+      log(
+        `rewind check before compaction failed (continuing): ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
     // typed /compact instructions are ignored exactly as pi ignores them —
     // the summary is built from the graph, never the focus text
     if (typeof e.instructions === "string" && e.instructions.length > 0) {
@@ -168,7 +189,7 @@ export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDe
     try {
       // a prior owl summary row never rides the tail — the fresh summary
       // re-renders the same graph, so exactly one summary row exists at a time
-      const keptTail = cut.kept.filter((m) => !isPriorSummaryRow(m));
+      const keptTail = cut.kept.filter((m) => !isPriorSummaryRow(m, ownSummariesFor(deps.getGraphStore())));
       return await runGate(deps, log, { kept: keptTail, scope, handle, signal });
     } finally {
       handle.release();
@@ -297,10 +318,6 @@ async function runGate(
   const details = encodeDetails(store.graph, store.selectedTree, store.usageLedger) as { compactionStages?: unknown };
   details.compactionStages = ledgerToStageUsages(compactionDelta);
 
-  // the snapshot persists BEFORE the answer — a crash in between
-  // keeps the previous snapshot authoritative and the compaction skipped
-  await deps.persistSnapshot(details, deps.newCompactionId());
-
   // The kept tail's aggregated thinking rides INSIDE the summary row (the
   // engine serves user rows; a trailing assistant row persists as
   // model="<synthetic>" and never reaches the model). Off or empty — the
@@ -324,6 +341,11 @@ async function runGate(
   // skip), so nothing duplicates.
   let trailing: SessionMessage | undefined;
   if (deps.injectedSummaryRow) trailing = { role: "assistant", text: summary, toolUses: [] };
+
+  // the snapshot + the own-summary record persist BEFORE the answer — a
+  // crash in between keeps the previous snapshot authoritative and the
+  // compaction skipped
+  await deps.persistSnapshot(details, deps.newCompactionId(), summaryText);
 
   const summaryMsg = summaryMessage(summaryText);
   return {
@@ -394,19 +416,40 @@ function skipFailed(deps: CompactionHookDeps, cause: string): TakeoverOutcome {
  *  block this compaction swallows). A null/unknown cut ⇒ the whole branch
  *  (pi's cut-not-found rule). */
 
-/** A summary row owl rendered at an earlier compaction: the engine hands it
- * back as a plain user message, and its text opens with owl's own root-view
- * heading. The fresh answer carries the current render; keeping the old row
- * would duplicate the memory view in the conversation. */
-function isPriorSummaryRow(m: SessionMessage): boolean {
-  return m.role === "user" && typeof m.text === "string" && m.text.startsWith("# Memory" + "\n");
+/** A summary row owl itself rendered at an earlier compaction: the engine
+ *  hands it back as a plain user message, so the row is owl's own exactly
+ *  when its text matches one of the recorded answered summaries (an exact
+ *  identity — a user message that merely opens like a summary never
+ *  matches). The fresh answer carries the current render; keeping the old
+ *  row would duplicate the memory view in the conversation. */
+function isPriorSummaryRow(m: SessionMessage, ownTexts: ReadonlySet<string>): boolean {
+  return m.role === "user" && typeof m.text === "string" && ownTexts.has(normalizeSummaryText(m.text));
 }
 
-function observerCatchUpGap(deps: CompactionHookDeps, firstKeptEntryId: string | null): SessionEntry[] {
+export function observerCatchUpGap(deps: CompactionHookDeps, firstKeptEntryId: string | null): SessionEntry[] {
   const branch = deps.getBranch();
   const cutIndex = firstKeptEntryId === null ? -1 : branch.findIndex((entry) => entry.id === firstKeptEntryId);
   const compactedBlock = cutIndex === -1 ? branch : branch.slice(0, cutIndex);
-  return computeUnobserved(compactedBlock, deps.getObserverFrontier()).filter(isRenderableEntry);
+  // the observation floor: the newest OWL-OWN summary on the block bounds
+  // the re-observation scope (everything before it is condensed into that
+  // row; a lost coverage state rebuilds from the boundary, and native or
+  // foreign-mod summaries are never boundaries — their rows may still be
+  // observed, which is the full-session re-observation they require).
+  // Two witnesses of the same fact, the newer position winning: the store's
+  // recorded summary texts (exact normalized identity) and the block's own
+  // compaction entries — chrome rows carrying owl's rendered summary, which
+  // survive a store loss and keep the condensed history below them from
+  // ever re-entering the scope.
+  const recordedFloor = ownSummaryFloorIndex(compactedBlock, ownSummariesFor(deps.getGraphStore()));
+  const fileFloor = ownCompactionFloorIndex(compactedBlock);
+  const floor = Math.max(recordedFloor, fileFloor);
+  if (floor > recordedFloor) {
+    (deps.log ?? ((m: string) => console.log(m)))(
+      `catch-up floor: on-file own summary at index ${String(floor)} bounds the scope (no recorded match)`,
+    );
+  }
+  const scoped = floor === -1 ? compactedBlock : compactedBlock.slice(floor + 1);
+  return computeUnobserved(scoped, deps.getObserverFrontier()).filter(isRenderableEntry);
 }
 
 /** Map the message-space cut onto the branch's entry space by TAIL

@@ -110,6 +110,69 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
     expect(asst.origin).toMatchObject({ kind: "model", model: "m" });
   }, 30_000);
 
+  test("--live-path mirrors only the tip's lineage: a fork's dead branch and un-carried chrome stay out", async () => {
+    const run = promisify(execFile);
+    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-live-"));
+    const transcript = [
+      JSON.stringify({ uuid: "f-1", parentUuid: null, type: "user", message: { role: "user", content: "start" } }),
+      JSON.stringify({
+        uuid: "f-2",
+        parentUuid: "f-1",
+        type: "assistant",
+        message: { id: "r1", model: "m", content: [{ type: "text", text: "fork point" }] },
+      }),
+      JSON.stringify({
+        uuid: "f-dead",
+        parentUuid: "f-2",
+        type: "assistant",
+        message: { id: "r2", model: "m", content: [{ type: "text", text: "abandoned branch" }] },
+      }),
+      JSON.stringify({
+        uuid: "f-live",
+        parentUuid: "f-2",
+        type: "user",
+        message: { role: "user", content: "the rewound continuation" },
+      }),
+      JSON.stringify({
+        uuid: "f-chrome",
+        parentUuid: "f-live",
+        type: "system",
+        message: { role: "system", content: "engine chrome" },
+      }),
+      JSON.stringify({ type: "last-prompt", sessionId: "sess-live", leafUuid: "f-chrome" }),
+    ].join("\n");
+    const transcriptPath = join(tmp, "sess-live.jsonl");
+    writeFileSync(transcriptPath, transcript, "utf8");
+    const cfg = join(tmp, "cfg");
+    mkdirSync(cfg, { recursive: true });
+
+    const { stderr } = await run(process.execPath, [
+      join(__dirname, "..", "..", "helpers", "bootstrap.mjs"),
+      transcriptPath,
+      "--config-dir",
+      cfg,
+      "--session-id",
+      "sess-live",
+      "--live-path",
+    ]);
+    const summary = JSON.parse(stderr.trim().split("\n").pop() ?? "{}");
+    expect(summary.done).toBe(true);
+    expect(summary.rows).toBe(3); // f-dead never mirrors
+
+    const sessDir = join(cfg, "session-owl", "sessions", "sess-live");
+    const mem = createMemoryFs();
+    const sep = join("x", "y").slice(1, -1);
+    const norm = (p: string) => p.split(sep).join("/");
+    for (const f of readdirSync(sessDir)) {
+      mem.adapter.writeText(`${norm(sessDir)}/${f}`, readFileSync(join(sessDir, f), "utf8"));
+    }
+    const sweep = await sweepMirror(mem.adapter, norm(sessDir));
+    expect(sweep.rows.map((r) => r.uuid)).toEqual(["f-1", "f-2", "f-live"]);
+    // the mirrored parents resolve through the un-carried chrome: f-live's
+    // file parent f-2 is carried, so the edge is exact
+    expect(sweep.rows[2]?.parentUuid).toBe("f-2");
+  }, 30_000);
+
   test("a trailing --after with no value exits 2 (no silent zero-row mirror)", async () => {
     const run = promisify(execFile);
     const tmp = mkdtempSync(join(tmpdir(), "owl-boot-after-"));
@@ -174,6 +237,40 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
     ]).catch((e: unknown) => e)) as { code?: number; stderr?: string };
     expect(res.code).toBe(2);
     expect(res.stderr).toContain("usage:");
+  }, 30_000);
+
+  test("a system compact_boundary row marks the NEXT conversation row as the compaction door", async () => {
+    const run = promisify(execFile);
+    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-boundary-"));
+    const t = join(tmp, "t.jsonl");
+    const lines = [
+      { uuid: "u-1", parentUuid: null, type: "user", message: { role: "user", content: "first" } },
+      { uuid: "b-1", parentUuid: "u-1", type: "system", subtype: "compact_boundary" },
+      { uuid: "mem-1", parentUuid: "b-1", type: "user", message: { role: "user", content: "# Memory\nthe render" } },
+      { uuid: "u-2", parentUuid: "mem-1", type: "user", message: { role: "user", content: "after" } },
+    ];
+    writeFileSync(t, lines.map((r) => JSON.stringify(r)).join("\n"), "utf8");
+    await run(process.execPath, [
+      join(__dirname, "..", "..", "helpers", "bootstrap.mjs"),
+      t,
+      "--config-dir",
+      join(tmp, "cfg"),
+    ]);
+    // read the written mirror: the summary row after the boundary system
+    // row carries the compaction door (the on-file floor reads it), the
+    // rows around it stay prompts
+    const sessDir = join(tmp, "cfg", "session-owl", "sessions");
+    const sid = readdirSync(sessDir)[0];
+    const mirrorFile = readdirSync(join(sessDir, sid)).find((f) => /^m1-.*\.jsonl$/.test(f));
+    expect(mirrorFile).toBeDefined();
+    const mirrored = readFileSync(join(sessDir, sid, mirrorFile as string), "utf8")
+      .split("\n")
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l) as { uuid?: string; row?: { door?: string } });
+    const byUuid = new Map(mirrored.map((r) => [r.uuid, r.row?.door]));
+    expect(byUuid.get("mem-1")).toBe("compaction");
+    expect(byUuid.get("u-1")).toBe("prompt");
+    expect(byUuid.get("u-2")).toBe("prompt");
   }, 30_000);
 
   test("multi-page runs keep ONE seq with .k continuation parts (writer parity)", async () => {
@@ -497,5 +594,79 @@ describe("runBackfill — the over-cap bootstrap seam", () => {
     expect(failed.bootstrapBlocked).toBe(true);
     const absent = await backfillWith(undefined);
     expect(absent.bootstrapBlocked).toBe(true);
+  });
+});
+
+describe("helpers/bootstrap.mjs — compaction-boundary logical edges", () => {
+  test("a boundary-parented row resolves through the skipped chrome onto the rewound branch", async () => {
+    const run = promisify(execFile);
+    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-"));
+    const transcript = [
+      JSON.stringify({ uuid: "m-1", parentUuid: null, type: "user", message: { role: "user", content: "root" } }),
+      JSON.stringify({
+        uuid: "m-2",
+        parentUuid: "m-1",
+        type: "user",
+        message: { role: "user", content: "pre-compact" },
+      }),
+      JSON.stringify({
+        uuid: "m-3",
+        parentUuid: "m-2",
+        type: "user",
+        message: { role: "user", content: "abandoned invocation" },
+      }),
+      JSON.stringify({
+        uuid: "m-2b",
+        parentUuid: "m-2",
+        type: "user",
+        message: { role: "user", content: "rewound sibling" },
+      }),
+      JSON.stringify({ uuid: "sys-a", type: "system", subtype: "informational", parentUuid: "m-2b" }),
+      JSON.stringify({
+        uuid: "sys-b",
+        type: "system",
+        subtype: "compact_boundary",
+        parentUuid: null,
+        logicalParentUuid: "sys-a",
+      }),
+      JSON.stringify({
+        uuid: "m-5",
+        parentUuid: "sys-b",
+        type: "user",
+        message: { role: "user", content: "# Memory\nsummary" },
+      }),
+      JSON.stringify({ uuid: "m-6", parentUuid: "m-5", type: "user", message: { role: "user", content: "kept tail" } }),
+    ].join("\n");
+    const transcriptPath = join(tmp, "sess-fork.jsonl");
+    writeFileSync(transcriptPath, transcript, "utf8");
+    const cfg = join(tmp, "cfg");
+    mkdirSync(cfg, { recursive: true });
+
+    await run(process.execPath, [
+      join(__dirname, "..", "..", "helpers", "bootstrap.mjs"),
+      transcriptPath,
+      "--config-dir",
+      cfg,
+    ]);
+
+    const sessDir = join(cfg, "session-owl", "sessions", "sess-fork");
+    const mem = createMemoryFs();
+    const sep = join("x", "y").slice(1, -1);
+    const norm = (p: string) => p.split(sep).join("/");
+    for (const f of readdirSync(sessDir)) {
+      mem.adapter.writeText(`${norm(sessDir)}/${f}`, readFileSync(join(sessDir, f), "utf8"));
+    }
+    const sweep = await sweepMirror(mem.adapter, norm(sessDir));
+    // the mirror is the verbatim archive: every conversation row lands in
+    // it, the abandoned branch included — liveness is the chain's job
+    const uuids = sweep.rows.map((r) => r.uuid);
+    expect(uuids).toEqual(["m-1", "m-2", "m-3", "m-2b", "m-5", "m-6"]);
+    // the summary row's parent resolves THROUGH the skipped boundary chrome
+    // onto the rewound sibling m-2b — never onto the abandoned branch
+    const summary = sweep.rows.find((r) => r.uuid === "m-5");
+    expect(summary?.parentUuid).toBe("m-2b");
+    const mirror = new MirrorWriter(mem.adapter, norm(sessDir), "adopt");
+    mirror.adoptRows(sweep.rows);
+    expect(mirror.chainTo("m-6")).toEqual(["m-1", "m-2", "m-2b", "m-5", "m-6"]);
   });
 });

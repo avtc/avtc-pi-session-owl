@@ -7,7 +7,7 @@
 // edges for the lineage ledger.
 
 import { describe, expect, test } from "vitest";
-import { exactEdges, parseTranscript, verifyJunction } from "../../host/rewind/verifier.js";
+import { exactEdges, liveChainSet, parseTranscript, verifyJunction } from "../../host/rewind/verifier.js";
 
 const chainRow = (uuid: string, parentUuid: string | null, extra: Record<string, unknown> = {}) => ({
   uuid,
@@ -106,5 +106,41 @@ describe("verifyJunction", () => {
       present: false,
       exactParent: null,
     });
+  });
+});
+
+describe("parseTranscript — logical edges at compaction boundaries", () => {
+  const forkText = [
+    JSON.stringify({ uuid: "m-1", type: "user", parentUuid: null }),
+    JSON.stringify({ uuid: "m-2", type: "user", parentUuid: "m-1" }),
+    JSON.stringify({ uuid: "m-3", type: "user", parentUuid: "m-2" }), // abandoned invocation
+    JSON.stringify({ uuid: "m-4", type: "assistant", parentUuid: "m-3" }), // abandoned tail
+    JSON.stringify({ uuid: "m-2b", type: "user", parentUuid: "m-2" }), // rewound sibling
+    JSON.stringify({ uuid: "sys-a", type: "system", subtype: "informational", parentUuid: "m-2b" }),
+    JSON.stringify({
+      uuid: "sys-b",
+      type: "system",
+      subtype: "compact_boundary",
+      parentUuid: null,
+      logicalParentUuid: "sys-a",
+    }),
+    JSON.stringify({ uuid: "m-5", type: "user", parentUuid: "sys-b" }), // summary row
+    JSON.stringify({ uuid: "m-6", type: "user", parentUuid: "m-5" }),
+    JSON.stringify({ type: "last-prompt", leafUuid: "m-6" }),
+  ].join("\n");
+
+  test("a compact_boundary row's edge is its logicalParentUuid (null parentUuid + logical link)", () => {
+    const pass = parseTranscript(forkText);
+    if (pass.kind !== "ok") throw new Error("expected ok");
+    const byId = new Map(pass.rows.map((r) => [r.uuid, r] as const));
+    expect(byId.get("sys-b")?.parentUuid).toBe("sys-a");
+    expect(byId.get("m-3")?.parentUuid).toBe("m-2");
+  });
+
+  test("liveChainSet from the rewound tip excludes the abandoned branch", () => {
+    const pass = parseTranscript(forkText);
+    if (pass.kind !== "ok") throw new Error("expected ok");
+    const live = liveChainSet(pass.rows, pass.tip);
+    expect([...live].sort()).toEqual(["m-1", "m-2", "m-2b", "m-5", "m-6", "sys-a", "sys-b"].sort());
   });
 });

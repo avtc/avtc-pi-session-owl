@@ -163,6 +163,8 @@ Five independent mode axes, all live-toggleable mid-session:
 
 The defaults keep the observations graph in shape, so when a compaction is triggered the summary is immediately provided — tune the modes and thresholds to your model and workload. Two shape knobs — `rootViewTargetNodes` (how many roots to aim for; no target = the agent shapes the root view on its own) and `rootViewStrategy` (task · category · recency · importance · topic) — advise the Builder and Selector on the root view's organization. See [CONFIGURATION.md](https://github.com/avtc/avtc-pi-session-owl/blob/main/docs/CONFIGURATION.md) for the full schema reference (every knob, defaults, per-component model presets).
 
+Plugin-spawned agents (session-owl's own included) are ignored, and their compaction is left to Claude Code. `subagentMode` covers all other subagents.
+
 ## Conflicts with other mods
 
 Claude Code runs every plugin's `session.compact` hook; when two mods both answer compaction, the session's summary is contested. Session Owl detects this at every start — it fingerprints the loaded plugins' declared events (the same surface `claude plugin validate` prints), watches for foreign compaction answers and compaction-shaped session rows, and when it finds a conflict it stays dormant: no observations are collected, compaction falls through to the native or foreign handler, and the widget shows a paused line:

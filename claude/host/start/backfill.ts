@@ -24,7 +24,7 @@ import { SESSION_MARKER_FILENAME } from "../storage/session-marker.js";
 import { prepareStoreContext, ROW_TYPE } from "../storage/store-context.js";
 import { captureInitialPrompt, ensureNGoalSeeded } from "./initial-prompt.js";
 import type { PendingEvaluator } from "./pending.js";
-import { livePath, readTranscript, rowFromTranscript } from "./transcript-reader.js";
+import { carriedAncestor, livePath, readTranscript, rowFromTranscript } from "./transcript-reader.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -169,25 +169,15 @@ export async function runBackfill(
 
   let remirrored = 0;
   if (!transcript.tooLarge) {
-    const live = livePath(transcript.rows, transcript.tip?.leafUuid ?? null);
-    // the transcript's full row set (by uuid) — the parent resolver walks a
-    // live row's file parent THROUGH the rows the mirror never carries
-    // (system/attachment chrome, dead forks) onto the nearest live ancestor;
-    // a raw file parent would chain into a row the mirror lacks and every
-    // chain walk would truncate exactly there
-    const rowsByUuid = new Map(transcript.rows.map((r) => [r.uuid, r]));
-    const resolveParent = (uuid: string): string | null => {
-      let cur: string | null = uuid;
-      for (let hops = 0; hops < 4096 && cur !== null; hops += 1) {
-        if (liveSet.has(cur)) return cur; // live itself — the direct parent
-        const row = rowsByUuid.get(cur);
-        if (row === undefined) return cur; // past the file's knowledge
-        if (row.parentUuid === null) return null;
-        cur = row.parentUuid; // chrome/dead — resolve through it
-      }
-      return cur;
-    };
+    const live = livePath(transcript.rows, transcript.tip?.leafUuid ?? null, transcript.parentByUuid);
+    // the parent resolver walks a live row's file parent THROUGH the rows
+    // the mirror never carries (system/attachment chrome, compaction
+    // boundaries via their logical edges, dead forks) onto the nearest
+    // carried ancestor; a raw file parent would chain into a row the
+    // mirror lacks and every chain walk would truncate exactly there
     const liveSet = new Set(live.map((r) => r.uuid));
+    const resolveParent = (uuid: string): string | null =>
+      liveSet.has(uuid) ? uuid : carriedAncestor(transcript.rows, transcript.parentByUuid, uuid);
     // re-mirror by the absent-check (the crash-window rule): every live
     // row whose uuid is absent from the mirror is written NOW — regardless
     // of where the frontier sits

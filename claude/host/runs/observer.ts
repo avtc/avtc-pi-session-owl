@@ -386,10 +386,11 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
             [RECORD_OBS_TOOL]: async (callEvent: Record<string, unknown>) => {
               const answer = await recordBody(callEvent);
               // persisted evidence: which array the executor filled, next to
-              // what the chunk end will see
+              // what the chunk end will see. An ALL-rejected batch answers
+              // as a DENY (no result field) — stringify null, never undefined
               try {
                 log.info(
-                  `observer record execute: agent=${agentId} records-len=${records.length} chunk=${chunkIndex + 1}/${totalChunks} answer=${JSON.stringify((answer as { result?: unknown }).result).slice(0, 60)}`,
+                  `observer record execute: agent=${agentId} records-len=${records.length} chunk=${chunkIndex + 1}/${totalChunks} answer=${JSON.stringify((answer as { result?: unknown }).result ?? null).slice(0, 60)}`,
                 );
               } catch (err) {
                 // diagnostics never throw — but the logger itself failing is

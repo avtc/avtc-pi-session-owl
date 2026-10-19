@@ -1,0 +1,55 @@
+{
+  "description": "Chrome-tip transcript: chain u-1 -> a-2 -> a-3 (live leaf); dead sibling d-3 off a-2; a system row s-4 (child of a-3, skipped by the reader as chrome) is what the last-prompt marker names. The live path must resolve s-4 through the edge map onto a-3 and walk from there — the dead d-3 never enters.",
+  "rows": [
+    {
+      "kind": "prompt",
+      "uuid": "u-1",
+      "parentUuid": null,
+      "sessionId": "sess-ct",
+      "timestamp": "2026-10-06T12:00:01.000Z",
+      "type": "user",
+      "message": { "role": "user", "content": "start" }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "a-2",
+      "parentUuid": "u-1",
+      "sessionId": "sess-ct",
+      "timestamp": "2026-10-06T12:00:02.000Z",
+      "type": "assistant",
+      "message": { "id": "r1", "model": "glm-5.1", "content": [{ "type": "text", "text": "one" }] }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "d-3",
+      "parentUuid": "a-2",
+      "sessionId": "sess-ct",
+      "timestamp": "2026-10-06T12:00:03.000Z",
+      "type": "assistant",
+      "message": { "id": "r2", "model": "glm-5.1", "content": [{ "type": "text", "text": "abandoned answer (dead tail)" }] }
+    },
+    {
+      "kind": "assistant-text",
+      "uuid": "a-3",
+      "parentUuid": "a-2",
+      "sessionId": "sess-ct",
+      "timestamp": "2026-10-06T12:00:04.000Z",
+      "type": "assistant",
+      "message": { "id": "r3", "model": "glm-5.1", "content": [{ "type": "text", "text": "live answer" }] }
+    },
+    {
+      "kind": "raw-row",
+      "uuid": "s-4",
+      "parentUuid": "a-3",
+      "sessionId": "sess-ct",
+      "timestamp": "2026-10-06T12:00:05.000Z",
+      "type": "system",
+      "message": { "role": "system", "content": "engine chrome after the last answer" }
+    },
+    {
+      "kind": "metadata-tip",
+      "uuid": null,
+      "raw": "{\"type\":\"last-prompt\",\"sessionId\":\"sess-ct\",\"leafUuid\":\"s-4\"}"
+    }
+  ]
+}

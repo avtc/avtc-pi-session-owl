@@ -57,7 +57,7 @@ export function planBootstrapInvocation(input: BootstrapCallerInput): BootstrapP
   const script = pluginJoin(input.pluginRoot, BOOTSTRAP_HELPER_RELATIVE);
   const cli = input.surface === null || input.surface === "terminal";
   if (!cli) return { run: false, reason: "non-cli-defers", script: null, args: [] };
-  const args = [input.transcriptPath, "--config-dir", input.configDir, "--session-id", input.sessionId];
+  const args = [input.transcriptPath, "--config-dir", input.configDir, "--session-id", input.sessionId, "--live-path"];
   return { run: true, reason: "cli", script, args };
 }
 

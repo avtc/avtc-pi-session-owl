@@ -59,7 +59,15 @@ try {
       continue;
     }
     if (typeof row.uuid !== "string") continue; // metadata without a chain slot
-    const edge = [row.uuid, typeof row.parentUuid === "string" ? row.parentUuid : null];
+    // normalized parent: parentUuid, else the logical link (compaction-boundary
+    // rows carry null parentUuid + logicalParentUuid)
+    const parent =
+      typeof row.parentUuid === "string"
+        ? row.parentUuid
+        : typeof row.logicalParentUuid === "string"
+          ? row.logicalParentUuid
+          : null;
+    const edge = [row.uuid, parent];
     if (after === null) {
       if (edges.length < maxEdges) edges.push(edge);
       rowsAfter += 1;

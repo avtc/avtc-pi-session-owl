@@ -18,6 +18,7 @@ import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-st
 import { makeNode, nowStoredTimestamp } from "../../core/src/types.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { installRunsLogSink, resetRunsLogSink } from "../../host/runs/seams.js";
+import { noteOwnSummary, ownSummariesFor } from "../../host/storage/summary-identity.js";
 import { _resetMeasureSnapshots, recordMeasure } from "../../host/triggers/context.js";
 import {
   evaluateAndLaunch,
@@ -62,6 +63,7 @@ function makeDeps(
     isEnabled: () => true,
     cheapGateClean: () => true,
     getObserverFrontier: () => getGraphStore().observerFrontier,
+    getOwnSummaries: () => ownSummariesFor(getGraphStore()),
     pinCore: async () => {},
     runs: {
       runObserver: async (args) => {
@@ -280,6 +282,83 @@ describe("onTurnCompleteBoundary — the wrap-up chain (pi's onTurnEnd semantics
   });
 });
 
+describe("the observation floor at the boundary — the walk stops at the newest own summary on the chain", () => {
+  function compactionRow(id: string, summary: string): SessionEntry {
+    return {
+      id,
+      timestamp: `${id}-ts`,
+      type: "compaction",
+      summary,
+      firstKeptEntryId: "",
+      tokensBefore: 0,
+    } as unknown as SessionEntry;
+  }
+
+  test("an on-file own summary bounds the trigger scope with a wiped store", async () => {
+    resetForNewSession();
+    const rows = [
+      ...entries(2),
+      compactionRow("own-1", "# Memory\nthe answered render"),
+      {
+        id: "p1",
+        timestamp: "p1-ts",
+        type: "message",
+        message: { role: "user", content: `post one ${PAD}` },
+      } as unknown as SessionEntry,
+      {
+        id: "p2",
+        timestamp: "p2-ts",
+        type: "message",
+        message: { role: "assistant", content: `post two ${PAD}` },
+      } as unknown as SessionEntry,
+      {
+        id: "p3",
+        timestamp: "p3-ts",
+        type: "message",
+        message: { role: "user", content: `post three ${PAD}` },
+      } as unknown as SessionEntry,
+    ];
+    const deps = makeDeps({ rows });
+    await evaluateAndLaunch(deps, false);
+    const launch = deps.launches[0];
+    expect(launch).toBeDefined();
+    // strictly after the own summary row: the pre-summary entries never
+    // re-enter the boundary catch-up even with no recorded texts
+    expect(launch?.unobserved?.map((e) => e.id)).toEqual(["p2", "p3"]);
+  });
+
+  test("the rescan relaunch keeps the whole live path (the maintenance promise)", async () => {
+    resetForNewSession();
+    const rows = [
+      ...entries(2),
+      compactionRow("own-1", "# Memory\nthe answered render"),
+      {
+        id: "p1",
+        timestamp: "p1-ts",
+        type: "message",
+        message: { role: "user", content: `post one ${PAD}` },
+      } as unknown as SessionEntry,
+      {
+        id: "p2",
+        timestamp: "p2-ts",
+        type: "message",
+        message: { role: "assistant", content: `post two ${PAD}` },
+      } as unknown as SessionEntry,
+      {
+        id: "p3",
+        timestamp: "p3-ts",
+        type: "message",
+        message: { role: "user", content: `post three ${PAD}` },
+      } as unknown as SessionEntry,
+    ];
+    const deps = makeDeps({ rows });
+    await evaluateAndLaunch(deps, true);
+    const launch = deps.launches[0];
+    expect(launch).toBeDefined();
+    expect(launch?.unobserved?.map((e) => e.id)).toEqual(["e2", "p1", "p2", "p3"]);
+  });
+});
+
 describe("measure snapshots — the context fill for the context-threshold arms", () => {
   test("feeds the on-session-context-threshold arm at the next boundary", async () => {
     recordMeasure("sess-t", { tokens: 50_000, window: 200_000 });
@@ -291,7 +370,7 @@ describe("measure snapshots — the context fill for the context-threshold arms"
         builderSessionContextThresholdTokens: 40_000,
       } as SessionOwlConfig,
     });
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     expect(deps.launches.map((l) => l.stage)).toEqual(["builder"]);
   });
 
@@ -306,7 +385,7 @@ describe("measure snapshots — the context fill for the context-threshold arms"
         builderSessionContextThresholdTokens: 40_000,
       } as SessionOwlConfig,
     });
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     expect(deps.launches).toEqual([]);
   });
 });
@@ -342,7 +421,7 @@ describe("core pinning — every decision call follows an awaited pinCore (no in
     deps.runs.runSelector = async () => {
       order.push("selector");
     };
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     // the pin PRECEDES the row read (pre-evaluation pinned), then a re-pin
     // follows each completed stage, before the next decision cluster
     expect(order).toEqual(["pin", "read", "observer", "pin", "builder", "pin", "selector"]);
@@ -376,7 +455,7 @@ describe("error containment — a thrown stage releases and never rejects the bo
     const original = console.error;
     console.error = (...a: unknown[]) => logs.push(a);
     try {
-      await evaluateAndLaunch(deps); // must NOT reject
+      await evaluateAndLaunch(deps, false); // must NOT reject
     } finally {
       console.error = original;
     }
@@ -408,7 +487,7 @@ describe("error containment — a thrown stage releases and never rejects the bo
     const h = acquireOrSkip("sess-t", "observe");
     expect(h).not.toBeNull();
     // the skip arm must not touch the lock ANOTHER holder owns
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     expect(inFlight("sess-t")).toBe(true); // still the test's own hold
     expect(current("sess-t")).toBe("observe");
     h?.release();
@@ -426,7 +505,7 @@ describe("subagentMode — the subagent stage gate", () => {
     const lines: string[] = [];
     installRunsLogSink((m) => lines.push(m));
     const deps = makeDeps({ key: "sess-t|agent-abc", settings: disabled });
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     expect(deps.launches).toHaveLength(0);
     expect(lines.join("\n")).toContain("session-owl disabled for subagents");
     resetRunsLogSink();
@@ -434,13 +513,13 @@ describe("subagentMode — the subagent stage gate", () => {
 
   test("the MAIN conversation still launches under the same settings", async () => {
     const deps = makeDeps({ settings: disabled }); // key stays sess-t (main)
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     expect(deps.launches.map((l) => l.stage)).toContain("observer");
   });
 
   test("agent-keyed with on-compaction (the default) passes this gate — the observer deferral is the binding's effective-settings override, never a skip here", async () => {
     const deps = makeDeps({ key: "sess-t|agent-abc" }); // DEFAULT_CONFIG.subagentMode="on-compaction", observerMode stays "on-threshold"
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     expect(deps.launches.map((l) => l.stage)).toContain("observer");
   });
 
@@ -449,7 +528,52 @@ describe("subagentMode — the subagent stage gate", () => {
       key: "sess-t|agent-abc",
       settings: { ...DEFAULT_CONFIG, observerThresholdTokens: 60, subagentMode: "inherited" } as SessionOwlConfig,
     });
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     expect(deps.launches.map((l) => l.stage)).toContain("observer");
+  });
+});
+
+describe("onTurnCompleteBoundary — the observation floor (own summaries bound the scope)", () => {
+  test("the trigger's unobserved slice starts strictly after the newest own-summary row", async () => {
+    const summaryText = "# Memory\nthe boundary render";
+    noteOwnSummary(getGraphStore(), summaryText);
+    const summaryRow = {
+      id: "e0",
+      timestamp: "e0-ts",
+      type: "message",
+      message: { role: "user", content: summaryText },
+    } as unknown as SessionEntry;
+    const rows = [summaryRow, ...entries(4)];
+    const deps = makeDeps({ rows });
+    onTurnCompleteBoundary(deps, {});
+    const p = Promise.resolve();
+    await tick();
+    await tick();
+    await p;
+    const launch = deps.launches.find((l) => l.stage === "observer");
+    expect(launch).toBeTruthy();
+    const ids = (launch?.unobserved ?? []).map((e) => e.id);
+    // the summary row never re-observes; the scoped block's first user
+    // message is the initial-prompt anchor the frontier rule skips
+    expect(ids).toEqual(["e2", "e3", "e4"]);
+  });
+
+  test("a summary-shaped user row with NO recorded text is no boundary (full scope)", async () => {
+    const lookAlike = {
+      id: "e0",
+      timestamp: "e0-ts",
+      type: "message",
+      message: { role: "user", content: "# Memory\na look-alike" },
+    } as unknown as SessionEntry;
+    const rows = [lookAlike, ...entries(4)];
+    const deps = makeDeps({ rows });
+    onTurnCompleteBoundary(deps, {});
+    const p = Promise.resolve();
+    await tick();
+    await tick();
+    await p;
+    const launch = deps.launches.find((l) => l.stage === "observer");
+    const ids = (launch?.unobserved ?? []).map((e) => e.id);
+    expect(ids).toEqual(["e1", "e2", "e3", "e4"]); // e0 = the first user message (the anchor skip)
   });
 });

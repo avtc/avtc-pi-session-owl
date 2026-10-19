@@ -35,6 +35,13 @@ import { sweepMirror } from "../storage/mirror.js";
 import { getSessionStorage } from "../storage/session-storage.js";
 import { newSnapshotId, persistSnapshotText } from "../storage/snapshot.js";
 import { type PreparedContext, prepareStoreContext } from "../storage/store-context.js";
+import {
+  collectOwnSummariesFromBranch,
+  normalizeSummaryText,
+  noteOwnSummary,
+  ownSummariesFor,
+  setOwnSummaries,
+} from "../storage/summary-identity.js";
 import { makeTodoBridge } from "../todo/bridge-consumer.js";
 import { makeTriggerCtx, windowFor } from "../triggers/context.js";
 import { evaluateAndLaunch, type TriggerHostDeps, type TriggerRuns } from "../triggers/eval.js";
@@ -78,8 +85,10 @@ export interface ConversationBinding {
   readonly widget: WidgetBridge;
   /** The evaluator's deps, runs bound to the real stage-run modules. */
   triggerDeps(): TriggerHostDeps;
-  /** The compaction gate's deps (the takeover's named inputs, all bound). */
-  compactionDeps(): CompactionHookDeps;
+  /** The compaction gate's deps (the takeover's named inputs, all bound;
+   *  the rewind-check capsule arrives from the wiring — it spells the
+   *  platform calls). */
+  compactionDeps(extras: { rewindCheck: () => Promise<void> }): CompactionHookDeps;
   /** The /owl-* command bodies' deps (browse/maintenance arms; the
    *  confirm + rewind-check capsules arrive from the wiring). */
   commandDeps(extras: {
@@ -205,6 +214,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
     });
     pinnedHandle = handle;
     const storeView = handle.store.getGraphStore();
+    setOwnSummaries(storeView, collectOwnSummariesFromBranch(ctx.getBranch(ctx.getLeafId())));
     pinnedStoreView = storeView;
     pinnedGraph = storeView.graph;
     return handle;
@@ -425,12 +435,13 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
       launchGuard: () => !state.isBootstrapBlocked(),
       cheapGateClean: () => !checkpointService().tripwires().evaluate(key).suspected,
       getObserverFrontier: () => binding.observerFrontier(),
+      getOwnSummaries: () => ownSummariesFor(binding.graphStore()),
       pinCore: async () => {
         await pinCore();
       },
       runs: triggerRuns,
     }),
-    compactionDeps: (): CompactionHookDeps => {
+    compactionDeps: (extras: { rewindCheck: () => Promise<void> }): CompactionHookDeps => {
       const liveSettings = settings();
       const keepRecentTokensField = (liveSettings as { keepRecentTokens?: unknown }).keepRecentTokens;
       const aggregatedThinkingField = (liveSettings as { keptTailAggregatedThinking?: unknown })
@@ -495,6 +506,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         settings: liveSettings,
         getSettings: settings,
         isPaused,
+        rewindCheck: extras.rewindCheck,
         // the ported kept-tail budget: a settings field, the port default until
         // the live read carries it
         keepRecentTokens:
@@ -509,7 +521,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         },
         getGraphStore: () => binding.graphStore(),
         runs: compactionRuns,
-        persistSnapshot: async (details: unknown, compactionId: string) => {
+        persistSnapshot: async (details: unknown, compactionId: string, summaryText: string) => {
           // the snapshot's liveness anchor: the newest mirrored row (the
           // rows the render reflects); the branch leaf covers a fresh
           // conversation before any mirror row exists
@@ -522,6 +534,11 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
             JSON.stringify(details),
             marker,
           );
+          // the answered summary's exact text = the durable identity of
+          // owl's own summary rows (the engine re-serves them as plain user
+          // rows; only the recorded text tells them from native ones)
+          storage.ledger.append("summary", { text: normalizeSummaryText(summaryText) }, marker);
+          noteOwnSummary(binding.graphStore(), summaryText);
         },
         notify,
         log: (message: string) => {
@@ -563,8 +580,9 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
           throw new Error(`binding ${key}: resetGraphForRescan() before the first pin`);
         }
         pinnedHandle.store.resetGraphForRescan(resolvedCtx);
+        setOwnSummaries(pinnedStoreView ?? binding.graphStore(), []); // a plain rescan re-observes the full live path
       },
-      relaunchMaintenance: () => evaluateAndLaunch(binding.triggerDeps()),
+      relaunchMaintenance: () => evaluateAndLaunch(binding.triggerDeps(), true),
       acquireForCompaction: () => acquireForCompaction(key),
       acquireOrSkipObserve: () => acquireOrSkip(key, "observe"),
       goalExtractSettled: () => goalExtractSettled(),

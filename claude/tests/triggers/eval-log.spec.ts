@@ -12,6 +12,7 @@ import { DEFAULT_CONFIG, type SessionOwlConfig } from "../../core/src/config/sch
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { installRunsLogSink, resetRunsLogSink, runsLog } from "../../host/runs/seams.js";
+import { ownSummariesFor } from "../../host/storage/summary-identity.js";
 import { _resetMeasureSnapshots } from "../../host/triggers/context.js";
 import { evaluateAndLaunch, type TriggerHostDeps } from "../../host/triggers/eval.js";
 import { _resetRunLocks } from "../../host/triggers/run-locks.js";
@@ -37,6 +38,7 @@ function makeDeps(rows: SessionEntry[], threshold: number): TriggerHostDeps {
     isEnabled: () => true,
     cheapGateClean: () => true,
     getObserverFrontier: () => getGraphStore().observerFrontier,
+    getOwnSummaries: () => ownSummariesFor(getGraphStore()),
     pinCore: async () => {},
     runs: {
       runObserver: async () => {},
@@ -73,7 +75,7 @@ describe("evaluateAndLaunch — the decision line", () => {
     // one short entry: observer under threshold, no new nodes — nothing fires
     const rows = [entries(1, 10)] as unknown as SessionEntry[];
     const deps = makeDeps(rows, 60000);
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     await tick();
     const line = sinkLines.find((l) => l.startsWith("trigger ["));
     expect(line).toBeDefined();
@@ -86,7 +88,7 @@ describe("evaluateAndLaunch — the decision line", () => {
 
   test("a completed chain logs its re-evaluated build/select phases", async () => {
     const rows = entries(4, 600);
-    await evaluateAndLaunch(makeDeps(rows, 60)); // observer fires and the fake runs settle
+    await evaluateAndLaunch(makeDeps(rows, 60), false); // observer fires and the fake runs settle
     await tick();
     const chained = sinkLines.filter((l) => l.startsWith("trigger ["));
     expect(chained.some((l) => l.includes("chained build"))).toBe(true);
@@ -96,7 +98,7 @@ describe("evaluateAndLaunch — the decision line", () => {
   test("a firing boundary logs the fire reason too (chained phases included)", async () => {
     const rows = entries(4, 600);
     const deps = makeDeps(rows, 60); // well under threshold ⇒ observer fires
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     await tick();
     const line = sinkLines.find((l) => l.startsWith("trigger ["));
     expect(line).toBeDefined();

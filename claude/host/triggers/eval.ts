@@ -33,6 +33,7 @@ import {
   makeMaybeBuilder,
   type TriggerInput,
 } from "../../core/src/triggers.js";
+import { ownCompactionFloorIndex, ownSummaryFloorIndex } from "../compaction/floor.js";
 import { runsLog } from "../runs/seams.js";
 import { contextTokensFor, makeTriggerCtx } from "./context.js";
 import { acquireOrSkip, armRearmOnRelease, type RunHandle, type StageName } from "./run-locks.js";
@@ -80,6 +81,9 @@ export interface TriggerHostDeps {
   /** The conversation's observer frontier (resolved through its core handle
    *  by the wiring — the stateful store singleton stays untouched here). */
   getObserverFrontier: () => string | null;
+  /** The conversation's recorded own-summary texts (the observation floor's
+   *  identity source, resolved through the core handle like the frontier). */
+  getOwnSummaries: () => ReadonlySet<string>;
   /** Pins the conversation's core as the ACTIVE singleton for the next
    *  synchronous stretch: resolves once the core is swapped in AND no
    *  other conversation's swap is in flight. Every vendored decision call
@@ -124,7 +128,10 @@ function isSubagentKey(key: string): boolean {
 /** Evaluate the matrix and run the firing stages as one chained background
  *  run (pi's onTurnEnd body). Resolves when the chain settles — the
  *  boundary handlers fire-and-forget this; tests may await it directly. */
-export async function evaluateAndLaunch(deps: TriggerHostDeps): Promise<void> {
+/** `fullScope` bypasses the on-file summary floor — the plain-rescan
+ *  relaunch re-observes the whole live path by design (the maintenance
+ *  promise); every ordinary boundary keeps the floor. */
+export async function evaluateAndLaunch(deps: TriggerHostDeps, fullScope: boolean): Promise<void> {
   // The subagent gate: with subagentMode "disabled", agent-scoped loops
   // skip stage work entirely (observation + graph building — the LLM cost);
   // the capture + compaction seams decline the loop outright (nothing is
@@ -146,7 +153,17 @@ export async function evaluateAndLaunch(deps: TriggerHostDeps): Promise<void> {
   // the unobserved slice on the conversation's entries view (the vendored
   // frontier rule: strictly after the frontier id, anchored past the first
   // user message)
-  const unobserved = computeUnobserved(deps.getBranch(deps.getLeafId()), deps.getObserverFrontier());
+  const branch = deps.getBranch(deps.getLeafId());
+  // the observation floor (own summaries bound the scope — same rule as the
+  // compaction catch-up gap): the store's recorded texts and the branch's
+  // own compaction entries are two witnesses of the same fact, the newest
+  // position winning; the rescan relaunch is the explicit whole-path
+  // override
+  const recordedFloor = ownSummaryFloorIndex(branch, deps.getOwnSummaries());
+  const fileFloor = fullScope ? -1 : ownCompactionFloorIndex(branch);
+  const floor = Math.max(recordedFloor, fileFloor);
+  const scoped = floor === -1 ? branch : branch.slice(floor + 1);
+  const unobserved = computeUnobserved(scoped, deps.getObserverFrontier());
 
   // read the context fill ONCE, only when a context arm is on (pi's
   // needsContextTokens rule — the default profile never reads it)
@@ -195,7 +212,7 @@ export async function evaluateAndLaunch(deps: TriggerHostDeps): Promise<void> {
         runsLog("trigger: settle-rearm held — the launch guard declined the deferred evaluation");
         return;
       }
-      void evaluateAndLaunch(deps).catch((cause) => runsLog("trigger: settle-rearm evaluation failed", cause));
+      void evaluateAndLaunch(deps, false).catch((cause) => runsLog("trigger: settle-rearm evaluation failed", cause));
     });
     return;
   }
@@ -277,7 +294,7 @@ export function onStepBoundary(deps: TriggerHostDeps, _e: { agentId?: string }):
     runsLog("trigger: cheap-gate check failed — deferring to the boundary", cause);
     return;
   }
-  void evaluateAndLaunch(deps).catch((cause) => runsLog("trigger: evaluation failed", cause));
+  void evaluateAndLaunch(deps, false).catch((cause) => runsLog("trigger: evaluation failed", cause));
 }
 
 /** The turn.complete boundary: the wrap-up evaluation + launch
@@ -300,5 +317,5 @@ export function onTurnCompleteBoundary(deps: TriggerHostDeps, _e: { agentId?: st
   } catch (cause) {
     runsLog("trigger: boundary snapshot failed — launching with live deps", cause);
   }
-  void evaluateAndLaunch(launchDeps).catch((cause) => runsLog("trigger: evaluation failed", cause));
+  void evaluateAndLaunch(launchDeps, false).catch((cause) => runsLog("trigger: evaluation failed", cause));
 }

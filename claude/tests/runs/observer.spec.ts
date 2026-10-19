@@ -6,7 +6,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 // chunk persists zero records), empty-verdict hole records, the
 // mid-catch-up Builder fold, the live enabled gate, timeout classification,
 // engine-failure propagation, and the usage ledger per chunk.
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { DEFAULT_CONFIG, type SessionOwlConfig } from "../../core/src/config/schema.js";
 import { buildChunks } from "../../core/src/format/chunk.js";
 import { clearDetailsCache } from "../../core/src/format/details.js";
@@ -361,31 +361,42 @@ describe("runObserver — validation + notify", () => {
   test("schema-invalid importance and malformed source ids reject per-record (nothing accepted)", async () => {
     const unobserved = entries(2);
     const r = await rigUp("s-schema", unobserved, true);
-    const fx = makeRunner([
-      async (_i, agentId) => {
-        const out = (await recordViaTool(agentId, [
-          { summary: "bogus importance", importance: "urgent", sourceEntryIds: ["e1"] },
-          { summary: "string ids", importance: "med", sourceEntryIds: "e1" },
-          { summary: "empty ids", importance: "med", sourceEntryIds: [] },
-        ])) as { deny: string };
-        expect(out.deny).toContain("rejected:");
-        expect(out.deny).not.toContain("accepted: all");
-        return {};
-      },
-    ]);
-    await runObserver({
-      core: r.core,
-      store: r.store,
-      settings: SETTINGS,
-      unobserved,
-      signal: new AbortController().signal,
-      widget: NO_OP_WIDGET,
-      notify: () => {},
-      runStageFn: fx.runner,
+    const consoleErrors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      consoleErrors.push(args.map(String).join(" "));
     });
-    // zero records landed from the malformed chunk
-    const wrappers = [...r.core.store.getGraphStore().graph.nodes.values()].filter((n) => n.state === "new");
-    expect(wrappers.length).toBe(0);
+    try {
+      const fx = makeRunner([
+        async (_i, agentId) => {
+          const out = (await recordViaTool(agentId, [
+            { summary: "bogus importance", importance: "urgent", sourceEntryIds: ["e1"] },
+            { summary: "string ids", importance: "med", sourceEntryIds: "e1" },
+            { summary: "empty ids", importance: "med", sourceEntryIds: [] },
+          ])) as { deny: string };
+          expect(out.deny).toContain("rejected:");
+          expect(out.deny).not.toContain("accepted: all");
+          return {};
+        },
+      ]);
+      await runObserver({
+        core: r.core,
+        store: r.store,
+        settings: SETTINGS,
+        unobserved,
+        signal: new AbortController().signal,
+        widget: NO_OP_WIDGET,
+        notify: () => {},
+        runStageFn: fx.runner,
+      });
+      // zero records landed from the malformed chunk
+      const wrappers = [...r.core.store.getGraphStore().graph.nodes.values()].filter((n) => n.state === "new");
+      expect(wrappers.length).toBe(0);
+      // the all-rejected batch answers as a DENY (no result field): the
+      // record-execute diagnostics line must not trip over it
+      expect(consoleErrors.some((line) => line.includes("diagnostics failed"))).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test("each chunk's dump section closes (balanced forensics: <chunk> … </chunk>)", async () => {

@@ -15,6 +15,7 @@ import { clearDetailsCache } from "../../core/src/format/details.js";
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { resetRunsLogSink } from "../../host/runs/seams.js";
+import { ownSummariesFor } from "../../host/storage/summary-identity.js";
 import { _resetMeasureSnapshots } from "../../host/triggers/context.js";
 import { evaluateAndLaunch, type TriggerHostDeps } from "../../host/triggers/eval.js";
 import { _resetRunLocks, abortInFlight, acquireOrSkip, inFlight } from "../../host/triggers/run-locks.js";
@@ -50,6 +51,7 @@ function makeDeps(over: Partial<TriggerHostDeps> & { rows?: SessionEntry[] } = {
     isEnabled: () => true,
     cheapGateClean: () => true,
     getObserverFrontier: () => getGraphStore().observerFrontier,
+    getOwnSummaries: () => ownSummariesFor(getGraphStore()),
     pinCore: async () => {},
     runs: {
       runObserver: async (args) => {
@@ -83,8 +85,8 @@ describe("settle-rearm — a skip no longer drops its evaluation", () => {
     const held = acquireOrSkip(deps.key, "observe");
     expect(held).not.toBeNull();
 
-    await evaluateAndLaunch(deps); // skip #1 → armed
-    await evaluateAndLaunch(deps); // skip #2 → coalesced (still one)
+    await evaluateAndLaunch(deps, false); // skip #1 → armed
+    await evaluateAndLaunch(deps, false); // skip #2 → coalesced (still one)
     expect(deps.launches).toEqual([]); // nothing launched while the lock was held
 
     held?.release();
@@ -98,7 +100,7 @@ describe("settle-rearm — a skip no longer drops its evaluation", () => {
     const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const deps = makeDeps({ launchGuard: () => false });
     const held = acquireOrSkip(deps.key, "observe");
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     expect(deps.launches).toEqual([]);
 
     held?.release();
@@ -113,7 +115,7 @@ describe("settle-rearm — a skip no longer drops its evaluation", () => {
     const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const deps = makeDeps();
     const held = acquireOrSkip(deps.key, "observe");
-    await evaluateAndLaunch(deps);
+    await evaluateAndLaunch(deps, false);
     expect(deps.launches).toEqual([]);
 
     abortInFlight(deps.key); // the takeover aborts the holder…
@@ -127,7 +129,7 @@ describe("settle-rearm — a skip no longer drops its evaluation", () => {
 
   test("an idle conversation arms nothing (a plain run releases a clean slate)", async () => {
     const deps = makeDeps();
-    await evaluateAndLaunch(deps); // no collision — the chain runs and releases
+    await evaluateAndLaunch(deps, false); // no collision — the chain runs and releases
     expect(deps.launches.map((l) => l.stage)).toEqual(["observer"]);
     await tick();
     expect(deps.launches.map((l) => l.stage)).toEqual(["observer"]); // no SECOND re-entry
@@ -140,7 +142,7 @@ describe("settle-rearm — a skip no longer drops its evaluation", () => {
     try {
       const deps = makeDeps();
       const held = acquireOrSkip(deps.key, "observe");
-      await evaluateAndLaunch(deps); // skip → arms
+      await evaluateAndLaunch(deps, false); // skip → arms
       expect(deps.launches).toEqual([]);
 
       held?.release(); // RED today: throws "queueMicrotask is not defined"

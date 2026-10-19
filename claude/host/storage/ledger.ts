@@ -27,6 +27,7 @@ export type LedgerKind =
   | "usage"
   | "selection"
   | "rescan"
+  | "summary"
   | "snapshot"
   | "SNAPSHOT_PARTS"
   | "CHECK"

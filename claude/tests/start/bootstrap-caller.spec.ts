@@ -26,7 +26,7 @@ describe("planBootstrapInvocation", () => {
       expect(plan.run).toBe(true);
       expect(plan.reason).toBe("cli");
       expect(plan.script).toBe("/plugins/session-owl/helpers/bootstrap.mjs");
-      expect(plan.args).toEqual(["/t/sess.jsonl", "--config-dir", "/cfg", "--session-id", "sess-1"]);
+      expect(plan.args).toEqual(["/t/sess.jsonl", "--config-dir", "/cfg", "--session-id", "sess-1", "--live-path"]);
     }
   });
 

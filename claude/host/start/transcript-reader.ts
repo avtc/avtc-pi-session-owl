@@ -46,12 +46,27 @@ export interface ParsedTranscript {
   rows: TranscriptRow[];
   tip: TipMarker | null;
   skippedLines: number;
+  /** Normalized parent edges for EVERY uuid-bearing file row, conversation
+   *  rows and chrome alike: the row's parentUuid, else its logicalParentUuid
+   *  (the compaction-boundary system rows carry a null parentUuid plus the
+   *  logical link the chain continues on), else null. Chain walks resolve
+   *  through chrome the row list never carries via this map. */
+  parentByUuid: Map<string, string | null>;
+}
+
+/** A row's normalized file parent: parentUuid, else the logical link
+ *  (compaction-boundary rows), else null. */
+function normalizedParent(row: Record<string, unknown>): string | null {
+  if (typeof row.parentUuid === "string") return row.parentUuid;
+  if (typeof row.logicalParentUuid === "string") return row.logicalParentUuid;
+  return null;
 }
 
 /** Parse transcript JSONL text: conversation rows kept verbatim, metadata
  *  rows skipped (the tip marker extracted), corrupt lines counted+skipped. */
 export function parseTranscriptRows(text: string): ParsedTranscript {
   const rows: TranscriptRow[] = [];
+  const parentByUuid = new Map<string, string | null>();
   let pendingBoundary = false; // a seen system compact_boundary awaits its carrier row
   let tip: TipMarker | null = null;
   let skipped = 0;
@@ -73,6 +88,9 @@ export function parseTranscriptRows(text: string): ParsedTranscript {
         sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : undefined,
       };
       continue;
+    }
+    if (typeof parsed.uuid === "string" && !parentByUuid.has(parsed.uuid)) {
+      parentByUuid.set(parsed.uuid, normalizedParent(parsed));
     }
     // this build's compaction boundary is a SYSTEM row ({type:"system",
     // subtype:"compact_boundary"}); the summary itself is the NEXT
@@ -103,7 +121,7 @@ export function parseTranscriptRows(text: string): ParsedTranscript {
     });
     pendingBoundary = false;
   }
-  return { rows, tip, skippedLines: skipped };
+  return { rows, tip, skippedLines: skipped, parentByUuid };
 }
 
 function errText(err: unknown): string {
@@ -138,7 +156,7 @@ export async function readTranscript(
       size = null;
     }
     if (size !== null && size > cap) return { tooLarge: true, byteSize: size };
-    return { tooLarge: false, rows: [], tip: null, skippedLines: 0 };
+    return { tooLarge: false, rows: [], tip: null, skippedLines: 0, parentByUuid: new Map() };
   }
   const size = byteLength(text);
   if (size > cap) return { tooLarge: true, byteSize: size };
@@ -152,22 +170,63 @@ export const READ_CAP = 4 * 1024 * 1024 - 64 * 1024;
 
 /** The live path: rows from the leaf to the root via parentUuid, ordered
  *  root→leaf. A null/unknown leaf degrades to file order (the marker is a
- *  hint; liveness correctness is the absent-from-mirror check's job). */
-export function livePath(rows: readonly TranscriptRow[], leafUuid: string | null): TranscriptRow[] {
-  const byUuid = new Map<string, TranscriptRow>();
-  for (const r of rows) byUuid.set(r.uuid, r);
-  if (leafUuid === null || !byUuid.has(leafUuid)) return [...rows];
+ *  hint; liveness correctness is the absent-from-mirror check's job).
+ *  With the normalized edge map the walk also resolves THROUGH parents the
+ *  row list never carries (system chrome, compaction-boundary rows) onto
+ *  the nearest carried ancestor — without it the chain truncates at every
+ *  skipped parent. */
+export function livePath(
+  rows: readonly TranscriptRow[],
+  leafUuid: string | null,
+  parentByUuid?: ReadonlyMap<string, string | null>,
+): TranscriptRow[] {
+  const byUuid = new Map(rows.map((r) => [r.uuid, r] as const));
+  if (leafUuid === null) return [...rows];
+  // a leaf the row list does not carry (system chrome after the last
+  // answer, the shape a rewind-day file ends in) resolves through the edge
+  // map onto the nearest carried row, so the walk still filters the
+  // abandoned fork instead of degrading to the whole file
+  const resolved =
+    !byUuid.has(leafUuid) && parentByUuid !== undefined ? carriedAncestor(rows, parentByUuid, leafUuid) : leafUuid;
+  if (resolved === null || !byUuid.has(resolved)) return [...rows];
   const chain: TranscriptRow[] = [];
-  let cursor: string | null = leafUuid;
+  let cursor: string | null = resolved;
   const seen = new Set<string>();
-  while (cursor !== null && byUuid.has(cursor) && !seen.has(cursor)) {
+  while (cursor !== null && !seen.has(cursor)) {
     seen.add(cursor);
     const row = byUuid.get(cursor);
-    if (row === undefined) break;
-    chain.push(row);
-    cursor = row.parentUuid;
+    if (row !== undefined) {
+      chain.push(row);
+      cursor = row.parentUuid;
+      continue;
+    }
+    // the cursor is chrome the row list skips — continue through the edge
+    // map toward the next carried ancestor; an unmapped uuid or a null edge
+    // ends the walk (past the file's knowledge)
+    if (parentByUuid === undefined || !parentByUuid.has(cursor)) break;
+    cursor = parentByUuid.get(cursor) ?? null;
   }
   return chain.reverse();
+}
+
+/** Resolve a file parent onto the nearest CARRIED ancestor: walk the
+ *  normalized edge map through rows the row list skips (system chrome,
+ *  compaction boundaries) until a carried row, a true root (null), or a
+ *  uuid the map does not know (returned as-is — a true edge a later pass
+ *  may still resolve; never a silent null). */
+export function carriedAncestor(
+  rows: readonly TranscriptRow[],
+  parentByUuid: ReadonlyMap<string, string | null>,
+  fromUuid: string,
+): string | null {
+  const carried = new Set(rows.map((r) => r.uuid));
+  let cur: string | null = fromUuid;
+  const seen = new Set<string>();
+  while (cur !== null && !carried.has(cur) && !seen.has(cur) && parentByUuid.has(cur)) {
+    seen.add(cur);
+    cur = parentByUuid.get(cur) ?? null;
+  }
+  return cur;
 }
 
 /** Subagent loop files: `<parent>/subagents/agent-<hash>.jsonl`. */

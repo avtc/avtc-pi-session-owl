@@ -1,0 +1,14 @@
+{
+  "rows": [
+    { "kind": "row", "uuid": "m-1", "type": "user", "parentUuid": null, "timestamp": "2026-10-19T08:00:00Z", "message": { "role": "user", "content": "root prompt" } },
+    { "kind": "row", "uuid": "m-2", "type": "user", "parentUuid": "m-1", "timestamp": "2026-10-19T08:40:00Z", "message": { "role": "user", "content": "last real row before the first compact" } },
+    { "kind": "row", "uuid": "m-3", "type": "user", "parentUuid": "m-2", "timestamp": "2026-10-19T08:47:04Z", "message": { "role": "user", "content": "/compact (abandoned invocation)" } },
+    { "kind": "row", "uuid": "m-4", "type": "assistant", "parentUuid": "m-3", "timestamp": "2026-10-19T08:53:45Z", "message": { "role": "assistant", "content": "abandoned tail reply" } },
+    { "kind": "row", "uuid": "m-2b", "type": "user", "parentUuid": "m-2", "timestamp": "2026-10-19T12:33:27Z", "message": { "role": "user", "content": "first row after the rewind (sibling of the abandoned invocation)" } },
+    { "kind": "row", "uuid": "sys-a", "type": "system", "subtype": "informational", "parentUuid": "m-2b", "timestamp": "2026-10-19T12:34:05Z", "content": "" },
+    { "kind": "row", "uuid": "sys-b", "type": "system", "subtype": "compact_boundary", "parentUuid": null, "logicalParentUuid": "sys-a", "timestamp": "2026-10-19T12:34:09Z", "content": "", "compactMetadata": {} },
+    { "kind": "row", "uuid": "m-5", "type": "user", "parentUuid": "sys-b", "timestamp": "2026-10-19T12:34:09Z", "message": { "role": "user", "content": "# Memory\nsummary row" } },
+    { "kind": "row", "uuid": "m-6", "type": "user", "parentUuid": "m-5", "timestamp": "2026-10-19T12:34:10Z", "message": { "role": "user", "content": "kept tail row" } },
+    { "kind": "metadata-tip", "raw": "{\"type\":\"last-prompt\",\"lastPrompt\":\"kept tail row\",\"leafUuid\":\"m-6\",\"sessionId\":\"sess-fork\"}" }
+  ]
+}

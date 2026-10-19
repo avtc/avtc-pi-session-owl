@@ -782,3 +782,27 @@ describe("backfill — ladder path, disabled arm, and pinned semantics", () => {
     expect(sweep.rows.map((r) => r.uuid)).toContain("e-1");
   });
 });
+
+describe("backfill — a rewind fork across a compaction boundary", () => {
+  test("the re-mirrored chain resolves through the boundary onto the rewound branch; the abandoned one stays off", async () => {
+    const transcript = jsonl("fork-compact");
+    await mem.adapter.writeText("/t/sess-fork.jsonl", transcript);
+    const storage = makeStorage("sess-fork");
+    const result = await runBackfill(storage.mirror, storage.ledger, {
+      key: "sess-fork",
+      sessionId: "sess-fork",
+      agentId: null,
+      fs: mem.adapter,
+      transcriptPath: "/t/sess-fork.jsonl",
+      enabled: true,
+      fireGoalExtract: () => {},
+      computePending: corePendingEvaluator,
+    });
+    expect(result.remirrored).toBe(5); // the live path only (the abandoned m-3/m-4 never mirror)
+    // the summary row's parent resolves THROUGH the uncarried boundary
+    // chrome onto the rewound row m-2b — never onto the abandoned branch
+    expect(storage.mirror.rowByUuid("m-5")?.parentUuid).toBe("m-2b");
+    const chain = storage.mirror.chainTo("m-6");
+    expect(chain).toEqual(["m-1", "m-2", "m-2b", "m-5", "m-6"]);
+  });
+});

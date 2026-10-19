@@ -9,6 +9,7 @@ import { join } from "node:path";
 // derivation that lets the chunk grouper consume transcript rows unchanged.
 import { describe, expect, test } from "vitest";
 import {
+  carriedAncestor,
   livePath,
   parseTranscriptRows,
   readTranscript,
@@ -96,6 +97,46 @@ describe("transcript-reader — live path", () => {
     const parsed = parseTranscriptRows(jsonl("main-simple"));
     const live = livePath(parsed.rows, "no-such-uuid");
     expect(live).toHaveLength(7);
+  });
+
+  test("a chrome tip leaf resolves through the edge map onto the nearest carried row — dead forks stay excluded", () => {
+    const parsed = parseTranscriptRows(jsonl("chrome-tip"));
+    const live = livePath(parsed.rows, parsed.tip?.leafUuid ?? null, parsed.parentByUuid);
+    expect(live.map((r) => r.uuid)).toEqual(["u-1", "a-2", "a-3"]);
+  });
+
+  test("a chrome leaf the edge map cannot resolve still degrades to file order", () => {
+    const parsed = parseTranscriptRows(jsonl("chrome-tip"));
+    const live = livePath(parsed.rows, "ghost-chrome-uuid", parsed.parentByUuid);
+    expect(live).toHaveLength(4);
+  });
+});
+
+describe("transcript-reader — logical edges across the compaction boundary", () => {
+  test("parentByUuid normalizes every uuid-bearing row: parentUuid, else logicalParentUuid", () => {
+    const parsed = parseTranscriptRows(jsonl("fork-compact"));
+    expect(parsed.parentByUuid.get("sys-b")).toBe("sys-a"); // the compact_boundary row: null parent + logical link
+    expect(parsed.parentByUuid.get("sys-a")).toBe("m-2b"); // ordinary chrome: the real parent
+    expect(parsed.parentByUuid.get("m-5")).toBe("sys-b"); // conversation rows keep their file parent
+    expect(parsed.parentByUuid.get("m-1")).toBeNull();
+  });
+
+  test("livePath walks THROUGH the uncarried boundary chrome onto the rewound branch, excluding the abandoned one", () => {
+    const parsed = parseTranscriptRows(jsonl("fork-compact"));
+    const live = livePath(parsed.rows, parsed.tip?.leafUuid ?? null, parsed.parentByUuid);
+    // m-5's parent is the skipped boundary row; its logical chain lands on
+    // m-2b (the rewound sibling), NOT m-3 (the abandoned invocation)
+    expect(live.map((r) => r.uuid)).toEqual(["m-1", "m-2", "m-2b", "m-5", "m-6"]);
+  });
+
+  test("carriedAncestor resolves a boundary-parented row onto the nearest mirrored ancestor", () => {
+    const parsed = parseTranscriptRows(jsonl("fork-compact"));
+    expect(carriedAncestor(parsed.rows, parsed.parentByUuid, "sys-b")).toBe("m-2b");
+    expect(carriedAncestor(parsed.rows, parsed.parentByUuid, "sys-a")).toBe("m-2b");
+    // an unknown uuid stays itself (a true edge the mirror cannot resolve yet)
+    expect(carriedAncestor(parsed.rows, parsed.parentByUuid, "not-in-file")).toBe("not-in-file");
+    // a walk that reaches a true root ends at null
+    expect(carriedAncestor(parsed.rows, parsed.parentByUuid, "m-1")).toBe("m-1");
   });
 });
 

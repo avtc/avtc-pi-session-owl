@@ -280,6 +280,115 @@ describe("host binding skeleton — registration", () => {
     expect(h.registryKeys().sort()).toEqual(["s3", "s3|ag1"]);
   });
 
+  test("a plugin-typed agent loop (spawnedBy only, builtin type) mirrors as a legitimate subagent", async () => {
+    await h.load();
+    await h.dispatch("classic.SessionStart", {
+      source: "clear",
+      session_id: "s-roster",
+      transcript_path: "/t.jsonl",
+      cwd: "/w",
+    });
+    h.setAgentRoster([{ id: "px1", type: "general-purpose", spawnedBy: "other-mod" }]);
+    await h.dispatch("session.append", {
+      message: { type: "user" },
+      door: "prompt",
+      origin: { kind: "coordinator" },
+      uuid: "pu1",
+      agentId: "px1",
+    });
+    await h.dispatch("session.append", {
+      message: { type: "assistant" },
+      door: "response",
+      origin: "model",
+      uuid: "pu2",
+      agentId: "px1",
+    });
+    expect(h.registryKeys().sort()).toEqual(["s-roster", "s-roster|px1"]);
+  });
+
+  test("a plugin-namespaced agent type (session-owl:*) is machinery from its first row — no conversation, no mirror", async () => {
+    await h.load();
+    await h.dispatch("classic.SessionStart", {
+      source: "clear",
+      session_id: "s-ns",
+      transcript_path: "/t.jsonl",
+      cwd: "/w",
+    });
+    h.setAgentRoster([{ id: "owl1", type: "session-owl:observer", spawnedBy: null }]);
+    await h.dispatch("session.append", {
+      message: { type: "user" },
+      door: "prompt",
+      origin: { kind: "coordinator" },
+      uuid: "nu1",
+      agentId: "owl1",
+    });
+    await h.dispatch("session.append", {
+      message: { type: "assistant" },
+      door: "response",
+      origin: "model",
+      uuid: "nu2",
+      agentId: "owl1",
+    });
+    expect(h.registryKeys()).toEqual(["s-ns"]);
+  });
+
+  test("another plugin's namespaced type is machinery too (any <plugin>:<name>)", async () => {
+    await h.load();
+    await h.dispatch("classic.SessionStart", {
+      source: "clear",
+      session_id: "s-foreign-ns",
+      transcript_path: "/t.jsonl",
+      cwd: "/w",
+    });
+    h.setAgentRoster([{ id: "fx1", type: "other-mod:worker" }]);
+    await h.dispatch("session.append", {
+      message: { type: "user" },
+      door: "prompt",
+      origin: { kind: "coordinator" },
+      uuid: "fu1",
+      agentId: "fx1",
+    });
+    expect(h.registryKeys()).toEqual(["s-foreign-ns"]);
+  });
+
+  test("a model-spawned subagent (builtin type, no spawnedBy) mirrors as before", async () => {
+    await h.load();
+    await h.dispatch("classic.SessionStart", {
+      source: "clear",
+      session_id: "s-model",
+      transcript_path: "/t.jsonl",
+      cwd: "/w",
+    });
+    h.setAgentRoster([{ id: "mx1", type: "general-purpose", name: null, spawnedBy: null }]);
+    await h.dispatch("session.append", {
+      message: { type: "user" },
+      door: "prompt",
+      origin: { kind: "coordinator" },
+      uuid: "mu1",
+      agentId: "mx1",
+    });
+    expect(h.registryKeys().sort()).toEqual(["s-model", "s-model|mx1"]);
+  });
+
+  test("a roster miss fails open (the row mirrors; a probe error never drops a real subagent)", async () => {
+    await h.load();
+    await h.dispatch("classic.SessionStart", {
+      source: "clear",
+      session_id: "s-miss",
+      transcript_path: "/t.jsonl",
+      cwd: "/w",
+    });
+    h.setAgentRoster([]);
+    await h.dispatch("session.append", {
+      message: { type: "user" },
+      door: "prompt",
+      origin: { kind: "coordinator" },
+      uuid: "au1",
+      agentId: "ax1",
+    });
+    expect(h.registryKeys().sort()).toEqual(["s-miss", "s-miss|ax1"]);
+  });
+
   test("session.measure records the context snapshot under the session (null context tolerated)", async () => {
     await h.load();
     await h.dispatch("classic.SessionStart", {
@@ -428,6 +537,38 @@ describe("host binding skeleton — registration", () => {
       agentId: "agX",
     });
     await expect(p).resolves.toEqual({ answer: "done", isAborted: false, agentId: "agX", usage: null });
+  });
+
+  test("a machinery loop's turn boundary fires no stage work (roster-attributed spawn)", async () => {
+    await h.load();
+    await h.dispatch("classic.SessionStart", {
+      source: "startup",
+      session_id: "sess-mach",
+      transcript_path: "/cfg/projects/p/sess-mach.jsonl",
+      cwd: "/w",
+    });
+    h.setAgentRoster([{ id: "mx9", type: "other-mod:worker" }]);
+    await h.dispatch("session.append", {
+      uuid: "mz1",
+      parentUuid: null,
+      door: "prompt",
+      origin: { kind: "coordinator" },
+      message: { type: "user", content: [{ type: "text", text: `machinery work ${"q".repeat(20000)}` }] },
+      agentId: "mx9",
+    });
+    await h.dispatch("session.append", {
+      uuid: "mz2",
+      parentUuid: "mz1",
+      door: "response",
+      origin: "model",
+      message: { type: "assistant", content: [{ type: "text", text: "machinery answer" }] },
+      agentId: "mx9",
+    });
+    h.sessionApi.set([]);
+    await h.dispatch("turn.complete", { answer: "machinery answer", isAborted: false, agentId: "mx9" });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(h.spawned.calls).toHaveLength(0);
+    expect(h.registryKeys()).toEqual(["sess-mach"]);
   });
 });
 

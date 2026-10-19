@@ -374,6 +374,7 @@ function armAll(dollar: any) {
     // capsules are re-armed per surface arm like every service here)
     agentSpawn: (input: unknown) => stageLaunchBroker.spawn(input as Record<string, unknown>),
     sessionSurfaces: () => dollar.session.surfaces(),
+    agentList: () => dollar.agent.list(),
     configList: () => dollar.config.list(),
     widgetLog: (message: string) => log.info(message),
     pluginRoot: () => dollar.plugin.root,
@@ -955,6 +956,42 @@ async function appendTimelineEventNow(event: TimelineEvent): Promise<void> {
   }
 }
 
+/** The machinery probe: one roster look-up per unknown agent id. Machinery
+ *  is a plugin-typed loop — the roster shows a plugin-namespaced type
+ *  (`<plugin>:<name>`, present from the loop's first row — ours are
+ *  `session-owl:observer` & co). A spawn through a builtin or anonymous type
+ *  (a mod passing `general-purpose`, or no name → `teammate`) is treated as
+ *  a legitimate subagent under subagentMode; a model/person spawn mirrors as
+ *  before. Fails OPEN — a probe that errors or misses must never drop a real
+ *  subagent's rows. */
+async function isPluginSpawnedLoop(agentId: string): Promise<boolean> {
+  if (bridge.isKnownPluginSpawned(agentId)) return true;
+  if (bridge.isRosterProbed(agentId)) return false;
+  bridge.markRosterProbed(agentId);
+  try {
+    const roster = (await bridge.currentServices().agentList()) as Array<{ id?: unknown; type?: unknown }>;
+    const entry = Array.isArray(roster)
+      ? roster.find((candidate) => candidate != null && candidate.id === agentId)
+      : undefined;
+    const pluginNamespaced =
+      entry !== undefined &&
+      typeof entry.type === "string" &&
+      entry.type.includes(":") &&
+      entry.type.length > ":".length;
+    diag(
+      `machinery probe agent=${agentId} found=${String(entry !== undefined)} type=${String(entry?.type ?? "<absent>")}`,
+    );
+    if (entry !== undefined && pluginNamespaced) {
+      bridge.markPluginSpawned(agentId);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    report("agent roster lookup failed", err);
+    return false;
+  }
+}
+
 async function onSessionAppend($: any, e: AnyEvent, next: Next) {
   armAll($);
   try {
@@ -1053,6 +1090,12 @@ async function onSessionAppend($: any, e: AnyEvent, next: Next) {
         // (the stage dump is their record).
         const run = getStageRun(agentId);
         if (run !== undefined) recordDumpOutputRow(run, e);
+      } else if (agentId !== null && (await isPluginSpawnedLoop(agentId))) {
+        // Machinery (any mod's roster-attributed spawn): no conversation is
+        // ensured, no rows mirror, no store dir is ever created. The roster
+        // is engine-side, so the verdict holds from the loop's first row —
+        // the window our own registry can't cover (it fills only after the
+        // spawn promise resolves).
       } else if (agentId !== null && state.subagentsFullyDisabled()) {
         // subagentMode "disabled": a foreign subagent loop collects NOTHING —
         // no conversation is ensured, no rows mirror, no store churn. The
@@ -1270,7 +1313,7 @@ async function* onTurnStep($: any, e: AnyEvent, next: any) {
     const boundaryAgentId = e && typeof e.agentId === "string" ? e.agentId : null;
     if (
       boundarySessionId !== null &&
-      (boundaryAgentId === null || (!bridge.spawnRegistry.has(boundaryAgentId) && !state.subagentsFullyDisabled()))
+      (boundaryAgentId === null || (!bridge.isMachineryLoop(boundaryAgentId) && !state.subagentsFullyDisabled()))
     ) {
       const boundaryKey = state.conversationKey(boundarySessionId, boundaryAgentId);
       // A subagent loop seeds + captures at ITS step boundary too: its
@@ -1366,7 +1409,7 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
       // matrix and the capture skip use; a fully-disabled foreign subagent
       // loop has no mirrored rows to reconcile — skipping also keeps its
       // storage dir from ever being created).
-      if (agentId === null || (!bridge.spawnRegistry.has(agentId) && !state.subagentsFullyDisabled())) {
+      if (agentId === null || (!bridge.isMachineryLoop(agentId) && !state.subagentsFullyDisabled())) {
         await runRewindCheckpoint($, sessionId, agentId, false);
       }
       const cap = getCapture(key);
@@ -1388,7 +1431,7 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
       if (
         state.isOwlEnabled() &&
         !state.isBootstrapBlocked() &&
-        (agentId === null || (!bridge.spawnRegistry.has(agentId) && !state.subagentsFullyDisabled()))
+        (agentId === null || (!bridge.isMachineryLoop(agentId) && !state.subagentsFullyDisabled()))
       ) {
         try {
           await getBinding(key, sessionId, agentId).captureInitialPromptForTurn();
@@ -1403,7 +1446,7 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
       // the actual launch). Placed BEFORE a loop's teardown so the loop's
       // boundary reads its still-live capture (pi's per-loop turn end); a
       // race past the release self-heals through the coverage union.
-      if (agentId === null || !bridge.spawnRegistry.has(agentId)) {
+      if (agentId === null || !bridge.isMachineryLoop(agentId)) {
         // The boundary gate: launch stages only at a completion that
         // concluded a real round — new assistant rows since the last
         // launch. The engine completes a resumed session's dangling turn
@@ -1518,7 +1561,17 @@ async function onSessionCompact(_$: any, e: AnyEvent, next: Next) {
   // pressed Esc — the compaction is cancelled), the gate's controller
   // unwinds that conversation's stages (chunk in flight finishes; the next
   // chunk's signal check aborts) and the wait loop stops re-dispatching.
-  const gateDeps = getBinding(claimKey, compactSessionId, compactAgentId).compactionDeps();
+  const gateDeps = getBinding(claimKey, compactSessionId, compactAgentId).compactionDeps({
+    // The layered rewind check's compaction entry — a serve-class call
+    // (/compact is user-initiated, latency-tolerant): a rewind since the
+    // last check-point re-folds BEFORE the gate reads the store. Machinery
+    // loops skip it (own-run exclusion, the same predicate the turn
+    // boundary uses).
+    rewindCheck:
+      compactAgentId !== null && bridge.isMachineryLoop(compactAgentId)
+        ? async () => {}
+        : () => runRewindCheckpoint(_$, compactSessionId, compactAgentId, false),
+  });
   const compactSignal = next && typeof next.signal === "object" && next.signal !== null ? next.signal : undefined;
   const outcome = await raceTakeoverWithSignal(
     compactionTakeover(
