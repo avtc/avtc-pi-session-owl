@@ -7,6 +7,7 @@
 // answers the permission decision itself for exactly its own registered
 // agent types; every other call keeps the engine's verdict untouched.
 import { beforeEach, describe, expect, test } from "vitest";
+import * as bridge from "../../host/engine-bridge.js";
 import { createHarness } from "../helpers/harness.js";
 
 let h: ReturnType<typeof createHarness>;
@@ -49,7 +50,38 @@ describe("tool.check — stage spawn self-approval", () => {
   });
 
   test("a non-Agent tool check passes through", async () => {
-    const out = await h.dispatch("tool.check", { tool: "Bash", input: { command: "ls" } });
+    const out = await h.dispatch("tool.check", {
+      tool: "Bash",
+      input: { command: "ls" },
+    });
     expect(out).toEqual({ tool: "Bash", input: { command: "ls" } });
+  });
+});
+
+describe("tool.check — the stage stop self-approval", () => {
+  test("stopping a registered stage agent is allowed outright", async () => {
+    bridge.recordSpawn("owl-stop-1", {});
+    try {
+      const out = await h.dispatch("tool.check", {
+        tool: "TaskStop",
+        input: { task_id: "owl-stop-1" },
+      });
+      expect(out).toEqual({ decision: "allow" });
+    } finally {
+      bridge.forgetSpawn("owl-stop-1");
+    }
+  });
+
+  test("stopping a foreign task keeps the engine's verdict", async () => {
+    const out = await h.dispatch("tool.check", {
+      tool: "TaskStop",
+      input: { task_id: "someone-elses-task" },
+    });
+    expect(out).toEqual({ tool: "TaskStop", input: { task_id: "someone-elses-task" } });
+  });
+
+  test("a stop without a task id passes through", async () => {
+    const out = await h.dispatch("tool.check", { tool: "TaskStop", input: {} });
+    expect(out).toEqual({ tool: "TaskStop", input: {} });
   });
 });

@@ -68,6 +68,7 @@ export function createHarness() {
   // (entry shape: { id, spawnedBy?, ... }).
   let agentRoster: Spec[] = [];
   const toolCalls: Spec[] = [];
+  let flunkNextToolCall = false;
   // Registration-refusal knob: simulates the engine's mode refusal
   // ($.tool.register unbound at the startup classic start) — the queue
   // opens again via clearToolRegisterRefusals().
@@ -119,6 +120,17 @@ export function createHarness() {
             : typeof input === "string"
               ? input
               : "";
+        if (name === "TaskStop") {
+          if (flunkNextToolCall) {
+            flunkNextToolCall = false;
+            throw new Error("no tool has that name: TaskStop");
+          }
+          return {
+            result: {
+              message: `Successfully stopped task: ${String((input as { task_id?: unknown }).task_id ?? "")}`,
+            },
+          };
+        }
         if (name === "mcp__session-owl-subagent-support__launch") {
           const launchId = String((input as { launchId?: unknown }).launchId ?? "");
           setTimeout(() => {
@@ -464,6 +476,9 @@ export function createHarness() {
       get calls() {
         return toolCalls;
       },
+    },
+    flunkNextToolCall: () => {
+      flunkNextToolCall = true;
     },
     turnAborts: {
       get calls() {

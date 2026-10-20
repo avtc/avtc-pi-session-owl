@@ -1689,13 +1689,40 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
       typeof e?.agentId === "string" ? e.agentId : "-"
     }`,
   );
-  // NOTE: the stage agents' SubagentHandback CANNOT be intercepted — the
-  // engine never dispatches tool.call for it (control-plane), and it
-  // ENFORCES the call anyway ([handback-send-enforce] re-prompts an agent
-  // that finishes with plain text). The
-  // delivered report rides our prompt.submit drop (pi parity) and the
-  // engine's "Prompt dropped by a hook" notice with it — the stage prompt
-  // cooperates with the enforcer instead of fighting it.
+  // A stage agent's handback call is its last act: the report is already
+  // in the stage run's hands, so the agent is stopped mid-call — its
+  // completion message would otherwise arrive as a peer prompt the drop
+  // path must refuse, printing the engine's "Prompt dropped by a hook"
+  // notice. The stop is marked deliberate (the run layer forgives an abort
+  // we initiate as a clean finish) and the completion routing runs here,
+  // because a stopped loop raises no turn.complete of its own. A stop
+  // that fails changes nothing: the agent finishes normally and the
+  // prompt.submit drop still catches the delivery.
+  if (
+    e &&
+    typeof e.tool === "string" &&
+    e.tool === "SubagentHandback" &&
+    typeof e.agentId === "string" &&
+    bridge.spawnRegistry.has(e.agentId)
+  ) {
+    const agentId = e.agentId;
+    try {
+      bridge.markDeliberateAbort(agentId);
+      const stop = await $.tool.call({ tool: "TaskStop", task_id: agentId });
+      diag(`stage handback: agent stopped (${JSON.stringify(stop).slice(0, 160)})`);
+      bridge.routeAgentCompletion({
+        answer: "",
+        isAborted: true,
+        agentId,
+        usage: undefined,
+        reason: "stopped-after-handback",
+      });
+    } catch (err) {
+      bridge.clearDeliberateAbort(agentId);
+      report("stage handback: stop failed — the drop path stays the fallback", err);
+    }
+    return next(e);
+  }
   // The stage tools are served only to owl's stage agents (the caller gate);
   // their executors are installed per run by the stage-run modules. A THROW
   // here would be SKIPPED by the engine ("no tool.call hook answered this
@@ -1888,10 +1915,18 @@ function onToolCheck(_$: any, e: AnyEvent, next: Next) {
   // itself for exactly its own registered agent types (they run ungated in
   // every other mode); every other call keeps the engine's verdict.
   const tool = (e as { tool?: unknown }).tool;
-  const input = (e as { input?: unknown }).input as { subagent_type?: unknown } | null | undefined;
+  const input = (e as { input?: unknown }).input as { subagent_type?: unknown; task_id?: unknown } | null | undefined;
   const type = input != null && typeof input === "object" ? input.subagent_type : undefined;
   if (tool === "Agent" && typeof type === "string" && STAGE_AGENT_NAMES.some((n) => `session-owl:${n}` === type)) {
     log.info(`tool.check: stage spawn self-approved (${type})`);
+    return { decision: "allow" };
+  }
+  // The same approval for the handback stop: the ambient TaskStop names
+  // one of the spawns above, and auto mode would otherwise put it to the
+  // classifier that gives no verdict for a call no request produced.
+  const taskId = input != null && typeof input === "object" ? input.task_id : undefined;
+  if (tool === "TaskStop" && typeof taskId === "string" && bridge.spawnRegistry.has(taskId)) {
+    log.info(`tool.check: stage stop self-approved (${taskId})`);
     return { decision: "allow" };
   }
   return next(e);
@@ -2215,6 +2250,7 @@ export const register: Register = (on) => {
   on("tool.register", onToolRegister);
   on("tool.call", onToolCall).catch(onToolCallFailure);
   on("tool.check", { tool: "Agent" }, onToolCheck);
+  on("tool.check", { tool: "TaskStop" }, onToolCheck);
   on("command.register", onCommandRegister);
   on("command.run", onCommandRun);
   on("agent.offer", onAgentOffer);

@@ -30,7 +30,7 @@ claude plugin install session-owl --marketplace avtc/avtc-pi-session-owl
 
 **Other surfaces** — not tested.
 
-`Prompt dropped by a hook: session-owl: stage handback` notices are expected during session-owl work. The mod consumes the handback of its own background agents. No silent variant exists yet (upstream: anthropics/claude-code#99417).
+After finishing, session-owl's background agents are shown as stopped (a red circle in the CLI for ~30s) — normal behavior, working around anthropics/claude-code#99417.
 
 ## How it works
 
