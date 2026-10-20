@@ -1,6 +1,6 @@
 # avtc-pi-session-owl
 
-Background-maintained append-only knowledge graph; roots become the compaction summary; the agent traverses and regex-searches it to recall messages, tool calls, own thinking.
+Session memory as a background-maintained append-only knowledge graph; its roots become the compaction summary; the agent traverses and regex-searches it to recall verbatim messages, tool calls and results.
 
 ![session-owl](assets/images/session-owl-hero.webp)
 
