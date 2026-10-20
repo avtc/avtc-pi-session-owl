@@ -229,6 +229,9 @@ export function createHarness() {
       resolve: () => ({
         Box: (props: { children?: unknown[] }) => ({ type: "Box", ...props }),
         Text: (props: { children?: unknown[] }) => ({ type: "Text", ...props }),
+        Button: (props: { children?: unknown[] }) => ({ type: "Button", ...props }),
+        Input: (props: { children?: unknown[] }) => ({ type: "Input", ...props }),
+        Select: (props: { children?: unknown[] }) => ({ type: "Select", ...props }),
       }),
       log: (text: string, opts?: { to?: string }) => {
         uiLog.push(opts?.to === "debug" ? `[debug] ${text}` : text);

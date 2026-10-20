@@ -9,7 +9,7 @@ import { describe, expect, test, vi } from "vitest";
 import { DEFAULT_CONFIG } from "../../core/src/config/schema.js";
 import type { SessionOwlGraph } from "../../core/src/types.js";
 import { makeNode, nowStoredTimestamp } from "../../core/src/types.js";
-import { _resetWidgetLine, widgetLine, widgetSegments } from "../../host/widget/line-store.js";
+import { _resetWidgetLine, idleSegments, widgetLine, widgetSegments } from "../../host/widget/line-store.js";
 import { createWidgetBridge, type TrackerBridgeDeps } from "../../host/widget/tracker-bridge.js";
 import { entries, rigUp } from "../runs/helpers.js";
 
@@ -97,6 +97,16 @@ async function makeBridge(
   };
 }
 
+describe("the idle line's seat — MAIN-only (an in-process subagent bridge never takes it)", () => {
+  test("an agent-scope bridge does not register the idle provider; main does", async () => {
+    _resetWidgetLine();
+    await makeBridge("seat-agent", 2, DEFAULT_CONFIG, "agent");
+    expect(idleSegments()).toBeNull(); // no provider from the agent bridge
+    await makeBridge("seat-main", 2, DEFAULT_CONFIG, "main");
+    expect(idleSegments()).not.toBeNull();
+  });
+});
+
 describe("the band channel — MAIN-only publishing (never mixed)", () => {
   test("an agent-scoped bridge writes no shared line/status/invalidate; the main bridge still does", async () => {
     const mainRig = await makeBridge("w-scope-main");
@@ -157,6 +167,25 @@ describe("the StageWidget protocol → the line store", () => {
     // clears any stale pin; no STRING status call for a hidden line
     expect(dispatch.invalidate).toBe(1);
     expect(dispatch.status).toEqual([undefined]);
+  });
+
+  test("bridge creation registers the idle provider: live counts, no accent", async () => {
+    const { graph } = await makeBridge("w-idle-provider");
+    graph.nodes.set(
+      "nIdle" as never,
+      makeNode({
+        id: "nIdle" as never,
+        summary: "idle root",
+        importance: "med",
+        parentNode: null,
+        state: "active",
+        createdAt: nowStoredTimestamp(),
+      }) as never,
+    );
+    const segs = idleSegments();
+    expect(segs).not.toBeNull();
+    expect(segs?.some((s) => s.color === "accent")).toBe(false);
+    expect(segs?.map((s) => s.text).join("")).toContain(" roots ");
   });
 
   test("startStage renders the observe line into the store + invalidates the band", async () => {

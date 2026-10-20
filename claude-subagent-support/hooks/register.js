@@ -106,12 +106,22 @@ async function onToolCall($, e, next) {
     };
     setTimeout(() => {
       spawnCapsule()
-        .then((handle) =>
-          reportCapsule({
-            spawnAgentId: typeof handle?.agentId === "string" ? handle.agentId : "",
-            spawnModel: typeof handle?.model === "string" ? handle.model : "",
-          }).catch((err) => sayError("stage_launched report failed", err)),
-        )
+        .then((handle) => {
+          const hasId = handle != null && typeof handle.agentId === "string" && handle.agentId.length > 0;
+          const payload = hasId
+            ? {
+                spawnAgentId: handle.agentId,
+                spawnModel: typeof handle.model === "string" ? handle.model : "",
+              }
+            : {
+                // an id-less resolve is a spawn failure: report it as one so
+                // the requester falls back at once (never a silent timeout);
+                // a permission deny (auto mode) resolves rather than rejects,
+                // and the raw shape names it
+                launchError: `spawn resolved without an agentId: ${JSON.stringify(handle) ?? String(handle)}`,
+              };
+          return reportCapsule(payload).catch((err) => sayError("stage_launched report failed", err));
+        })
         .catch((err) => {
           sayError("stage agent spawn failed", err);
           reportCapsule({ launchError: err instanceof Error ? err.stack || err.message : String(err) }).catch(

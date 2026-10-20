@@ -149,7 +149,22 @@ describe("settings pane focus + close wiring", () => {
     // the anchored model: the filter Input holds the ring; a move attempt
     // onto a row is DENIED and read as a NEXT signal — the selection (and
     // the description box with it) advances
+    // the FIRST offer after an open onto a non-input element rewrites the
+    // landing onto the first tab (the desktop's mount walks the last
+    // actable; keyboard surfaces' first offer is the filter's autoFocus
+    // and passes untouched)
     const first = controller?.state().selectionId;
+    const r0 = (await h.dispatch("ui.focus", {
+      component: "Pane",
+      requestId: "owl-settings",
+      element: "settings-tab-3",
+    })) as { deny?: string; element?: string };
+    expect(r0?.deny).toBeUndefined();
+    expect(r0?.element).toBe("settings-tab-0");
+    expect(controller?.state().selectionId).toBe(first); // no navigation on the rewrite
+    // the anchored model: the filter Input holds the ring; a move attempt
+    // onto a row is DENIED and read as a NEXT signal — the selection (and
+    // the description box with it) advances
     const r1 = (await h.dispatch("ui.focus", {
       component: "Pane",
       requestId: "owl-settings",
@@ -168,9 +183,50 @@ describe("settings pane focus + close wiring", () => {
     expect(r2?.deny).toBeUndefined();
   });
 
+  test("on the desktop surface every focus offer passes through — no deny, no phantom navigation", async () => {
+    const { getSettingsPaneController } = await import("../../host/settings/pane.js");
+    await h.dispatch("command.run", { command: "owl-settings", args: "" });
+    // the pane's own render marks the surface pointer-driven
+    await h.dispatch("ui.render", { component: "Pane", requestId: "owl-settings", surface: "desktop" });
+    const controller = getSettingsPaneController();
+    // the FIRST offer is still the mount rewrite (the initial landing fix);
+    // everything after passes through
+    const r0 = (await h.dispatch("ui.focus", {
+      component: "Pane",
+      requestId: "owl-settings",
+      element: "settings-tab-3",
+    })) as { deny?: string; element?: string };
+    expect(r0?.element).toBe("settings-tab-0");
+    const before = controller?.state().selectionId;
+    const r = (await h.dispatch("ui.focus", {
+      component: "Pane",
+      requestId: "owl-settings",
+      element: "observerMode",
+    })) as { deny?: string; element?: string };
+    expect(r?.deny).toBeUndefined(); // never denied
+    expect(r?.element).toBe("observerMode"); // never rewritten past the first offer
+    expect(controller?.state().selectionId).toBe(before); // no navigation reading
+    // restore the keyboard surface for the suites that follow
+    await h.dispatch("ui.render", { component: "Pane", requestId: "owl-settings", surface: "terminal" });
+  });
+
+  test("a first offer onto the filter field passes through untouched (the keyboard surfaces' autoFocus)", async () => {
+    await h.dispatch("command.run", { command: "owl-settings", args: "" });
+    const r = (await h.dispatch("ui.focus", {
+      component: "Pane",
+      requestId: "owl-settings",
+      element: "settings-filter:0",
+    })) as { deny?: string; element?: string };
+    expect(r?.deny).toBeUndefined();
+    expect(r?.element).toBe("settings-filter:0"); // not rewritten
+  });
+
   test("the picker's bottom edge REDIRECTS the ring onto the custom value field", async () => {
     const { getSettingsPaneController } = await import("../../host/settings/pane.js");
     await h.dispatch("command.run", { command: "owl-settings", args: "" });
+    // the engine's own first offer on a keyboard surface: the filter's
+    // autoFocus, consumed before the picker navigation begins
+    await h.dispatch("ui.focus", { component: "Pane", requestId: "owl-settings", element: "settings-filter:0" });
     const controller = getSettingsPaneController();
     // a row with presets AND a custom value field (the number-with-presets
     // row carries the per-setting open-value override)

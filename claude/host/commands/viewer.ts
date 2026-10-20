@@ -60,7 +60,9 @@ export function buildViewerTree(els: {
   return els.Box({
     key: "owl-viewer",
     flexDirection: "column",
-    children: lines.map((line, i) => els.Text({ key: `owl-viewer-l${i}`, children: line === "" ? " " : line })),
+    children: lines.map((line, i) =>
+      els.Text({ key: `owl-viewer-l${i}`, mono: true, children: line === "" ? " " : line }),
+    ),
   });
 }
 

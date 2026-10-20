@@ -6,7 +6,13 @@
 // content alive.
 import { describe, expect, test } from "vitest";
 import { type BandElements, composeBand, decideBand } from "../../host/widget/band.js";
-import { _resetWidgetLine, setWidgetLine, widgetLine, widgetSegments } from "../../host/widget/line-store.js";
+import {
+  _resetWidgetLine,
+  setIdleProvider,
+  setWidgetLine,
+  widgetLine,
+  widgetSegments,
+} from "../../host/widget/line-store.js";
 import type { WidgetSegment } from "../../host/widget/render.js";
 
 const ELEMENTS: BandElements = {
@@ -20,14 +26,52 @@ describe("decideBand", () => {
     expect(decideBand(true, "inner")).toEqual({ kind: "passthrough" });
   });
 
-  test("no line in the store: passthrough (the band composes nothing)", () => {
+  test("no line in the store: the idle decision composes (the band draws nothing until segments serve)", () => {
     _resetWidgetLine();
-    expect(decideBand(false, "inner")).toEqual({ kind: "passthrough" });
+    expect(decideBand(false, "inner")).toEqual({ kind: "compose", inner: "inner", line: "", idle: true });
   });
 
-  test("an empty-string line is treated as hidden", () => {
+  test("an idle provider's segments paint the idle band (the usual line, no live run)", () => {
+    _resetWidgetLine();
+    setIdleProvider(() => [
+      { text: "🦉 ", color: "text" },
+      { text: "5 obs", color: "text" },
+      { text: " · 1.2k tok", color: "muted" },
+    ]);
+    const decision = decideBand(false, "inner");
+    if (decision.kind !== "compose") throw new Error("expected compose");
+    const out = composeBand(ELEMENTS, decision) as { type: string; children: unknown[] };
+    const line = out.children[1] as { type: string; children: unknown[] };
+    expect(line.type).toBe("Box");
+    expect(line.children).toEqual([
+      { type: "Text", mono: true, children: ["🦉 "], color: "text" },
+      { type: "Text", mono: true, children: ["5 obs"], color: "text" },
+      { type: "Text", mono: true, children: [" · 1.2k tok"], color: "subtle" },
+    ]);
+    setIdleProvider(null);
+  });
+
+  test("no idle provider: the idle band draws the inner content alone (no placeholder line)", () => {
+    _resetWidgetLine();
+    setIdleProvider(null);
+    const decision = decideBand(false, "inner");
+    if (decision.kind !== "compose") throw new Error("expected compose");
+    expect(composeBand(ELEMENTS, decision)).toBe("inner");
+  });
+
+  test("a live line never reads the idle provider", () => {
+    setIdleProvider(() => [{ text: "IDLE-NEVER", color: "text" }]);
+    setWidgetLine("live line");
+    const decision = decideBand(false, "inner");
+    if (decision.kind !== "compose") throw new Error("expected compose");
+    const out = composeBand(ELEMENTS, decision) as { type: string; children: unknown[] };
+    expect(JSON.stringify(out)).not.toContain("IDLE-NEVER");
+    _resetWidgetLine();
+  });
+
+  test("an empty-string line behaves like no line (the idle decision)", () => {
     setWidgetLine("");
-    expect(decideBand(false, "inner")).toEqual({ kind: "passthrough" });
+    expect(decideBand(false, "inner")).toEqual({ kind: "compose", inner: "inner", line: "", idle: true });
   });
 
   test("a live line composes under the inner drawing", () => {
@@ -49,7 +93,7 @@ describe("composeBand", () => {
     expect(out.type).toBe("Box");
     expect(out.children).toHaveLength(2);
     expect(out.children[0]).toEqual({ type: "Inner" });
-    expect(out.children[1]).toEqual({ type: "Text", children: ["🦉 line"] });
+    expect(out.children[1]).toEqual({ type: "Text", mono: true, children: ["🦉 line"] });
   });
 });
 
@@ -94,9 +138,9 @@ describe("composeBand — the painted line", () => {
       type: "Box",
       flexDirection: "row",
       children: [
-        { type: "Text", children: ["12"], color: "claude" },
-        { type: "Text", children: [" obs"], dimColor: true },
-        { type: "Text", children: [" · 22k/200k"], color: "subtle" },
+        { type: "Text", mono: true, children: ["12"], color: "claude" },
+        { type: "Text", mono: true, children: [" obs"], dimColor: true },
+        { type: "Text", mono: true, children: [" · 22k/200k"], color: "subtle" },
       ],
     });
   });
@@ -107,7 +151,7 @@ describe("composeBand — the painted line", () => {
     if (decision.kind !== "compose") throw new Error("expected compose");
     const out = composeBand(ELEMENTS, decision) as { type: string; children: { children: unknown[] }[] };
     const row = out.children[1] as { children: unknown[] };
-    expect(row.children[0]).toEqual({ type: "Text", children: ["x"], color: "text" });
+    expect(row.children[0]).toEqual({ type: "Text", mono: true, children: ["x"], color: "text" });
   });
 
   test("a line with no segments still draws as one plain Text", () => {
@@ -115,7 +159,7 @@ describe("composeBand — the painted line", () => {
     const decision = decideBand(false, { type: "Inner" });
     if (decision.kind !== "compose") throw new Error("expected compose");
     const out = composeBand(ELEMENTS, decision) as { type: string; children: unknown[] };
-    expect(out.children[1]).toEqual({ type: "Text", children: ["plain line"] });
+    expect(out.children[1]).toEqual({ type: "Text", mono: true, children: ["plain line"] });
   });
 
   test("a foreign line (the pause override) never borrows the stage segments", () => {
@@ -123,7 +167,7 @@ describe("composeBand — the painted line", () => {
     const decision = decideBand(false, "inner", "pause line");
     if (decision.kind !== "compose") throw new Error("expected compose");
     const out = composeBand(ELEMENTS, decision) as { type: string; children: unknown[] };
-    expect(out.children[1]).toEqual({ type: "Text", children: ["pause line"] });
+    expect(out.children[1]).toEqual({ type: "Text", mono: true, children: ["pause line"] });
     _resetWidgetLine();
   });
 });
@@ -151,7 +195,7 @@ describe("decideBand — the conflict-pause line", () => {
 
   test("no pause line keeps the store-driven behavior", () => {
     _resetWidgetLine();
-    expect(decideBand(false, "inner", null)).toEqual({ kind: "passthrough" });
+    expect(decideBand(false, "inner", null)).toEqual({ kind: "compose", inner: "inner", line: "", idle: true });
     setWidgetLine("🦉 line");
     expect(decideBand(false, "inner", null)).toEqual({ kind: "compose", inner: "inner", line: "🦉 line" });
     _resetWidgetLine();

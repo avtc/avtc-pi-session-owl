@@ -1,6 +1,6 @@
 {
   "name": "avtc-pi-session-owl",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Background-maintained append-only knowledge graph; roots become the compaction summary; the agent traverses and regex-searches it to recall messages, tool calls, own thinking.",
   "type": "module",
   "license": "MIT",

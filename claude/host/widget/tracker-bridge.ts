@@ -32,8 +32,14 @@ import type {
   WidgetAgentEvent,
   WidgetStage,
 } from "../runs/seams.js";
-import { type StoredSegment, setWidgetLine } from "./line-store.js";
-import { formatConflictLine, formatWidgetSegments, type ThemeSeam, type WidgetSnapshot } from "./render.js";
+import { type StoredSegment, setIdleProvider, setWidgetLine } from "./line-store.js";
+import {
+  formatConflictLine,
+  formatIdleSegments,
+  formatWidgetSegments,
+  type ThemeSeam,
+  type WidgetSnapshot,
+} from "./render.js";
 import { hasBandSurface, hasFallbackSurface } from "./width.js";
 
 const RECORD_OBS_TOOL = "record_observations";
@@ -133,6 +139,13 @@ export function createWidgetBridge(deps: TrackerBridgeDeps): WidgetBridge {
   let usage: WidgetSnapshot["usage"] = { ...ZERO_USAGE };
   let streamingOutputTokens = 0;
   let agentContextTokens: number | null = null;
+  // the idle-line source this bridge serves between runs (the band draws it
+  // whenever no live line is published). One band, main's alone: an
+  // in-process subagent loop's bridge never takes the line store's idle
+  // seat — the newest binding would otherwise serve the subagent's counts
+  if (deps.scope === "main") {
+    setIdleProvider(() => formatIdleSegments(snapshot()));
+  }
   let agentModelId: string | null = null;
   let selectedBaseline: { count: number; viewTokens: number } | null = null;
   let inFlightObs = 0;

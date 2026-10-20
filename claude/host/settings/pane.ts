@@ -126,7 +126,21 @@ let paneController: PaneController | null = null;
 
 /** Build (once) and open the settings pane. Returns the controller the render
  *  hook reads, or null when the consumer has not initialized (logged). */
+/** Whether the pane awaits its first focus offer since the last open (each
+ *  /owl-settings invocation re-arms it): a surface that never takes the
+ *  keyboard lands its ring on the pane's last actable at mount, and the
+ *  first offer is where the host rewrites that landing. */
+let firstRingOfferPending = false;
+
+/** Consumes the first-offer flag (one rewrite per open). */
+export function takeSettingsPaneFirstRingOffer(): boolean {
+  if (!firstRingOfferPending) return false;
+  firstRingOfferPending = false;
+  return true;
+}
+
 export async function ensureSettingsPane(capsules: PaneCapsules): Promise<PaneController | null> {
+  firstRingOfferPending = true;
   const handle = getInstalledSettingsHandle();
   if (handle === null) {
     capsules.uiLog(SETTINGS_PANE_NOT_READY);
@@ -223,4 +237,5 @@ export function manualJsonNoticeTree(els: { Text: (props: Record<string, unknown
 export function _resetSettingsPaneForTest(): void {
   paneController = null;
   currentCwd = "";
+  firstRingOfferPending = false;
 }

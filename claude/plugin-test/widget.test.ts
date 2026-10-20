@@ -35,7 +35,7 @@ describe("the band composition — engine-run twin", () => {
     if (decision.kind !== "compose") throw new Error("expected compose");
     const out = composeBand(ELEMENTS, decision) as { type: string; children: unknown[] };
     expect(out.type).toBe("Box");
-    expect(out.children).toEqual(["inner", { type: "Text", children: ["🦉 5 obs → 2 roots"] }]);
+    expect(out.children).toEqual(["inner", { type: "Text", mono: true, children: ["🦉 5 obs → 2 roots"] }]);
     _resetWidgetLine();
   });
 });
@@ -55,8 +55,8 @@ describe("the painted band line — engine-run twin", () => {
       type: "Box",
       flexDirection: "row",
       children: [
-        { type: "Text", children: ["12"], color: "claude" },
-        { type: "Text", children: [" obs"], dimColor: true },
+        { type: "Text", mono: true, children: ["12"], color: "claude" },
+        { type: "Text", mono: true, children: [" obs"], dimColor: true },
       ],
     });
     _resetWidgetLine();
@@ -69,7 +69,7 @@ describe("the painted band line — engine-run twin", () => {
     const decision = decideBand(false, "inner");
     if (decision.kind !== "compose") throw new Error("expected compose");
     const out = composeBand(ELEMENTS, decision) as { type: string; children: unknown[] };
-    expect(out.children[1]).toEqual({ type: "Text", children: ["plain"] });
+    expect(out.children[1]).toEqual({ type: "Text", mono: true, children: ["plain"] });
   });
 });
 

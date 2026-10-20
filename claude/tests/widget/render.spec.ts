@@ -14,7 +14,13 @@ const piConflict = (names: string[], width: number, theme2: unknown): string =>
   piConflictRaw(names, width, theme2 as never).replace(/owl:/g, "owl-");
 
 import type { WidgetSnapshot as PiSnapshot } from "../../../src/widget/tracker.js";
-import { formatConflictLine, formatWidgetLine, type WidgetSnapshot } from "../../host/widget/render.js";
+import {
+  formatConflictLine,
+  formatIdleSegments,
+  formatWidgetLine,
+  type WidgetSegment,
+  type WidgetSnapshot,
+} from "../../host/widget/render.js";
 
 /** Passthrough theme (colorless — the port and pi agree on the raw text). */
 const theme = { fg: (_c: string, t: string) => t };
@@ -96,6 +102,43 @@ describe("formatWidgetLine — parity with pi's render", () => {
     const marker = { fg: (c: string, t: string) => `<${c}>${t}</${c}>` };
     const snap = baseSnapshot();
     expect(formatWidgetLine(snap, marker)).toBe(piWidget(snap as unknown as PiSnapshot, marker));
+  });
+});
+
+describe("formatIdleSegments — the usual line without a highlighted stage", () => {
+  const join = (segs: WidgetSegment[]): string => segs.map((s) => s.text).join("");
+
+  test("no accent anywhere; batch and pass markers drop", () => {
+    const segs = formatIdleSegments(baseSnapshot());
+    expect(segs.some((s) => s.color === "accent")).toBe(false);
+    expect(join(segs)).not.toContain("1/3"); // the observe batch belongs to the run
+    expect(join(segs)).not.toContain("#"); // the build pass marker belongs to the run
+  });
+
+  test("the run's deltas clear: the idle line shows plain counts", () => {
+    const text = join(formatIdleSegments(baseSnapshot()));
+    expect(text).not.toContain("("); // (+N)/(-N) deltas and the +N in-flight marker
+    expect(text).toContain("12 obs");
+    expect(text).toContain("4 roots");
+  });
+
+  test("counts stay; the stage agent's context/token cluster drops", () => {
+    const segs = formatIdleSegments(baseSnapshot());
+    const text = join(segs);
+    expect(text).toContain("12 obs");
+    expect(text).toContain("4 roots");
+    expect(text).not.toContain("22k/200k");
+    expect(text).not.toContain("tok");
+  });
+
+  test("a selected root renders without accent", () => {
+    const snap = {
+      ...baseSnapshot(),
+      selected: { count: 2, countDelta: 1, viewTokens: 500, tokenDelta: 0, threshold: 4000 },
+    };
+    const segs = formatIdleSegments(snap);
+    expect(join(segs)).toContain("2 selected");
+    expect(segs.some((s) => s.color === "accent")).toBe(false);
   });
 });
 

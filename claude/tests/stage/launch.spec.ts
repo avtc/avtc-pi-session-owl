@@ -79,6 +79,29 @@ describe("stage launch broker", () => {
     await expect(pending).resolves.toEqual(handle("ag-1"));
   });
 
+  test("every settle denial says its reason through the warn capsule", async () => {
+    const warnings: string[] = [];
+    const broker = armedBroker({
+      launchViaCompanionImpl: async () => ({ result: "launching" }),
+      warn: (m: string) => warnings.push(m),
+    });
+    const pending = broker.spawn({ subagentType: "t", prompt: "p" });
+    await new Promise((r) => setTimeout(r, 5));
+    const id = currentOnlyLaunchId(broker);
+    broker.settle({ spawnAgentId: "x" });
+    broker.settle({ launchId: "no-such-id", spawnAgentId: "x" });
+    broker.settle({ launchId: id });
+    expect(warnings).toEqual([
+      "stage launch callback denied: stage_launched: launchId missing",
+      "stage launch callback denied: stage_launched: no launch in flight for no-such-id",
+      "stage launch callback denied: stage_launched: spawnAgentId missing",
+    ]);
+    // the denied launch still settles through the fallback (short timer)
+    const result = broker.settle({ launchId: id, spawnAgentId: "ag-2", spawnModel: "m" });
+    expect("result" in result).toBe(true);
+    await expect(pending).resolves.toEqual(handle("ag-2"));
+  });
+
   test("a refused launch (companion absent) falls back to the direct spawn with a warning", async () => {
     const warnings: string[] = [];
     const broker = armedBroker({

@@ -153,11 +153,15 @@ export function createLaunchBroker(): LaunchBroker {
     },
 
     settle(e: Record<string, unknown>): { result: string } | { deny: string } {
+      const deny = (reason: string): { deny: string } => {
+        deps?.warn(`stage launch callback denied: ${reason}`);
+        return { deny: reason };
+      };
       const id = typeof e.launchId === "string" ? e.launchId : null;
       const agentId = typeof e.spawnAgentId === "string" && e.spawnAgentId.length > 0 ? e.spawnAgentId : null;
-      if (id === null) return { deny: "stage_launched: launchId missing" };
+      if (id === null) return deny("stage_launched: launchId missing");
       const entry = pending.get(id);
-      if (entry === undefined) return { deny: `stage_launched: no launch in flight for ${id}` };
+      if (entry === undefined) return deny(`stage_launched: no launch in flight for ${id}`);
       // the companion's own failure report: reject the parked launch WITH
       // the reason (its stack when the companion had one) — the stage run
       // fails loudly and retries; never a silent timeout
@@ -168,7 +172,7 @@ export function createLaunchBroker(): LaunchBroker {
         entry.reject(new Error(`stage agent spawn failed at the companion: ${launchError}`));
         return { result: "launched" };
       }
-      if (agentId === null) return { deny: "stage_launched: spawnAgentId missing" };
+      if (agentId === null) return deny("stage_launched: spawnAgentId missing");
       pending.delete(id);
       clearTimeout(entry.timer);
       entry.resolve({

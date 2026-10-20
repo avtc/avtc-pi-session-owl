@@ -93,8 +93,8 @@ function paint(theme: ThemeSeam, color: Color, text: string): string {
 }
 
 /** The obs section: {count}{Δ} obs [N/M batch — while one is in flight]. */
-function obsSection(snap: WidgetSnapshot): WidgetSegment[] {
-  const active = snap.stage === "observe";
+function obsSection(snap: WidgetSnapshot, accent: boolean): WidgetSegment[] {
+  const active = accent && snap.stage === "observe";
   const countColor: Color = active ? "accent" : "text";
   const out: WidgetSegment[] = [{ text: String(snap.obs.count), color: countColor }];
   const delta = signedCount(snap.obs.delta);
@@ -109,8 +109,8 @@ function obsSection(snap: WidgetSnapshot): WidgetSegment[] {
 }
 
 /** The roots section: {count}{Δ} roots {viewTokens}{Δ}/{threshold} [#N]. */
-function rootsSection(snap: WidgetSnapshot): WidgetSegment[] {
-  const active = snap.stage === "build";
+function rootsSection(snap: WidgetSnapshot, accent: boolean): WidgetSegment[] {
+  const active = accent && snap.stage === "build";
   const countColor: Color = active ? "accent" : "text";
   const out: WidgetSegment[] = [{ text: String(snap.roots.count), color: countColor }];
   const countDelta = signedCount(snap.roots.countDelta);
@@ -125,11 +125,12 @@ function rootsSection(snap: WidgetSnapshot): WidgetSegment[] {
 }
 
 /** The selected section (select + selected-root only). */
-function selectedSection(snap: WidgetSnapshot): WidgetSegment[] | null {
+function selectedSection(snap: WidgetSnapshot, accent: boolean): WidgetSegment[] | null {
   if (snap.selected === null) return null;
-  const out: WidgetSegment[] = [{ text: String(snap.selected.count), color: "accent" }];
+  const countColor: Color = accent ? "accent" : "text";
+  const out: WidgetSegment[] = [{ text: String(snap.selected.count), color: countColor }];
   const countDelta = signedCount(snap.selected.countDelta);
-  if (countDelta !== "") out.push({ text: countDelta, color: "accent" });
+  if (countDelta !== "") out.push({ text: countDelta, color: countColor });
   out.push({ text: " selected ", color: "dim" });
   out.push({ text: formatTokens(snap.selected.viewTokens), color: "dim" });
   const tokenDelta = signedTokens(snap.selected.tokenDelta);
@@ -163,13 +164,41 @@ function trailingSection(snap: WidgetSnapshot): WidgetSegment[] {
  * muted. Segments are non-empty and in paint order.
  */
 export function formatWidgetSegments(snap: WidgetSnapshot): WidgetSegment[] {
-  const out: WidgetSegment[] = [{ text: `${OWL} `, color: "text" }, ...obsSection(snap)];
-  out.push({ text: SEP, color: "dim" }, ...rootsSection(snap));
-  const selected = selectedSection(snap);
+  return widgetSegmentsWith(snap, true);
+}
+
+/** The idle line: the usual sections with no highlighted active stage —
+ *  every count rides the plain text color, and the run-scoped markers (the
+ *  observe batch counter, the build pass number) do not apply. */
+export function formatIdleSegments(snap: WidgetSnapshot): WidgetSegment[] {
+  return widgetSegmentsWith(snap, false);
+}
+
+function widgetSegmentsWith(snap: WidgetSnapshot, accent: boolean): WidgetSegment[] {
+  // the idle line carries no run-scoped state: the batch counter, the
+  // per-run deltas (vs the last run's baseline) and the stage agent's
+  // context/token cluster do not ride it
+  const effective = accent
+    ? snap
+    : {
+        ...snap,
+        batch: null,
+        inFlightObs: 0,
+        contextTokens: null,
+        contextWindow: null,
+        obs: { ...snap.obs, delta: 0 },
+        roots: { ...snap.roots, countDelta: 0, tokenDelta: 0 },
+        selected: snap.selected === null ? null : { ...snap.selected, countDelta: 0, tokenDelta: 0 },
+      };
+  const out: WidgetSegment[] = [{ text: `${OWL} `, color: "text" }, ...obsSection(effective, accent)];
+  out.push({ text: SEP, color: "dim" }, ...rootsSection(effective, accent));
+  const selected = selectedSection(effective, accent);
   if (selected !== null) {
     out.push({ text: SEP, color: "dim" }, ...selected);
   }
-  out.push({ text: MID, color: "dim" }, ...trailingSection(snap));
+  if (accent) {
+    out.push({ text: MID, color: "dim" }, ...trailingSection(effective));
+  }
   return out;
 }
 

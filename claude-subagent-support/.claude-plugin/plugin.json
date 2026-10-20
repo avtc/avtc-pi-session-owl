@@ -1,6 +1,6 @@
 {
   "name": "session-owl-subagent-support",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Spawns session-owl's background stage agents with a clean origin so they can use its memory tools (a Claude Code platform quirk companion).",
   "author": {
     "name": "avtc",

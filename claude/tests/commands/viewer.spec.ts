@@ -55,6 +55,10 @@ describe("command-output viewer pane", () => {
     const tree = buildViewerTree(els) as { box: { children: unknown[] } };
     const texts = made.filter(([k]) => k === "Text").map(([, p]) => p.children as unknown);
     expect(texts).toEqual(["alpha", " ", "beta"]);
+    // every listing line asks for the monospaced face (aligned tree output;
+    // the terminal ignores the prop)
+    const mono = made.filter(([k]) => k === "Text").map(([, p]) => (p as { mono?: boolean }).mono);
+    expect(mono).toEqual([true, true, true]);
     expect(made.some(([k]) => k === "Box")).toBe(true);
     expect(tree.box.children).toHaveLength(3);
   });

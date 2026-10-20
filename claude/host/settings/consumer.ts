@@ -72,6 +72,9 @@ export const PORT_DEFAULTS_CONFIG: SessionOwlConfig = Object.fromEntries(
 export interface SettingsCapsules {
   toolRegister: (spec: unknown) => Promise<unknown>;
   uiInvalidate: () => void;
+  /** Clears a pinned status line (the fallback surfaces' widget) — the
+   *  disable transition must withdraw it, not just the band. */
+  uiStatus?: (text: string | undefined) => void;
   appendTimeline?: (t: "enable" | "disable" | "pause" | "resume") => void;
 }
 
@@ -100,6 +103,11 @@ export interface OwlSettingsHandle {
 function fireAfterChange(id: string, value: unknown, capsules: SettingsCapsules): void {
   if (id === "enabled" && typeof value === "boolean") {
     setOwlEnabled(value);
+    if (!value) {
+      // the widget withdraws on disable: the band passes through and a
+      // pinned status line (the fallback surfaces) is cleared
+      capsules.uiStatus?.(undefined);
+    }
     if (value) {
       void registerOwlRecallIfNewlyEnabled(async (spec) => capsules.toolRegister(spec)).catch((err: unknown) => {
         // the once-flag stays unset on failure (retryable); the rejection

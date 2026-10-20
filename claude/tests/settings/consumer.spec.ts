@@ -55,6 +55,7 @@ function makeCapsules() {
     timeline,
     toolRegister: async (spec: unknown) => void registered.push(spec),
     uiInvalidate: () => void invalidates.push(1),
+    uiStatus: (_text: string | undefined) => {},
     fsStat: async () => null,
     appendTimeline: (t: string) => void timeline.push(t),
   };
@@ -231,6 +232,17 @@ describe("the settings consumer — conflict-timeline transitions", () => {
     expect(capsules.timeline).toEqual(["enable"]);
     handle.updateSetting("enabled", false);
     expect(capsules.timeline).toEqual(["enable", "disable"]);
+  });
+
+  test("a disable flip clears a pinned status line (the widget withdraws)", async () => {
+    const statuses: (string | undefined)[] = [];
+    const { handle } = await makeConsumer({
+      capsules: { uiStatus: (text) => void statuses.push(text) },
+    });
+    handle.updateSetting("enabled", true);
+    expect(statuses).toEqual([]); // the enable flip pins nothing
+    handle.updateSetting("enabled", false);
+    expect(statuses).toEqual([undefined]); // the pinned line is withdrawn
   });
 
   test("an enable while conflict-paused also mirrors pause (the window never opens)", async () => {

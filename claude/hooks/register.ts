@@ -75,6 +75,7 @@ import {
   getSettingsPaneController,
   manualJsonNoticeTree,
   SETTINGS_PANE_ID,
+  takeSettingsPaneFirstRingOffer,
 } from "../host/settings/pane.js";
 import { noStageModelSettings, STAGE_AGENT_NAMES, stageAgentSpecs } from "../host/stage/agents.js";
 import { shouldDropPeerMessage } from "../host/stage/delivery.js";
@@ -104,6 +105,7 @@ import { recordMeasure, seedWindow } from "../host/triggers/context.js";
 import { onStepBoundary, onTurnCompleteBoundary } from "../host/triggers/eval.js";
 import { abortActiveFor, abortAllForSessionEnd, awaitIdle } from "../host/triggers/run-locks.js";
 import { composeBand, decideBand } from "../host/widget/band.js";
+import { consumeIdleRefresh } from "../host/widget/line-store.js";
 import { formatPauseLine } from "../host/widget/pause-line.js";
 import { buildPaneTree } from "../node_modules/avtc-claude-settings-ui/dist/index.js";
 
@@ -338,6 +340,15 @@ async function serveQueue<T>(
  *  other consumers reach through currentServices() at call time (the
  *  settings after-change capsules, the stage spawn path) — the full
  *  superset from every handler keeps them alive across re-arms. */
+/** The spawn answer as one log line: the full raw shape, whatever it is. */
+function describeSpawnAnswer(handle: unknown): string {
+  try {
+    return JSON.stringify(handle) ?? String(handle);
+  } catch {
+    return String(handle);
+  }
+}
+
 function armAll(dollar: any) {
   // the launch broker's capsules (re-armed with the fresh dollar, the same
   // replace-on-arm rule as the bridge table below)
@@ -346,10 +357,15 @@ function armAll(dollar: any) {
       dollar.tool.call({ tool: "mcp__session-owl-subagent-support__launch", ...spec }),
     spawnDirect: async (input: Record<string, unknown>) => {
       const handle = (await dollar.agent.spawn(input as never)) as { model?: unknown; agentId?: unknown };
-      if (typeof handle.agentId !== "string" || handle.agentId.length === 0) {
+      const agentId = (handle as { agentId?: unknown }).agentId;
+      if (typeof agentId !== "string" || agentId.length === 0) {
+        // the full answer, verbatim: an id-less resolve differs per surface
+        // (a permission deny resolves rather than rejecting), and the raw
+        // shape tells them apart
+        log.warn(`stage spawn answer without an agentId: ${describeSpawnAnswer(handle)}`);
         throw new Error("stage spawn resolved without an agentId");
       }
-      return { model: typeof handle.model === "string" ? handle.model : "", agentId: handle.agentId };
+      return { model: typeof handle.model === "string" ? handle.model : "", agentId };
     },
     warn: (message: string) => log.warn(message),
   });
@@ -615,10 +631,16 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
         capsules: {
           toolRegister: (s) => bridge.currentServices().toolRegister(s),
           uiInvalidate: () => bridge.currentServices().uiInvalidate(),
+          uiStatus: (text) => bridge.currentServices().uiStatus(text),
           appendTimeline: (t) => guarded(appendTimelineEvent({ t, at: Date.now() }), "timeline append"),
         },
       });
       await registerSurfaces($);
+      // Prime the main conversation's binding here: the band's idle line
+      // gains its provider and the store's counts before any frame that
+      // outlives the opening one (turns, compaction and recall would each
+      // have created this same instance on first use).
+      void getBinding(e.session_id, e.session_id, null);
       // Branch/fork lineage: under this new id the engine
       // copied a /branch or /fork's TRANSCRIPT (the first row's
       // forkedFrom.sessionId names the origin) — copy the origin's owl
@@ -1858,6 +1880,23 @@ async function onCommandRun($: any, e: AnyEvent, next: Next) {
   return next(e);
 }
 
+function onToolCheck(_$: any, e: AnyEvent, next: Next) {
+  // The stage spawns' self-approval on the permission decision: auto-mode
+  // desktop sessions put the ambient mod-initiated Agent spawn to the
+  // server-side classifier, which gives no verdict for a call no request
+  // produced, denying the stage launch. The plugin answers the decision
+  // itself for exactly its own registered agent types (they run ungated in
+  // every other mode); every other call keeps the engine's verdict.
+  const tool = (e as { tool?: unknown }).tool;
+  const input = (e as { input?: unknown }).input as { subagent_type?: unknown } | null | undefined;
+  const type = input != null && typeof input === "object" ? input.subagent_type : undefined;
+  if (tool === "Agent" && typeof type === "string" && STAGE_AGENT_NAMES.some((n) => `session-owl:${n}` === type)) {
+    log.info(`tool.check: stage spawn self-approved (${type})`);
+    return { decision: "allow" };
+  }
+  return next(e);
+}
+
 async function onAgentOffer(_$: any, e: AnyEvent, next: Next) {
   // The stage types are hidden from the model's agent picker: the
   // main model never sees owl's stages as spawnable (a plugin's own
@@ -1868,6 +1907,11 @@ async function onAgentOffer(_$: any, e: AnyEvent, next: Next) {
   return next(e);
 }
 
+/** The surface the settings pane last drew on (set by its ui.render):
+ *  the desktop drives the pane with the pointer, and its focus offers are
+ *  the pointer's own landings (hover, click) rather than arrow walks. */
+let settingsPaneSurface: "desktop" | "keyboard" = "keyboard";
+
 /** The focus ring moved inside the settings pane: the described row follows
  *  it (pi's selected-row description area tracks the arrows' selection), and
  *  a move OFF our elements — to one of the engine's own stops (another
@@ -1877,6 +1921,25 @@ function onPaneFocus(_$: any, e: AnyEvent, next: Next) {
   const controller = getSettingsPaneController();
   const element = (e as { element?: unknown }).element;
   if (controller === null) return next(e);
+  // A surface that never takes the keyboard (the desktop pane) ignores
+  // autoFocus and lands its ring on the pane's LAST actable at mount; the
+  // first offer after an open rewrites that landing onto the first tab, so
+  // the pane starts where it starts everywhere else. Keyboard surfaces'
+  // own first offer — the filter field's autoFocus — passes untouched.
+  if (takeSettingsPaneFirstRingOffer()) {
+    const seat = typeof element === "string" ? element.split(":")[0] : "";
+    if (seat !== "settings-filter" && seat !== "picker-filter" && element !== "picker-custom") {
+      return next({ ...e, element: "settings-tab-0" });
+    }
+  }
+  // A pointer-driven surface has no keyboard to anchor: every offer is the
+  // pointer's own landing (hover, click), so it passes through — the
+  // anchored model would read each as an arrow signal (phantom selection
+  // walks on every click and hover) and its deny would swallow the first
+  // press of anything below the rows (the Close button needed two)
+  if (settingsPaneSurface === "desktop") {
+    return next(e);
+  }
   // The input-anchored keyboard model: the filter Input holds the ring.
   // Every person-origin move attempt onto anything but our own text
   // inputs is denied — the controller reads the offered target as the
@@ -1928,6 +1991,18 @@ function onPaneClose(_$: any, e: AnyEvent, next: Next) {
 }
 
 async function onUiRender($: any, e: AnyEvent, next: Next) {
+  // The idle line's post-fold refresh rides this dispatch: the band's
+  // opening frame drew before the store fold landed, and an out-of-frame
+  // invalidation does not redraw the band — the request is consumed here,
+  // IN frame, so the engine re-renders with the counts now servable
+  if (consumeIdleRefresh()) {
+    try {
+      $.ui.invalidate("ui.render");
+    } catch {
+      /* an engine that refuses mid-render invalidation draws the line at
+       * its next natural frame — the counts are already servable */
+    }
+  }
   // The settings pane (the family library's tree over the pane controller —
   // surfaces with field elements get the full tabbed pane; mobile draws a
   // text-only manual-JSON notice instead of a broken tree).
@@ -1943,13 +2018,17 @@ async function onUiRender($: any, e: AnyEvent, next: Next) {
     if (requestId === SETTINGS_PANE_ID) {
       const inner = await next(e);
       const table = $.ui.resolve(e) as never;
+      settingsPaneSurface = (e as { surface?: unknown }).surface === "desktop" ? "desktop" : "keyboard";
       if ((e as { surface?: unknown }).surface === "mobile") {
         return manualJsonNoticeTree(table as never) as never;
       }
       const controller = getSettingsPaneController();
       if (controller === null) return inner;
       const props = (e as { props?: { bodyColumns?: number } }).props;
-      return buildPaneTree(table, controller, { bodyColumns: props?.bodyColumns ?? 80 }) as never;
+      return buildPaneTree(table, controller, {
+        bodyColumns: props?.bodyColumns ?? 80,
+        surface: (e as { surface?: unknown }).surface === "desktop" ? "desktop" : undefined,
+      }) as never;
     }
     return next(e);
   }
@@ -1962,6 +2041,9 @@ async function onUiRender($: any, e: AnyEvent, next: Next) {
   // (Node-side) publishes into it and asks for the re-render.
   if (e && (e as { component?: unknown }).component === "AbovePrompt") {
     const inner = await next(e);
+    // disabled owl draws nothing on the band: the widget line must not
+    // outlive the Enabled switch
+    if (!state.isOwlEnabled()) return inner;
     // The conflict-pause line (live — mid-session flips re-render): wins
     // over the store's stage line while paused (a stale stage line must
     // not outlive the pause); the survey still holds the band either way.
@@ -2132,6 +2214,7 @@ export const register: Register = (on) => {
   on("session.compact", onSessionCompact);
   on("tool.register", onToolRegister);
   on("tool.call", onToolCall).catch(onToolCallFailure);
+  on("tool.check", { tool: "Agent" }, onToolCheck);
   on("command.register", onCommandRegister);
   on("command.run", onCommandRun);
   on("agent.offer", onAgentOffer);

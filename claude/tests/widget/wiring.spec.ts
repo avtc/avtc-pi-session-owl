@@ -16,7 +16,7 @@ async function bandHarness() {
 }
 
 describe("the AbovePrompt band branch (live wiring)", () => {
-  test("no line in the store: the band passes through untouched", async () => {
+  test("no line in the store and no provider: the band carries no owl line (nothing servable yet)", async () => {
     _resetWidgetLine();
     const h = await bandHarness();
     const out = await h.dispatch("ui.render", {
@@ -25,8 +25,8 @@ describe("the AbovePrompt band branch (live wiring)", () => {
       hasSurvey: false,
       requestId: "r1",
     });
-    // passthrough: the event itself (the harness's next default)
-    expect((out as { component?: string }).component).toBe("AbovePrompt");
+    // the inner drawing alone — no placeholder line before the fold lands
+    expect(JSON.stringify(out)).not.toContain("🦉");
   });
 
   test("a live line composes Box{[next, Text(line)]} under the band's content", async () => {
@@ -58,6 +58,69 @@ describe("the AbovePrompt band branch (live wiring)", () => {
     expect((out as { component?: string }).component).toBe("AbovePrompt");
     expect((out as { type?: string }).type).toBeUndefined();
     _resetWidgetLine();
+  });
+
+  test("a disabled owl passes the band through — the widget is hidden", async () => {
+    const owlState = await import("../../host/state.js");
+    const h = await bandHarness();
+    try {
+      owlState.setOwlEnabled(false);
+      setWidgetLine("🦉 stale line while disabled");
+      const out = await h.dispatch("ui.render", {
+        component: "AbovePrompt",
+        surface: "terminal",
+        hasSurvey: false,
+        requestId: "r3d",
+      });
+      // the inner drawing, untouched: no owl line anywhere in the band
+      expect((out as { component?: string }).component).toBe("AbovePrompt");
+      expect(JSON.stringify(out)).not.toContain("🦉");
+    } finally {
+      owlState._resetForTest();
+      _resetWidgetLine();
+    }
+  });
+
+  test("session.start primes the main binding - the idle provider serves after the fold", async () => {
+    const { _resetWidgetLine, idleSegments } = await import("../../host/widget/line-store.js");
+    const { hasBinding } = await import("../../host/runs/bind.js");
+    _resetWidgetLine();
+    const h = await bandHarness();
+    h.env.set("CLAUDE_CONFIG_DIR", "/cfg");
+    await h.dispatch("classic.SessionStart", {
+      session_id: "prime-1",
+      cwd: "/w",
+      source: "startup",
+      transcript_path: "/t/prime-1.jsonl",
+    });
+    expect(hasBinding("prime-1")).toBe(true); // created at start, not at first turn
+    // the fold+pin runs on microtasks; give it a beat
+    await new Promise((r) => setTimeout(r, 50));
+    expect(idleSegments()).not.toBeNull(); // the provider is registered and serving
+  });
+
+  test("a pending idle refresh consumes the NEXT render dispatch - invalidated in frame, once", async () => {
+    const { requestIdleRefresh } = await import("../../host/widget/line-store.js");
+    _resetWidgetLine();
+    const h = await bandHarness();
+    const before = h.uiInvalidateCalls.length;
+    requestIdleRefresh();
+    await h.dispatch("ui.render", {
+      component: "AbovePrompt",
+      surface: "terminal",
+      hasSurvey: false,
+      requestId: "r-idle",
+    });
+    expect(h.uiInvalidateCalls.length).toBe(before + 1); // consumed, in frame
+    expect(h.uiInvalidateCalls[h.uiInvalidateCalls.length - 1]).toBe("ui.render");
+    const before2 = h.uiInvalidateCalls.length;
+    await h.dispatch("ui.render", {
+      component: "AbovePrompt",
+      surface: "terminal",
+      hasSurvey: false,
+      requestId: "r-idle2",
+    });
+    expect(h.uiInvalidateCalls.length).toBe(before2); // one-shot
   });
 
   test("other components (ToolResult) still route to the restyle branch", async () => {

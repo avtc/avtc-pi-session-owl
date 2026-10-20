@@ -46,6 +46,7 @@ import { makeTodoBridge } from "../todo/bridge-consumer.js";
 import { makeTriggerCtx, windowFor } from "../triggers/context.js";
 import { evaluateAndLaunch, type TriggerHostDeps, type TriggerRuns } from "../triggers/eval.js";
 import { acquireForCompaction, acquireForExtract, acquireOrSkip } from "../triggers/run-locks.js";
+import { requestIdleRefresh } from "../widget/line-store.js";
 import { createWidgetBridge, type WidgetBridge } from "../widget/tracker-bridge.js";
 import { runBuilder } from "./builder.js";
 import { goalExtractSettled, runGoalExtract } from "./goal-extract.js";
@@ -307,6 +308,29 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
       }
     },
   });
+
+  // The conversation's opening frame draws the identity mark alone — the
+  // band rendered before this binding existed. Pinning the core once the
+  // store fold lands gives the idle line this conversation's real counts
+  // (zeros for a fresh session, the persisted counts after a resume) and
+  // asks the band for one re-render.
+  if (agentId === null) {
+    void pinCore()
+      .then(() => {
+        requestIdleRefresh();
+        try {
+          services().uiInvalidate();
+        } catch {
+          /* the bridge un-armed or the call is out of frame — the pending
+           *  flag rides the next in-frame render dispatch instead */
+        }
+      })
+      .catch((err: unknown) => {
+        // the fold's own failure reporting covers the storage side; this
+        // names the priming loss where it was seen (the bare mark staying)
+        log.warn(`widget: idle priming failed: ${errText(err)}`);
+      });
+  }
 
   const triggerRuns: TriggerRuns = {
     runObserver: async ({ signal, unobserved, maybeBuild }) => {

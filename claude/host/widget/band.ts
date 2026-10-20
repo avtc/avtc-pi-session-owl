@@ -10,7 +10,8 @@
 // The rules (the widget task's design):
 //   survey holds the band  ⇒ yield: draw `next(e)` untouched (return null —
 //                             the hook passes through);
-//   no line (idle/hidden)  ⇒ passthrough (null);
+//   no line (idle)         ⇒ the idle line composes (the band stays
+//                             visible between stage runs);
 //   otherwise              ⇒ Box{ children: [next(e), line] } — the
 //                             owl line APPENDED under whatever else the band
 //                             carries, so every other mod's band content
@@ -18,7 +19,7 @@
 //                             per-span Texts (color styling), a plain line as
 //                             one Text. The 🦉 prefix carries owl's
 //                             identity (the engine adds its own `[-]`).
-import { widgetLine, widgetSegments } from "./line-store.js";
+import { idleSegments, widgetLine, widgetSegments } from "./line-store.js";
 import type { WidgetSegment } from "./render.js";
 
 /** The element constructors the composition needs (the surface table's
@@ -26,7 +27,7 @@ import type { WidgetSegment } from "./render.js";
  *  Text carries the per-span style props the engine paints with. */
 export interface BandElements {
   Box: (props: { children?: unknown[]; flexDirection?: string }) => unknown;
-  Text: (props: { children?: unknown[]; color?: string; dimColor?: boolean }) => unknown;
+  Text: (props: { children?: unknown[]; color?: string; dimColor?: boolean; mono?: boolean }) => unknown;
 }
 
 /** The engine-facing style each segment color paints as: pi's accent rides
@@ -40,20 +41,27 @@ const SEGMENT_STYLE: Record<WidgetSegment["color"], { color?: string; dimColor?:
 };
 
 /** What the band hook should draw for this render ask. */
-export type BandDecision = { kind: "passthrough" } | { kind: "compose"; inner: unknown; line: string };
+export type BandDecision =
+  | { kind: "passthrough" }
+  | { kind: "compose"; inner: unknown; line: string }
+  | { kind: "compose"; inner: unknown; line: string; idle: true };
 
 /** Decide the band's drawing for one render ask. `hasSurvey` yields (the
- *  engine's survey owns the band); a null/empty line passes through; a live
- *  line composes under `inner` (the `next(e)` result). A non-null
- *  `pauseLine` (the conflict-pause text, live-computed by the hook) WINS
- *  over the store's line — a stale stage line must not outlive the pause,
- *  and the pause stays honest across mid-session flips; the survey still
- *  holds the band either way. */
+ *  engine's survey owns the band); an empty line passes through (hidden);
+ *  everything else composes under `inner` (the `next(e)` result): a live
+ *  line, or the idle line when the store holds none — and the idle line
+ *  draws ONLY from servable segments (before the conversation's store fold
+ *  lands there is nothing honest to show, so the band carries no owl line
+ *  at all rather than a bare identity mark). A non-null `pauseLine` (the
+ *  conflict-pause text, live-computed by the hook) WINS over the store's
+ *  line — a stale stage line must not outlive the pause, and the pause
+ *  stays honest across mid-session flips; the survey still holds the band
+ *  either way. */
 export function decideBand(hasSurvey: boolean, inner: unknown, pauseLine: string | null = null): BandDecision {
   if (hasSurvey) return { kind: "passthrough" };
   const line = pauseLine ?? widgetLine();
-  if (line === null || line === "") return { kind: "passthrough" };
-  return { kind: "compose", inner, line };
+  if (line !== null && line !== "") return { kind: "compose", inner, line };
+  return { kind: "compose", inner, line: "", idle: true };
 }
 
 /** Shape the composition: the inner drawing with owl's line appended.
@@ -63,16 +71,21 @@ export function decideBand(hasSurvey: boolean, inner: unknown, pauseLine: string
  *  one plain Text, which is exactly the uncolored behavior. */
 export function composeBand(
   elements: BandElements,
-  decision: { kind: "compose"; inner: unknown; line: string },
+  decision: { kind: "compose"; inner: unknown; line: string; idle?: boolean },
 ): unknown {
-  const segments = decision.line === widgetLine() ? widgetSegments() : null;
+  const segments = decision.idle === true ? idleSegments() : decision.line === widgetLine() ? widgetSegments() : null;
+  if (decision.idle === true && (segments === null || segments.length === 0)) {
+    // nothing servable yet (the fold has not landed): the band draws the
+    // inner content alone — no placeholder line
+    return decision.inner;
+  }
   const lineElement =
     segments === null || segments.length === 0
-      ? elements.Text({ children: [decision.line] })
+      ? elements.Text({ mono: true, children: [decision.line] })
       : elements.Box({
           flexDirection: "row",
           children: segments.map((segment) =>
-            elements.Text({ children: [segment.text], ...SEGMENT_STYLE[segment.color] }),
+            elements.Text({ mono: true, children: [segment.text], ...SEGMENT_STYLE[segment.color] }),
           ),
         });
   return elements.Box({

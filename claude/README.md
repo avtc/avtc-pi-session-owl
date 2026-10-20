@@ -20,19 +20,17 @@ Requires Claude Code 2.1.302 or later.
 claude plugin install session-owl --marketplace avtc/avtc-pi-session-owl
 ```
 
-Alternative — the avtc plugin marketplace:
-
-```bash
-claude plugin install session-owl --marketplace avtc/avtc-claude-marketplace
-```
-
 ## Compatibility
 
 **Claude Code CLI** — tested.
 
 **VS Code extension** — the plugin loads and memory capture works, but plugin UI does not render there: no status widget, and the `/owl-*` commands produce no visible output (the engine draws plugin UI on the terminal surface only). Stage-agent output appears in the main chat window instead. Not thoroughly tested.
 
+**Claude Desktop** — tested.
+
 **Other surfaces** — not tested.
+
+`Prompt dropped by a hook: session-owl: stage handback` notices are expected during session-owl work. The mod consumes the handback of its own background agents. No silent variant exists yet (upstream: anthropics/claude-code#99417).
 
 ## How it works
 
