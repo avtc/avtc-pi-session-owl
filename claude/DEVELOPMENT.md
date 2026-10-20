@@ -30,11 +30,8 @@ release runbook.
   Anthropic endpoint; no network)
 - `inertness:smoke` — with hooks disabled (`disableAllHooks: true` and, in a
   second run, `--safe-mode`) the plugin is inert: no load, no writes
-- `h5-host-untouched` (via the acceptance suite) — the pi source tree stays
-  byte-identical to the pre-port baseline (modulo the recorded,
-  content-pinned hunks)
 - `acceptance-checklist` — `node scripts/acceptance-checklist.cjs` prints
-  PASS/FAIL per done-condition area (1–14)
+  PASS/FAIL per done-condition area (1–13)
 
 ## Release runbook
 

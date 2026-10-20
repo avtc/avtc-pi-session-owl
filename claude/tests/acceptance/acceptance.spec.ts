@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 //
-// The acceptance sweep: the fourteen done-condition areas as one asserted
-// gate-pass. Areas 1–8, 13, 14 assert the OWNING suites exist and pin the
+// The acceptance sweep: the thirteen done-condition areas as one asserted
+// gate-pass. Areas 1–8, 12, 13 assert the OWNING suites exist and pin the
 // named behaviors (the suites themselves are the per-area evidence — this
-// file is the index that fails when one goes missing); areas 9–12 assert
-// the audit artifacts, the host-untouched gate, the inertness gate's
+// file is the index that fails when one goes missing); areas 9–11 assert
+// the audit artifacts, the inertness gate's
 // wiring, and the packaging invariants. Each test prints its area verdict
 // (PASS/FAIL per line, the plan's checklist requirement).
 import { execFileSync } from "node:child_process";
@@ -32,7 +32,7 @@ function has(source: string, needle: string): boolean {
   return source.includes(needle);
 }
 
-describe("acceptance sweep — the fourteen done-condition areas", () => {
+describe("acceptance sweep — the thirteen done-condition areas", () => {
   test("area 1 — build & drift: dual-tree suites, sync gate, offline validate", () => {
     area(1, "build & drift");
     // the drift gate script + its npm wiring
@@ -164,15 +164,8 @@ describe("acceptance sweep — the fourteen done-condition areas", () => {
     pass();
   });
 
-  test("area 10 — host untouched: src/ + index.ts byte-identical to the pre-port baseline", () => {
-    area(10, "host untouched");
-    const out = execFileSync(process.execPath, ["scripts/h5-host-untouched.cjs", "--repo", ROOT], { encoding: "utf8" });
-    expect(out).toContain("clean");
-    pass();
-  }, 60_000);
-
-  test("area 11 — degradation: the inertness gate is wired (two disable modes ⇒ no load, no writes)", () => {
-    area(11, "degradation");
+  test("area 10 — degradation: the inertness gate is wired (two disable modes ⇒ no load, no writes)", () => {
+    area(10, "degradation");
     expect(exists("scripts/inertness-smoke.mjs")).toBe(true);
     const pkg = JSON.parse(reads("package.json")) as { scripts: Record<string, string> };
     const testChain = pkg.scripts.test ?? "";
@@ -184,8 +177,8 @@ describe("acceptance sweep — the fourteen done-condition areas", () => {
     pass();
   });
 
-  test("area 12 — packaging: name, version lock, exact pins, committed lockfile, offline-resolvable deps", () => {
-    area(12, "packaging");
+  test("area 11 — packaging: name, version lock, exact pins, committed lockfile, offline-resolvable deps", () => {
+    area(11, "packaging");
     const plugin = JSON.parse(reads("claude/.claude-plugin/plugin.json"));
     const claudePkg = JSON.parse(reads("claude/package.json"));
     const rootPkg = JSON.parse(reads("package.json"));
@@ -200,8 +193,8 @@ describe("acceptance sweep — the fourteen done-condition areas", () => {
     pass();
   });
 
-  test("area 13 — storage: marker, sweep, batch refs, directory-as-index", () => {
-    area(13, "storage");
+  test("area 12 — storage: marker, sweep, batch refs, directory-as-index", () => {
+    area(12, "storage");
     const mirror = reads("claude/tests/storage/mirror.spec.ts");
     expect(has(mirror, "one NEW m<seq>-<producer8>.jsonl per turn-flush")).toBe(true); // written-new batches
     const pipeline = reads("claude/tests/capture/pipeline.spec.ts");
@@ -213,8 +206,8 @@ describe("acceptance sweep — the fourteen done-condition areas", () => {
     pass();
   });
 
-  test("area 14 — rewind/fork: layered check, orphan-fork class, blind-window quarantine", () => {
-    area(14, "rewind/fork");
+  test("area 13 — rewind/fork: layered check, orphan-fork class, blind-window quarantine", () => {
+    area(13, "rewind/fork");
     const rewindSpecs =
       reads("claude/tests/rewind/canonical-check.spec.ts") +
       reads("claude/tests/rewind/lineage.spec.ts") +

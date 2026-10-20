@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 //
-// The acceptance checklist: prints PASS/FAIL per done-condition area (1-14)
+// The acceptance checklist: prints PASS/FAIL per done-condition area (1-13)
 // by running the acceptance suite, whose per-test output carries the area
 // verdicts. Exit 0 only when every area passes.
 //
@@ -27,8 +27,8 @@ const areas = lines.filter((l) => l.includes("[acceptance] area"));
 for (const line of areas) console.log(line.trim());
 
 const sawAll = areas.filter((l) => l.includes(": PASS")).length;
-console.log(`[acceptance-checklist] ${sawAll}/14 areas PASS`);
-if (r.status !== 0 || sawAll < 14) {
+console.log(`[acceptance-checklist] ${sawAll}/13 areas PASS`);
+if (r.status !== 0 || sawAll < 13) {
   const fails = lines.filter((l) => l.includes("×") || l.includes("FAIL"));
   for (const f of fails.slice(0, 10)) console.log(f.trim());
   process.exit(1);

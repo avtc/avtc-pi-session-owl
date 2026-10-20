@@ -33,16 +33,6 @@
           }
         }
       }
-    },
-    {
-      "includes": ["scripts/h5-host-untouched.cjs"],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            "noTemplateCurlyInString": "off"
-          }
-        }
-      }
     }
   ],
   "javascript": {
