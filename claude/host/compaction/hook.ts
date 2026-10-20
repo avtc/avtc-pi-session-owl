@@ -26,7 +26,6 @@ import { extractTouchedFiles } from "../../core/src/compaction/touched-files.js"
 import { ledgerToStageUsages } from "../../core/src/compaction/usage-map.js";
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
 import { isRenderableEntry } from "../../core/src/format/chunk.js";
-import { BUILDER } from "../../core/src/format/render.js";
 import { assertGraphStructure } from "../../core/src/graph/mutations.js";
 import { measureRootViewTokens } from "../../core/src/graph/read-tools.js";
 import { sinceLastCompaction, snapshotAtCompaction } from "../../core/src/status/usage-ledger.js";
@@ -379,7 +378,7 @@ async function precomputeTakeover(deps: CompactionHookDeps): Promise<TakeoverOut
     await deps.pinCore();
     const store = deps.getGraphStore();
     const backlog = observerCatchUpGap(deps, null).length > 0;
-    const withinThreshold = measureRootViewTokens(store.graph, BUILDER) < deps.settings.builderRootViewThreshold;
+    const withinThreshold = measureRootViewTokens(store.graph) < deps.settings.builderRootViewThreshold;
     if (backlog || !withinThreshold) {
       return { kind: "skip", result: buildSkip("session-owl precompute skipped: memory graph not render-ready") };
     }

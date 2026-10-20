@@ -3,8 +3,8 @@
 
 // renderSummary: the mechanical compaction-summary renderer. Preamble +
 // legend, the verbatim initial prompt, the active-set root one-liners (nGoal
-// first; nIrrelevant last in selected-root), and recently-touched files. Non-Builder
-// viewer (new→active, no 🆕); obsolete roots excluded; never truncated.
+// first; nIrrelevant last in selected-root), and recently-touched files.
+// Obsolete roots excluded; never truncated.
 
 import { describe, expect, it } from "vitest";
 import { renderSummary } from "../../src/compaction/summary.js";
@@ -229,7 +229,7 @@ describe("renderSummary — observations-root", () => {
     expect(activeSet.indexOf("nGoal")).toBeLessThan(activeSet.indexOf("n3 ·"));
   });
 
-  it("renders archived roots with 📦 and new nodes as active (no 🆕)", () => {
+  it("renders archived roots with 📦 and new nodes with 🆕", () => {
     const out = renderSummary({
       graph: graphWith([
         sNode("nGoal", { id: N_GOAL, summary: "g", importance: "crit" }),
@@ -244,7 +244,7 @@ describe("renderSummary — observations-root", () => {
     });
     const activeSet = out.split("## Active set")[1];
     expect(activeSet).toContain("📦"); // archived glyph
-    expect(activeSet).not.toContain("🆕"); // new renders as active (non-Builder)
+    expect(activeSet).toContain("🆕"); // a `new` root shows as not yet processed
   });
 });
 

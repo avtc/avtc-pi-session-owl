@@ -18,10 +18,8 @@ import {
   formatNodeLine,
   formatObservationLine,
   indent,
-  NON_BUILDER,
   type RenderableNode,
   type RenderableObservation,
-  type RenderViewer,
   singleLine,
 } from "../format/render.js";
 import {
@@ -55,7 +53,6 @@ import { IMPORTANCE_RANK, type Importance, type NodeId, type ObsId, type Session
 // --- named constants (no bare literals at call sites) ----------------------
 
 export const OWL_RECALL_TOOL = "owl_recall";
-const VIEWER: RenderViewer = NON_BUILDER;
 const CHILD_DEPTH = 1;
 /** Maximum word-wrapped screen rows a collapsed (non-expanded) transcript
  *  render shows; the expand-hint row rides below them. */
@@ -386,7 +383,7 @@ function renderNodePayload(
   excerpts: ReadonlyMap<string, string[]>,
   details: DetailsProvider,
 ): string {
-  const lines: string[] = [formatNodeLine(node, { viewer: VIEWER })];
+  const lines: string[] = [formatNodeLine(node, {})];
   const childNodes = node.childNodeIds
     .map((id) => target.nodes.get(id))
     .filter((n): n is RenderableNode => n !== undefined);
@@ -394,7 +391,7 @@ function renderNodePayload(
     .map((id) => target.observations.get(id))
     .filter((o): o is RecallObservation => o !== undefined);
   for (const child of childNodes) {
-    lines.push(indent(formatNodeLine(child, { viewer: VIEWER }), CHILD_DEPTH));
+    lines.push(indent(formatNodeLine(child, {}), CHILD_DEPTH));
   }
   for (const obs of childObs) {
     lines.push(indent(renderObservationBlock(obs, mode, NO_PARENT, excerpts.get(obs.id), details), CHILD_DEPTH));
@@ -425,10 +422,10 @@ function renderNodePayloadGrep(
   if (!summaryMatch.has(node.id) && keptChildNodes.length === 0 && keptChildObs.length === 0) {
     return null;
   }
-  const lines: string[] = [formatNodeLine(node, { viewer: VIEWER })];
+  const lines: string[] = [formatNodeLine(node, {})];
   for (const cid of keptChildNodes) {
     const child = target.nodes.get(cid);
-    if (child !== undefined) lines.push(indent(formatNodeLine(child, { viewer: VIEWER }), CHILD_DEPTH));
+    if (child !== undefined) lines.push(indent(formatNodeLine(child, {}), CHILD_DEPTH));
   }
   for (const oid of keptChildObs) {
     const o = target.observations.get(oid);
@@ -469,13 +466,13 @@ function renderObservationBlock(
  *  one line, never length-truncated — so the line stays byte-compatible with
  *  every other observation line. */
 function terseObservationLine(obs: RenderableObservation, showParent: string | undefined): string {
-  return formatObservationLine(obs, { viewer: VIEWER, showParent });
+  return formatObservationLine(obs, { showParent });
 }
 
 /** An observation header carrying no content: the shared format with content
  *  omitted (`id · importance · size · [in parent] · timestamp`). */
 function observationHeader(obs: RenderableObservation, showParent: string | undefined): string {
-  return formatObservationLine(obs, { viewer: VIEWER, showParent, formatContent: () => "" });
+  return formatObservationLine(obs, { showParent, formatContent: () => "" });
 }
 
 // --- search/list path ------------------------------------------------------
@@ -566,7 +563,6 @@ async function buildSearchCandidates(
         id: node.id,
         key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
         line: formatNodeLine(node, {
-          viewer: VIEWER,
           showParent: node.parentNode ?? undefined,
           obsSize: directObsSizeHint(node, target.observations),
         }),
@@ -608,7 +604,7 @@ function rootBrowseCandidates(target: RecallTarget, includeSuperseded: boolean):
   return ordered.map((node) => ({
     id: node.id,
     key: { importanceRank: importanceRankOf(node.importance), recency: node.timestamps.rangeEnd },
-    line: formatNodeLine(node, { viewer: VIEWER, obsSize: directObsSizeHint(node, target.observations) }),
+    line: formatNodeLine(node, { obsSize: directObsSizeHint(node, target.observations) }),
   }));
 }
 

@@ -47,7 +47,7 @@ At compaction, the active set is rendered into the compaction summary that is in
 ```
 # Memory
 Your session memory — the top level of a tree; each id opens deeper detail via owl_recall.
-Legend: 📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · 2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size)
+Legend: 📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 🆕new (not yet processed) 📦archived 🪦obsolete · 2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size)
 
 ## Memory use
 The root view is a navigation index into retained session memory: the lines name what exists; the detail, evidence, rationale, and results live in the tree behind them, across the whole session (see the totals). Recall before relying on session-derived understanding: search memory, or expand a visible related id — a complete-looking label still summarizes only the surface, and relevant context often sits deeper than the root. Use {"ids":["n23"]} to expand, {"query":"…"} to search, and add "fullDetails":true when exact messages, tool output, or rationale matter.
@@ -100,7 +100,7 @@ The graph is a containment tree of **nodes** (folders) holding **observations** 
 📁 n5 · med · Scratch · 2obs · 38lines 900tokens · Jul 28 14:30 — Jul 29 09:15
 ```
 
-(*📁* *n..* node · *📄* *o..* observation (obs); importance *crit*/*high*/*med*/*low* (how much it matters if lost); state glyphs *📦* archived · *🪦* obsolete · *🆕* new, Builder view only; 2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size).)
+(*📁* *n..* node · *📄* *o..* observation (obs); importance *crit*/*high*/*med*/*low* (how much it matters if lost); state glyphs *🆕* new (not yet processed) · *📦* archived · *🪦* obsolete; 2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size).)
 
 **How the agent operates it.** The Builder and Selector navigate and edit the graph with filesystem-style tools — `ls`, `cat`, `find` to read; `mkdir`, `mv`, `merge`, `supersede` (Builder-only), `set_meta` to reorganize; `try_finish` to converge the root view on its budget. The Builder maintains the source graph; the Selector builds a curated copy (the active set) for the summary. The agent itself uses the read-only `owl_recall` to fetch and search on demand.
 

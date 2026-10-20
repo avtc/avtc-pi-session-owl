@@ -17,7 +17,6 @@
 // The pause line (setConflict) swaps the stage line while paused; endStage
 // hides the line (the status capsule takes undefined; the store clears).
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
-import { BUILDER } from "../../core/src/format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../../core/src/graph/read-tools.js";
 import {
   deltaTextOf,
@@ -108,7 +107,7 @@ interface PauseState {
  *  count and the rendered view share one roots computation). */
 function rootViewCounts(graph: SessionOwlGraph): { count: number; viewTokens: number } {
   const roots = nonObsoleteRoots(graph);
-  const viewTokens = estimateContentTokens(renderRootViewFromRoots(roots, BUILDER, graph.observations));
+  const viewTokens = estimateContentTokens(renderRootViewFromRoots(roots, graph.observations));
   return { count: roots.length, viewTokens };
 }
 

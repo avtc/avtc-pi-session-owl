@@ -8,7 +8,7 @@
 // wording — approval-owed there); this module serves it FIRST when the
 // pause is active (pi's paused-first ordering), else gathers StatusInput
 // from the port state and notifies through the commands' notify adapter.
-import { BUILDER, NON_BUILDER, treeLevels } from "../../core/src/format/render.js";
+import { treeLevels } from "../../core/src/format/render.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../../core/src/format/tokens.js";
 import { nonObsoleteRootsOf, renderRootViewFromRoots } from "../../core/src/graph/read-tools.js";
 import { sinceLastCompaction, sinceSessionStart } from "../../core/src/status/usage-ledger.js";
@@ -149,9 +149,7 @@ export function gatherStatusInput(deps: StatusGatherDeps): StatusInput {
   const nodes = [...deps.graph.nodes.values()];
   const observations = [...deps.graph.observations.values()];
   const nonObsoleteRoots = nonObsoleteRootsOf(nodes);
-  const rootsViewTokens = estimateContentTokens(
-    renderRootViewFromRoots(nonObsoleteRoots, BUILDER, deps.graph.observations),
-  );
+  const rootsViewTokens = estimateContentTokens(renderRootViewFromRoots(nonObsoleteRoots, deps.graph.observations));
   return {
     enabled: deps.enabled,
     settings: {
@@ -185,7 +183,7 @@ function measureSelectedView(
   if (decoded.length === 0) return null;
   return {
     rootsCount: decoded.length,
-    viewTokens: estimateContentTokens(renderRootViewFromRoots(decoded, NON_BUILDER, observations)),
+    viewTokens: estimateContentTokens(renderRootViewFromRoots(decoded, observations)),
   };
 }
 

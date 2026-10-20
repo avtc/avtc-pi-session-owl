@@ -341,7 +341,6 @@ describe("gatherStatusInput", () => {
           node({ id: "n1", summary: "active root", summaryTokens: 40 }),
           node({ id: "n2", summary: "obsolete root", summaryTokens: 40 }),
         ],
-        "nonBuilder",
         EMPTY_SIZE_HINTS,
       ),
     );

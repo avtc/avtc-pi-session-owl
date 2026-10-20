@@ -14,21 +14,13 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getSessionOwlSettings } from "../config/schema.js";
-import {
-  directObsSizeHint,
-  formatNodeLine,
-  formatObservationLine,
-  indent,
-  NON_BUILDER,
-  type RenderViewer,
-} from "../format/render.js";
+import { directObsSizeHint, formatNodeLine, formatObservationLine, indent } from "../format/render.js";
 import { extractionSettled } from "../goal-extract/run.js";
 import {
   buildCatUnits,
   collectFindMatches,
   directChildren,
   type IncludeSuperseded,
-  nodeLineOptions,
   nonObsoleteRoots,
   orderActiveSetRoots,
   renderCatUnit,
@@ -49,7 +41,6 @@ import { runReuseRebuild } from "./reuse-rebuild.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
-const VIEWER: RenderViewer = NON_BUILDER;
 const CHILD_DEPTH = 1;
 const EXCLUDE_SUPERSEDED: IncludeSuperseded = false;
 const INCLUDE_SUPERSEDED: IncludeSuperseded = true;
@@ -119,9 +110,7 @@ export async function runOwlLs(args: string, ctx: ExtensionCommandContext): Prom
   if (idArg === null) {
     // roots: non-obsolete only (obsolete hidden by default — use /owl:find-all).
     for (const node of orderActiveSetRoots(nonObsoleteRoots(graph))) {
-      lines.push(
-        formatNodeLine(node, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(node, graph.observations) }),
-      );
+      lines.push(formatNodeLine(node, { obsSize: directObsSizeHint(node, graph.observations) }));
     }
     const { text } = formatList(lines, resolveCap());
     await notifyInfo(ctx, text === "" ? "No memory yet." : text);
@@ -134,20 +123,13 @@ export async function runOwlLs(args: string, ctx: ExtensionCommandContext): Prom
     return;
   }
   // parent header at depth 0; children indented at depth 1.
-  lines.push(
-    formatNodeLine(parent, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(parent, graph.observations) }),
-  );
+  lines.push(formatNodeLine(parent, { obsSize: directObsSizeHint(parent, graph.observations) }));
   const { nodes, observations } = directChildren(graph, parent);
   for (const node of nodes) {
-    lines.push(
-      indent(
-        formatNodeLine(node, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(node, graph.observations) }),
-        CHILD_DEPTH,
-      ),
-    );
+    lines.push(indent(formatNodeLine(node, { obsSize: directObsSizeHint(node, graph.observations) }), CHILD_DEPTH));
   }
   for (const obs of observations) {
-    lines.push(indent(formatObservationLine(obs, { viewer: VIEWER }), CHILD_DEPTH));
+    lines.push(indent(formatObservationLine(obs, {}), CHILD_DEPTH));
   }
   const { text } = formatList(lines, resolveCap());
   await notifyInfo(ctx, text);
@@ -175,7 +157,7 @@ export async function runOwlCat(args: string, ctx: ExtensionCommandContext): Pro
     await notifyError(ctx, `No node or observation with id '${idArg}'.`);
     return;
   }
-  const units = buildCatUnits(graph, [idArg], VIEWER);
+  const units = buildCatUnits(graph, [idArg]);
   const lines = units.map(renderCatUnit);
   const { text } = formatList(lines, resolveCap());
   await notifyInfo(ctx, text);
@@ -203,7 +185,7 @@ async function runFind(
     return;
   }
   const graph = getGraphStore().graph;
-  const collected = await collectFindMatches(graph, [compiled.regex], includeSuperseded, VIEWER);
+  const collected = await collectFindMatches(graph, [compiled.regex], includeSuperseded);
   if ("error" in collected) {
     await notifyError(ctx, collected.error);
     return;

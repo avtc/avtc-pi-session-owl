@@ -19,7 +19,7 @@ import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SessionOwlConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
-import { NON_BUILDER, renderTreeTotal } from "../format/render.js";
+import { renderTreeTotal } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
 import { measureRootViewTokens, nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { toStoreContext } from "../lifecycle.js";
@@ -316,7 +316,7 @@ function passMessages(
   const nodePart = rootViewTargetNodes === null ? `${roots} nodes` : `${roots}/${rootViewTargetNodes} nodes`;
   const text =
     `Shape the active-set for the current task (pass ${pass}). Promote what matters, demote what doesn't into nIrrelevant, consolidate and condense to fit the budget. ` +
-    `Root view: ${nodePart}, ${formatTokens(measureRootViewTokens(working.graph, NON_BUILDER))}/${formatTokens(rootViewThreshold)} tokens.\n\n` +
+    `Root view: ${nodePart}, ${formatTokens(measureRootViewTokens(working.graph))}/${formatTokens(rootViewThreshold)} tokens.\n\n` +
     `Working tree\n\n${workingTree}\n${treeTotal}\n\n${contextView}`;
   return [{ role: "user", content: text } as AgentMessage];
 }
@@ -392,7 +392,7 @@ function makeSelectedCountsProvider(workingGraph: Graph): SelectedCountsProvider
     const roots = nonObsoleteRoots(workingGraph);
     return {
       count: roots.length,
-      viewTokens: estimateContentTokens(renderRootViewFromRoots(roots, NON_BUILDER, workingGraph.observations)),
+      viewTokens: estimateContentTokens(renderRootViewFromRoots(roots, workingGraph.observations)),
     };
   };
 }

@@ -3,12 +3,9 @@
 
 // Shared graph read tools (ls/cat/find) + the `try_finish` convergence gate +
 // the root-view render/measure helpers. These operate on any SessionOwlGraph
-// (the Builder's source graph OR the Selector's working copy) and are
-// parameterized by a `viewer` so the shared one-line render honors the
-// viewer-dependent `new`-state glyph rule (Builder sees 🆕; every other consumer
-// renders `new` as `active`). The Builder (source graph, viewer "builder") and
-// the Selector (working copy, viewer "nonBuilder") both build their toolsets
-// from these factories — no duplication.
+// (the Builder's source graph OR the Selector's working copy) — the Builder
+// (source graph) and the Selector (working copy) both build their toolsets
+// from these factories, no duplication.
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "../../../node_modules/typebox/build/index.mjs";
@@ -19,9 +16,7 @@ import {
   formatNodeLine,
   formatObservationLine,
   indent,
-  NON_BUILDER,
   type RenderableNode,
-  type RenderViewer,
   type SizeHintObservation,
 } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
@@ -341,16 +336,6 @@ function renderTerseWindow(
   return { text: renderLines(lines), count: window.length, more: paginateMore };
 }
 
-/** The node-line render options for a given viewer (Builder sees the `new`
- *  glyph; every other consumer renders `new` as `active`). */
-export function nodeLineOptions(viewer: RenderViewer): {
-  viewer: RenderViewer;
-} {
-  return {
-    viewer,
-  };
-}
-
 // --- ls --------------------------------------------------------------------
 
 const LS_PARAMS = Type.Object({
@@ -360,9 +345,8 @@ const LS_PARAMS = Type.Object({
   page: Type.Optional(PageSchema),
 });
 
-/** Build the `ls` tool bound to `graph`, rendered for `viewer` (the `new`-state
- *  glyph is Builder-only; non-Builder viewers render `new` as `active`). */
-function makeLsTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<typeof LS_PARAMS> {
+/** Build the `ls` tool bound to `graph`. */
+function makeLsTool(graph: SessionOwlGraph): AgentTool<typeof LS_PARAMS> {
   return {
     name: LS_TOOL,
     description:
@@ -383,7 +367,6 @@ function makeLsTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<typ
         const rendered = window.map((node) => ({
           id: node.id,
           render: formatNodeLine(node, {
-            ...nodeLineOptions(viewer),
             obsSize: directObsSizeHint(node, graph.observations),
           }),
         }));
@@ -397,7 +380,7 @@ function makeLsTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<typ
       }
       // header is the parent itself at depth 0; children indented at depth 1.
       const headerLine = indent(
-        formatNodeLine(parent, { ...nodeLineOptions(viewer), obsSize: directObsSizeHint(parent, graph.observations) }),
+        formatNodeLine(parent, { obsSize: directObsSizeHint(parent, graph.observations) }),
         ROOT_DEPTH,
       );
       const { nodes, observations } = directChildren(graph, parent);
@@ -405,9 +388,9 @@ function makeLsTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<typ
         ...nodes.map((n) => ({
           id: n.id,
           depth: 1,
-          render: formatNodeLine(n, { ...nodeLineOptions(viewer), obsSize: directObsSizeHint(n, graph.observations) }),
+          render: formatNodeLine(n, { obsSize: directObsSizeHint(n, graph.observations) }),
         })),
-        ...observations.map((o) => ({ id: o.id, depth: 1, render: formatObservationLine(o, { viewer }) })),
+        ...observations.map((o) => ({ id: o.id, depth: 1, render: formatObservationLine(o, {}) })),
       ];
       const { window, more, remaining, stale } = paginate(combined, page);
       if (stale) {
@@ -439,9 +422,8 @@ const CAT_PARAMS = Type.Object({
 });
 
 /** Build the `cat` tool: read full text — observations verbatim, or a node's
- *  header plus its direct observations verbatim (child nodes NOT expanded).
- *  `viewer` controls the node-header glyph rendering (Builder-only `new`). */
-function makeCatTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<typeof CAT_PARAMS> {
+ *  header plus its direct observations verbatim (child nodes NOT expanded). */
+function makeCatTool(graph: SessionOwlGraph): AgentTool<typeof CAT_PARAMS> {
   return {
     name: CAT_TOOL,
     description:
@@ -487,14 +469,14 @@ function makeCatTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<ty
       let items: RenderItem[];
       let grepNote: string | undefined;
       if (modeRes.kind === "grep") {
-        const pruned = await buildCatGrepItemsWithMatches(graph, params.ids, viewer, modeRes);
+        const pruned = await buildCatGrepItemsWithMatches(graph, params.ids, modeRes);
         if ("error" in pruned) {
           return { content: [{ type: "text", text: pruned.error }], details: { error: true } };
         }
         items = pruned.items;
         grepNote = pruned.note;
       } else {
-        const units = buildCatUnits(graph, params.ids, viewer);
+        const units = buildCatUnits(graph, params.ids);
         items = units.map(catUnitToItem);
       }
 
@@ -533,7 +515,7 @@ function makeCatTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<ty
  *  Delegates to the shared formatObservationLine with content omitted, so the
  *  header stays byte-identical to every other observation line prefix. */
 function catObsHeader(obs: Observation): string {
-  return formatObservationLine(obs, { viewer: NON_BUILDER, formatContent: () => "" });
+  return formatObservationLine(obs, { formatContent: () => "" });
 }
 
 /** A paginated cat unit: one observation full-text (header + content), with an
@@ -597,12 +579,12 @@ function singleObsTargetCount(graph: SessionOwlGraph, ids: string[]): number {
 /** Build the cat units for a list of requested ids: each node expands to its
  *  direct observations (the node header rides the first as a preamble); each
  *  observation is one unit; unknown ids are a not-found unit. */
-export function buildCatUnits(graph: SessionOwlGraph, ids: string[], viewer: RenderViewer): CatUnit[] {
+export function buildCatUnits(graph: SessionOwlGraph, ids: string[]): CatUnit[] {
   const units: CatUnit[] = [];
   for (const id of ids) {
     const node = graph.nodes.get(id as NodeId);
     if (node !== undefined) {
-      const nodeHeader = formatNodeLine(node, nodeLineOptions(viewer));
+      const nodeHeader = formatNodeLine(node, {});
       const obs = node.observationIds
         .map((oid) => graph.observations.get(oid))
         .filter((o): o is Observation => o !== undefined)
@@ -649,7 +631,6 @@ function catUnitToItem(unit: CatUnit): RenderItem {
 function buildCatGrepItems(
   graph: SessionOwlGraph,
   ids: readonly string[],
-  viewer: RenderViewer,
   summaryMatch: ReadonlySet<string>,
   obsMatch: ReadonlySet<string>,
 ): RenderItem[] {
@@ -657,7 +638,7 @@ function buildCatGrepItems(
   for (const id of ids) {
     const node = graph.nodes.get(id as NodeId);
     if (node !== undefined) {
-      const nodeHeader = formatNodeLine(node, nodeLineOptions(viewer));
+      const nodeHeader = formatNodeLine(node, {});
       const matchingObs = node.observationIds
         .map((oid) => graph.observations.get(oid))
         .filter((o): o is Observation => o !== undefined && obsMatch.has(o.id))
@@ -691,7 +672,6 @@ function buildCatGrepItems(
 async function buildCatGrepItemsWithMatches(
   graph: SessionOwlGraph,
   ids: readonly string[],
-  viewer: RenderViewer,
   grep: Extract<ContentMode, { kind: "grep" }>,
 ): Promise<{ items: RenderItem[]; note?: string } | { error: string }> {
   // gather summary nodes (requested nodes + their direct child nodes) + all
@@ -738,7 +718,7 @@ async function buildCatGrepItemsWithMatches(
   for (let i = 0; i < obsList.length; i += 1) {
     if (result.passes[summaryNodes.length + i]) obsMatch.add(obsList[i].id);
   }
-  const items = buildCatGrepItems(graph, ids, viewer, summaryMatch, obsMatch);
+  const items = buildCatGrepItems(graph, ids, summaryMatch, obsMatch);
   return { items, note: result.note };
 }
 
@@ -806,7 +786,6 @@ export async function collectFindMatches(
   graph: SessionOwlGraph,
   regexes: readonly RegExp[],
   includeSuperseded: IncludeSuperseded,
-  viewer: RenderViewer,
 ): Promise<{ matches: FindMatch[]; note?: string } | { error: string }> {
   // gather candidates first (preserving node-then-obs grouping), then batch-test
   // every text against EVERY regex (intersection: an item passes only if it
@@ -846,7 +825,6 @@ export async function collectFindMatches(
         id: node.id,
         node,
         render: formatNodeLine(node, {
-          ...nodeLineOptions(viewer),
           showParent: node.parentNode ?? undefined,
           obsSize: directObsSizeHint(node, graph.observations),
         }),
@@ -859,7 +837,7 @@ export async function collectFindMatches(
       obsMatches.push({
         id: obs.id,
         obs,
-        render: formatObservationLine(obs, { viewer, showParent: parent }),
+        render: formatObservationLine(obs, { showParent: parent }),
       });
     }
   }
@@ -878,10 +856,9 @@ interface ObsMatch extends FindMatch {
   obs: Observation;
 }
 
-/** Build the `find` tool: whole-graph regex search over node summaries +
- *  observation content, flat results each carrying `in <parent>`. `viewer`
- *  controls the match glyph rendering (Builder-only `new`). */
-function makeFindTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<typeof FIND_PARAMS> {
+/** Build the `find` tool: whole-graph regex search over node summaries and
+ *  observation content, flat results each carrying `in <parent>`. */
+function makeFindTool(graph: SessionOwlGraph): AgentTool<typeof FIND_PARAMS> {
   return {
     name: FIND_TOOL,
     description: "Search the whole memory graph by regex through node summaries and observation content.",
@@ -918,7 +895,7 @@ function makeFindTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<t
       if (modeRes.kind === "grep") {
         filterRegexes.push(modeRes.pattern);
       }
-      const collected = await collectFindMatches(graph, filterRegexes, includeSuperseded, viewer);
+      const collected = await collectFindMatches(graph, filterRegexes, includeSuperseded);
       if ("error" in collected) {
         return { content: [{ type: "text", text: collected.error }], details: { error: true } };
       }
@@ -967,30 +944,25 @@ function makeFindTool(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool<t
 
 // --- root view render + measure (shared by try_finish + fast-path) ---------
 
-/** Render the non-obsolete root view (the same lines `ls` shows at the root) for
- *  `viewer`. Shared by try_finish (budget gate), the run's fast-path, and the
- *  per-pass user-message state snapshot. */
-export function renderRootView(graph: SessionOwlGraph, viewer: RenderViewer): string {
-  return renderRootViewFromRoots(nonObsoleteRoots(graph), viewer, graph.observations);
+/** Render the non-obsolete root view (the same lines `ls` shows at the root).
+ *  Shared by try_finish (budget gate), the run's fast-path, and the per-pass
+ *  user-message state snapshot. */
+export function renderRootView(graph: SessionOwlGraph): string {
+  return renderRootViewFromRoots(nonObsoleteRoots(graph), graph.observations);
 }
 
-/** Render an already-collected set of non-obsolete roots for `viewer`. Lets a
- *  caller that already needs the roots list (e.g. the widget, which reads both
- *  the count and the view tokens) avoid recomputing `nonObsoleteRoots`. */
-export function renderRootViewFromRoots(
-  roots: Node[],
-  viewer: RenderViewer,
-  observations: ReadonlyMap<string, SizeHintObservation>,
-): string {
+/** Render an already-collected set of non-obsolete roots. Lets a caller that
+ *  already needs the roots list (e.g. the widget, which reads both the count
+ *  and the view tokens) avoid recomputing `nonObsoleteRoots`. */
+export function renderRootViewFromRoots(roots: Node[], observations: ReadonlyMap<string, SizeHintObservation>): string {
   if (roots.length === 0) return "";
-  return roots.map((n) => formatNodeLine(n, { viewer, obsSize: directObsSizeHint(n, observations) })).join("\n");
+  return roots.map((n) => formatNodeLine(n, { obsSize: directObsSizeHint(n, observations) })).join("\n");
 }
 
-/** Token-estimate of the non-obsolete root view (chars/4), rendered for
- *  `viewer`. Shared by the fast-path (skip-when-under) and try_finish
- *  (within-budget gate). */
-export function measureRootViewTokens(graph: SessionOwlGraph, viewer: RenderViewer): number {
-  return estimateContentTokens(renderRootView(graph, viewer));
+/** Token-estimate of the non-obsolete root view (chars/4). Shared by the
+ *  fast-path (skip-when-under) and try_finish (within-budget gate). */
+export function measureRootViewTokens(graph: SessionOwlGraph): number {
+  return estimateContentTokens(renderRootView(graph));
 }
 
 // --- try_finish (convergence gate) -----------------------------------------
@@ -1006,14 +978,13 @@ export interface TryFinishThreshold {
 const TRY_FINISH_PARAMS = Type.Object({}, { description: "No parameters." });
 
 /** Build the `try_finish` convergence gate: measures the non-obsolete root view
- *  (rendered for `viewer`) against `threshold.rootViewThreshold`. Within budget
+ *  `threshold.rootViewThreshold`. Within budget
  *  → success + terminate:true (stops the pass/run). Over budget → reject +
  *  terminate:false (keep organizing, call again). Deterministic/mechanical —
  *  no LLM. */
 export function makeTryFinishTool(
   graph: SessionOwlGraph,
   threshold: TryFinishThreshold,
-  viewer: RenderViewer,
 ): AgentTool<typeof TRY_FINISH_PARAMS> {
   return {
     name: TRY_FINISH_TOOL,
@@ -1022,7 +993,7 @@ export function makeTryFinishTool(
     label: "Finish",
     parameters: TRY_FINISH_PARAMS,
     async execute(): Promise<AgentToolResult<unknown>> {
-      const rootsViewTokens = measureRootViewTokens(graph, viewer);
+      const rootsViewTokens = measureRootViewTokens(graph);
       const thresholdTokens = threshold.rootViewThreshold;
       if (rootsViewTokens <= thresholdTokens) {
         return {
@@ -1050,7 +1021,7 @@ export function makeTryFinishTool(
   };
 }
 
-/** Read-only graph tools (ls/cat/find) bound to `graph` for `viewer`. */
-export function makeReadTools(graph: SessionOwlGraph, viewer: RenderViewer): AgentTool[] {
-  return [makeLsTool(graph, viewer), makeCatTool(graph, viewer), makeFindTool(graph, viewer)];
+/** Read-only graph tools (ls/cat/find) bound to `graph`. */
+export function makeReadTools(graph: SessionOwlGraph): AgentTool[] {
+  return [makeLsTool(graph), makeCatTool(graph), makeFindTool(graph)];
 }

@@ -9,7 +9,6 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, test } from "vitest";
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
 import { clearDetailsCache } from "../../core/src/format/details.js";
-import { NON_BUILDER } from "../../core/src/format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../../core/src/graph/read-tools.js";
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { estimateContentTokens, makeNode, nowStoredTimestamp } from "../../core/src/types.js";
@@ -416,7 +415,7 @@ describe("runSelector — the convergence loop", () => {
       createdAt: nowStoredTimestamp(),
     });
     const expected = estimateContentTokens(
-      renderRootViewFromRoots([...nonObsoleteRoots(source), binNode], NON_BUILDER, source.observations),
+      renderRootViewFromRoots([...nonObsoleteRoots(source), binNode], source.observations),
     );
     let pulled: { count: number; viewTokens: number } | null = null;
     const widget = {

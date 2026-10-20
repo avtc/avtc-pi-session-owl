@@ -13,7 +13,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { getSessionOwlSettings } from "../config/schema.js";
 import { isConflictPaused } from "../conflicts/pause.js";
-import { BUILDER } from "../format/render.js";
 import { nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { RECORD_OBS_TOOL } from "../observer/run.js";
 import type { StageUsage } from "../runtime/agent-loop.js";
@@ -346,16 +345,12 @@ export function createTracker(): ProgressTracker {
 
 // --- snapshot (tracker + live store/ctx → pure data for the render) --------
 
-/** The viewer the widget's roots section reflects: the Builder's budget view
- *  (the builderRootViewThreshold gate uses the same render). */
-const WIDGET_ROOTS_VIEWER = BUILDER;
-
 /** Non-obsolete root count + view tokens from a SINGLE `nonObsoleteRoots` pass
  *  (the widget renders per streaming event, so the count + the rendered view must
  *  share one roots computation, not two). */
 function rootViewCounts(graph: SessionOwlGraph): { count: number; viewTokens: number } {
   const roots = nonObsoleteRoots(graph);
-  const viewTokens = estimateContentTokens(renderRootViewFromRoots(roots, WIDGET_ROOTS_VIEWER, graph.observations));
+  const viewTokens = estimateContentTokens(renderRootViewFromRoots(roots, graph.observations));
   return { count: roots.length, viewTokens };
 }
 

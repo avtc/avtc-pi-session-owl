@@ -3,11 +3,11 @@
 
 // Tests for the Selector toolset (src/selector/tools.ts):
 //   - working-copy graph tools (ls/cat/find/mkdir/mv/merge) — operate on the
-//     deep-copied working graph with viewer "nonBuilder" (new→active); mutations
+//     deep-copied working graph; mutations
 //     apply with MUTATE_WORKING_COPY (nGoal/oInitialPrompt freely rearrangeable,
 //     no source-graph protections); nothing reaches the source GraphStore.
 //   - set_meta (Selector variant: importance + summary, no lifecycle).
-//   - try_finish (nonBuilder viewer, selectorRootViewThreshold).
+//   - try_finish (selectorRootViewThreshold).
 //   - fs_* read tools (alias pi built-ins).
 //   - todo_list (conditional on the todo bridge).
 //   - makeSelectorTools assembly (supersede excluded; set_meta is the Selector variant).
@@ -201,11 +201,11 @@ describe("Selector working-copy graph tools (mkdir/mv/merge)", () => {
     expect(working.graph.nodes.get("n7")?.parentNode).toBeNull();
   });
 
-  it("ls/find render new nodes WITHOUT the 🆕 glyph (nonBuilder viewer)", async () => {
+  it("ls/find render new nodes WITH the 🆕 glyph", async () => {
     const tools = makeSelectorGraphTools(working, SETTINGS);
     const lsOut = textOf(await callTool(tools, "ls", {}));
     expect(lsOut).toContain("n12"); // the new node is listed
-    expect(lsOut).not.toContain("🆕");
+    expect(lsOut).toContain("🆕");
   });
 });
 

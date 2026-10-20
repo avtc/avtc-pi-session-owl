@@ -15,7 +15,6 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { getSessionOwlSettings, type SessionOwlConfig } from "./config/schema.js";
 import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./format/chunk.js";
-import { BUILDER } from "./format/render.js";
 import { measureRootViewTokens } from "./graph/read-tools.js";
 import { log } from "./log.js";
 import { acquireOrSkip, armRearmOnRelease, inFlight, type StageName } from "./runtime/run-lock.js";
@@ -234,7 +233,7 @@ function countNewNodes(): number {
  *  would under-count: it omits every line's framing, so the trigger and the
  *  gate could disagree on whether the root view is over budget.) */
 function computeRootViewTokens(): number {
-  return measureRootViewTokens(getGraphStore().graph, BUILDER);
+  return measureRootViewTokens(getGraphStore().graph);
 }
 
 /** Build the Observer's mid-run Builder trigger. After each chunk's persist the

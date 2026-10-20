@@ -16,20 +16,12 @@
 // never sees a raw stack; the command surface degrades, the session lives).
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
-import {
-  directObsSizeHint,
-  formatNodeLine,
-  formatObservationLine,
-  indent,
-  NON_BUILDER,
-  type RenderViewer,
-} from "../../core/src/format/render.js";
+import { directObsSizeHint, formatNodeLine, formatObservationLine, indent } from "../../core/src/format/render.js";
 import type { IncludeSuperseded } from "../../core/src/graph/read-tools.js";
 import {
   buildCatUnits,
   collectFindMatches,
   directChildren,
-  nodeLineOptions,
   nonObsoleteRoots,
   orderActiveSetRoots,
   renderCatUnit,
@@ -117,7 +109,6 @@ export interface OwlCommandDeps {
 
 // --- named constants (pi's, kebab-swapped where the name appears) -------------
 
-const VIEWER: RenderViewer = NON_BUILDER;
 const CHILD_DEPTH = 1;
 const EXCLUDE_SUPERSEDED: IncludeSuperseded = false;
 const INCLUDE_SUPERSEDED: IncludeSuperseded = true;
@@ -194,9 +185,7 @@ export async function runOwlLs(args: string, deps: OwlCommandDeps): Promise<void
   if (idArg === null) {
     // roots: non-obsolete only (obsolete hidden by default — use /owl-find-all).
     for (const node of orderActiveSetRoots(nonObsoleteRoots(graph))) {
-      lines.push(
-        formatNodeLine(node, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(node, graph.observations) }),
-      );
+      lines.push(formatNodeLine(node, { obsSize: directObsSizeHint(node, graph.observations) }));
     }
     const { text } = formatList(lines, deps.getSettings().commandResultCap);
     if (text === "") {
@@ -213,20 +202,13 @@ export async function runOwlLs(args: string, deps: OwlCommandDeps): Promise<void
     return;
   }
   // parent header at depth 0; children indented at depth 1.
-  lines.push(
-    formatNodeLine(parent, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(parent, graph.observations) }),
-  );
+  lines.push(formatNodeLine(parent, { obsSize: directObsSizeHint(parent, graph.observations) }));
   const { nodes, observations } = directChildren(graph, parent);
   for (const node of nodes) {
-    lines.push(
-      indent(
-        formatNodeLine(node, { ...nodeLineOptions(VIEWER), obsSize: directObsSizeHint(node, graph.observations) }),
-        CHILD_DEPTH,
-      ),
-    );
+    lines.push(indent(formatNodeLine(node, { obsSize: directObsSizeHint(node, graph.observations) }), CHILD_DEPTH));
   }
   for (const obs of observations) {
-    lines.push(indent(formatObservationLine(obs, { viewer: VIEWER }), CHILD_DEPTH));
+    lines.push(indent(formatObservationLine(obs, {}), CHILD_DEPTH));
   }
   const { text } = formatList(lines, deps.getSettings().commandResultCap);
   routeOutput(deps, `owl-ls — ${idArg}`, text);
@@ -255,7 +237,7 @@ export async function runOwlCat(args: string, deps: OwlCommandDeps): Promise<voi
     deps.notify(`No node or observation with id '${idArg}'.`, "error");
     return;
   }
-  const units = buildCatUnits(graph, [idArg], VIEWER);
+  const units = buildCatUnits(graph, [idArg]);
   const lines = units.map(renderCatUnit);
   const { text } = formatList(lines, deps.getSettings().commandResultCap);
   routeOutput(deps, `owl-cat — ${idArg}`, text);
@@ -485,7 +467,7 @@ async function runFind(args: string, deps: OwlCommandDeps, includeSuperseded: In
   await deps.checkThenServe(deps.key);
   await deps.pinCore();
   const graph = deps.getGraphStore().graph;
-  const collected = await collectFindMatches(graph, [compiled.regex], includeSuperseded, VIEWER);
+  const collected = await collectFindMatches(graph, [compiled.regex], includeSuperseded);
   if ("error" in collected) {
     deps.notify(collected.error, "error");
     return;

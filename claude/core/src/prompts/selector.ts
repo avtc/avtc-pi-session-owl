@@ -21,7 +21,7 @@ what memory holds and what opening an id adds.`;
 }
 
 const SELECTOR_LEGEND = `Legend — the working tree uses these marks:
-📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived
+📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 🆕new (not yet processed) 📦archived
 (no mark = active)
 ${COUNTS_SIZE_LEGEND}
 ${IMPORTANCE_GLOSS} Set it when you make a node (\`mkdir\`/\`merge\`) or re-rate it (\`set_meta\`).

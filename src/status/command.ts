@@ -8,7 +8,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getSessionOwlSettings, type SessionOwlConfig } from "../config/schema.js";
 import { getConflictHits, isConflictPaused } from "../conflicts/pause.js";
-import { BUILDER, NON_BUILDER, type SizeHintObservation, treeLevels } from "../format/render.js";
+import { type SizeHintObservation, treeLevels } from "../format/render.js";
 import { formatCost, formatCount, formatDuration, formatTokens } from "../format/tokens.js";
 import { nonObsoleteRootsOf, renderRootViewFromRoots } from "../graph/read-tools.js";
 import { notify } from "../notify.js";
@@ -200,7 +200,7 @@ export function gatherStatusInput(
   const nodes = [...graph.nodes.values()];
   const observations = [...graph.observations.values()];
   const nonObsoleteRoots = nonObsoleteRootsOf(nodes);
-  const rootsViewTokens = estimateContentTokens(renderRootViewFromRoots(nonObsoleteRoots, BUILDER, graph.observations));
+  const rootsViewTokens = estimateContentTokens(renderRootViewFromRoots(nonObsoleteRoots, graph.observations));
   const selectedView = measureSelectedView(config.renderMode, store.selectedTree?.nodes ?? null, graph.observations);
   return {
     enabled: config.enabled,
@@ -236,7 +236,7 @@ function measureSelectedView(
   if (decoded.length === 0) return null;
   return {
     rootsCount: decoded.length,
-    viewTokens: estimateContentTokens(renderRootViewFromRoots(decoded, NON_BUILDER, observations)),
+    viewTokens: estimateContentTokens(renderRootViewFromRoots(decoded, observations)),
   };
 }
 

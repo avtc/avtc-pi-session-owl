@@ -9,11 +9,10 @@
 //     (SELECTOR_FILE_TOOLS — no port code needed);
 //   - the conditional todo_list tool rides the todo bridge (its port).
 // The graph tools below are pi's composition verbatim: the shared factories
-// bound to the deep-copied WORKING COPY — reads render with the nonBuilder
-// viewer, mutates apply with the `workingCopy` policy and append nothing.
+// bound to the deep-copied WORKING COPY — mutates apply with the
+// `workingCopy` policy and append nothing.
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
-import { NON_BUILDER } from "../../core/src/format/render.js";
 import {
   MERGE_TOOL,
   MKDIR_TOOL,
@@ -56,18 +55,17 @@ export function workingCopyMutateContext(): MutateContext {
 }
 
 /** Build the Selector graph tools (ls/cat/find/mkdir/mv/merge/set_meta/
- *  try_finish) bound to the working copy. The read tools render with the
- *  "nonBuilder" viewer (new→active); the mutate tools apply with the
+ *  try_finish) bound to the working copy. The mutate tools apply with the
  *  `workingCopy` policy and append nothing to the store. */
 export function makeSelectorGraphTools(working: SelectorWorkingCopy, settings: SessionOwlConfig): AgentTool[] {
   const ctx = workingCopyMutateContext();
   return [
-    ...makeReadTools(working.graph, NON_BUILDER),
+    ...makeReadTools(working.graph),
     makeMkdirTool(working.graph, ctx),
     makeMvTool(working.graph, ctx),
     makeMergeTool(working.graph, ctx),
     makeSelectorSetMetaTool(working.graph, ctx),
-    makeTryFinishTool(working.graph, { rootViewThreshold: settings.selectorRootViewThreshold }, NON_BUILDER),
+    makeTryFinishTool(working.graph, { rootViewThreshold: settings.selectorRootViewThreshold }),
   ];
 }
 

@@ -521,22 +521,13 @@ describe("Builder read tools", () => {
   });
 });
 
-describe("read-tool viewer parameterization (Builder vs nonBuilder)", () => {
-  // n12 is a `new` root in buildGraph(). The 🆕 glyph is Builder-only; every
-  // other consumer (Selector, owl_recall, commands, compaction summary) renders
-  // `new` as `active` (no glyph) per the viewer-dependent render rule.
-  it("builder viewer renders a new node with the 🆕 glyph", async () => {
-    const builderTools = makeReadTools(buildGraph(), "builder");
-    const out = textOf(await callTool(builderTools, "ls", {}));
+describe("read-tool render (the shared one-line format)", () => {
+  // n12 is a `new` root in buildGraph() — every surface renders it with the 🆕 glyph.
+  it("ls renders a new node with the 🆕 glyph", async () => {
+    const tools = makeReadTools(buildGraph());
+    const out = textOf(await callTool(tools, "ls", {}));
     expect(out).toContain("n12");
     expect(out).toContain("🆕");
-  });
-
-  it("nonBuilder viewer renders a new node as active (no 🆕 glyph)", async () => {
-    const nonBuilderTools = makeReadTools(buildGraph(), "nonBuilder");
-    const out = textOf(await callTool(nonBuilderTools, "ls", {}));
-    expect(out).toContain("n12");
-    expect(out).not.toContain("🆕");
   });
 });
 

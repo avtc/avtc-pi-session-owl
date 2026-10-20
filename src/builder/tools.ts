@@ -6,14 +6,12 @@
 // mkdir/mv/merge + the Selector's set_meta factories live in `../graph/mutate-tools.js`
 // (parameterized by a MutateContext = policy + persistence strategy); the shared
 // read tools (ls/cat/find) + try_finish + the root-view render/measure helpers
-// live in `../graph/read-tools.js` (parameterized by viewer). The Builder wires
-// both with the source-graph policy + the store-appending persist + the
-// "builder" viewer.
+// live in `../graph/read-tools.js`; the Builder wires both with the
+// source-graph policy + the store-appending persist.
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import type { SessionOwlConfig } from "../config/schema.js";
-import { BUILDER } from "../format/render.js";
 import {
   MERGE_TOOL,
   MKDIR_TOOL,
@@ -154,11 +152,10 @@ function makeSetMetaTool(graph: SessionOwlGraph, ctx: MutateContext): AgentTool<
 
 // --- factory ---------------------------------------------------------------
 
-/** Build the Builder read tools (ls/cat/find) rendered for the Builder viewer
- *  (the 🆕 glyph is Builder-only — non-Builder consumers render `new` as
- *  `active`). Thin wrapper over the shared read-tool factories. */
+/** Build the Builder read tools (ls/cat/find) — a thin wrapper over the
+ *  shared read-tool factories. */
 export function makeBuilderReadTools(graph: SessionOwlGraph): AgentTool[] {
-  return makeReadTools(graph, BUILDER);
+  return makeReadTools(graph);
 }
 
 /** Build the full Builder toolset (9 tools): ls/cat/find (read) +
@@ -175,6 +172,6 @@ export function makeBuilderTools(graph: SessionOwlGraph, store: StoreContext, se
     makeMergeTool(graph, ctx),
     makeSupersedeTool(graph, ctx),
     makeSetMetaTool(graph, ctx),
-    makeTryFinishTool(graph, { rootViewThreshold: settings.builderRootViewThreshold }, BUILDER),
+    makeTryFinishTool(graph, { rootViewThreshold: settings.builderRootViewThreshold }),
   ];
 }

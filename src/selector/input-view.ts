@@ -15,9 +15,9 @@ import {
   hasAssistantText,
   renderAssistantTextBlock,
 } from "../format/chunk.js";
-import { directObsSizeHint, formatNodeLine, NON_BUILDER, RENDER_LEGEND } from "../format/render.js";
+import { directObsSizeHint, formatNodeLine, RENDER_LEGEND } from "../format/render.js";
 import { cloneNode, cloneObservation } from "../graph/clone.js";
-import { nodeLineOptions, orderedNonObsoleteRoots } from "../graph/read-tools.js";
+import { orderedNonObsoleteRoots } from "../graph/read-tools.js";
 import { isUnstuckAutoContinue } from "../lifecycle.js";
 import type { TodoContext } from "../todo/types.js";
 import type { Node, NodeId, Observation, ObsId } from "../types.js";
@@ -307,8 +307,6 @@ export function renderWorkingRoots(workingCopy: SelectorWorkingCopy): string {
   const graph = workingCopy.graph;
   const ordered = orderedNonObsoleteRoots(graph.nodes.values());
   return ordered
-    .map((node) =>
-      formatNodeLine(node, { ...nodeLineOptions(NON_BUILDER), obsSize: directObsSizeHint(node, graph.observations) }),
-    )
+    .map((node) => formatNodeLine(node, { obsSize: directObsSizeHint(node, graph.observations) }))
     .join("\n");
 }

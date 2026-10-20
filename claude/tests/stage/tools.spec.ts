@@ -30,8 +30,7 @@ import {
 
 const graph = {} as SessionOwlGraph;
 const ctx: MutateContext = { policy: "source" as never, persist: () => {} };
-const viewer = {} as never;
-const readTools = makeReadTools(graph, viewer);
+const readTools = makeReadTools(graph);
 function readParams(name: string): Record<string, unknown> {
   const t = readTools.find((x) => x.name === name);
   if (!t) throw new Error(`no read tool ${name}`);
@@ -95,7 +94,7 @@ describe("stage tool specs — compiled-schema parity with the vendored core", (
   });
   test("try_finish mirrors makeTryFinishTool's parameters", () => {
     expect(spec("try_finish").inputSchema).toEqual(
-      makeTryFinishTool(graph, { rootViewThreshold: 1 } as never, viewer).parameters,
+      makeTryFinishTool(graph, { rootViewThreshold: 1 } as never).parameters,
     );
   });
   test("every spec names its short form; the full set is the stages' union + the conditional todo_list", () => {

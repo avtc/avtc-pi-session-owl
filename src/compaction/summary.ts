@@ -5,13 +5,12 @@
 // text Pi injects post-compaction — the agent's memory. Sections: a # Memory
 // header + legend + owl_recall hint, the verbatim initial prompt, the active-set
 // root one-liners (selected tree or observations root), and recently-touched
-// files. Non-Builder viewer (a `new` node renders like active — no 🆕); obsolete roots excluded; never
-// truncated (bounded by the Selector/Builder try_finish, not here).
+// files. Obsolete roots excluded; never truncated (bounded by the
+// Selector/Builder try_finish, not here).
 
 import {
   directObsSizeHint,
   formatNodeLine,
-  NON_BUILDER,
   RENDER_LEGEND,
   type RenderableNode,
   renderTreeTotal,
@@ -96,7 +95,7 @@ export function renderSummary(args: RenderSummaryArgs): string {
   lines.push(ACTIVE_SET_HEADING);
   const sizeHints = args.graph.observations ?? EMPTY_OBSERVATIONS;
   for (const root of activeSetRoots(args)) {
-    lines.push(formatNodeLine(root, { viewer: NON_BUILDER, obsSize: directObsSizeHint(root, sizeHints) }));
+    lines.push(formatNodeLine(root, { obsSize: directObsSizeHint(root, sizeHints) }));
   }
   // The tree-total footer: the scale of everything retained (the source graph,
   // incl. obsolete) behind this top level. Skipped when the tree is empty

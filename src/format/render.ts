@@ -8,13 +8,6 @@
 import type { Node, Observation } from "../types.js";
 import { formatTokens } from "./tokens.js";
 
-export type RenderViewer = "builder" | "nonBuilder";
-
-/** Shared named values for the RenderViewer union, so call sites pass a named
- *  constant instead of a bare string (consistency + one definition point). */
-export const BUILDER: RenderViewer = "builder";
-export const NON_BUILDER: RenderViewer = "nonBuilder";
-
 /** The counts+size legend segment — the tail shared verbatim by every legend
  *  (RENDER_LEGEND, the Builder and Selector prompts, README): the child-count
  *  segment and the size segment (the direct observations' full-details size)
@@ -22,11 +15,12 @@ export const NON_BUILDER: RenderViewer = "nonBuilder";
 export const COUNTS_SIZE_LEGEND =
   "2nodes 3obs (direct children) · 34lines 412tokens (direct children observations full details size)";
 
-/** The canonical one-line legend for the shared render format (non-Builder
- *  consumers — compaction summary, commands; the Builder's own prompt carries
- *  its own legend including the Builder-only 🆕new glyph). */
+/** The canonical one-line legend for the shared render format (every surface
+ *  that renders the graph without its own prompt legend — compaction summary,
+ *  Selector context, owl_recall, commands; the Builder's and Selector's own
+ *  prompts carry the same marks inline). */
 export const RENDER_LEGEND =
-  "📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 📦archived 🪦obsolete · " +
+  "📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 🆕new (not yet processed) 📦archived 🪦obsolete · " +
   COUNTS_SIZE_LEGEND;
 
 const MONTH_ABBREVIATIONS = [
@@ -143,11 +137,13 @@ export function formatTimestampRange(startStored: string, endStored: string): st
   return `${startText} — ${monthDay(end.date)} ${end.time}`;
 }
 
-/** The notable-state glyph for a node, or empty for active. */
-function stateGlyph(node: RenderableNode, viewer: RenderViewer): string {
+/** The notable-state glyph for a node, or empty for active. `new` renders as
+ *  🆕 on every surface — the one-line legends document it as "not yet
+ *  processed" (the Builder's flush_new is what discharges it). */
+function stateGlyph(node: RenderableNode): string {
   if (node.state === "archived") return "📦";
   if (node.state === "obsolete") return "🪦";
-  if (node.state === "new") return viewer === "builder" ? "🆕" : "";
+  if (node.state === "new") return "🆕";
   return "";
 }
 
@@ -276,7 +272,6 @@ export function renderTreeTotal(graph: TreeTotalGraph, compactionCount: number):
 }
 
 interface LineOptions {
-  viewer: RenderViewer;
   showParent?: string;
   /** The summed size of the node's direct observations (caller-resolved via
    *  directObsSizeHint) — renders as the size segment after the child counts.
@@ -320,7 +315,7 @@ export interface RenderableObservation {
 
 /** Render one node as a line (no indent — callers apply depth indentation). */
 export function formatNodeLine(node: RenderableNode, options: LineOptions): string {
-  const parts: string[] = [`📁 ${node.id} · ${stateGlyph(node, options.viewer)}${node.importance}`];
+  const parts: string[] = [`📁 ${node.id} · ${stateGlyph(node)}${node.importance}`];
   const summary = singleLine(node.summary);
   if (summary !== "") {
     parts.push(summary);

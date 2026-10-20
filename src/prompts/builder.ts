@@ -20,7 +20,7 @@ outcome that matters, and says what else the node holds.`;
 }
 
 const BUILDER_LEGEND = `Legend — graph listings use these marks:
-📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 🆕new 📦archived 🪦obsolete
+📁 n.. node · 📄 o.. observation (obs) · importance crit high med low (how much it matters if lost) · 🆕new (not yet processed) 📦archived 🪦obsolete
 (no mark = active; obsolete hidden unless searched)
 ${COUNTS_SIZE_LEGEND}
 ${IMPORTANCE_GLOSS} Set it when you make a node (\`mkdir\`/\`merge\`) and re-rate it (\`set_meta\`) as the graph matures.`;

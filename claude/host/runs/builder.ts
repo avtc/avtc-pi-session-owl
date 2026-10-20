@@ -26,7 +26,7 @@ import {
 } from "../../core/src/builder/tools.js";
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
 import { renderStageInputMessages } from "../../core/src/format/chunk.js";
-import { BUILDER, renderTreeTotal } from "../../core/src/format/render.js";
+import { renderTreeTotal } from "../../core/src/format/render.js";
 import { formatTokens } from "../../core/src/format/tokens.js";
 import { applyFlushNew } from "../../core/src/graph/mutations.js";
 import { nonObsoleteRoots } from "../../core/src/graph/read-tools.js";
@@ -140,7 +140,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
     input.scope !== null &&
     input.ensureReady &&
     input.settings.builderSkipWithinBudget &&
-    measureRootViewTokens(graph, BUILDER) < input.settings.builderRootViewThreshold
+    measureRootViewTokens(graph) < input.settings.builderRootViewThreshold
   ) {
     return;
   }
@@ -315,13 +315,13 @@ function passMessages(
   compactionCount: number,
   settings: SessionOwlConfig,
 ): EngineStageRunInput["messages"] {
-  const rootView = renderRootView(graph, BUILDER) || EMPTY_ROOT_VIEW;
+  const rootView = renderRootView(graph) || EMPTY_ROOT_VIEW;
   const roots = nonObsoleteRoots(graph).length;
   const nodePart =
     settings.rootViewTargetNodes === null ? `${roots} nodes` : `${roots}/${settings.rootViewTargetNodes} nodes`;
   const text =
     "Organize the memory graph. Process the new arrivals and consolidate the root view to fit the budget. " +
-    `Root view: ${nodePart}, ${formatTokens(measureRootViewTokens(graph, BUILDER))}/${formatTokens(settings.builderRootViewThreshold)} tokens.\n\n` +
+    `Root view: ${nodePart}, ${formatTokens(measureRootViewTokens(graph))}/${formatTokens(settings.builderRootViewThreshold)} tokens.\n\n` +
     `Current root view (pass ${pass}):\n${rootView}\n${renderTreeTotal(graph, compactionCount)}`;
   return [{ role: "user", content: text }];
 }

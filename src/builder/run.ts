@@ -19,7 +19,7 @@ import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SessionOwlConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
-import { BUILDER, renderTreeTotal } from "../format/render.js";
+import { renderTreeTotal } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
 import { applyFlushNew } from "../graph/mutations.js";
 import { nonObsoleteRoots } from "../graph/read-tools.js";
@@ -100,8 +100,8 @@ export interface BuilderRunInput {
  * post-catch-up call with the root view under builderRootViewThreshold), an ABNORMAL end (signal abort, or an error
  * that ends the run), and a model-unavailable skip all PRESERVE `new` — a
  * build that folded nothing must not discharge the each-N trigger's pending
- * arrivals; they retry on the next fire. `new` renders as 🆕 for the Builder viewer only,
- * so the Selector and the compaction summary are unaffected either way.
+ * arrivals; they retry on the next fire. `new` renders as 🆕 on every surface
+ * until a run flushes it, so a preserved `new` stays visibly unprocessed.
  *
  * Honors `signal`; persists applied mutates + flush_new at call time. Never
  * throws — a model-unavailable skip notifies the user; a run-ending error logs
@@ -147,7 +147,7 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
     input.scope !== null &&
     input.ensureReady &&
     input.settings.builderSkipWithinBudget &&
-    measureRootViewTokens(graph, BUILDER) < input.settings.builderRootViewThreshold
+    measureRootViewTokens(graph) < input.settings.builderRootViewThreshold
   ) {
     return;
   }
@@ -318,7 +318,7 @@ function passMessages(
   rootViewThreshold: number,
   rootViewTargetNodes: number | null,
 ): AgentMessage[] {
-  const rootView = renderRootView(graph, BUILDER) || EMPTY_ROOT_VIEW;
+  const rootView = renderRootView(graph) || EMPTY_ROOT_VIEW;
   // budget + current usage up front (tokens AND the rendered root count —
   // easier to read than counting lines): without the numbers the model treats
   // an unknown budget as tight and consolidates proactively below the ceiling
@@ -326,7 +326,7 @@ function passMessages(
   const nodePart = rootViewTargetNodes === null ? `${roots} nodes` : `${roots}/${rootViewTargetNodes} nodes`;
   const text =
     "Organize the memory graph. Process the new arrivals and consolidate the root view to fit the budget. " +
-    `Root view: ${nodePart}, ${formatTokens(measureRootViewTokens(graph, BUILDER))}/${formatTokens(rootViewThreshold)} tokens.\n\n` +
+    `Root view: ${nodePart}, ${formatTokens(measureRootViewTokens(graph))}/${formatTokens(rootViewThreshold)} tokens.\n\n` +
     `Current root view (pass ${pass}):\n${rootView}\n${renderTreeTotal(graph, compactionCount)}`;
   return [{ role: "user", content: text } as AgentMessage];
 }

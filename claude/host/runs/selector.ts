@@ -15,7 +15,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
 import { renderStageInputMessages } from "../../core/src/format/chunk.js";
-import { NON_BUILDER, renderTreeTotal } from "../../core/src/format/render.js";
+import { renderTreeTotal } from "../../core/src/format/render.js";
 import { formatTokens } from "../../core/src/format/tokens.js";
 import { measureRootViewTokens, nonObsoleteRoots, renderRootViewFromRoots } from "../../core/src/graph/read-tools.js";
 import { selectorSystemPrompt } from "../../core/src/prompts/selector.js";
@@ -316,8 +316,8 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
 }
 
 /** Build the per-pass user message: the task + the CURRENT working-tree
- *  render + the stable context (pi's passMessages verbatim, viewer NON_BUILDER
- *  folded into the render helpers). */
+ *  render + the stable context (pi's passMessages verbatim, folded into the
+ *  render helpers). */
 function passMessages(
   working: SelectorInputView["workingCopy"],
   contextView: string,
@@ -331,7 +331,7 @@ function passMessages(
     settings.rootViewTargetNodes === null ? `${roots} nodes` : `${roots}/${settings.rootViewTargetNodes} nodes`;
   const text =
     `Shape the active-set for the current task (pass ${pass}). Promote what matters, demote what doesn't into nIrrelevant, consolidate and condense to fit the budget. ` +
-    `Root view: ${nodePart}, ${formatTokens(measureRootViewTokens(working.graph, NON_BUILDER))}/${formatTokens(settings.selectorRootViewThreshold)} tokens.\n\n` +
+    `Root view: ${nodePart}, ${formatTokens(measureRootViewTokens(working.graph))}/${formatTokens(settings.selectorRootViewThreshold)} tokens.\n\n` +
     `Working tree\n\n${workingTree}\n${treeTotal}\n\n${contextView}`;
   return [{ role: "user", content: text }];
 }
@@ -370,13 +370,13 @@ function persistResult(
 }
 
 /** Build the live selected-counts provider over the working copy (pi's
- *  makeSelectedCountsProvider — the NON_BUILDER render's token estimate). */
+ *  makeSelectedCountsProvider — the working-tree render's token estimate). */
 function makeSelectedCountsProvider(workingGraph: SelectorInputView["workingCopy"]["graph"]): SelectedCountsProvider {
   return () => {
     const roots = nonObsoleteRoots(workingGraph);
     return {
       count: roots.length,
-      viewTokens: estimateContentTokens(renderRootViewFromRoots(roots, NON_BUILDER, workingGraph.observations)),
+      viewTokens: estimateContentTokens(renderRootViewFromRoots(roots, workingGraph.observations)),
     };
   };
 }

@@ -3,14 +3,13 @@
 
 // The Selector toolset — operates on the deep-copied WORKING COPY (never the
 // source graph). Composition:
-//   - graph read tools (ls/cat/find) — reused from graph/read-tools with the
-//     "nonBuilder" viewer (a `new` node renders like active — no 🆕 glyph);
+//   - graph read tools (ls/cat/find) — reused from graph/read-tools;
 //   - graph mutate tools (mkdir/mv/merge/set_meta) — the shared factories from
 //     graph/mutate-tools bound to a workingCopy MutateContext (policy `workingCopy`
 //     — skips the nGoal/oInitialPrompt rejections; the Selector freely rearranges
 //     them in its copy — and a NO-OP persist: the working copy is transient, the
 //     final tree is persisted once at run completion);
-//   - try_finish (convergence gate on selectorRootViewThreshold, nonBuilder);
+//   - try_finish (convergence gate on selectorRootViewThreshold);
 //   - fs_* read tools (alias pi's read/grep/find/ls built-ins);
 //   - todo_list (conditional on the optional avtc-pi-todo bridge).
 // supersede is EXCLUDED (Builder-only source-graph semantics). The Selector's
@@ -27,7 +26,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { SessionOwlConfig } from "../config/schema.js";
-import { NON_BUILDER } from "../format/render.js";
 import {
   MERGE_TOOL,
   MKDIR_TOOL,
@@ -143,18 +141,17 @@ function makeTodoListTool(bridge: TodoBridge): AgentTool<typeof TODO_LIST_PARAMS
 // --- graph tools + full toolset -------------------------------------------
 
 /** Build the Selector graph tools (ls/cat/find/mkdir/mv/merge/set_meta/
- *  try_finish) bound to the working copy. The read tools render with the
- *  "nonBuilder" viewer (new→active); the mutate tools apply with the
+ *  try_finish) bound to the working copy. The mutate tools apply with the
  *  `workingCopy` policy and append nothing to the store. */
 export function makeSelectorGraphTools(working: SelectorWorkingCopy, settings: SessionOwlConfig): AgentTool[] {
   const ctx = workingCopyMutateContext();
   return [
-    ...makeReadTools(working.graph, NON_BUILDER),
+    ...makeReadTools(working.graph),
     makeMkdirTool(working.graph, ctx),
     makeMvTool(working.graph, ctx),
     makeMergeTool(working.graph, ctx),
     makeSelectorSetMetaTool(working.graph, ctx),
-    makeTryFinishTool(working.graph, { rootViewThreshold: settings.selectorRootViewThreshold }, NON_BUILDER),
+    makeTryFinishTool(working.graph, { rootViewThreshold: settings.selectorRootViewThreshold }),
   ];
 }
 
