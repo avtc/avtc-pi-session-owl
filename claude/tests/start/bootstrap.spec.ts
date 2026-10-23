@@ -2,8 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 // The bootstrap ladder: how a >read-cap transcript gets bootstrapped per
@@ -11,6 +10,7 @@ import { promisify } from "node:util";
 // the Node helper CLI that writes owl mirror segments directly from a
 // transcript (streamed, never holding the file).
 import { beforeEach, describe, expect, test } from "vitest";
+import { tempDir } from "../../../tests/temp-dir.js";
 import { clearDetailsCache } from "../../core/src/format/details.js";
 import { resetForNewSession } from "../../core/src/store/graph-store.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
@@ -53,7 +53,7 @@ describe("bootstrap-ladder — rung selection", () => {
 describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
   test("writes owl mirror batches from a transcript, streamed, sweep-compatible", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-"));
+    const tmp = tempDir("owl-boot");
     const transcript = [
       JSON.stringify({ uuid: "b-1", parentUuid: null, type: "user", message: { role: "user", content: "hello" } }),
       JSON.stringify({
@@ -112,7 +112,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("--live-path mirrors only the tip's lineage: a fork's dead branch and un-carried chrome stay out", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-live-"));
+    const tmp = tempDir("owl-boot-live");
     const transcript = [
       JSON.stringify({ uuid: "f-1", parentUuid: null, type: "user", message: { role: "user", content: "start" } }),
       JSON.stringify({
@@ -175,7 +175,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("a trailing --after with no value exits 2 (no silent zero-row mirror)", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-after-"));
+    const tmp = tempDir("owl-boot-after");
     const t = join(tmp, "t.jsonl");
     writeFileSync(
       t,
@@ -195,7 +195,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("a flag token as the --after value exits 2 (no silent zero-row mirror)", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-after-flag"));
+    const tmp = tempDir("owl-boot-after-flag");
     const t = join(tmp, "t.jsonl");
     writeFileSync(
       t,
@@ -219,7 +219,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("a flag token as --session-id exits 2 (no garbage sessions/--limit dir)", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-sid-flag"));
+    const tmp = tempDir("owl-boot-sid-flag");
     const t = join(tmp, "t.jsonl");
     writeFileSync(
       t,
@@ -241,7 +241,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("a system compact_boundary row marks the NEXT conversation row as the compaction door", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-boundary-"));
+    const tmp = tempDir("owl-boot-boundary");
     const t = join(tmp, "t.jsonl");
     const lines = [
       { uuid: "u-1", parentUuid: null, type: "user", message: { role: "user", content: "first" } },
@@ -275,7 +275,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("multi-page runs keep ONE seq with .k continuation parts (writer parity)", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot2-"));
+    const tmp = tempDir("owl-boot2");
     const rows = [];
     for (let i = 0; i < 6; i += 1) {
       rows.push(
@@ -314,7 +314,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("the page budget is BYTES: CJK rows split at the byte budget, files stay under it", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot4-"));
+    const tmp = tempDir("owl-boot4");
     const rows = [];
     for (let i = 0; i < 8; i += 1) {
       rows.push(
@@ -350,7 +350,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("uuid-bearing metadata rows are skipped (the host reader's type filter)", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot5-"));
+    const tmp = tempDir("owl-boot5");
     const rows = [
       JSON.stringify({ uuid: "ok-1", parentUuid: null, type: "user", message: { role: "user", content: "real" } }),
       JSON.stringify({
@@ -391,7 +391,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("--after bounds the walk (known uuid skips; unknown uuid is a silent no-op)", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot6-"));
+    const tmp = tempDir("owl-boot6");
     const rows = [
       JSON.stringify({ uuid: "a-1", parentUuid: null, type: "user", message: { role: "user", content: "one" } }),
       JSON.stringify({ uuid: "a-2", parentUuid: "a-1", type: "user", message: { role: "user", content: "two" } }),
@@ -424,7 +424,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 
   test("a non-numeric --page-bytes exits 2 with the usage line; a missing file exits 1 with {error}", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot3-"));
+    const tmp = tempDir("owl-boot3");
     const cfg = join(tmp, "cfg");
     mkdirSync(cfg, { recursive: true });
     await expect(
@@ -451,7 +451,7 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
 describe("helpers/bootstrap.mjs — the session-id sanitizer", () => {
   test("a hostile --session-id stays inside the sessions root (percent-encoded)", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-san-"));
+    const tmp = tempDir("owl-boot-san");
     const transcriptPath = join(tmp, "sess-san.jsonl");
     writeFileSync(
       transcriptPath,
@@ -482,7 +482,7 @@ describe("helpers/bootstrap.mjs — the isMeta three-way split (host-reader pari
   function runRows(rows: unknown[]): Promise<string> {
     // runs the helper over a generated transcript, then returns the session
     // dir's swept rows as JSON (door/origin per row)
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-meta-"));
+    const tmp = tempDir("owl-boot-meta");
     const transcriptPath = join(tmp, "t.jsonl");
     writeFileSync(transcriptPath, `${rows.map((r) => JSON.stringify(r)).join("\n")}\n`, "utf8");
     const cfg = join(tmp, "cfg");
@@ -600,7 +600,7 @@ describe("runBackfill — the over-cap bootstrap seam", () => {
 describe("helpers/bootstrap.mjs — compaction-boundary logical edges", () => {
   test("a boundary-parented row resolves through the skipped chrome onto the rewound branch", async () => {
     const run = promisify(execFile);
-    const tmp = mkdtempSync(join(tmpdir(), "owl-boot-"));
+    const tmp = tempDir("owl-boot");
     const transcript = [
       JSON.stringify({ uuid: "m-1", parentUuid: null, type: "user", message: { role: "user", content: "root" } }),
       JSON.stringify({

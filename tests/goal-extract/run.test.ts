@@ -2,7 +2,6 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
@@ -23,6 +22,7 @@ import { _resetRunLock, abortInFlight, acquireOrSkip, current } from "../../src/
 import { getGraphStore, resetForNewSession, type StoreContext } from "../../src/store/graph-store.js";
 import { N_GOAL } from "../../src/types.js";
 import { NO_OP_WIDGET } from "../../src/widget/tracker.js";
+import { tempDir } from "../temp-dir.js";
 
 // --- fakes -----------------------------------------------------------------
 
@@ -311,7 +311,7 @@ describe("runGoalExtract — stage dump", () => {
   });
 
   it("debugDumpLimit > 0: writes a toolless header + footer dump for the one-shot", async () => {
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-goal-dump-"));
+    const dumpRoot = tempDir("owl-goal-dump");
     let seenDumpPath: string | null | undefined;
     const scripted = async (input: StageRunInput): Promise<StageRunResult> => {
       seenDumpPath = input.dumpPath;
@@ -335,7 +335,7 @@ describe("runGoalExtract — stage dump", () => {
   });
 
   it("a model-gap skip leaves NO dump file (opens only after the skips)", async () => {
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-goal-dump-"));
+    const dumpRoot = tempDir("owl-goal-dump");
     _setDumpHomeForTest(dumpRoot);
     try {
       await runGoalExtract(makeInput({ ctx: makeNoModelCtx(), runStageFn: async () => assistantResult("x") }));

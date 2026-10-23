@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { _setConflictsHomeForTest, CONFLICT_PACKAGE_MARKERS, detectConflicts } from "../../src/conflicts/detect.js";
+import { tempDir } from "../temp-dir.js";
 
 let home: string;
 let project: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "owl-conflicts-"));
-  project = mkdtempSync(join(tmpdir(), "owl-conflicts-proj-"));
+  home = tempDir("owl-conflicts");
+  project = tempDir("owl-conflicts-proj");
   _setConflictsHomeForTest(home);
 });
 

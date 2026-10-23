@@ -36,6 +36,7 @@ import { _resetSessionOwlSettingsHandle, _setRegisterSettingsCommand } from "../
 import { _setBaseLoggerForTest } from "../src/log.js";
 import { _resetSessionAffinity } from "../src/runtime/session-affinity.js";
 import { resetConversationStates } from "../src/store/graph-store.js";
+import { sweepTempDirs } from "./temp-dir.js";
 
 // Tests must NEVER write to the real production log file (~/.pi/logs/...). The
 // real avtc-pi-logger is created at log.ts module load (shared under
@@ -65,6 +66,7 @@ afterAll(async () => {
   _setRegisterSettingsCommand(null);
   _resetSessionAffinity();
   resetConversationStates(); // every resident graph state + details bucket + the active key
+  sweepTempDirs(); // every tempDir() handed out in the file — see tests/temp-dir.ts
   // The conflict-pause singleton is recorded by the real activation path and
   // read live by the status/widget gates. A file that ran vi.resetModules() spun
   // fresh module copies, so a static import here could miss the instance the

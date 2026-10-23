@@ -2,7 +2,6 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
@@ -17,6 +16,7 @@ import type { TurnPredicate } from "../../src/runtime/agent-loop.js";
 import { _resetSessionAffinity, setSessionOwlSessionBase } from "../../src/runtime/session-affinity.js";
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import { NO_OP_WIDGET, type WidgetController } from "../../src/widget/tracker.js";
+import { tempDir } from "../temp-dir.js";
 
 // --- helpers ---------------------------------------------------------------
 
@@ -1172,7 +1172,7 @@ describe("runObserver — stage dump", () => {
     const script = scriptedRunStage([
       [{ summary: "Chose vitest for all new tests.", importance: "high", sourceEntryIds: ["a1"] }],
     ]);
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-observer-dump-"));
+    const dumpRoot = tempDir("owl-observer-dump");
     let seenDumpPath: string | null | undefined;
     const scripted = script.fn as NonNullable<ObserverRunInput["runStageFn"]>;
     _setDumpHomeForTest(dumpRoot); // dumps land under <dumpRoot>/.pi/session-owl/dumps/<project>
@@ -1213,7 +1213,7 @@ describe("runObserver — stage dump", () => {
     const { pi } = makeFakePi();
     const ctx = makeFakeCtx();
     const script = scriptedRunStage([]);
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-observer-dump-"));
+    const dumpRoot = tempDir("owl-observer-dump");
     _setDumpHomeForTest(dumpRoot);
     try {
       await runObserver(

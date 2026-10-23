@@ -2,8 +2,6 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
   Api,
@@ -35,6 +33,7 @@ import {
   type StageUsage,
 } from "../../src/runtime/agent-loop.js";
 import { estimateContentTokens } from "../../src/types.js";
+import { tempDir } from "../temp-dir.js";
 
 /** Per-LLM-call output cap used across tests (large enough not to bite). */
 const TEST_MAX_TOKENS = 8192;
@@ -885,7 +884,7 @@ describe("runStage — tool-call debug logging", () => {
 
 describe("runStage — stage dump seam", () => {
   it("writes <input> before and <output> after the loop when dumpPath is set", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-stagedump-"));
+    const dir = tempDir("owl-stagedump");
     const dump = openStageDump("builder", 5, dir);
     const inMsg = [{ role: "user", content: "organize", timestamp: 0 }] as unknown as AgentMessage[];
     const produced = [
@@ -918,7 +917,7 @@ describe("runStage — stage dump seam", () => {
   });
 
   it("<output> excludes the seed even when the loop result carries no leading system message (fallback shape)", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-stagedump-"));
+    const dir = tempDir("owl-stagedump");
     const dump = openStageDump("builder", 5, dir);
     const inMsg = [{ role: "user", content: "organize", timestamp: 0 }] as unknown as AgentMessage[];
     const produced = [
@@ -962,7 +961,7 @@ describe("runStage — stage dump seam", () => {
   });
 
   it("a throwing loop writes an <output error> section, then StageRunError propagates", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-stagedump-"));
+    const dir = tempDir("owl-stagedump");
     const dump = openStageDump("builder", 5, dir);
     const badLoop = (() => {
       throw new Error("boom");

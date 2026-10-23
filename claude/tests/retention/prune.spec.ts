@@ -5,12 +5,12 @@
 // the marker/scan liveness ladder, agent-suffixed dirs governed by their
 // PARENT session.
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
+import { tempDir } from "../../../tests/temp-dir.js";
 
 const run = promisify(execFile);
 const HELPER = join(__dirname, "..", "..", "helpers", "prune.mjs");
@@ -18,7 +18,8 @@ const NOW = "2026-10-08T12:00:00.000Z";
 const NOW_MS = Date.parse(NOW);
 const DAY_MS = 86_400_000;
 
-// temp trees stay for post-mortem (the OS tmpdir sweep collects them)
+// temp trees are tracked (tests/temp-dir.ts) — swept after the file by
+// tests/setup.ts; %TEMP% is never the debugging surface
 
 interface PruneReport {
   mode: "off" | "days" | "follow";
@@ -73,7 +74,7 @@ function writeFileIfMissing(path: string): void {
 }
 
 function baseTree(): string {
-  return mkdtempSync(join(tmpdir(), "owl-prune-"));
+  return tempDir("owl-prune");
 }
 
 describe("helpers/prune.mjs — mode gating", () => {

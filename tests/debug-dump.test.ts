@@ -8,7 +8,6 @@
 // flushed to disk immediately, nothing lost if the process dies mid-run.
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -21,10 +20,11 @@ import {
   sanitizeForPath,
   stageDumpHeader,
 } from "../src/debug-dump.js";
+import { tempDir } from "./temp-dir.js";
 
-/** Fresh temp dir per test — no litter in the repo or the user's home. */
+/** Fresh tracked temp dir per test — no litter in the repo, the user's home, or %TEMP%. */
 function tempDumpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "owl-dump-test-"));
+  return tempDir("owl-dump-test");
 }
 
 function dumpFiles(dir: string, stage: string): string[] {

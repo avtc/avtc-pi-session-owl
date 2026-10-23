@@ -8,12 +8,12 @@
 // pins the EXEC contract: tolerant parsing, the --after cursor, failure
 // exits.
 import { execFile } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
+import { tempDir } from "../../../tests/temp-dir.js";
 
 const run = promisify(execFile);
 const HELPER = join(__dirname, "..", "..", "helpers", "verify.mjs");
@@ -31,7 +31,7 @@ async function verify(file: string, ...args: string[]): Promise<VerifyReport> {
 }
 
 function tempTranscript(text: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "owl-verify-"));
+  const dir = tempDir("owl-verify");
   const file = join(dir, "t.jsonl");
   writeFileSync(file, text, "utf8");
   return file;
@@ -86,7 +86,7 @@ describe("helpers/verify.mjs — the streaming over-cap pass", () => {
   });
 
   test("an absent file exits 1 with ok:false; a missing operand exits 2", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "owl-verify-"));
+    const dir = tempDir("owl-verify");
     await expect(verify(join(dir, "nope.jsonl"))).rejects.toMatchObject({ code: 1 });
     await expect(run(process.execPath, [HELPER])).rejects.toMatchObject({ code: 2 });
   });

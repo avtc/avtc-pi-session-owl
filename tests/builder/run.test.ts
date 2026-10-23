@@ -2,7 +2,6 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -27,6 +26,7 @@ import { type StageRunInput, type StageRunResult, StageTimeoutError } from "../.
 import { getGraphStore, resetForNewSession } from "../../src/store/graph-store.js";
 import type { SessionOwlGraph } from "../../src/types.js";
 import { makeObservation, N_GOAL, type NodeId } from "../../src/types.js";
+import { tempDir } from "../temp-dir.js";
 import { NO_OP_WIDGET, recordingWidget, scriptRunStage, scriptRunStageWithError } from "./run-helpers.js";
 
 const NOW = "2026-07-29T09:00:00.000Z";
@@ -377,7 +377,7 @@ describe("runBuilder", () => {
     });
     // route the default dump root (~/.pi/session-owl/dumps/<project>) to a temp
     // dir so the test never litters the user's home
-    const dumpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owl-builder-dump-"));
+    const dumpRoot = tempDir("owl-builder-dump");
     let seenDumpPath: string | null | undefined;
     let seenPassText = "";
     const scripted = scriptRunStage({ passes: [{ tools: [{ name: TRY_FINISH_TOOL, ok: true }] }] });
