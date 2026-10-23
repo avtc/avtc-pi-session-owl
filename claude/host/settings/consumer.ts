@@ -47,10 +47,9 @@ export const OWL_SETTINGS_ENV_VAR = "CLAUDE_SETTINGS_SESSION_OWL";
 
 /** The owl schema under the Claude path conventions (the pi-named paths of the
  *  vendored SESSION_OWL_SCHEMA belong to its dead-on-this-platform modal
- *  registration; every live read/write goes through this schema). Three
+ *  registration; every live read/write goes through this schema). Two
  *  shared knobs ship with port defaults (withPortDefaults): the Default-model
- *  knob `haiku`, the Default-thinking-level knob `high`, and the Observer
- *  Include-thinking knob `false`. */
+ *  knob `haiku` and the Default-thinking-level knob `high`. */
 export const OWL_CLAUDE_SCHEMA = withPortDefaults(
   withPortFields({
     ...SESSION_OWL_SCHEMA,

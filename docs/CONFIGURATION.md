@@ -37,7 +37,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 |---|---|---|---|
 | `observerModel` | model | `null` | Overrides `defaultModel` for the Observer. |
 | `observerThresholdTokens` | number | `4000` | `on-threshold` gate: emit a batch when accumulated unobserved tokens reach this. |
-| `observerIncludeThinking` | boolean | `true` | Include non-redacted thinking blocks in the chunks the Observer reads. On the Claude port the default is `false`. |
+| `observerIncludeThinking` | boolean | `true` | Include non-redacted thinking blocks in the chunks the Observer reads. |
 | `observerToolBlockCapTokens` | number | `null` | When capturing tool calls and results, trim each block to this many tokens (keeping the start and end). `null` = keep the whole block. |
 | `observerMaxTokens` | number | `16384` | Maximum output tokens per Observer LLM call. |
 | `observerThinkingLevel` | thinking-level | `null` | Thinking level for the Observer. `null`/Inherit default = use `defaultThinkingLevel`; `off` = no thinking. |
@@ -109,9 +109,9 @@ Everything else in this document applies unchanged. The knobs below exist only i
 
 - **`keepRecentTokens`** (number, default `20000`) — tokens of recent conversation kept verbatim alongside the memory summary when session-owl answers a compaction. Answered at the compaction seam; editable from the settings pane.
 - **`mirrorRetentionDays`** (number, default `null` = keep forever — full-text recall never expires) — a number enables the startup retention sweep (expired sessions and sessions whose transcript is gone are truly deleted); the follow-cleanup mode tracks Claude Code's own `cleanupPeriodDays` instead.
-- **`keptTailAggregatedThinking`** (boolean, default `true`) — folds the kept tail's thinking blocks into the memory summary as an attributed-reasoning section named "## Reasoning from earlier turns (attributed)"; `off` keeps the summary text only (this platform's compaction has no thinking field of its own).
+- **`keptTailAggregatedThinking`** (boolean, default `false`) — when enabled, folds the kept tail's thinking blocks into the memory summary as an attributed-reasoning section named "## Reasoning from earlier turns (attributed)"; `off` keeps the summary text only (this platform's compaction has no thinking field of its own).
 - **`injectedSummaryRow`** (boolean, default `false`) — after a compaction, echoes the injected memory summary as one visible assistant row above the compaction command. Invisible to the agent.
 
-Three shared knobs also ship with port-specific defaults: `defaultModel` `haiku`, `defaultThinkingLevel` `high`, and `observerIncludeThinking` `false` (the pi defaults are `null`/`null`/`true`; picking a different value persists it explicitly, and "Session default"/re-enabling keeps working the same way).
+Two shared knobs also ship with port-specific defaults: `defaultModel` `haiku` and `defaultThinkingLevel` `high` (the pi defaults are `null`/`null`; picking a different value persists it explicitly, and "Session default" keeps working the same way).
 
 The retention sweep runs as a Node helper at session start on CLI surfaces; non-CLI surfaces defer it to the next CLI run. Dry-run by default: `node claude/helpers/prune.mjs --days N [--apply]`.

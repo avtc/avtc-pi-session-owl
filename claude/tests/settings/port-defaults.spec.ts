@@ -16,7 +16,6 @@ import { OWL_CLAUDE_SCHEMA, PORT_DEFAULTS_CONFIG } from "../../host/settings/con
 import {
   PORT_DEFAULT_MODEL,
   PORT_DEFAULT_THINKING_LEVEL,
-  PORT_OBSERVER_INCLUDE_THINKING,
   withPortDefaults,
   withPortFields,
 } from "../../host/settings/port-fields.js";
@@ -49,7 +48,7 @@ describe("the port's default-model override", () => {
     expect(vendoredRow?.defaultValue).toBeNull();
   });
 
-  test("withPortDefaults overrides exactly the three port-defaulted rows — every other row is untouched", () => {
+  test("withPortDefaults overrides exactly the two port-defaulted shared rows — every other row is untouched", () => {
     const base = withPortFields(SESSION_OWL_SCHEMA);
     const overridden = withPortDefaults(base);
     expect(overridden.settings.length).toBe(base.settings.length);
@@ -61,9 +60,6 @@ describe("the port's default-model override", () => {
       } else if (row.id === "defaultThinkingLevel") {
         expect(after.defaultValue).toBe(PORT_DEFAULT_THINKING_LEVEL);
         expect(after.defaultValue).toBe("high");
-      } else if (row.id === "observerIncludeThinking") {
-        expect(after.defaultValue).toBe(PORT_OBSERVER_INCLUDE_THINKING);
-        expect(after.defaultValue).toBe(false);
       } else {
         expect(after).toBe(row); // same reference — no accidental rebuild
       }
@@ -78,22 +74,24 @@ describe("the port's default-model override", () => {
     // spot values: the port's own defaults, not the vendored ones
     expect(PORT_DEFAULTS_CONFIG.defaultModel).toBe("haiku");
     expect(PORT_DEFAULTS_CONFIG.defaultThinkingLevel).toBe("high");
-    expect(PORT_DEFAULTS_CONFIG.observerIncludeThinking).toBe(false);
     expect((PORT_DEFAULTS_CONFIG as { keepRecentTokens?: unknown }).keepRecentTokens).toBe(20_000);
+    expect((PORT_DEFAULTS_CONFIG as { keptTailAggregatedThinking?: unknown }).keptTailAggregatedThinking).toBe(false);
     expect(PORT_DEFAULTS_CONFIG.enabled).toBe(true);
   });
 });
 
 describe("the port's thinking-knob defaults", () => {
-  test("the port composite ships defaultThinkingLevel high and observerIncludeThinking false; the vendored schema stays null/true", () => {
+  test("the port composite ships defaultThinkingLevel high; the vendored schema stays null", () => {
     const thinkingRow = OWL_CLAUDE_SCHEMA.settings.find((s) => s.id === "defaultThinkingLevel");
     const vendoredThinkingRow = SESSION_OWL_SCHEMA.settings.find((s) => s.id === "defaultThinkingLevel");
-    const includeRow = OWL_CLAUDE_SCHEMA.settings.find((s) => s.id === "observerIncludeThinking");
-    const vendoredIncludeRow = SESSION_OWL_SCHEMA.settings.find((s) => s.id === "observerIncludeThinking");
     expect(thinkingRow?.defaultValue).toBe("high");
     expect(vendoredThinkingRow?.defaultValue).toBeNull();
-    expect(includeRow?.defaultValue).toBe(false);
-    expect(vendoredIncludeRow?.defaultValue).toBe(true);
+  });
+
+  test("the port-only Keep-tail-thinking row ships false — the section is not rendered by default", () => {
+    const row = OWL_CLAUDE_SCHEMA.settings.find((s) => s.id === "keptTailAggregatedThinking");
+    expect(row?.type).toBe("boolean");
+    expect(row?.defaultValue).toBe(false);
   });
 
   test("a fresh load with no files resolves both thinking knobs to the port defaults", async () => {
@@ -104,10 +102,10 @@ describe("the port's thinking-knob defaults", () => {
     });
     await lib.load("/proj", "/home/.claude");
     expect(lib.getSettings().defaultThinkingLevel).toBe("high");
-    expect(lib.getSettings().observerIncludeThinking).toBe(false);
+    expect(lib.getSettings().keptTailAggregatedThinking).toBe(false);
   });
 
-  test("re-enabling prev-turn thinking persists as a value and survives a reload", async () => {
+  test("re-enabling the tail-thinking section persists as a value and survives a reload", async () => {
     const fs = memFs();
     const lib = createSettingsExtension<Record<string, unknown>>(OWL_CLAUDE_SCHEMA as never, {
       fs: fs as never,
@@ -115,8 +113,8 @@ describe("the port's thinking-knob defaults", () => {
       envVar: "TEST_OWL_SETTINGS",
     });
     await lib.load("/proj", "/home/.claude");
-    lib.updateSetting("observerIncludeThinking", true, { level: "session" });
-    expect(lib.getSettings().observerIncludeThinking).toBe(true);
+    lib.updateSetting("keptTailAggregatedThinking", true, { level: "session" });
+    expect(lib.getSettings().keptTailAggregatedThinking).toBe(true);
 
     // a second handle over the same files: the explicit true rides the
     // env-var ladder back in, not the default
@@ -127,7 +125,7 @@ describe("the port's thinking-knob defaults", () => {
       envVar: "TEST_OWL_SETTINGS",
     });
     await second.load("/proj", "/home/.claude");
-    expect(second.getSettings().observerIncludeThinking).toBe(true);
+    expect(second.getSettings().keptTailAggregatedThinking).toBe(true);
   });
 });
 

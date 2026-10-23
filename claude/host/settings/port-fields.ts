@@ -14,11 +14,12 @@
 //
 //   keptTailAggregatedThinking — the platform's compact answer carries no
 //                         thinking field, so the kept tail would lose every
-//                         thinking block; true (default) folds them into the
-//                         '# Memory' summary row as the attributed-reasoning
-//                         section (the engine serves user rows — a trailing
-//                         assistant row persists as model="<synthetic>" and
-//                         never reaches the model);
+//                         thinking block; false (default) ships the summary
+//                         without the attributed-reasoning section — enabling
+//                         folds them into the '# Memory' summary row (the
+//                         engine serves user rows — a trailing assistant row
+//                         persists as model="<synthetic>" and never reaches
+//                         the model);
 //
 //   injectedSummaryRow — echo the injected summary (tree + the attributed
 //                         section when enabled) as ONE visible assistant row
@@ -32,12 +33,14 @@
 // the General tab — the consumer hands the extended schema to the settings
 // library, whose normalize/persist are schema-driven and keep the keys.
 //
-// One SHARED knob also ships with a port-specific default: the Default-model
-// knob comes pre-set to `haiku` (withPortDefaults) — the background stages
-// run on the latest Haiku out of the box; per-component overrides and the
-// chain itself are unchanged, and picking "Session default" persists an
-// explicit null that falls the stages back to the session model (same
-// semantics as pi's null default, just not the shipped value).
+// One SHARED-knob group also ships with port-specific defaults
+// (withPortDefaults): the Default-model knob comes pre-set to `haiku` (the
+// background stages run on the latest Haiku out of the box) and the
+// Default-thinking-level knob to `high` (the background stages reason at
+// high by default). Per-component overrides and the chains themselves are
+// unchanged, and picking "Session default" persists an explicit value that
+// falls the stages back to the same semantics as pi's null default, just
+// not the shipped value.
 
 /** The structural slice the overlay needs (both the library's and the
  *  vendored schema satisfy it — the overlay stays generic over either). */
@@ -74,7 +77,7 @@ export const PORT_ONLY_SETTINGS: readonly {
     description:
       "Fold the kept tail's thinking blocks into the memory summary as an attributed-reasoning section (compaction has no thinking field; disabling drops the reasoning content).",
     type: "boolean",
-    defaultValue: true,
+    defaultValue: false,
   },
   {
     id: "injectedSummaryRow",
@@ -103,10 +106,6 @@ export const PORT_DEFAULT_MODEL = "haiku";
 /** The port's shipped value for the shared Default-thinking-level knob. */
 export const PORT_DEFAULT_THINKING_LEVEL = "high";
 
-/** The port's shipped value for the shared Observer Include-thinking knob:
- *  prev-turn thinking blocks are not rendered into the Observer's chunks. */
-export const PORT_OBSERVER_INCLUDE_THINKING = false;
-
 /** The vendored schema with the port-only fields appended (General tab). */
 export function withPortFields<S extends SchemaShape>(base: S): S {
   return {
@@ -130,15 +129,13 @@ export function withPortFields<S extends SchemaShape>(base: S): S {
 }
 
 /** The port-specific defaults for SHARED knobs, applied after the field
- * overlay: the Default-model knob ships `haiku`, the Default-thinking-level
- * knob `high`, and the Observer Include-thinking knob `false` instead of the
- * vendored `null`/`null`/`true`. Every other row is passed through by
- * reference — this is the only place a shared knob's default may diverge
- * from the vendored schema. */
+ * overlay: the Default-model knob ships `haiku` and the Default-thinking-
+ * level knob `high` instead of the vendored `null`/`null`. Every other row
+ * is passed through by reference — this is the only place a shared knob's
+ * default may diverge from the vendored schema. */
 const PORT_SHARED_DEFAULTS: Readonly<Record<string, unknown>> = {
   defaultModel: PORT_DEFAULT_MODEL,
   defaultThinkingLevel: PORT_DEFAULT_THINKING_LEVEL,
-  observerIncludeThinking: PORT_OBSERVER_INCLUDE_THINKING,
 };
 
 export function withPortDefaults<S extends SchemaShape>(base: S): S {

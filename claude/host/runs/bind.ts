@@ -535,7 +535,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         // the live read carries it
         keepRecentTokens:
           typeof keepRecentTokensField === "number" ? keepRecentTokensField : PORT_KEEP_RECENT_TOKENS_DEFAULT,
-        keptTailAggregatedThinking: aggregatedThinkingField !== false, // pi parity: content kept
+        keptTailAggregatedThinking: aggregatedThinkingField === true, // off by default — the summary ships without the section
         injectedSummaryRow: injectedSummaryRowField === true, // display echo, default off
         getBranch: () => binding.branch(),
         getLeafId: () => binding.leafId(),
