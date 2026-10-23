@@ -18,7 +18,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 | `subagentMode` | string | `on-compaction` | How session-owl treats subagents. Inherited = the same treatment as the main conversation; On compaction = their memory is captured only when the subagent itself compacts (small subagents that never compact are skipped entirely); Disabled = session-owl is off for subagents. When session-owl is disabled, it is off for subagents as well. |
 | `ignoreConflicts` | boolean | `false` | Register even when a conflicting compaction extension is detected (for deliberate co-runs, e.g. benchmarking). |
 | `defaultModel` | model | `null` | One model for all components. `null`/unset uses the current session model. Per-component models override this. On the Claude port the default is `haiku`. |
-| `defaultThinkingLevel` | thinking-level | `null` | Thinking level for all components. `null`/Session default = use the session's thinking level; `off` = no thinking. Per-component levels override this. |
+| `defaultThinkingLevel` | thinking-level | `null` | Thinking level for all components. `null`/Session default = use the session's thinking level; `off` = no thinking. Per-component levels override this. On the Claude port the default is `high`. |
 | `renderMode` | string | `observations-root` | What session-owl injects after compaction (the recall commands read the same view). `selected-root` = a focused, task-relevant view the Selector builds; `observations-root` = the root view of the memory graph. |
 | `observerMode` | string | `on-threshold` | When the Observer captures memory. `on-threshold` = throughout the session, after a turn once enough new text accumulates; `on-compaction` = all at once, at compaction time only. |
 | `builderMode` | string | `each-N-observations` | When the Builder runs: `on-compaction` (cheapest), `each-N-observations`, `on-session-context-threshold`, or `on-root-view-threshold`. |
@@ -37,7 +37,7 @@ All settings are **live-toggleable** — changes take effect at the next trigger
 |---|---|---|---|
 | `observerModel` | model | `null` | Overrides `defaultModel` for the Observer. |
 | `observerThresholdTokens` | number | `4000` | `on-threshold` gate: emit a batch when accumulated unobserved tokens reach this. |
-| `observerIncludeThinking` | boolean | `true` | Include non-redacted thinking blocks in the chunks the Observer reads. |
+| `observerIncludeThinking` | boolean | `true` | Include non-redacted thinking blocks in the chunks the Observer reads. On the Claude port the default is `false`. |
 | `observerToolBlockCapTokens` | number | `null` | When capturing tool calls and results, trim each block to this many tokens (keeping the start and end). `null` = keep the whole block. |
 | `observerMaxTokens` | number | `16384` | Maximum output tokens per Observer LLM call. |
 | `observerThinkingLevel` | thinking-level | `null` | Thinking level for the Observer. `null`/Inherit default = use `defaultThinkingLevel`; `off` = no thinking. |
@@ -111,5 +111,7 @@ Everything else in this document applies unchanged. The knobs below exist only i
 - **`mirrorRetentionDays`** (number, default `null` = keep forever — full-text recall never expires) — a number enables the startup retention sweep (expired sessions and sessions whose transcript is gone are truly deleted); the follow-cleanup mode tracks Claude Code's own `cleanupPeriodDays` instead.
 - **`keptTailAggregatedThinking`** (boolean, default `true`) — folds the kept tail's thinking blocks into the memory summary as an attributed-reasoning section named "## Reasoning from earlier turns (attributed)"; `off` keeps the summary text only (this platform's compaction has no thinking field of its own).
 - **`injectedSummaryRow`** (boolean, default `false`) — after a compaction, echoes the injected memory summary as one visible assistant row above the compaction command. Invisible to the agent.
+
+Three shared knobs also ship with port-specific defaults: `defaultModel` `haiku`, `defaultThinkingLevel` `high`, and `observerIncludeThinking` `false` (the pi defaults are `null`/`null`/`true`; picking a different value persists it explicitly, and "Session default"/re-enabling keeps working the same way).
 
 The retention sweep runs as a Node helper at session start on CLI surfaces; non-CLI surfaces defer it to the next CLI run. Dry-run by default: `node claude/helpers/prune.mjs --days N [--apply]`.

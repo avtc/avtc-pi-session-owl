@@ -13,7 +13,13 @@ import { describe, expect, test } from "vitest";
 import { createSettingsExtension } from "../../../node_modules/avtc-claude-settings-ui/dist/index.js";
 import { SESSION_OWL_SCHEMA, type SessionOwlConfig } from "../../core/src/config/schema.js";
 import { OWL_CLAUDE_SCHEMA, PORT_DEFAULTS_CONFIG } from "../../host/settings/consumer.js";
-import { PORT_DEFAULT_MODEL, withPortDefaults, withPortFields } from "../../host/settings/port-fields.js";
+import {
+  PORT_DEFAULT_MODEL,
+  PORT_DEFAULT_THINKING_LEVEL,
+  PORT_OBSERVER_INCLUDE_THINKING,
+  withPortDefaults,
+  withPortFields,
+} from "../../host/settings/port-fields.js";
 import { stageModelFromSettings } from "../../host/stage/agents.js";
 
 function memFs(files: Record<string, string> = {}) {
@@ -43,7 +49,7 @@ describe("the port's default-model override", () => {
     expect(vendoredRow?.defaultValue).toBeNull();
   });
 
-  test("withPortDefaults overrides exactly the defaultModel row — every other row is untouched", () => {
+  test("withPortDefaults overrides exactly the three port-defaulted rows — every other row is untouched", () => {
     const base = withPortFields(SESSION_OWL_SCHEMA);
     const overridden = withPortDefaults(base);
     expect(overridden.settings.length).toBe(base.settings.length);
@@ -52,6 +58,12 @@ describe("the port's default-model override", () => {
       if (row.id === "defaultModel") {
         expect(after.defaultValue).toBe(PORT_DEFAULT_MODEL);
         expect(after.defaultValue).toBe("haiku");
+      } else if (row.id === "defaultThinkingLevel") {
+        expect(after.defaultValue).toBe(PORT_DEFAULT_THINKING_LEVEL);
+        expect(after.defaultValue).toBe("high");
+      } else if (row.id === "observerIncludeThinking") {
+        expect(after.defaultValue).toBe(PORT_OBSERVER_INCLUDE_THINKING);
+        expect(after.defaultValue).toBe(false);
       } else {
         expect(after).toBe(row); // same reference — no accidental rebuild
       }
@@ -65,8 +77,57 @@ describe("the port's default-model override", () => {
     }
     // spot values: the port's own defaults, not the vendored ones
     expect(PORT_DEFAULTS_CONFIG.defaultModel).toBe("haiku");
+    expect(PORT_DEFAULTS_CONFIG.defaultThinkingLevel).toBe("high");
+    expect(PORT_DEFAULTS_CONFIG.observerIncludeThinking).toBe(false);
     expect((PORT_DEFAULTS_CONFIG as { keepRecentTokens?: unknown }).keepRecentTokens).toBe(20_000);
     expect(PORT_DEFAULTS_CONFIG.enabled).toBe(true);
+  });
+});
+
+describe("the port's thinking-knob defaults", () => {
+  test("the port composite ships defaultThinkingLevel high and observerIncludeThinking false; the vendored schema stays null/true", () => {
+    const thinkingRow = OWL_CLAUDE_SCHEMA.settings.find((s) => s.id === "defaultThinkingLevel");
+    const vendoredThinkingRow = SESSION_OWL_SCHEMA.settings.find((s) => s.id === "defaultThinkingLevel");
+    const includeRow = OWL_CLAUDE_SCHEMA.settings.find((s) => s.id === "observerIncludeThinking");
+    const vendoredIncludeRow = SESSION_OWL_SCHEMA.settings.find((s) => s.id === "observerIncludeThinking");
+    expect(thinkingRow?.defaultValue).toBe("high");
+    expect(vendoredThinkingRow?.defaultValue).toBeNull();
+    expect(includeRow?.defaultValue).toBe(false);
+    expect(vendoredIncludeRow?.defaultValue).toBe(true);
+  });
+
+  test("a fresh load with no files resolves both thinking knobs to the port defaults", async () => {
+    const lib = createSettingsExtension<Record<string, unknown>>(OWL_CLAUDE_SCHEMA as never, {
+      fs: memFs() as never,
+      env: memEnv() as never,
+      envVar: "TEST_OWL_SETTINGS",
+    });
+    await lib.load("/proj", "/home/.claude");
+    expect(lib.getSettings().defaultThinkingLevel).toBe("high");
+    expect(lib.getSettings().observerIncludeThinking).toBe(false);
+  });
+
+  test("re-enabling prev-turn thinking persists as a value and survives a reload", async () => {
+    const fs = memFs();
+    const lib = createSettingsExtension<Record<string, unknown>>(OWL_CLAUDE_SCHEMA as never, {
+      fs: fs as never,
+      env: memEnv() as never,
+      envVar: "TEST_OWL_SETTINGS",
+    });
+    await lib.load("/proj", "/home/.claude");
+    lib.updateSetting("observerIncludeThinking", true, { level: "session" });
+    expect(lib.getSettings().observerIncludeThinking).toBe(true);
+
+    // a second handle over the same files: the explicit true rides the
+    // env-var ladder back in, not the default
+    const envDump = memEnv({ TEST_OWL_SETTINGS: JSON.stringify(lib.getSettings()) });
+    const second = createSettingsExtension<Record<string, unknown>>(OWL_CLAUDE_SCHEMA as never, {
+      fs,
+      env: envDump as never,
+      envVar: "TEST_OWL_SETTINGS",
+    });
+    await second.load("/proj", "/home/.claude");
+    expect(second.getSettings().observerIncludeThinking).toBe(true);
   });
 });
 

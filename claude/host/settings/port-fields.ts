@@ -100,6 +100,13 @@ export const PORT_ONLY_SETTINGS: readonly {
  * Haiku via the engine's model alias. */
 export const PORT_DEFAULT_MODEL = "haiku";
 
+/** The port's shipped value for the shared Default-thinking-level knob. */
+export const PORT_DEFAULT_THINKING_LEVEL = "high";
+
+/** The port's shipped value for the shared Observer Include-thinking knob:
+ *  prev-turn thinking blocks are not rendered into the Observer's chunks. */
+export const PORT_OBSERVER_INCLUDE_THINKING = false;
+
 /** The vendored schema with the port-only fields appended (General tab). */
 export function withPortFields<S extends SchemaShape>(base: S): S {
   return {
@@ -123,14 +130,22 @@ export function withPortFields<S extends SchemaShape>(base: S): S {
 }
 
 /** The port-specific defaults for SHARED knobs, applied after the field
- * overlay: the Default-model knob ships `haiku` instead of the vendored
- * `null`. Every other row is passed through by reference — this is the only
- * place a shared knob's default may diverge from the vendored schema. */
+ * overlay: the Default-model knob ships `haiku`, the Default-thinking-level
+ * knob `high`, and the Observer Include-thinking knob `false` instead of the
+ * vendored `null`/`null`/`true`. Every other row is passed through by
+ * reference — this is the only place a shared knob's default may diverge
+ * from the vendored schema. */
+const PORT_SHARED_DEFAULTS: Readonly<Record<string, unknown>> = {
+  defaultModel: PORT_DEFAULT_MODEL,
+  defaultThinkingLevel: PORT_DEFAULT_THINKING_LEVEL,
+  observerIncludeThinking: PORT_OBSERVER_INCLUDE_THINKING,
+};
+
 export function withPortDefaults<S extends SchemaShape>(base: S): S {
   return {
     ...base,
     settings: base.settings.map((s) =>
-      s.id === "defaultModel" ? { ...s, defaultValue: PORT_DEFAULT_MODEL } : s,
+      s.id in PORT_SHARED_DEFAULTS ? { ...s, defaultValue: PORT_SHARED_DEFAULTS[s.id] } : s,
     ) as S["settings"],
   };
 }
