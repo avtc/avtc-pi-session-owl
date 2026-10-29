@@ -359,6 +359,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         widget,
         scope: null,
         ensureReady: false,
+        readBranch: () => binding.branch(),
         flushLedger: async () => {
           await storage.ledger.flush();
         },
@@ -498,6 +499,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
             widget,
             scope,
             ensureReady,
+            readBranch: () => binding.branch(),
             flushLedger: async () => {
               await storage.ledger.flush();
             },

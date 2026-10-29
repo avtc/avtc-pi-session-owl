@@ -18,6 +18,7 @@
 // fast-path skip, an abort, or an error preserves them.
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
   MUTATE_TOOL_NAMES,
   makeBuilderTools,
@@ -35,6 +36,7 @@ import { makeLedgerHook, persistLedger } from "../../core/src/runtime/ledger-hoo
 import type { StoreContext } from "../../core/src/store/graph-store.js";
 import type { NodeId } from "../../core/src/types.js";
 import { type EngineStageRunInput, runStage, type StageRunResultLike } from "../../shims/pi-agent-core/index.js";
+import { countCompactions } from "../compaction/hook.js";
 import { reassertCore } from "../core-instances.js";
 import {
   appendDump,
@@ -52,7 +54,6 @@ import { enableStageDumpArchive, getStageRun, takeStageDump, takeStageFatalModel
 import { bindAgentTools, type StageToolExecutor, unbindAgentTools } from "../stage/tools.js";
 import { lookupModelRates } from "../usage/inputs.js";
 import {
-  countCompactionsFromBranch,
   isTimeoutClass,
   ModelUnavailableError,
   makeCountedExecutor,
@@ -88,6 +89,12 @@ export interface BuilderRunInput {
   widget: StageWidget;
   /** The compaction cut; null at turn_end. */
   scope: { firstKeptEntryId: string | null } | null;
+  /** The active branch as pi-shaped entries (host seam: the capture layer's
+   *  entry view over the mirror rows — the tree-total footer's compaction
+   *  count reads THIS, the session's own compaction rows, matching the
+   *  takeover summary's counter; the store's branch serves row markers,
+   * which carry ids but not the compaction history). */
+  readBranch: () => SessionEntry[];
   /** True ONLY for the final post-catch-up (ensure-ready) call at compaction —
    *  the sole call eligible for the builderSkipWithinBudget fast-path. The
    *  Observer's mid-catch-up folding and every turn_end trigger run never
@@ -159,8 +166,11 @@ export async function runBuilder(input: BuilderRunInput): Promise<void> {
   let toolsForDump: AgentTool[] = [];
   let headerWritten = false;
   // computed once per run — the source graph + the session branch are stable
-  // across passes (only the working graph mutates): pi's countCompactions fold.
-  const compactionCount = countCompactionsFromBranch(store);
+  // across passes (only the working graph mutates): the MIRROR branch's
+  // compaction rows (the host twin of pi's countCompactions(sessionManager)
+  // fold — the store branch materializes at most one snapshot entry, never
+  // the session's compaction history).
+  const compactionCount = countCompactions(input.readBranch());
   try {
     input.widget.startStage(WIDGET_STAGE, { pass });
     stageOpened = true;

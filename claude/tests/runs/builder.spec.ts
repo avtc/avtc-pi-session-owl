@@ -63,7 +63,7 @@ async function run(
     signal: new AbortController().signal,
     widget: NO_OP_WIDGET,
     scope: null,
-    compactionCount: 0,
+    readBranch: () => [],
     runStageFn: fx.runner,
     ...over,
   } as Parameters<typeof runBuilder>[0]);
@@ -125,13 +125,21 @@ describe("runBuilder — unit-commit flush", () => {
 });
 
 describe("runBuilder — fast-path (compaction scope only)", () => {
-  test("the compaction count derives from the session branch (pi's internal fold, not an input)", async () => {
+  test("the compaction count derives from the MIRROR branch's compaction rows (never the store's snapshot materialization)", async () => {
     const rig = await rigUp("b-ccount", entries(2));
-    // a snapshot ledger record: the branch replay renders the NEWEST snapshot
-    // as the compaction entry after its marker row (flush + re-fold)
+    // a snapshot ledger record materializes at most ONE store-branch
+    // compaction entry — the footer must NOT read it; the mirror branch
+    // (the session's own compaction rows) is the count's source
     await rig.ledger.append("snapshot", { type: "session-owl", version: "v1", nodes: [] }, "e2");
     await rig.ledger.flush();
     await rig.prepared.refresh();
+    const mirrorBranch = [
+      { id: "e1", type: "message" },
+      { id: "b1", type: "compaction", summary: "# Memory — one" },
+      { id: "e2", type: "message" },
+      { id: "b2", type: "compaction", summary: "# Memory — two" },
+      { id: "e3", type: "message" },
+    ] as never[];
     const fx = makeRunner([async () => ({})], true);
     await runBuilder({
       core: rig.core,
@@ -140,11 +148,14 @@ describe("runBuilder — fast-path (compaction scope only)", () => {
       signal: new AbortController().signal,
       widget: NO_OP_WIDGET,
       scope: null,
+      ensureReady: false,
+      readBranch: () => mirrorBranch as never,
       runStageFn: fx.runner,
     } as Parameters<typeof runBuilder>[0]);
     expect(fx.calls.length).toBeGreaterThanOrEqual(1);
     const prompt = String(fx.calls[0].messages[0]?.content ?? "");
-    expect(prompt).toContain("1 compaction");
+    expect(prompt).toContain("2 compactions");
+    expect(prompt).not.toContain("1 compaction");
   });
 
   test("each pass's dump section closes (balanced forensics: <pass> … </pass>)", async () => {
@@ -157,6 +168,8 @@ describe("runBuilder — fast-path (compaction scope only)", () => {
       signal: new AbortController().signal,
       widget: NO_OP_WIDGET,
       scope: null,
+      ensureReady: false,
+      readBranch: () => [],
       runStageFn: fx.runner,
     } as Parameters<typeof runBuilder>[0]);
     expect(fx.agents.length).toBeGreaterThanOrEqual(1);
@@ -253,7 +266,7 @@ describe("runBuilder — convergence loop", () => {
       widget: NO_OP_WIDGET,
       scope: null,
       ensureReady: false,
-      compactionCount: 0,
+      readBranch: () => [],
       runStageFn: async (input) => {
         const out = await fx.runner(input);
         controller.abort(); // abort lands after pass 1 (which mutated)
@@ -303,7 +316,7 @@ describe("runBuilder — convergence loop", () => {
       widget: NO_OP_WIDGET,
       scope: null,
       ensureReady: false,
-      compactionCount: 0,
+      readBranch: () => [],
       runStageFn: async (input) => {
         input.onStageEnd?.({ input: 7, output: 3, cacheRead: 0, cacheWrite: 0, cost: 0.002, turns: 1, elapsedMs: 4 });
         return fx.runner(input);

@@ -25,6 +25,7 @@ import type { StoreContext } from "../../core/src/store/graph-store.js";
 import type { TodoBridge, TodoContext } from "../../core/src/todo/types.js";
 import { estimateContentTokens, O_INITIAL_PROMPT } from "../../core/src/types.js";
 import { type EngineStageRunInput, runStage, type StageRunResultLike } from "../../shims/pi-agent-core/index.js";
+import { countCompactions } from "../compaction/hook.js";
 import { type CoreHandle, reassertCore } from "../core-instances.js";
 import {
   appendDump,
@@ -42,7 +43,6 @@ import { enableStageDumpArchive, getStageRun, takeStageDump, takeStageFatalModel
 import { bindAgentTools, type StageToolExecutor, unbindAgentTools } from "../stage/tools.js";
 import { lookupModelRates } from "../usage/inputs.js";
 import {
-  countCompactionsFromBranch,
   isTimeoutClass,
   ModelUnavailableError,
   makeCountedExecutor,
@@ -157,7 +157,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
       includeEntryId: false,
     },
   });
-  const treeTotal = renderTreeTotal(graphStore.graph, countCompactionsFromBranch(store));
+  const treeTotal = renderTreeTotal(graphStore.graph, countCompactions(input.readBranch()));
 
   let stageOpened = false;
   let pass = FIRST_PASS;

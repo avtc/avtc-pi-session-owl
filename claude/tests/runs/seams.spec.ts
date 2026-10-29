@@ -7,12 +7,7 @@
 // logger-only default serves callers without a surface) — the messages
 // and levels are pi's verbatim, so the adapter is a pure transport swap.
 import { describe, expect, test } from "vitest";
-import {
-  countCompactionsFromBranch,
-  loggerNotify,
-  NO_OP_WIDGET,
-  sessionStartMsFromBranch,
-} from "../../host/runs/seams.js";
+import { loggerNotify, NO_OP_WIDGET, sessionStartMsFromBranch } from "../../host/runs/seams.js";
 
 describe("loggerNotify (the logger-only default adapter)", () => {
   test("writes message + level through the log sink", () => {
@@ -72,20 +67,5 @@ describe("sessionStartMsFromBranch — the branch's first entry is the session's
     expect(
       sessionStartMsFromBranch([{ type: "message", id: "a", parentId: null, timestamp: "not-a-date" }], 654_321),
     ).toBe(654_321);
-  });
-});
-
-describe("countCompactionsFromBranch — unchanged (regression)", () => {
-  test("counts only compaction entries", () => {
-    const store = {
-      getBranch: () => [
-        { type: "message", id: "a" },
-        { type: "compaction", id: "b" },
-        { type: "message", id: "c" },
-        { type: "compaction", id: "d" },
-      ],
-      getLeafId: () => "d",
-    } as never;
-    expect(countCompactionsFromBranch(store)).toBe(2);
   });
 });

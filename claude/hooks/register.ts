@@ -1236,21 +1236,21 @@ async function runRewindCheckpoint($: any, sessionId: string, agentId: string | 
     return;
   }
   const key = state.conversationKey(sessionId, agentId);
-  const storage = getSessionStorage(key, sessionId, agentId);
-  const deps = checkpointService().buildDeps(key, storage, {
-    apiFingerprints: () => rewindApiFingerprints($, agentId),
-    ...(agentId === null
-      ? {
-          // the rows-form double check: the platform's messages() rows
-          // carry NO uuid field (the pinned types) — unavailable here, the
-          // check degrades to the api form (tailConfirmed stays true)
-          rowUuids: async () => null as string[] | null,
-        }
-      : {}),
-    transcriptPass: () => rewindTranscriptPass(agentId),
-    logLine: (line) => log.info(line),
-  });
   try {
+    const storage = getSessionStorage(key, sessionId, agentId);
+    const deps = checkpointService().buildDeps(key, storage, {
+      apiFingerprints: () => rewindApiFingerprints($, agentId),
+      ...(agentId === null
+        ? {
+            // the rows-form double check: the platform's messages() rows
+            // carry NO uuid field (the pinned types) — unavailable here, the
+            // check degrades to the api form (tailConfirmed stays true)
+            rowUuids: async () => null as string[] | null,
+          }
+        : {}),
+      transcriptPass: () => rewindTranscriptPass(agentId),
+      logLine: (line) => log.info(line),
+    });
     const verdict = await runCheckpoint(deps, { persist });
     if (verdict.kind === "skipped") {
       lastCheckpointSkipped.add(key);
@@ -1797,22 +1797,41 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
       ...(agentId !== null ? { agentId } : {}),
       input: recallInputOf(e),
     };
-    return await handleOwlRecallCall(call, {
-      resolveKey: (loopId: string | null) => state.conversationKey(sessionId, loopId),
-      isDisabled: () => !state.isOwlEnabled(),
-      subagentsDisabled: () => state.subagentsFullyDisabled(),
-      isConflictPaused: () =>
-        isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() })),
-      checkThenServe: async () => {
-        await runRewindCheckpoint($, sessionId, agentId, false);
-      },
-      pinCore: async () => {
-        await getBinding(key, sessionId, agentId).pinCore();
-      },
-    });
+    // The serve NEVER waits on the rewind check: on a large resumed
+    // conversation the check's api-view fingerprints run tens of seconds,
+    // and a tool.call hook that outlives the engine's ~10s per-call ceiling
+    // lingers — two linger reports respawn the worker with the plugin
+    // UNLOADED (the whole mod goes dark for the session). The canonical
+    // view is checked at the turn/process boundaries instead; between a
+    // rewind and the next turn-end check a serve may answer from the
+    // pre-rewind graph (bounded staleness, the accepted trade).
+    // The try/catch is belt-and-braces: a throw out of the serve would be
+    // SKIPPED by the engine ("no tool.call hook answered") — the same
+    // linger/unload trap — so any unexpected failure answers in-band.
+    try {
+      return await handleOwlRecallCall(call, {
+        resolveKey: (loopId: string | null) => state.conversationKey(sessionId, loopId),
+        isDisabled: () => !state.isOwlEnabled(),
+        subagentsDisabled: () => state.subagentsFullyDisabled(),
+        isConflictPaused: () =>
+          isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() })),
+        checkThenServe: SKIP_REWIND_CHECK_IN_SERVE,
+        pinCore: async () => {
+          await getBinding(key, sessionId, agentId).pinCore();
+        },
+      });
+    } catch (err) {
+      report("owl_recall serve failed", err);
+      return { deny: `Error: session-owl recall failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
   }
   return next(e);
 }
+
+/** The tool.call-served surfaces' checkThenServe: a no-op, never the
+ *  rewind checkpoint (see the owl_recall call site for the linger/unload
+ *  trap it avoids; the turn/process boundaries own the canonical view). */
+const SKIP_REWIND_CHECK_IN_SERVE: () => Promise<void> = async () => {};
 
 /** The tool.call envelope's reserved keys — everything else on the event IS
  *  the model's arguments (the engine spreads them beside `tool`). */
@@ -1889,9 +1908,7 @@ async function onCommandRun($: any, e: AnyEvent, next: Next) {
         const answer = await $.ui.ask(`${title}\n${message}`, ["Yes", "No"]);
         return answer === "Yes";
       },
-      checkThenServe: async () => {
-        await runRewindCheckpoint($, sessionId, null, false);
-      },
+      checkThenServe: SKIP_REWIND_CHECK_IN_SERVE,
       openViewer: (title: string, text: string) => {
         setViewerContent(title, text);
         void $.ui.open({ id: VIEWER_PANE_ID, title, focus: true, closeOnEscape: true, rows: 20 });

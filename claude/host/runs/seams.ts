@@ -18,7 +18,6 @@
 //   runtime/convergence.ts: the Builder and Selector runs consume the same
 //   counting/classification bodies, differing only in their mutate-name set.
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { StoreContext, StoreEntry } from "../../core/src/store/graph-store.js";
 import type { StageRunResultLike } from "../../shims/pi-agent-core/index.js";
 import type { NotifyLevel } from "../notify/adapter.js";
 
@@ -219,9 +218,6 @@ export function isTimeoutClass(result: StageRunResultLike, signal: AbortSignal):
   return result.abortReason === "timeout";
 }
 
-/** The compaction count for the tree-total (host seam: the branch's
- *  compaction entries — pi's countCompactions(sessionManager) fold; derived
- *  inside the run, never an input). */
 /** The session's birth from the ACTIVE BRANCH's first entry timestamp —
  *  pi's readSessionBounds duration half: a --resume keeps the conversation's
  *  original birth (the first row predates the process), where a process-start
@@ -235,13 +231,4 @@ export function sessionStartMsFromBranch(
   if (first === undefined) return fallbackMs;
   const ms = Date.parse(first.timestamp ?? "1970-01-01T00:00:00.000Z");
   return Number.isNaN(ms) ? fallbackMs : ms;
-}
-
-export function countCompactionsFromBranch(store: StoreContext): number {
-  const branch: readonly StoreEntry[] = store.getBranch(store.getLeafId());
-  let n = 0;
-  for (const e of branch) {
-    if (e.type === "compaction") n += 1;
-  }
-  return n;
 }
