@@ -99,13 +99,6 @@ export interface CompactionHookDeps {
   injectedSummaryRow: boolean;
   /** The conversation's entries view (the branch the gap + touched files read). */
   getBranch: () => SessionEntry[];
-  /** The count of owl's own persisted compaction snapshots (ledger lines of
-   *  kind snapshot / SNAPSHOT_PARTS — one per owl-ANSWERED compaction,
-   *  durable across restarts). The footer count's FLOOR: the engine files
-   *  compaction rows without live append events, so the mirror adopts them
-   *  only at the next transcript backfill — without the floor every
-   *  compaction of a long-lived process renders "0 compactions". */
-  ownSnapshotCount: () => Promise<number>;
   getLeafId: () => string | null;
   /** The conversation's observer frontier. */
   getObserverFrontier: () => string | null;
@@ -308,21 +301,36 @@ async function runGate(
     held.scope.firstKeptEntryId,
   );
   const oInitialPrompt = store.graph.observations.get(O_INITIAL_PROMPT) ?? null;
+  // the footer's count: owl's own compaction generation (the noted counter
+  // / the live snapshot's compactionsAfter) — this compaction EXCLUDED, the
+  // persist below writes count + 1 into the snapshot it creates
+  const compactionCount = compactionCountOf(store);
   const summary = renderSummary({
     graph: store.graph,
     selectedTree: store.selectedTree,
     oInitialPrompt,
     renderMode: deps.settings.renderMode,
     touchedFiles,
-    compactionCount: await footerCompactionCount(deps),
+    compactionCount,
   });
   // the compaction baseline for the status report's since-last arithmetic
   store.lastCompactionLedger = snapshotAtCompaction(store.usageLedger).lastCompactionLedger;
 
   // the per-stage usage delta isolates THIS compaction's stage cost
   const compactionDelta = sinceLastCompaction(store.usageLedger, preStageLedger);
-  const details = encodeDetails(store.graph, store.selectedTree, store.usageLedger) as { compactionStages?: unknown };
+  const details = encodeDetails(store.graph, store.selectedTree, store.usageLedger) as {
+    compactionStages?: unknown;
+    compactionsAfter?: unknown;
+  };
   details.compactionStages = ledgerToStageUsages(compactionDelta);
+  // the counter rides the snapshot: the NEXT compaction renders this
+  // number, a restart/resume restores it from the live snapshot, and a
+  // rewind rolls it back together with the graph (the older LIVE snapshot
+  // serves). Noted on the live store view too — the just-answered
+  // compaction must count before any reload re-derives from disk.
+  const compactionsAfter = compactionCount + 1;
+  details.compactionsAfter = compactionsAfter;
+  noteCompactionCount(store, compactionsAfter);
 
   // The kept tail's aggregated thinking rides INSIDE the summary row (the
   // engine serves user rows; a trailing assistant row persists as
@@ -395,7 +403,7 @@ async function precomputeTakeover(deps: CompactionHookDeps): Promise<TakeoverOut
       oInitialPrompt: store.graph.observations.get(O_INITIAL_PROMPT) ?? null,
       renderMode: deps.settings.renderMode,
       touchedFiles: extractTouchedFiles({ getLeafId: deps.getLeafId, getBranch: deps.getBranch }, null),
-      compactionCount: await footerCompactionCount(deps),
+      compactionCount: compactionCountOf(store),
     });
     return { kind: "answer", result: buildTakeover({ summary, kept: [] }) };
   } finally {
@@ -471,6 +479,19 @@ export function observerCatchUpGap(deps: CompactionHookDeps, firstKeptEntryId: s
  *  Distrust (null — the whole branch becomes the catch-up block, never a
  *  cut swallowed unobserved) when the cut precedes the summary region, or
  *  the branch is behind even counting its head extras. */
+/** The current mapping rule for which compaction entry is a compaction's
+ *  SUMMARY row (vs its boundary marker): a non-empty summary text. NOTE:
+ *  the live boundary row itself carries text ('Conversation compacted'),
+ *  under which this rule counts both rows — a safe-direction over-count; a
+ *  live session.append decides the final row-type distinction. */
+function isCompactionSummaryEntry(entry: SessionEntry): boolean {
+  return (
+    (entry as { type?: string }).type === "compaction" &&
+    typeof (entry as { summary?: unknown }).summary === "string" &&
+    (entry as { summary: string }).summary.length > 0
+  );
+}
+
 function entryIdForCut(branch: SessionEntry[], firstKeptIndex: number, messageCount: number): string | null {
   const messageBearing = branch.filter((entry) =>
     COMPACT_EVENT_ENTRY_TYPES.has((entry as { type?: string }).type ?? ""),
@@ -488,34 +509,28 @@ function entryIdForCut(branch: SessionEntry[], firstKeptIndex: number, messageCo
   return aligned === undefined ? null : aligned.id;
 }
 
-/** The current mapping rule for which compaction entry is a compaction's
- *  SUMMARY row (vs its boundary marker): a non-empty summary text. NOTE:
- *  the live boundary row itself carries text ('Conversation compacted'),
- *  under which this rule counts both rows — a safe-direction over-count; a
- *  live session.append decides the final row-type distinction. */
-function isCompactionSummaryEntry(entry: SessionEntry): boolean {
-  return (
-    (entry as { type?: string }).type === "compaction" &&
-    typeof (entry as { summary?: unknown }).summary === "string" &&
-    (entry as { summary: string }).summary.length > 0
-  );
+/** The live per-store compaction counters (the same bolt-on pattern as the
+ *  own-summary sets: a store drops out with its resident state). The
+ *  footer's count source — owl's own compaction generation: incremented at
+ *  every ANSWERED compaction (the persist notes count + 1 on the live view
+ *  and writes it into the snapshot as compactionsAfter), restored at every
+ *  pin from the newest LIVE snapshot (a rewind rolls it back with the
+ *  graph — the older live snapshot serves). Deliberately owl-cycles only:
+ *  native/foreign compactions owl never answered do not advance it, and a
+ *  store whose snapshots predate the field counts from zero. */
+const compactionCounts = new WeakMap<GraphStore, number>();
+
+/** Hold a compaction count on a conversation store. MONOTONIC per store
+ *  view: a pin re-noting from a not-yet-refreshed (older) resolved snapshot
+ *  must never clobber the count a just-answered compaction noted — a
+ *  rewind gets a FRESH view (the reload), which starts over from the older
+ *  live snapshot. */
+export function noteCompactionCount(store: GraphStore, count: number): void {
+  const current = compactionCounts.get(store) ?? 0;
+  if (count > current) compactionCounts.set(store, count);
 }
 
-/** The footer's compaction count: the mirror branch's compaction rows
- *  (complete once the transcript backfill adopted them), floored by owl's
- *  own persisted snapshots — a live process sees NO compaction rows (the
- *  engine files them without live append events), so without the floor the
- *  footer reads 0 through every compaction of a long-lived process. */
-async function footerCompactionCount(deps: CompactionHookDeps): Promise<number> {
-  return Math.max(countCompactions(deps.getBranch()), await deps.ownSnapshotCount());
-}
-
-/** Compactions so far on this branch (the summary footer's maturity signal) —
- *  the summary rows under the current mapping rule. */
-export function countCompactions(branch: SessionEntry[]): number {
-  let count = 0;
-  for (const entry of branch) {
-    if (isCompactionSummaryEntry(entry)) count += 1;
-  }
-  return count;
+/** A store's compaction count (0 until any is noted). */
+export function compactionCountOf(store: GraphStore): number {
+  return compactionCounts.get(store) ?? 0;
 }

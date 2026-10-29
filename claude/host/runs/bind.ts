@@ -19,7 +19,12 @@ import { entriesForCache, getCapture } from "../capture/append-handler.js";
 import { makeEntryResolver } from "../capture/details-bridge.js";
 import { type ClaudeRow, groupRows } from "../capture/grouper.js";
 import type { OwlCommandDeps } from "../commands/handlers.js";
-import { type CompactionHookDeps, type CompactionRuns, countCompactions } from "../compaction/hook.js";
+import {
+  type CompactionHookDeps,
+  type CompactionRuns,
+  compactionCountOf,
+  noteCompactionCount,
+} from "../compaction/hook.js";
 import { isConflictPaused } from "../conflicts/pause.js";
 import { type CoreHandle, getCore } from "../core-instances.js";
 import type { StageDumpLocation } from "../dumps/module.js";
@@ -33,7 +38,7 @@ import * as state from "../state.js";
 import { serveStatusReport } from "../status/report.js";
 import { sweepMirror } from "../storage/mirror.js";
 import { getSessionStorage } from "../storage/session-storage.js";
-import { countSnapshotRecords, newSnapshotId, persistSnapshotText } from "../storage/snapshot.js";
+import { newSnapshotId, persistSnapshotText } from "../storage/snapshot.js";
 import { type PreparedContext, prepareStoreContext } from "../storage/store-context.js";
 import {
   collectOwnSummariesFromBranch,
@@ -206,7 +211,8 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
   let pinnedHandle: CoreHandle | null = null;
 
   const pinCore = async (): Promise<CoreHandle> => {
-    const ctx = (await preparedCtx()).ctx;
+    const prepared = await preparedCtx();
+    const ctx = prepared.ctx;
     resolvedCtx = ctx;
     const handle = await getCore(key, {
       ctxFactory: () => ctx,
@@ -216,19 +222,17 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
     pinnedHandle = handle;
     const storeView = handle.store.getGraphStore();
     setOwnSummaries(storeView, collectOwnSummariesFromBranch(ctx.getBranch(ctx.getLeafId())));
+    // the snapshot's compaction counter rides the pin (the footer count's
+    // source): monotonic per store view, so a not-yet-refreshed older
+    // snapshot never clobbers a just-answered count; a rewind's fresh view
+    // starts over from the older LIVE snapshot the reconciliation serves
+    const snapDetails = prepared.resolvedSnapshot()?.details as { compactionsAfter?: unknown } | undefined;
+    if (snapDetails !== undefined && typeof snapDetails.compactionsAfter === "number") {
+      noteCompactionCount(storeView, snapDetails.compactionsAfter);
+    }
     pinnedStoreView = storeView;
     pinnedGraph = storeView.graph;
     return handle;
-  };
-
-  /** The conversation's persisted-snapshot count (one ledger line per
-   *  owl-ANSWERED compaction — flushed fold + live buffer, never
-   *  overlapping) — the compaction footer's floor: the mirror adopts the
-   *  engine's compaction rows only via the transcript backfill, so a live
-   *  process without a restart would read 0 compactions without it. */
-  const ownSnapshotCount = async (): Promise<number> => {
-    const prepared = await preparedCtx();
-    return countSnapshotRecords(prepared.recordsRef.flushed, storage.ledger.liveRecords());
   };
 
   // The one-shot model capsule (goal extraction) — literal at the arm site,
@@ -369,7 +373,6 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         widget,
         scope: null,
         ensureReady: false,
-        readBranch: () => binding.branch(),
         flushLedger: async () => {
           await storage.ledger.flush();
         },
@@ -509,7 +512,6 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
             widget,
             scope,
             ensureReady,
-            readBranch: () => binding.branch(),
             flushLedger: async () => {
               await storage.ledger.flush();
             },
@@ -557,7 +559,6 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         },
         getGraphStore: () => binding.graphStore(),
         runs: compactionRuns,
-        ownSnapshotCount,
         persistSnapshot: async (details: unknown, compactionId: string, summaryText: string) => {
           // the snapshot's liveness anchor: the newest mirrored row (the
           // rows the render reflects); the branch leaf covers a fresh
@@ -705,7 +706,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
               binding.branch(),
               state.registry.get(key)?.createdAt ?? Date.now(),
             ),
-            compactionCount: Math.max(countCompactions(binding.branch()), await ownSnapshotCount()),
+            compactionCount: compactionCountOf(view),
           },
           usageLedger: view.usageLedger,
           lastCompactionLedger: view.lastCompactionLedger,

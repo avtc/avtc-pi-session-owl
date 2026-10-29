@@ -15,7 +15,13 @@ import { clearDetailsCache } from "../../core/src/format/details.js";
 import { cloneLedger, EMPTY_LEDGER } from "../../core/src/store/codecs.js";
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { makeNode, nowStoredTimestamp } from "../../core/src/types.js";
-import { type CompactionHookDeps, compactionTakeover, observerCatchUpGap } from "../../host/compaction/hook.js";
+import {
+  type CompactionHookDeps,
+  compactionCountOf,
+  compactionTakeover,
+  noteCompactionCount,
+  observerCatchUpGap,
+} from "../../host/compaction/hook.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { ModelUnavailableError } from "../../host/runs/seams.js";
 import { noteOwnSummary } from "../../host/storage/summary-identity.js";
@@ -107,7 +113,6 @@ function makeHarness(over: Partial<CompactionHookDeps> = {}): Harness {
     injectedSummaryRow: false,
     getBranch: () => branch,
     getLeafId: () => branch[branch.length - 1]?.id ?? null,
-    ownSnapshotCount: async () => 0,
     getObserverFrontier: () => store.observerFrontier,
     pinCore: async () => {
       order.push("pin");
@@ -577,40 +582,15 @@ describe("compaction takeover — the entry-space cut alignment", () => {
     expect(builderEntry).toBe("builder:e1");
   });
 
-  test("countCompactions rule: non-empty-summary entries count, textless markers never", async () => {
-    // pins the CURRENT mapping mechanism (the live-shape decision rides the
-    // recorded probe — see the hook's isCompactionSummaryEntry note)
+  test("the footer count is owl's own compaction generation (the noted counter), zero on a fresh store", async () => {
     const h = makeHarness();
     h.branch.length = 0;
     h.branch.push(
       entry("e1"),
-      { id: "b0", type: "compaction", summary: "" } as never,
       { id: "b1", type: "compaction", summary: "# Memory — one" } as never,
-      entry("e2"),
       { id: "b2", type: "compaction", summary: "# Memory — two" } as never,
-      entry("e3"),
+      entry("e2"),
     );
-    h.deps.keepRecentTokens = 2; // the first message stays swallowed — the render path runs countCompactions
-    const outcome = await compactionTakeover(
-      { trigger: "auto", messages: [message("swallowed seed — pad"), message("only row")] },
-      { ...h.deps, getBranch: () => h.branch },
-    );
-    expect(outcome.kind).toBe("answer");
-    if (outcome.kind !== "answer") return;
-    // the footer's maturity signal counted the TWO summary rows — the
-    // textless marker never counts under the current rule
-    expect(outcome.result.messages[0]?.text).toContain("2 compactions");
-  });
-
-  test("the footer count is floored by owl's own persisted snapshots (a live process has no mirror rows)", async () => {
-    // the engine files compaction rows without live append events — the
-    // mirror adopts them only at the next transcript backfill, so a
-    // long-lived process renders over a branch with NO compaction rows;
-    // the persisted-snapshot ledger (one line per owl-ANSWERED compaction)
-    // carries the count until the backfill lands
-    const h = makeHarness({ ownSnapshotCount: async () => 3 });
-    h.branch.length = 0;
-    h.branch.push(entry("e1"), entry("e2")); // no compaction rows at all
     h.deps.keepRecentTokens = 2; // the first message stays swallowed — the render path runs the count
     const outcome = await compactionTakeover(
       { trigger: "auto", messages: [message("swallowed seed — pad"), message("only row")] },
@@ -618,29 +598,37 @@ describe("compaction takeover — the entry-space cut alignment", () => {
     );
     expect(outcome.kind).toBe("answer");
     if (outcome.kind !== "answer") return;
-    expect(outcome.result.messages[0]?.text).toContain("3 compactions");
-    expect(outcome.result.messages[0]?.text).not.toContain("0 compactions");
+    // the mirror rows (native or swept) never drive the count: owl cycles
+    // only, and a store nothing was noted on counts from zero
+    expect(outcome.result.messages[0]?.text).toContain("0 compactions");
   });
 
-  test("the mirror count wins when the backfill has adopted MORE rows than owl's own snapshots (native compactions included)", async () => {
-    const h = makeHarness({ ownSnapshotCount: async () => 1 });
+  test("the noted counter drives the footer and the persist writes count + 1 into the snapshot and the live store", async () => {
+    const h = makeHarness();
+    noteCompactionCount(h.store as never, 3); // the live snapshot restored 3 at the pin
     h.branch.length = 0;
-    h.branch.push(
-      entry("e1"),
-      { id: "b1", type: "compaction", summary: "# Memory — one" } as never,
-      { id: "b2", type: "compaction", summary: "# Memory — two" } as never,
-      entry("e2"),
-    );
+    h.branch.push(entry("e1"), entry("e2")); // no compaction rows: the mirror is NOT the source
     h.deps.keepRecentTokens = 2;
+    let persisted: { compactionsAfter?: unknown } | null = null;
     const outcome = await compactionTakeover(
       { trigger: "auto", messages: [message("swallowed seed — pad"), message("only row")] },
-      { ...h.deps, getBranch: () => h.branch },
+      {
+        ...h.deps,
+        getBranch: () => h.branch,
+        persistSnapshot: async (details: unknown) => {
+          persisted = details as { compactionsAfter?: unknown };
+        },
+      },
     );
     expect(outcome.kind).toBe("answer");
     if (outcome.kind !== "answer") return;
-    // max(mirror=2, snapshots=1): the swept mirror is the richer source —
-    // never a sum (the same compactions would double-count)
-    expect(outcome.result.messages[0]?.text).toContain("2 compactions");
+    // this compaction EXCLUDED at render; the snapshot it produces carries
+    // the incremented generation, and the live store view is noted too (the
+    // next compaction in the SAME process must see it without a reload)
+    expect(outcome.result.messages[0]?.text).toContain("3 compactions");
+    const snap = persisted as { compactionsAfter?: unknown } | null; // CFA keeps the closure-written value opaque
+    expect(snap?.compactionsAfter).toBe(4);
+    expect(compactionCountOf(h.store as never)).toBe(4);
   });
 
   test("the live two-row shape (boundary marker + summary) aligns exactly like the one-row model", async () => {

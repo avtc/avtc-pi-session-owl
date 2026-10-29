@@ -25,7 +25,7 @@ import type { StoreContext } from "../../core/src/store/graph-store.js";
 import type { TodoBridge, TodoContext } from "../../core/src/todo/types.js";
 import { estimateContentTokens, O_INITIAL_PROMPT } from "../../core/src/types.js";
 import { type EngineStageRunInput, runStage, type StageRunResultLike } from "../../shims/pi-agent-core/index.js";
-import { countCompactions } from "../compaction/hook.js";
+import { compactionCountOf } from "../compaction/hook.js";
 import { type CoreHandle, reassertCore } from "../core-instances.js";
 import {
   appendDump,
@@ -157,7 +157,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
       includeEntryId: false,
     },
   });
-  const treeTotal = renderTreeTotal(graphStore.graph, countCompactions(input.readBranch()));
+  const treeTotal = renderTreeTotal(graphStore.graph, compactionCountOf(graphStore));
 
   let stageOpened = false;
   let pass = FIRST_PASS;

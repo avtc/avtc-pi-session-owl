@@ -646,3 +646,17 @@ describe("store-context — the restore-fork served-branch contract", () => {
     expect(roots.map((n) => n.id)).toContain("nGoal");
   });
 });
+
+describe("store-context — resolvedSnapshot (the compaction counter's restore source)", () => {
+  test("null before any snapshot; the newest LIVE snapshot's details after one", async () => {
+    const { mirror, prepared } = await setup();
+    mirror.bufferRow(row("u1", null));
+    expect(prepared.resolvedSnapshot()).toBeNull();
+    // persist one snapshot on the live branch, re-fold, resolve
+    const ledger = new LedgerWriter(fs, DIR, "snap-p");
+    await persistSnapshotText(fs, DIR, ledger, "snap1", JSON.stringify({ compactionsAfter: 4 }), "u1");
+    const p2 = await prepareStoreContext(fs, DIR, new LedgerWriter(fs, DIR, "x"), mirror);
+    const resolved = p2.resolvedSnapshot();
+    expect((resolved?.details as { compactionsAfter?: unknown })?.compactionsAfter).toBe(4);
+  });
+});

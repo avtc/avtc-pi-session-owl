@@ -191,6 +191,12 @@ export interface PreparedContext {
    *  rewind reconciliation feeds the detected live set; the default is the
    *  constructed one). */
   refresh(isLive?: LivePredicate): Promise<void>;
+  /** The newest LIVE snapshot this context resolved (its decoded details);
+   *  null before the first owl-answered compaction. The restore source for
+   *  host-side per-store state that rides the snapshot (the compaction
+   *  counter) — liveness-resolved, so a rewind serves the older snapshot's
+   *  value together with its graph. */
+  resolvedSnapshot(): { details: unknown } | null;
 }
 
 /**
@@ -379,6 +385,7 @@ export async function prepareStoreContext(
     },
     /** Re-fold + re-resolve (call at every load — the ctxFactory pattern). */
     refresh,
+    resolvedSnapshot: () => (snapshot === null ? null : { details: snapshot.details }),
   };
 }
 
