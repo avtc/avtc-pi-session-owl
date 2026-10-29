@@ -7,7 +7,12 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { byteLength, createMemoryFs, ROLL_MARGIN } from "../../host/storage/fs-adapter.js";
 import { foldLedger, type LedgerRecord, LedgerWriter } from "../../host/storage/ledger.js";
-import { persistSnapshotText, resolveNewestSnapshot, snapPartName } from "../../host/storage/snapshot.js";
+import {
+  countSnapshotRecords,
+  persistSnapshotText,
+  resolveNewestSnapshot,
+  snapPartName,
+} from "../../host/storage/snapshot.js";
 
 const mem = createMemoryFs();
 const fs = mem.adapter;
@@ -154,5 +159,31 @@ describe("snapshot — crash orphans + liveness", () => {
     await fs.writeText(`${DIR}/snap-s-1-of-1.json`, "short");
     const resolved = await resolveNewestSnapshot(fs, DIR, [r], () => true);
     expect(resolved).toBeNull();
+  });
+});
+
+describe("countSnapshotRecords — the compaction footer's floor", () => {
+  const snap = (ts: number) => rec("snapshot", { type: "session-owl", version: "v1", n: ts }, `u${ts}`, ts);
+  const parts = (ts: number) =>
+    rec("SNAPSHOT_PARTS", { snapId: `s${ts}`, files: ["snap-s1-1-of-1.json"], totalChars: 10 }, `u${ts}`, ts);
+  const other = (ts: number) =>
+    ({ producerId: "A", seq: ts, ts, marker: `u${ts}`, at: `u${ts}`, kind: "usage", payload: {} }) as LedgerRecord;
+
+  test("one line per compaction, both record kinds, both views sum exactly once", () => {
+    // flushed (the last fold: 2 snapshot lines) + live (the writer's buffer:
+    // 1 snapshot + 1 parts line) = 4 owl-answered compactions
+    expect(countSnapshotRecords([snap(1), snap(2), other(3)], [other(4), snap(5), parts(6)])).toBe(4);
+  });
+
+  test("empty and non-snapshot-only record sets count 0", () => {
+    expect(countSnapshotRecords([], [])).toBe(0);
+    expect(countSnapshotRecords([other(1), other(2)], [other(3)])).toBe(0);
+  });
+
+  test("a RAW record count — dead markers still count (the compaction happened)", () => {
+    // liveness/marker filtering is deliberately absent: the compaction row
+    // a snapshot's marker names reaches the mirror only via the backfill
+    const dead = { ...snap(1), marker: "off-branch" } as LedgerRecord;
+    expect(countSnapshotRecords([dead], [])).toBe(1);
   });
 });

@@ -301,3 +301,22 @@ export async function resolveConsistentSnapshot(
 export function newSnapshotId(): string {
   return randomUUID().slice(0, 8);
 }
+
+/** Distinct persisted compaction snapshots across both record views (the
+ *  last fold's flushed records + the writer's live buffer): one ledger line
+ *  per owl-ANSWERED compaction (kind snapshot single-record, SNAPSHOT_PARTS
+ *  over-roll) — the two views never overlap (a re-fold re-claims the
+ *  written records into the fold). A raw-record count by design: liveness
+ *  or marker filters would defeat the count's purpose — the compaction row
+ *  a snapshot's marker names reaches the mirror only via the transcript
+ *  backfill, so live processes must count the snapshots themselves. */
+export function countSnapshotRecords(flushed: readonly LedgerRecord[], live: readonly LedgerRecord[]): number {
+  let n = 0;
+  for (const r of flushed) {
+    if (r.kind === "snapshot" || r.kind === "SNAPSHOT_PARTS") n += 1;
+  }
+  for (const r of live) {
+    if (r.kind === "snapshot" || r.kind === "SNAPSHOT_PARTS") n += 1;
+  }
+  return n;
+}

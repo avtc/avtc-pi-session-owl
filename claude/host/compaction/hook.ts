@@ -99,6 +99,13 @@ export interface CompactionHookDeps {
   injectedSummaryRow: boolean;
   /** The conversation's entries view (the branch the gap + touched files read). */
   getBranch: () => SessionEntry[];
+  /** The count of owl's own persisted compaction snapshots (ledger lines of
+   *  kind snapshot / SNAPSHOT_PARTS — one per owl-ANSWERED compaction,
+   *  durable across restarts). The footer count's FLOOR: the engine files
+   *  compaction rows without live append events, so the mirror adopts them
+   *  only at the next transcript backfill — without the floor every
+   *  compaction of a long-lived process renders "0 compactions". */
+  ownSnapshotCount: () => Promise<number>;
   getLeafId: () => string | null;
   /** The conversation's observer frontier. */
   getObserverFrontier: () => string | null;
@@ -307,7 +314,7 @@ async function runGate(
     oInitialPrompt,
     renderMode: deps.settings.renderMode,
     touchedFiles,
-    compactionCount: countCompactions(deps.getBranch()),
+    compactionCount: await footerCompactionCount(deps),
   });
   // the compaction baseline for the status report's since-last arithmetic
   store.lastCompactionLedger = snapshotAtCompaction(store.usageLedger).lastCompactionLedger;
@@ -388,7 +395,7 @@ async function precomputeTakeover(deps: CompactionHookDeps): Promise<TakeoverOut
       oInitialPrompt: store.graph.observations.get(O_INITIAL_PROMPT) ?? null,
       renderMode: deps.settings.renderMode,
       touchedFiles: extractTouchedFiles({ getLeafId: deps.getLeafId, getBranch: deps.getBranch }, null),
-      compactionCount: countCompactions(deps.getBranch()),
+      compactionCount: await footerCompactionCount(deps),
     });
     return { kind: "answer", result: buildTakeover({ summary, kept: [] }) };
   } finally {
@@ -492,6 +499,15 @@ function isCompactionSummaryEntry(entry: SessionEntry): boolean {
     typeof (entry as { summary?: unknown }).summary === "string" &&
     (entry as { summary: string }).summary.length > 0
   );
+}
+
+/** The footer's compaction count: the mirror branch's compaction rows
+ *  (complete once the transcript backfill adopted them), floored by owl's
+ *  own persisted snapshots — a live process sees NO compaction rows (the
+ *  engine files them without live append events), so without the floor the
+ *  footer reads 0 through every compaction of a long-lived process. */
+async function footerCompactionCount(deps: CompactionHookDeps): Promise<number> {
+  return Math.max(countCompactions(deps.getBranch()), await deps.ownSnapshotCount());
 }
 
 /** Compactions so far on this branch (the summary footer's maturity signal) —

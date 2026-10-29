@@ -33,7 +33,7 @@ import * as state from "../state.js";
 import { serveStatusReport } from "../status/report.js";
 import { sweepMirror } from "../storage/mirror.js";
 import { getSessionStorage } from "../storage/session-storage.js";
-import { newSnapshotId, persistSnapshotText } from "../storage/snapshot.js";
+import { countSnapshotRecords, newSnapshotId, persistSnapshotText } from "../storage/snapshot.js";
 import { type PreparedContext, prepareStoreContext } from "../storage/store-context.js";
 import {
   collectOwnSummariesFromBranch,
@@ -219,6 +219,16 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
     pinnedStoreView = storeView;
     pinnedGraph = storeView.graph;
     return handle;
+  };
+
+  /** The conversation's persisted-snapshot count (one ledger line per
+   *  owl-ANSWERED compaction — flushed fold + live buffer, never
+   *  overlapping) — the compaction footer's floor: the mirror adopts the
+   *  engine's compaction rows only via the transcript backfill, so a live
+   *  process without a restart would read 0 compactions without it. */
+  const ownSnapshotCount = async (): Promise<number> => {
+    const prepared = await preparedCtx();
+    return countSnapshotRecords(prepared.recordsRef.flushed, storage.ledger.liveRecords());
   };
 
   // The one-shot model capsule (goal extraction) — literal at the arm site,
@@ -547,6 +557,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         },
         getGraphStore: () => binding.graphStore(),
         runs: compactionRuns,
+        ownSnapshotCount,
         persistSnapshot: async (details: unknown, compactionId: string, summaryText: string) => {
           // the snapshot's liveness anchor: the newest mirrored row (the
           // rows the render reflects); the branch leaf covers a fresh
@@ -694,7 +705,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
               binding.branch(),
               state.registry.get(key)?.createdAt ?? Date.now(),
             ),
-            compactionCount: countCompactions(binding.branch()),
+            compactionCount: Math.max(countCompactions(binding.branch()), await ownSnapshotCount()),
           },
           usageLedger: view.usageLedger,
           lastCompactionLedger: view.lastCompactionLedger,
