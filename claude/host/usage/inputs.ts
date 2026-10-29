@@ -14,6 +14,17 @@ import type { ModelRates } from "../../shims/pi-agent-core/index.js";
 /** One family entry: the id PREFIX (the part before any date suffix) and
  *  its per-million rates. Longest prefix wins. */
 const FAMILY_RATES: ReadonlyArray<{ prefix: string; rates: ModelRates }> = [
+  { prefix: "claude-opus-5-5", rates: { inputPerM: 4, outputPerM: 20 } },
+  { prefix: "claude-sonnet-5-5", rates: { inputPerM: 2, outputPerM: 10 } },
+  {
+    // prompt-size tiered: prompts above 100k tokens price at the upper step
+    prefix: "claude-haiku-5-5",
+    rates: {
+      inputPerM: 0.1,
+      outputPerM: 0.5,
+      overThreshold: { inputTokens: 100_000, inputPerM: 0.5, outputPerM: 2.5 },
+    },
+  },
   { prefix: "claude-opus-4-5", rates: { inputPerM: 5, outputPerM: 25 } },
   { prefix: "claude-opus-4", rates: { inputPerM: 15, outputPerM: 75 } },
   { prefix: "claude-sonnet-4", rates: { inputPerM: 3, outputPerM: 15 } },

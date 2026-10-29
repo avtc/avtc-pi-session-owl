@@ -87,6 +87,9 @@ interface CompletionUsage {
 export interface ModelRates {
   inputPerM: number;
   outputPerM: number;
+  /** A second price step for prompts above inputTokens (prompt-size tiered
+   *  pricing); absent = one flat rate. */
+  overThreshold?: { inputTokens: number; inputPerM: number; outputPerM: number };
 }
 
 /** The engine-backed runStage input: pi's StageRunInput fields the spawn
@@ -214,7 +217,9 @@ function computeCost(usage: CompletionUsage | null, rates: ModelRates | null, lo
     log(`session-owl: cost unavailable for model "${usage.model}" — usage cost zeroed`);
     return 0;
   }
-  return (usage.input / 1_000_000) * rates.inputPerM + (usage.output / 1_000_000) * rates.outputPerM;
+  const tier =
+    rates.overThreshold !== undefined && usage.input > rates.overThreshold.inputTokens ? rates.overThreshold : rates;
+  return (usage.input / 1_000_000) * tier.inputPerM + (usage.output / 1_000_000) * tier.outputPerM;
 }
 
 /** The engine services the shim needs (armed by the register wiring). */

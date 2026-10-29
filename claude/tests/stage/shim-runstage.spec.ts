@@ -147,6 +147,61 @@ describe("runStage — usage mapping", () => {
     expect(ends).toHaveLength(1); // onStageEnd fired
   });
 
+  test("prompt-size tiered rates price large prompts at the upper step", async () => {
+    clearAllStageRuns();
+    bridge.clearRouting();
+    arm(async () => ({ model: "haiku-5-5", agentId: "ag-t1" }));
+    const tiered = {
+      inputPerM: 0.1,
+      outputPerM: 0.5,
+      overThreshold: { inputTokens: 100_000, inputPerM: 0.5, outputPerM: 2.5 },
+    };
+    const p1 = runStage(
+      baseInput({
+        modelRates: (m) => (m === "haiku-5-5" ? tiered : null),
+      }),
+    );
+    await settle();
+    bridge.routeAgentCompletion({
+      answer: "x",
+      isAborted: false,
+      agentId: "ag-t1",
+      usage: completionUsageOf({
+        input_tokens: 150_000,
+        output_tokens: 10_000,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        model: "haiku-5-5",
+      }),
+    });
+    const r1 = await p1;
+    // 150k above the 100k step: 150k×$0.50/M + 10k×$2.50/M
+    expect(r1.usage.cost).toBeCloseTo(0.075 + 0.025, 5);
+
+    arm(async () => ({ model: "haiku-5-5", agentId: "ag-t2" }));
+    const p2 = runStage(
+      baseInput({
+        modelRates: (m) => (m === "haiku-5-5" ? tiered : null),
+      }),
+    );
+    await settle();
+    bridge.routeAgentCompletion({
+      answer: "x",
+      isAborted: false,
+      agentId: "ag-t2",
+      usage: completionUsageOf({
+        input_tokens: 100_000,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        model: "haiku-5-5",
+      }),
+    });
+    const r2 = await p2;
+    // exactly 100k stays on the lower step (up to 100k inclusive)
+    expect(r2.usage.cost).toBeCloseTo(0.01, 5);
+  });
+
   test("unknown rates zero the cost with a log line (gateway models)", async () => {
     clearAllStageRuns();
     bridge.clearRouting();

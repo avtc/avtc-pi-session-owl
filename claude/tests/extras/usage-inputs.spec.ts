@@ -24,9 +24,24 @@ describe("lookupModelRates", () => {
     expect(lookupModelRates("claude-opus-4-1")).toEqual({ inputPerM: 15, outputPerM: 75 });
   });
 
+  test("the 5.5 generation resolves (haiku prompt-size tiered)", () => {
+    const haiku = lookupModelRates("claude-haiku-5-5");
+    expect(haiku).toEqual({
+      inputPerM: 0.1,
+      outputPerM: 0.5,
+      overThreshold: { inputTokens: 100_000, inputPerM: 0.5, outputPerM: 2.5 },
+    });
+    // dated snapshots stay in the family
+    expect(lookupModelRates("claude-haiku-5-5-20261007")).toEqual(haiku);
+    expect(lookupModelRates("claude-sonnet-5-5")).toEqual({ inputPerM: 2, outputPerM: 10 });
+    expect(lookupModelRates("claude-opus-5-5")).toEqual({ inputPerM: 4, outputPerM: 20 });
+  });
+
   test("unknown models yield null — zeroed + logged, never guessed", () => {
     expect(lookupModelRates("mimo-v2.6-flash")).toBeNull();
     expect(lookupModelRates("")).toBeNull();
     expect(lookupModelRates("claude-future-9")).toBeNull();
+    // 5.6 rates are unknown until published — its own row, never guessed
+    expect(lookupModelRates("claude-haiku-5-6")).toBeNull();
   });
 });
