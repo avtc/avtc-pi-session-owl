@@ -121,7 +121,7 @@ describe("the many-boundary mass-history rebuild", () => {
     const graphStore = await import("../../core/src/store/graph-store.js");
     await graphStore.load(prepared.ctx);
     let store = graphStore.getGraphStore();
-    // F2: EVERY observation from EVERY generation survived the boot fold
+    // the boot fold keeps EVERY observation from EVERY generation
     const bootObs = [...store.graph.observations.values()].map((o) => o.id).sort();
     expect(bootObs).toEqual(["obs-g1", "obs-g2", "obs-g3", "obs-g4", "obs-g5"]);
     const { nonObsoleteRoots } = await import("../../core/src/graph/read-tools.js");
@@ -151,7 +151,7 @@ describe("the many-boundary mass-history rebuild", () => {
     );
 
     // --- RELOAD: a fresh boot over the same store. The fold keeps every
-    // record (F2 — deletion is never the mechanism), so the process-start
+    // record (deletion is never the mechanism), so the process-start
     // check RE-DETECTS the rewind and re-applies the (capped) verdict —
     // exactly the resume flow. Then the root-view sanity holds.
     const mirror3 = new MirrorWriter(fs, dir, "boot-4");

@@ -114,9 +114,9 @@ describe("capDeadAtOldestLiveKnown — the boundary cap (dead adjudication stops
   ];
 
   test("a verdict inside the newest generation kills only that generation's dead tail — every earlier generation + the originals are exempt", () => {
-    // the live path roots at the newest boundary's edge: B2 (ceremony, not a
-    // known row) → g2a → g2b (the settle) — everything before g2a is
-    // pre-boundary history the file keeps by design
+    // the live path roots at the newest boundary's edge: the boundary
+    // ceremony row (not a known row) → g2a → g2b (the settle) — everything
+    // before g2a is pre-boundary history the file keeps by design
     const liveOrder = ["b2-ceremony", "g2a", "g2b"];
     const deadRaw = KNOWN.filter((u) => !liveOrder.includes(u)); // the uncapped massacre shape
     const dead = capDeadAtOldestLiveKnown(KNOWN, liveOrder, deadRaw);
