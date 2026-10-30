@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { matchRematRow } from "../compaction/remat.js";
 import type { MirroredRow, MirrorWriter } from "../storage/mirror.js";
 // The session.append capture body: parse the row, file it into its
 // conversation's row cache + pending list, and hand it to the mirror buffer.
@@ -77,6 +78,10 @@ export function captureAppend(
   // event but NEVER written to the transcript file. Capturing them would
   // leave permanent mirror residue the file can never confirm.
   if (row.door === "hook-context") return false;
+  // a hook-answered fold's materialized rows match the verdict's own
+  // message list in order — stamped remat (the grouper skips them; the
+  // stamp persists in the mirror, so a resume reads it back)
+  if (matchRematRow(key, row)) row.remat = true;
   const cap = ensureCapture(key, mirrorFor, row);
   const known = cap.rowCache.has(row.uuid);
   // The envelope carries no timestamp either — a row without one is stamped

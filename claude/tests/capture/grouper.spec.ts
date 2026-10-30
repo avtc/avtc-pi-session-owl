@@ -97,6 +97,30 @@ describe("grouper — plugin + compaction dispatch", () => {
     expect(JSON.stringify(entries)).not.toContain("SubagentHandback");
   });
 
+  test("remat rows (the re-materialized kept tail) produce no entries — user note and assistant response forms", () => {
+    const entries = groupRows([
+      {
+        ...fixtureRowBase("f-user", null),
+        door: "note",
+        remat: true,
+        message: { type: "user", content: [{ type: "text", text: "kept document body" }] },
+      },
+      {
+        ...fixtureRowBase("f-assistant", "f-user"),
+        door: "response",
+        remat: true,
+        message: { type: "assistant", content: [{ type: "text", text: "kept reply" }] } as never,
+      },
+      {
+        ...fixtureRowBase("n1", "f-assistant"),
+        message: { type: "user", content: [{ type: "text", text: "the new turn" }] },
+      },
+    ]) as AnyEntry[];
+    const messages = entries.filter((e) => e.type === "message");
+    expect(messages).toHaveLength(1);
+    expect(JSON.stringify(messages[0]?.message ?? messages[0])).toContain("the new turn");
+  });
+
   test("a native compaction row becomes a CompactionEntry — skipped as an observer source", () => {
     const entries = groupRows(fixture("plugin-and-compaction")) as AnyEntry[];
     const compaction = entries.find((e) => e.type === "compaction");

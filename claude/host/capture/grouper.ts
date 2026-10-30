@@ -51,6 +51,12 @@ export interface ClaudeRow {
     }>;
   };
   timestamp?: string;
+  /** True on the re-materialized kept tail of a hook-answered compaction
+   *  (matched at capture against the answer's own messages — see
+   *  host/compaction/remat.ts): the row is the platform re-persisting
+   *  already-observed content under a fresh uuid and never becomes an
+   *  entry. */
+  remat?: boolean;
 }
 
 const SKIPPED_DOORS = new Set(["attachment", "hook-context", "notice"]);
@@ -286,6 +292,10 @@ export function groupRows(rows: readonly ClaudeRow[]): SessionEntry[] {
       continue;
     }
     const m = row.message;
+    if (row.remat === true) {
+      flushAssistant();
+      continue;
+    }
     if (m.type === "assistant") {
       group.push(row);
       continue;

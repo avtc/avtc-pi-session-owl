@@ -39,6 +39,7 @@ import {
   withBudgetFreeWait,
 } from "../host/compaction/budget-free.js";
 import { type CompactEvent, compactionTakeover } from "../host/compaction/hook.js";
+import { setRematExpectation } from "../host/compaction/remat.js";
 import { recomputePauseSet, runConflictActivation } from "../host/conflicts/activation.js";
 import { recordBWitness, recordFoldList } from "../host/conflicts/channel-a-prime.js";
 import { handlePluginRegisterEnvelope, recordLiveOutcome, resetWaveLiveHits } from "../host/conflicts/channel-b.js";
@@ -1598,6 +1599,12 @@ async function onSessionCompact(_$: any, e: AnyEvent, next: Next) {
     // VERDICT (the gate above may have run for many minutes; an entry-time
     // claim would already be expired when the rows land)
     compactClaims.set(claimKey, { at: Date.now(), kind: "answer" });
+    // the fold's materialized rows arrive right after, in order — arm the
+    // in-order matcher with the answer's own messages so they are stamped
+    // remat (never re-observed; the originals' entries stay the sources)
+    if (outcome.kind === "answer") {
+      setRematExpectation(claimKey, outcome.result.messages);
+    }
     // The engine writes NO row for a hook-answered compaction, so the
     // timeline's compact-answer row is what records where the summarized
     // prefix ends (the uuid-less row is inert for row adjudication — only

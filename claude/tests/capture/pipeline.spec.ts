@@ -302,3 +302,103 @@ describe("append-handler — the envelope's missing fields", () => {
     expect((entries[0] as { timestamp?: string }).timestamp).toBe("2020-01-02T03:04:05.000Z");
   });
 });
+
+describe("append-handler — the re-materialized kept tail (a hook-answered fold)", () => {
+  test("fold rows matching the answer's messages are stamped remat, persisted, skipped from entries — never re-observed", async () => {
+    const { computeUnobserved } = await import("../../core/src/triggers.js");
+    const { _resetRematExpectations, setRematExpectation } = await import("../../host/compaction/remat.js");
+    _resetRematExpectations();
+    // the pre-fold conversation: a kept doc + reply, both observed (the
+    // frontier sits at the reply)
+    expect(
+      captureAppend(
+        "s-fold",
+        row("u1", null, { message: { type: "user", content: [{ type: "text", text: "reference document body" }] } }),
+        mirrorFor,
+      ),
+    ).toBe(true);
+    expect(
+      captureAppend(
+        "s-fold",
+        row("a1", "u1", {
+          door: "response",
+          message: { type: "assistant", content: [{ type: "text", text: "got-1" }] } as never,
+        }),
+        mirrorFor,
+      ),
+    ).toBe(true);
+    // the verdict's answer: a summary + the kept tail (stripped rows), the
+    // exact messages the platform materializes next
+    setRematExpectation("s-fold", [
+      { role: "user", text: "# Memory\nthe roots", toolUses: [] },
+      { role: "user", text: "reference document body", toolUses: [] },
+      { role: "assistant", text: "got-1", toolUses: [] },
+    ]);
+    // the fold: boundary (chrome), summary (note), kept user (note), kept
+    // assistant (response) — then the post-fold new turn
+    expect(
+      captureAppend(
+        "s-fold",
+        row("b1", null, {
+          door: "compaction",
+          message: { type: "user", content: [{ type: "text", text: "Conversation compacted" }] },
+        }),
+        mirrorFor,
+      ),
+    ).toBe(true);
+    expect(
+      captureAppend(
+        "s-fold",
+        row("sum1", "b1", {
+          door: "note",
+          message: { type: "user", content: [{ type: "text", text: "# Memory\nthe roots" }] },
+        }),
+        mirrorFor,
+      ),
+    ).toBe(true);
+    expect(
+      captureAppend(
+        "s-fold",
+        row("f1", "sum1", {
+          door: "note",
+          message: { type: "user", content: [{ type: "text", text: "reference document body" }] },
+        }),
+        mirrorFor,
+      ),
+    ).toBe(true);
+    expect(
+      captureAppend(
+        "s-fold",
+        row("f2", "f1", {
+          door: "response",
+          message: { type: "assistant", content: [{ type: "text", text: "got-1" }] } as never,
+        }),
+        mirrorFor,
+      ),
+    ).toBe(true);
+    expect(
+      captureAppend(
+        "s-fold",
+        row("n1", "f2", { message: { type: "user", content: [{ type: "text", text: "Reply with exactly: ack2" }] } }),
+        mirrorFor,
+      ),
+    ).toBe(true);
+    // the stamp persisted in the capture cache (the mirror lines carry it)
+    const cap = ensureCapture("s-fold", mirrorFor);
+    expect((cap.rowCache.get("sum1") as { remat?: boolean }).remat).toBe(true);
+    expect((cap.rowCache.get("f1") as { remat?: boolean }).remat).toBe(true);
+    expect((cap.rowCache.get("f2") as { remat?: boolean }).remat).toBe(true);
+    expect((cap.rowCache.get("b1") as { remat?: boolean }).remat).toBeUndefined();
+    expect((cap.rowCache.get("n1") as { remat?: boolean }).remat).toBeUndefined();
+    // the entries view: the fold's content rows are gone (the boundary's
+    // compaction entry stays — the observation floor marker); with the
+    // frontier at the pre-fold reply the gap holds ONLY the new turn — the
+    // kept tail is never re-observed, the new content still is
+    const entries = entriesForCache("s-fold") as Array<{ id: string; type?: string }>;
+    expect(entries.map((e) => e.id)).toEqual(["u1", "a1", "b1", "n1"]);
+    expect(entries.find((e) => e.id === "b1")?.type).toBe("compaction");
+    const gap = computeUnobserved(entries as never, "a1").filter((e) => (e as { type?: string }).type === "message");
+    expect(gap.map((e) => (e as { id: string }).id)).toEqual(["n1"]);
+    _resetRematExpectations();
+  });
+});
