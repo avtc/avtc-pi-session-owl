@@ -28,8 +28,9 @@ import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSy
 import { join } from "node:path";
 import process from "node:process";
 
-// the platform's whole-file read cap — a rewritten batch stays under it
-const READ_CAP_BYTES = 4 * 1024 * 1024;
+// the writer's roll margin — a rewritten batch stays well under the
+// platform's whole-file read cap
+const READ_CAP_BYTES = 3 * 1024 * 1024;
 const LEDGER_PREFIX = "ledger-";
 const LEDGER_SUFFIX = ".jsonl";
 

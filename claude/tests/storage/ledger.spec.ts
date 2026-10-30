@@ -385,3 +385,34 @@ describe("ledger — restated lineage uuid detection", () => {
     expect(fold.lineageRestatements).toBe(1);
   });
 });
+
+describe("ledger — over-cap batches signal the heal seam", () => {
+  test("a read refused for size counts as overCapFiles and stops early when asked", async () => {
+    const dir = `${DIR}-ocrefused`;
+    // a cap-refusal error shape: the adapter throws the platform's refusal
+    const mem2 = createMemoryFs();
+    const good = JSON.stringify({
+      producerId: "p-oc",
+      seq: 1,
+      ts: 1000,
+      marker: "m1",
+      at: "m1",
+      kind: "usage",
+      payload: {},
+    });
+    await mem2.adapter.writeText(`${dir}/ledger-oc1000001.jsonl`, `${good}\n`);
+    await mem2.adapter.writeText(`${dir}/ledger-overcap0002.jsonl`, `${good}\n`);
+    const inner = mem2.adapter.readText.bind(mem2.adapter);
+    const capped = {
+      ...mem2.adapter,
+      readText: (path: string) =>
+        /overcap0002/.test(path)
+          ? Promise.reject(new Error("session-owl: $.fs.read file exceeds the 4194304 byte limit"))
+          : inner(path),
+    };
+    const fold = await foldLedger(capped as typeof mem2.adapter, dir, { stopOnRestatement: true });
+    expect(fold.overCapFiles).toBe(1);
+    expect(fold.unreadableFiles).toEqual(["ledger-overcap0002.jsonl"]);
+    expect(fold.stoppedEarly).toBe(true);
+  });
+});

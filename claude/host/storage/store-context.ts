@@ -251,20 +251,26 @@ export async function prepareStoreContext(
     const id = recordIdOf(r);
     if (reportedRides.has(id)) return;
     reportedRides.add(id);
+    rideCount += 1;
+    if (rideCount > RIDE_LOG_LIMIT) return; // counted, not logged line-by-line
     const row = String(r[reason]);
     log.info(
       `branch-keep: record ${id} (${r.kind}) rides the fold — ${reason} row ${row} not on the served branch ` +
-        `(${lastBranch.length}/${mirror.arrivalOrder().length} rows served); a verdict decides, the fold never drops`,
+        `(${lastBranch.length}/${mirror.arrivalOrder().length} rows served); a verdict decides, the fold never drops` +
+        (rideCount === RIDE_LOG_LIMIT ? " — further rides this context are counted silently" : ""),
     );
   };
+  let rideCount = 0;
+  const RIDE_LOG_LIMIT = 10;
   const refresh = async (override?: LivePredicate): Promise<void> => {
     const live = override ?? isLive;
     let fold = await foldLedger(fs, dir, { stopOnRestatement: opts.healLedger !== undefined });
-    if (fold.lineageRestatements > 0) {
+    if (fold.lineageRestatements > 0 || fold.overCapFiles > 0) {
       if (opts.healLedger !== undefined) {
         // one heal attempt per refresh: a legitimate stream states each
         // lineage uuid exactly once, so a restatement is storage damage —
-        // stop early, rewrite through the seam, re-read the healed files
+        // and a batch over the read cap is invisible damage only the Node
+        // seam can read; stop early, rewrite through the seam, re-read
         let report: { done: boolean; restatedEdges?: number; uniqueEdges?: number } | null = null;
         try {
           report = await opts.healLedger();
@@ -273,7 +279,7 @@ export async function prepareStoreContext(
             `ledger heal seam threw (loading the redundant stream): ${err instanceof Error ? err.message : String(err)}`,
           );
         }
-        if (report !== null && report.done) {
+        if (report?.done) {
           log.info(
             `ledger healed: ${report.restatedEdges ?? "?"} restated edge(s) folded to ${report.uniqueEdges ?? "?"} unique — re-reading`,
           );
@@ -283,9 +289,16 @@ export async function prepareStoreContext(
         fold = await foldLedger(fs, dir); // full read: healed files, or the redundant originals
       } else if (!reportedRestatements) {
         reportedRestatements = true;
-        log.info(
-          `ledger fold: ${fold.lineageRestatements} restated lineage edge(s) — no heal seam on this surface; the fold is last-wins in memory`,
-        );
+        if (fold.lineageRestatements > 0) {
+          log.info(
+            `ledger fold: ${fold.lineageRestatements} restated lineage edge(s) — no heal seam on this surface; the fold is last-wins in memory`,
+          );
+        }
+        if (fold.overCapFiles > 0) {
+          log.info(
+            `ledger fold: ${fold.overCapFiles} batch(es) over the read cap — no heal seam on this surface; their records stay unread this load`,
+          );
+        }
       }
     }
     let records = fold.records;

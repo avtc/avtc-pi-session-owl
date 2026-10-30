@@ -264,6 +264,11 @@ export interface FoldResult {
   records: LedgerRecord[];
   /** Batch files that failed to read/parse entirely (orphans, tolerated). */
   unreadableFiles: string[];
+  /** Unreadable batches refused for exceeding the platform whole-file read
+   *  cap: oversized lineage damage the in-process fold can never see — the
+   *  heal seam (a Node process has no read cap) is the only reader that
+   *  can collapse them. */
+  overCapFiles: number;
   /** Individual lines skipped (corrupt, tolerated — same class as pi's
    *  skipped bad deltas). */
   skippedLines: number;
@@ -286,6 +291,12 @@ function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** The platform's whole-file read refusal (the fold's tier signal): those
+ *  batches carry content this process can never read. */
+function isCapRefusalText(message: string): boolean {
+  return /4194304|4 ?MiB|byte limit|exceeds.*cap/i.test(message);
+}
+
 /** Fold every ledger batch in the directory into the total order. */
 export async function foldLedger(fs: FsAdapter, dir: string, opts: FoldLedgerOpts = {}): Promise<FoldResult> {
   let names: string[];
@@ -298,6 +309,7 @@ export async function foldLedger(fs: FsAdapter, dir: string, opts: FoldLedgerOpt
   }
   const records: LedgerRecord[] = [];
   const unreadableFiles: string[] = [];
+  let overCapFiles = 0;
   let skippedLines = 0;
   // the lineage duplicate census: a uuid may be stated exactly once —
   // a second statement (any value) is damage; the set holds first-seen uuids
@@ -323,7 +335,13 @@ export async function foldLedger(fs: FsAdapter, dir: string, opts: FoldLedgerOpt
     try {
       text = await fs.readText(`${dir}/${name}`);
     } catch (err) {
-      log.info(`ledger fold: batch unreadable, skipped (${name}): ${errText(err)}`);
+      const message = errText(err);
+      if (isCapRefusalText(message)) {
+        overCapFiles += 1;
+        if (opts.stopOnRestatement === true) stoppedEarly = true;
+      } else {
+        log.info(`ledger fold: batch unreadable, skipped (${name}): ${message}`);
+      }
       unreadableFiles.push(name);
       continue;
     }
@@ -338,14 +356,19 @@ export async function foldLedger(fs: FsAdapter, dir: string, opts: FoldLedgerOpt
         skippedLines += 1;
       }
     }
-    if (opts.stopOnRestatement === true && lineageRestatements > 0) stoppedEarly = true;
+    if (opts.stopOnRestatement === true && (lineageRestatements > 0 || overCapFiles > 0)) stoppedEarly = true;
   }
   records.sort((a, b) => {
     if (a.ts !== b.ts) return a.ts - b.ts;
     if (a.producerId !== b.producerId) return a.producerId < b.producerId ? -1 : 1;
     return a.seq - b.seq;
   });
-  return { records, unreadableFiles, skippedLines, lineageRestatements, stoppedEarly };
+  if (overCapFiles > 0) {
+    log.info(
+      `ledger fold: ${overCapFiles} batch(es) over the read cap — invisible to this fold; the heal seam rewrites them`,
+    );
+  }
+  return { records, unreadableFiles, skippedLines, lineageRestatements, stoppedEarly, overCapFiles };
 }
 
 // ---- quarantine -----------------------------------------------------------------
