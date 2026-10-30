@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT;
+// SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 //
 // The tail-read tier of the live chain verifier: the file's last N

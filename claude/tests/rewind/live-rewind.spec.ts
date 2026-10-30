@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT;
+// SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 //
 // The live rewind application: what the chain processor's onRewind seam
