@@ -141,11 +141,23 @@ export class LiveChainProcessor {
     this.queue.length = 0;
   }
 
+  /** A verdict detected in a deferring flush context, parked for its
+   *  timer-lane application (the refold re-folds the whole ledger — on a
+   *  multi-GB store that far exceeds a hook budget, so the hook returns
+   *  and the plugin timer applies it). */
+  private pendingRewind: { settle: string | null } | null = null;
+  /** Whether the CURRENT flush context parks verdicts instead of applying
+   *  them inline. */
+  private deferVerdictsNow = false;
+
   /** The eager path (turn.complete — the engine's forced drain has made
    *  the whole turn durable). Supersedes any pending deferred tick; waits
    *  out an in-flight tick and runs once more so this flush never
-   *  resolves while rows sit unverified. Never throws. */
-  async flush(): Promise<void> {
+   *  resolves while rows sit unverified. Never throws. `deferVerdicts`
+   *  parks a detected verdict's application on the timer lane (a
+   *  serve-class caller leaves it inline — the compaction gate must read
+   *  a folded store). */
+  async flush(opts: { deferVerdicts?: boolean } = {}): Promise<void> {
     if (this.cancelTimer !== null) {
       this.cancelTimer();
       this.cancelTimer = null;
@@ -154,7 +166,36 @@ export class LiveChainProcessor {
     if (this.processing !== null) {
       await this.processing; // process() never rejects (its catch arms the retry)
     }
-    await this.process();
+    if (!opts.deferVerdicts) await this.applyPendingRewind();
+    this.deferVerdictsNow = opts.deferVerdicts === true;
+    try {
+      await this.process();
+    } finally {
+      this.deferVerdictsNow = false;
+    }
+  }
+
+  /** Whether a detected verdict sits parked awaiting its timer-lane
+   *  application (the deferring flush returned before the refold ran). */
+  hasPendingRewind(): boolean {
+    return this.pendingRewind !== null;
+  }
+
+  /** Apply a parked verdict; a failure re-parks and re-arms (a detected
+   *  rewind is never silently dropped). */
+  private async applyPendingRewind(): Promise<void> {
+    const verdict = this.pendingRewind;
+    if (verdict === null) return;
+    this.pendingRewind = null;
+    try {
+      await this.deps.onRewind(verdict);
+    } catch (err) {
+      this.deps.log(
+        `live chain: parked verdict application failed — re-armed: ${String((err as { message?: unknown })?.message ?? err)}`,
+      );
+      this.pendingRewind = verdict;
+      this.retry(this.backoffMs());
+    }
   }
 
   private armTimer(ms: number, rearm = false): void {
@@ -164,7 +205,13 @@ export class LiveChainProcessor {
     this.cancelTimer = this.deps.schedule(ms, () => {
       this.timerArmed = false;
       this.cancelTimer = null;
-      void this.process();
+      // a parked verdict rides the head of the lane (applied before any
+      // further verification)
+      void (async () => {
+        if (this.processing !== null) await this.processing;
+        await this.applyPendingRewind();
+        if (!this.disposed) await this.process();
+      })();
     });
   }
 
@@ -390,7 +437,18 @@ export class LiveChainProcessor {
       this.deps.log(
         `live chain: ${deadAbsent} amputated row(s), settle at ${String(expected)} — refolding onto the verified chain`,
       );
-      await this.deps.onRewind({ settle: expected });
+      if (this.deferVerdictsNow) {
+        // the application re-folds the whole ledger — park it on the timer
+        // lane so this hook returns inside its budget; the serve-class
+        // flushes apply it inline before they read the store
+        this.deps.log(
+          "live chain: verdict parked — the application runs on the timer lane (the hook budget stays free)",
+        );
+        this.pendingRewind = { settle: expected };
+        this.armTimer(0);
+      } else {
+        await this.deps.onRewind({ settle: expected });
+      }
     }
     this.finishTick(present, amputated, size);
   }

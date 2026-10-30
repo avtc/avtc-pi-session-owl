@@ -1235,14 +1235,17 @@ function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
 
 /** The main loop's turn-boundary verification: the live chain flush (the
  *  engine's forced drain has made the turn durable). Dormant while
- *  disabled or conflict-paused. */
-async function liveChainFlush($: any, sessionId: string): Promise<void> {
+ *  disabled or conflict-paused. `deferVerdicts` parks a detected verdict's
+ *  application on the timer lane — the hook returns inside its budget and
+ *  the refold (a whole-ledger re-fold; seconds on a multi-GB store) runs
+ *  free of it. */
+async function liveChainFlush($: any, sessionId: string, deferVerdicts = false): Promise<void> {
   if (!state.isOwlEnabled()) return;
   if (isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))) {
     return;
   }
   try {
-    await ensureLiveChain($, sessionId).flush();
+    await ensureLiveChain($, sessionId).flush({ deferVerdicts });
   } catch (err) {
     report("live chain flush failed", err);
   }
@@ -1400,8 +1403,10 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
       if (agentId === null) {
         // the main loop verifies through the live chain (the file tail);
         // subagent loops keep no per-turn verifier (their transcripts are
-        // separate files, their stores short-lived)
-        await liveChainFlush($, sessionId);
+        // separate files, their stores short-lived). The verdict's
+        // APPLICATION defers to the timer lane: the refold re-folds the
+        // whole ledger and must not blow the turn.complete hook budget.
+        await liveChainFlush($, sessionId, true);
       }
       const cap = getCapture(key);
       if (cap !== undefined) {
@@ -1439,25 +1444,36 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
       // boundary reads its still-live capture (pi's per-loop turn end); a
       // race past the release self-heals through the coverage union.
       if (agentId === null || !bridge.isMachineryLoop(agentId)) {
-        // The boundary gate: launch stages only at a completion that
-        // concluded a real round — new assistant rows since the last
-        // launch. The engine completes a resumed session's dangling turn
-        // as the continuation prompt arrives; that boundary fires nothing.
-        const capture = getCapture(key);
-        const gateRows = (capture?.mirror.arrivalOrder() ?? []).map((uuid) => {
-          const message = capture?.mirror.rowByUuid(uuid)?.row as
-            | { message?: { role?: unknown; type?: unknown } }
-            | undefined;
-          const role = message?.message?.role;
-          const type = message?.message?.type;
-          const kind = typeof role === "string" ? role : typeof type === "string" ? type : undefined;
-          return { uuid, kind };
-        });
-        if (!state.isBootstrapBlocked() && shouldFireBoundary(gateRows, lastFiredAssistantByKey.get(key) ?? null)) {
-          lastFiredAssistantByKey.set(key, newestAssistantUuid(gateRows));
-          onTurnCompleteBoundary(getBinding(key, sessionId, agentId).triggerDeps(), {
-            agentId: agentId ?? undefined,
+        // A parked rewind verdict defers this boundary's stages: the store
+        // is about to refold onto the verified chain — observing over the
+        // pre-verdict state would target a dying world. The next boundary
+        // runs on the folded state.
+        const chain = agentId === null ? ensureLiveChain($, sessionId) : null;
+        if (chain?.hasPendingRewind()) {
+          log.info(
+            `trigger [${key}]: observe=skip (reason=rewind verdict application pending — this boundary's stages defer to the next)`,
+          );
+        } else {
+          // The boundary gate: launch stages only at a completion that
+          // concluded a real round — new assistant rows since the last
+          // launch. The engine completes a resumed session's dangling turn
+          // as the continuation prompt arrives; that boundary fires nothing.
+          const capture = getCapture(key);
+          const gateRows = (capture?.mirror.arrivalOrder() ?? []).map((uuid) => {
+            const message = capture?.mirror.rowByUuid(uuid)?.row as
+              | { message?: { role?: unknown; type?: unknown } }
+              | undefined;
+            const role = message?.message?.role;
+            const type = message?.message?.type;
+            const kind = typeof role === "string" ? role : typeof type === "string" ? type : undefined;
+            return { uuid, kind };
           });
+          if (!state.isBootstrapBlocked() && shouldFireBoundary(gateRows, lastFiredAssistantByKey.get(key) ?? null)) {
+            lastFiredAssistantByKey.set(key, newestAssistantUuid(gateRows));
+            onTurnCompleteBoundary(getBinding(key, sessionId, agentId).triggerDeps(), {
+              agentId: agentId ?? undefined,
+            });
+          }
         }
       }
       if (agentId !== null) {

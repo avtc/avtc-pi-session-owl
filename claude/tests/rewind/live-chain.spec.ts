@@ -548,6 +548,67 @@ describe("live chain processor — rewind detection", () => {
   });
 });
 
+describe("live chain processor — the verdict deferral (a flush context can park the heavy refold)", () => {
+  test("deferVerdicts parks the application: the hook returns fast, edges stay durable, the timer lane applies", async () => {
+    const h = harness({
+      owlTail: "t2",
+      known: ["t1"],
+      tail: facts([row("t1", "x"), row("u9", "t1")]),
+    });
+    h.proc.enqueue(ev("u9", true));
+    await h.proc.flush({ deferVerdicts: true });
+    // the file's edges are durable BEFORE any verdict — parked included
+    expect(h.patched).toEqual([{ uuid: "u9", parent: "t1" }]);
+    // the refold did NOT run inline (the hook budget stays free)
+    expect(h.rewinds).toEqual([]);
+    expect(h.proc.hasPendingRewind()).toBe(true);
+    expect(h.logs.some((l) => l.includes("verdict parked"))).toBe(true);
+    // the timer lane applies it
+    h.fireScheduled();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.rewinds).toEqual([{ settle: "u9" }]);
+    expect(h.proc.hasPendingRewind()).toBe(false);
+  });
+
+  test("a later serve-class flush (deferVerdicts off) applies a parked verdict FIRST — the gate reads a folded store", async () => {
+    const h = harness({
+      owlTail: "t2",
+      known: ["t1"],
+      tail: facts([row("t1", "x"), row("u9", "t1")]),
+    });
+    h.proc.enqueue(ev("u9", true));
+    await h.proc.flush({ deferVerdicts: true });
+    expect(h.proc.hasPendingRewind()).toBe(true);
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([{ settle: "u9" }]);
+    expect(h.proc.hasPendingRewind()).toBe(false);
+  });
+
+  test("a parked verdict whose application fails on the lane re-arms — never silently dropped", async () => {
+    let fails = 0;
+    const h = harness({
+      owlTail: "t2",
+      known: ["t1"],
+      tail: facts([row("t1", "x"), row("u9", "t1")]),
+      onRewind: () => {
+        fails += 1;
+        if (fails === 1) throw new Error("refold exploded");
+      },
+    });
+    h.proc.enqueue(ev("u9", true));
+    await h.proc.flush({ deferVerdicts: true });
+    h.fireScheduled(); // the first application attempt fails
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fails).toBe(1);
+    expect(h.proc.hasPendingRewind()).toBe(true);
+    h.fireScheduled(); // the re-armed retry succeeds
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fails).toBe(2);
+    expect(h.rewinds).toEqual([{ settle: "u9" }, { settle: "u9" }]);
+    expect(h.proc.hasPendingRewind()).toBe(false);
+  });
+});
+
 describe("live chain processor — vi sanity", () => {
   test("flush with an empty queue touches nothing", async () => {
     const h = harness();
