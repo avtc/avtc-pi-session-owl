@@ -115,7 +115,6 @@ export class LiveChainProcessor {
    *  tick so it fires after the LAST event, not the first. */
   enqueue(event: { uuid: string; door: string; captured: boolean; agentId?: unknown }): boolean {
     if (event.agentId !== undefined && event.agentId !== null) return false;
-    if (this.stoodDown) return false;
     if (event.uuid.length > MAX_UUID) return false; // engine uuids are sane
     if (this.queue.length >= MAX_QUEUE) {
       // an unbounded pending batch would wedge every later tick to the
@@ -124,7 +123,7 @@ export class LiveChainProcessor {
       this.queue.splice(0, this.queue.length - MAX_QUEUE + 1);
     }
     this.queue.push({ uuid: event.uuid, captured: event.captured });
-    this.armTimer(this.tickDelayMs, true);
+    if (!this.stoodDown) this.armTimer(this.tickDelayMs, true);
     return true;
   }
 
@@ -216,26 +215,34 @@ export class LiveChainProcessor {
     });
   }
 
-  /** Detection stood down (the tail tier cannot serve this transcript on
-   *  this surface): nothing re-arms, the queue is inert — a per-process
-   *  latch; a fresh process on a capable surface starts over. */
+  /** Detection stood down (the tail tier cannot serve this transcript):
+   *  the TIMER LANE stops — no busy retry loop — while the per-turn eager
+   *  check keeps attempting; a tier that serves again revives detection
+   *  (the documented reconciliation: transient failures heal at the next
+   *  successful check). */
   private stoodDown = false;
 
   private standDown(reason: string): void {
+    if (this.stoodDown) return;
     this.stoodDown = true;
-    this.queue.length = 0;
     if (this.cancelTimer !== null) {
       this.cancelTimer();
       this.cancelTimer = null;
     }
     this.timerArmed = false;
     this.deps.log(
-      `live chain: detection stands down — ${reason}; capture/observation/compaction run as-is, the context tripwire stays`,
+      `live chain: detection stands down — ${reason} (the timer lane stops; the per-turn check keeps attempting, a serving tier revives it); capture/observation/compaction run as-is on inferred edges`,
     );
   }
 
+  private revive(): void {
+    if (!this.stoodDown) return;
+    this.stoodDown = false;
+    this.deps.log("live chain: detection resumed — the tail tier serves again");
+  }
+
   private retry(ms: number): void {
-    if (this.disposed) return;
+    if (this.disposed || this.stoodDown) return;
     this.armTimer(ms);
   }
 
@@ -249,7 +256,7 @@ export class LiveChainProcessor {
   }
 
   private async process(): Promise<void> {
-    if (this.disposed || this.stoodDown || this.processing !== null) return;
+    if (this.disposed || this.processing !== null) return;
     const run = this.tick().catch((err: unknown) => {
       this.deps.log(`live chain tick failed: ${String((err as { message?: unknown })?.message ?? err)}`);
       this.retries = Math.min(this.retries + 1, MAX_RETRIES);
@@ -300,15 +307,16 @@ export class LiveChainProcessor {
       this.retries = Math.min(this.retries + 1, MAX_RETRIES);
       if (this.retries >= MAX_RETRIES) {
         // the tier cannot serve this transcript (a surface without the
-        // process seam, a permanently broken helper) — retrying forever
-        // would wedge a queue no read can ever drain. Detection stands
-        // down: one line, no more ticks, everything else runs as-is.
+        // process seam, a broken helper) — the timer lane stops instead of
+        // retrying forever; the per-turn eager check keeps attempting, and
+        // a tier that serves again revives the lane (the reconciliation)
         this.standDown("the tail tier cannot serve this transcript");
         return;
       }
       this.retry(this.backoffMs());
       return;
     }
+    this.revive();
     if (tail.torn) {
       this.retries = Math.min(this.retries + 1, MAX_RETRIES);
       this.retry(this.tornBackoffMs);

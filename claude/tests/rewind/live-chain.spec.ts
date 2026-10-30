@@ -412,23 +412,33 @@ describe("live chain processor — the torn and missing tails", () => {
     expect(h.patched).toEqual([]);
     expect(h.scheduled).toContain(2500);
   });
-  test("a permanently missing tier stands detection down: one line, no more ticks, the app runs as-is", async () => {
-    // the file exists (size known) but the read tier can never serve it
-    // (a surface without the process seam, a permanently broken helper) —
-    // after the bounded ladder the processor stands down instead of
-    // retrying forever
+  test("a missing tier stands the timer lane down: one line, no retry loop — the per-turn check keeps attempting and a success revives", async () => {
+    // the file exists (size known) but the read tier cannot serve it (a
+    // surface without the process seam, a broken helper) — the timer lane
+    // stands down after the bounded ladder instead of retrying forever;
+    // the per-turn eager check keeps attempting (the documented
+    // reconciliation), and a tier that serves again revives detection
     const h = harness({ owlTail: "t0", tail: null, size: 1000 });
     h.proc.enqueue(ev("u1", true));
     for (let i = 0; i < 5; i += 1) await h.proc.flush();
     expect(h.logs.some((l) => l.includes("detection stands down"))).toBe(true);
-    // stood down: nothing re-arms, nothing reads, the queue is inert
-    const reads = h.readCalls.length;
+    // the timer lane is off: an enqueue arms nothing
     const schedules = h.scheduled.length;
-    h.proc.enqueue(ev("u2", true)); // refused after the stand-down
-    await h.proc.flush();
-    expect(h.readCalls.length).toBe(reads);
+    h.proc.enqueue(ev("u2", true));
     expect(h.scheduled.length).toBe(schedules);
-    expect(h.rewinds).toEqual([]); // never a wrong verdict
+    // the eager per-turn check still attempts (and stays down while the
+    // tier is missing) — never a wrong verdict
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    // the tier serves again: the next eager check revives detection
+    h.setTail(facts([row("t0", "x"), row("u1", "t0"), row("u2", "t0")]));
+    await h.proc.flush();
+    expect(h.logs.some((l) => l.includes("detection resumed"))).toBe(true);
+    expect(h.patched.map((e) => e.uuid)).toContain("u1");
+    expect(h.patched.map((e) => e.uuid)).toContain("u2");
+    // revived: the timer lane arms again on the next enqueue
+    h.proc.enqueue(ev("u3", true));
+    expect(h.scheduled.length).toBe(schedules + 1);
   });
 
   test("a null read (tier missing) retries the normal delay without state change", async () => {
