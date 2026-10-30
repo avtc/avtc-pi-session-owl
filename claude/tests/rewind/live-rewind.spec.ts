@@ -11,7 +11,7 @@
 // dropped).
 
 import { describe, expect, test } from "vitest";
-import { applyLiveRewind } from "../../host/rewind/live-rewind.js";
+import { applyLiveRewind, capDeadAtOldestLiveKnown } from "../../host/rewind/live-rewind.js";
 
 function deps(overrides?: Partial<Parameters<typeof applyLiveRewind>[0]>) {
   const calls: string[] = [];
@@ -93,5 +93,81 @@ describe("applyLiveRewind", () => {
     await applyLiveRewind(d, { settle: "t1" });
     expect(seen[0]).toBeInstanceOf(Set);
     expect([...(seen[0] as Set<string>)].sort()).toEqual(["b1", "t1"]);
+  });
+});
+
+describe("capDeadAtOldestLiveKnown — the boundary cap (dead adjudication stops at the live path's root)", () => {
+  // the 17-boundary shape in miniature: originals, then two compaction
+  // generations, each generation's fresh rows rooted at its boundary edge
+  const KNOWN = [
+    "o1",
+    "o2",
+    "o3",
+    "o4", // the originals (generation zero)
+    "g1a",
+    "g1b",
+    "g1c", // generation one's re-materialized rows
+    "g2a",
+    "g2b", // generation two's re-materialized rows
+    "g2c",
+    "g2d", // generation two's tail (the amputated part)
+  ];
+
+  test("a verdict inside the newest generation kills only that generation's dead tail — every earlier generation + the originals are exempt", () => {
+    // the live path roots at the newest boundary's edge: B2 (ceremony, not a
+    // known row) → g2a → g2b (the settle) — everything before g2a is
+    // pre-boundary history the file keeps by design
+    const liveOrder = ["b2-ceremony", "g2a", "g2b"];
+    const deadRaw = KNOWN.filter((u) => !liveOrder.includes(u)); // the uncapped massacre shape
+    const dead = capDeadAtOldestLiveKnown(KNOWN, liveOrder, deadRaw);
+    expect(dead).toEqual(["g2c", "g2d"]); // only the amputated newest-generation tail
+  });
+
+  test("a live path rooted at the session's first row (the removed-boundary surgery shape) caps nothing — deep adjudication stands", () => {
+    const liveOrder = ["o1", "o2", "g1a"]; // rewound into the originals; no boundary edge on the path
+    const deadRaw = KNOWN.filter((u) => !liveOrder.includes(u));
+    const dead = capDeadAtOldestLiveKnown(KNOWN, liveOrder, deadRaw);
+    expect(dead).toEqual(deadRaw); // the abandoned worlds die
+  });
+
+  test("an empty live order (rewind to the root) caps nothing", () => {
+    const deadRaw = ["t1", "t2"];
+    expect(capDeadAtOldestLiveKnown(KNOWN, [], deadRaw)).toEqual(deadRaw);
+  });
+
+  test("a live order with no known row (all ceremony) caps nothing", () => {
+    const deadRaw = ["o1", "g1a"];
+    expect(capDeadAtOldestLiveKnown(KNOWN, ["b2-ceremony"], deadRaw)).toEqual(deadRaw);
+  });
+
+  test("a dead row outside the known order stays dead (defensive)", () => {
+    expect(capDeadAtOldestLiveKnown(KNOWN, ["g2a", "g2b"], ["mystery", "g2c"])).toEqual(["mystery", "g2c"]);
+  });
+});
+
+describe("applyLiveRewind — the boundary cap rides the verdict", () => {
+  test("knownOrder caps the dead set and logs the kept pre-boundary rows", async () => {
+    const logs: string[] = [];
+    const { deps: d, calls } = deps({
+      liveOrderFor: async () => ["b2-ceremony", "g2a", "g2b"],
+      deadPath: async () => ["o1", "o2", "g2c"],
+      knownOrder: () => ["o1", "o2", "g1a", "g2a", "g2b", "g2c"],
+      log: (line: string) => {
+        logs.push(line);
+        calls.push(`log:${line}`);
+      },
+    });
+    const r = await applyLiveRewind(d, { settle: "g2b" });
+    expect(r).toEqual({ quarantined: 1 });
+    expect(calls).toContain("refold:b2-ceremony,g2a,g2b|dead:g2c");
+    expect(calls).toContain("onDivergence:g2b:g2c");
+    expect(logs.join("\n")).toContain("boundary cap");
+    expect(logs.join("\n")).toContain("2 pre-boundary");
+  });
+
+  test("without knownOrder the dead set passes through unchanged (the bare contract)", async () => {
+    const { deps: d, calls } = deps();
+    await applyLiveRewind(d, { settle: "t1" });
+    expect(calls).toContain("refold:b1,t1|dead:t2");
   });
 });

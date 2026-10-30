@@ -22,6 +22,10 @@ export interface LiveRewindDeps {
   /** Everything owl's current path holds AFTER the settle point — the
    *  amputated world (dead). */
   deadPath: (settle: string | null) => Promise<string[]>;
+  /** owl's known path in ARRIVAL order (file order) — the boundary cap's
+   *  axis: rows ordered before the live path's oldest known row are exempt
+   *  from death. Absent = the dead set is taken as-is (already capped). */
+  knownOrder?: () => readonly string[];
   /** Re-fold the store (quarantine + marker liveness) — the divergence move. */
   refold: (
     liveSet: ReadonlySet<string>,
@@ -34,6 +38,33 @@ export interface LiveRewindDeps {
   log: (line: string) => void;
 }
 
+/** The boundary cap: rows ordered before the live path's OLDEST known row
+ *  are never adjudicated dead. The live path's root is the newest
+ *  compaction boundary the file still holds (the lineage walk stops at its
+ *  null-parent edge), and everything ordered before it is the summarized
+ *  history the transcript keeps by design — re-materialized generations and
+ *  their originals — not rewind damage. A live path with no known row (an
+ *  empty survive set, or a root outside owl's path — the rewind-to-root and
+ *  boundary-removed-at-surgery shapes) caps nothing: the whole path stays
+ *  adjudicable. */
+export function capDeadAtOldestLiveKnown(
+  knownOrder: readonly string[],
+  liveOrder: readonly string[],
+  dead: readonly string[],
+): string[] {
+  const indexOf = new Map(knownOrder.map((u, i) => [u, i] as const));
+  let oldest = -1;
+  for (const u of liveOrder) {
+    const i = indexOf.get(u);
+    if (i !== undefined && (oldest === -1 || i < oldest)) oldest = i;
+  }
+  if (oldest === -1) return [...dead];
+  return dead.filter((u) => {
+    const i = indexOf.get(u);
+    return i === undefined || i > oldest;
+  });
+}
+
 /** Apply a live-detected rewind: abort in-flight stages, refold onto the
  *  settle point's live prefix, record the dead path. Throws on failure —
  *  the caller (the chain processor's tick) retries the whole detection. */
@@ -44,7 +75,12 @@ export async function applyLiveRewind(
   const { settle } = verdict;
   await deps.abortAndAwaitInFlight();
   const liveOrder = await deps.liveOrderFor(settle);
-  const dead = await deps.deadPath(settle);
+  const deadRaw = await deps.deadPath(settle);
+  const dead =
+    deps.knownOrder === undefined ? deadRaw : capDeadAtOldestLiveKnown(deps.knownOrder(), liveOrder, deadRaw);
+  if (dead.length !== deadRaw.length) {
+    deps.log(`live rewind: boundary cap kept ${deadRaw.length - dead.length} pre-boundary row(s) out of the dead set`);
+  }
   const liveSet = new Set(liveOrder);
   deps.log(`live rewind: settle=${String(settle)} live=${liveOrder.length} dead=${dead.length} — refolding`);
   const { quarantined } = await deps.refold(liveSet, liveOrder, new Set(dead));

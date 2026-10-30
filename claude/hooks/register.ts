@@ -1201,6 +1201,7 @@ function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
               .filter((r) => !live.has(r.uuid))
               .map((r) => r.uuid);
           },
+          knownOrder: () => checkpointDeps.knownPath().map((r) => r.uuid),
           refold: checkpointDeps.refold,
           onDivergence: checkpointDeps.onDivergence,
           log: (line: string) => log.info(line),
