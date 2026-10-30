@@ -115,6 +115,7 @@ export class LiveChainProcessor {
    *  tick so it fires after the LAST event, not the first. */
   enqueue(event: { uuid: string; door: string; captured: boolean; agentId?: unknown }): boolean {
     if (event.agentId !== undefined && event.agentId !== null) return false;
+    if (this.stoodDown) return false;
     if (event.uuid.length > MAX_UUID) return false; // engine uuids are sane
     if (this.queue.length >= MAX_QUEUE) {
       // an unbounded pending batch would wedge every later tick to the
@@ -215,6 +216,24 @@ export class LiveChainProcessor {
     });
   }
 
+  /** Detection stood down (the tail tier cannot serve this transcript on
+   *  this surface): nothing re-arms, the queue is inert — a per-process
+   *  latch; a fresh process on a capable surface starts over. */
+  private stoodDown = false;
+
+  private standDown(reason: string): void {
+    this.stoodDown = true;
+    this.queue.length = 0;
+    if (this.cancelTimer !== null) {
+      this.cancelTimer();
+      this.cancelTimer = null;
+    }
+    this.timerArmed = false;
+    this.deps.log(
+      `live chain: detection stands down — ${reason}; capture/observation/compaction run as-is, the context tripwire stays`,
+    );
+  }
+
   private retry(ms: number): void {
     if (this.disposed) return;
     this.armTimer(ms);
@@ -230,7 +249,7 @@ export class LiveChainProcessor {
   }
 
   private async process(): Promise<void> {
-    if (this.disposed || this.processing !== null) return;
+    if (this.disposed || this.stoodDown || this.processing !== null) return;
     const run = this.tick().catch((err: unknown) => {
       this.deps.log(`live chain tick failed: ${String((err as { message?: unknown })?.message ?? err)}`);
       this.retries = Math.min(this.retries + 1, MAX_RETRIES);
@@ -279,6 +298,14 @@ export class LiveChainProcessor {
     const tail = await this.deps.readTail(this.windowRows());
     if (tail === null) {
       this.retries = Math.min(this.retries + 1, MAX_RETRIES);
+      if (this.retries >= MAX_RETRIES) {
+        // the tier cannot serve this transcript (a surface without the
+        // process seam, a permanently broken helper) — retrying forever
+        // would wedge a queue no read can ever drain. Detection stands
+        // down: one line, no more ticks, everything else runs as-is.
+        this.standDown("the tail tier cannot serve this transcript");
+        return;
+      }
       this.retry(this.backoffMs());
       return;
     }

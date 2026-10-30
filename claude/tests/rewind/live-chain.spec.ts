@@ -412,6 +412,25 @@ describe("live chain processor — the torn and missing tails", () => {
     expect(h.patched).toEqual([]);
     expect(h.scheduled).toContain(2500);
   });
+  test("a permanently missing tier stands detection down: one line, no more ticks, the app runs as-is", async () => {
+    // the file exists (size known) but the read tier can never serve it
+    // (a surface without the process seam, a permanently broken helper) —
+    // after the bounded ladder the processor stands down instead of
+    // retrying forever
+    const h = harness({ owlTail: "t0", tail: null, size: 1000 });
+    h.proc.enqueue(ev("u1", true));
+    for (let i = 0; i < 5; i += 1) await h.proc.flush();
+    expect(h.logs.some((l) => l.includes("detection stands down"))).toBe(true);
+    // stood down: nothing re-arms, nothing reads, the queue is inert
+    const reads = h.readCalls.length;
+    const schedules = h.scheduled.length;
+    h.proc.enqueue(ev("u2", true)); // refused after the stand-down
+    await h.proc.flush();
+    expect(h.readCalls.length).toBe(reads);
+    expect(h.scheduled.length).toBe(schedules);
+    expect(h.rewinds).toEqual([]); // never a wrong verdict
+  });
+
   test("a null read (tier missing) retries the normal delay without state change", async () => {
     const h = harness({ owlTail: "t0", tail: null });
     h.proc.enqueue(ev("u1", true));
