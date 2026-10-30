@@ -31,6 +31,10 @@ export interface CheckpointDeps {
   apiMessages: () => Promise<Fingerprint[]>;
   /** The previously-known live path (tip LAST) with fingerprints. */
   knownPath: () => KnownRow[];
+  /** the uuid-only chain tail, skipping dead + excluded rows (the live
+   *  chain's per-tick base — no fingerprint/ts materialization); absent =
+   *  derive from knownPath */
+  knownTailExcluding?: (exclude: ReadonlySet<string>) => string | null;
   /** The current known tip (the CHECK marker at persist points). */
   knownTip: () => string | null;
   /** The transcript file's text, where readable (the verifier pass); null

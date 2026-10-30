@@ -48,25 +48,67 @@ if (
   process.exit(2);
 }
 
-// --tail mode: stream a ring buffer of the last N rows, then report.
+// --tail mode: read BACKWARD from EOF in blocks (the file can be far
+// past the 4 MiB cap — the forward stream would pay the whole file per
+// read). Only the last N uuid-bearing rows and the torn signal matter,
+// so the scan stops as soon as the ring is full.
 if (tailN !== null) {
-  const ring = [];
-  let lastLineJunk = false;
+  const newest = []; // the newest-first rows (the scan reads backward)
+  let torn = false;
+  const fd = openSync(file, "r");
   try {
-    const rl = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
-    for await (const line of rl) {
-      const trimmed = line.trim();
-      if (trimmed === "") continue;
+    const st = fstatSync(fd);
+    const size = st.size;
+    if (size > 0) {
+      // the trailing-newline check: a last byte that is not a newline
+      // means the final line may still be mid-write
+      const one = Buffer.alloc(1);
+      if (readSync(fd, one, 0, 1, size - 1) === 1 && one[0] !== 0x0a) torn = true;
+    }
+    const CHUNK = 64 * 1024;
+    let pos = size;
+    let carry = Buffer.alloc(0); // bytes after the newest complete newline
+    const lines = []; // newest-first complete lines
+    while (pos > 0 && lines.length < tailN + 2) {
+      const readLen = Math.min(CHUNK, pos);
+      pos -= readLen;
+      const buf = Buffer.alloc(readLen);
+      readSync(fd, buf, 0, readLen, pos);
+      const block = carry.length === 0 ? buf : Buffer.concat([buf, carry]);
+      const firstNl = block.indexOf(0x0a);
+      if (firstNl === -1) {
+        carry = block; // no complete line yet — the whole block carries
+        continue;
+      }
+      const lastNl = block.lastIndexOf(0x0a);
+      carry = block.subarray(lastNl + 1);
+      // decode only BETWEEN newlines (a block boundary can split a
+      // multibyte character — the trimmed head bytes are re-read by the
+      // older block, where they sit cleanly inside it; the file's true
+      // first line is the pos === 0 exception)
+      const from = pos === 0 ? 0 : firstNl + 1;
+      const text = block.toString("utf8", from, lastNl + 1);
+      const parts = text.split("\n");
+      for (let i = parts.length - 1; i >= 0; i -= 1) {
+        const line = parts[i];
+        if (line !== undefined && line.trim() !== "") lines.push(line);
+      }
+    }
+    // the carried bytes past the last newline: an unterminated final
+    // fragment (already flagged torn) — never parsed; `lines` holds only
+    // complete lines, newest-first
+    let lastLineJunk = false;
+    for (let i = 0; i < lines.length && newest.length < tailN; i += 1) {
+      const trimmed = lines[i].trim();
       let row;
       try {
         row = JSON.parse(trimmed);
       } catch {
-        lastLineJunk = true; // provisional; cleared if more lines follow
+        if (i === 0) lastLineJunk = true; // the FINAL line is mid-write junk
         continue;
       }
-      // any parseable line clears the junk flag — uuid-less metadata rows
-      // are legitimate content, never torn evidence
-      lastLineJunk = false;
+      // any parseable line is fine — uuid-less metadata rows are skipped
+      // as content, never torn evidence
       if (row === null || typeof row !== "object") continue;
       if (typeof row.uuid !== "string") continue;
       const parent =
@@ -76,33 +118,18 @@ if (tailN !== null) {
             ? row.logicalParentUuid
             : null;
       const boundary = row.type === "system" && row.subtype === "compact_boundary" ? 1 : 0;
-      ring.push([row.uuid, parent, boundary]);
-      if (ring.length > tailN) ring.shift();
+      newest.push([row.uuid, parent, boundary]);
     }
-    // the trailing-newline check: a last byte that is not \n means the
-    // final line may still be mid-write
-    let torn = lastLineJunk;
-    try {
-      const fd = openSync(file, "r");
-      try {
-        const st = fstatSync(fd);
-        if (st.size > 0) {
-          const buf = Buffer.alloc(1);
-          const got = readSync(fd, buf, 0, 1, st.size - 1);
-          if (got === 1 && buf[0] !== 0x0a) torn = true;
-        }
-      } finally {
-        closeSync(fd);
-      }
-    } catch {
-      // the byte check is best-effort; the line signals carry torn alone
-    }
-    process.stdout.write(`${JSON.stringify({ ok: true, torn, tail: ring })}\n`);
+    if (lastLineJunk) torn = true;
+    const out = newest.slice(0, tailN).reverse(); // oldest-first
+    process.stdout.write(`${JSON.stringify({ ok: true, torn, tail: out })}\n`);
+    process.exit(0);
   } catch (err) {
     process.stdout.write(`${JSON.stringify({ ok: false, error: String(err?.message || err) })}\n`);
     process.exit(1);
+  } finally {
+    closeSync(fd);
   }
-  process.exit(0);
 }
 
 let rowsAfter = 0;

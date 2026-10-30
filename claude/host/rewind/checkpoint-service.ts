@@ -178,6 +178,19 @@ class CheckpointServiceImpl {
       key,
       apiMessages: () => thunks.apiFingerprints(),
       knownPath: () => this.knownPathOf(key, storage, this.deadByKey.get(key)),
+      // the uuid-only tail (the live chain's per-tick base): skips the
+      // fingerprint/ts materialization knownPath pays for
+      knownTailExcluding: (exclude: ReadonlySet<string>): string | null => {
+        const dead = this.deadByKey.get(key);
+        const order = storage.mirror.arrivalOrder();
+        for (let i = order.length - 1; i >= 0; i -= 1) {
+          const uuid = order[i];
+          if (uuid === undefined || exclude.has(uuid)) continue;
+          if (dead?.has(uuid)) continue;
+          return uuid;
+        }
+        return null;
+      },
       knownTip: () => storage.mirror.tipUuid(),
       ...(transcriptThunk !== undefined ? { transcriptText: () => transcriptThunk() } : {}),
       ...(transcriptPassThunk !== undefined ? { transcriptPass: () => transcriptPassThunk() } : {}),

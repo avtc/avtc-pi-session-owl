@@ -100,15 +100,17 @@ describe("live chain processor — enqueue", () => {
 });
 
 describe("live chain processor — the normal tick", () => {
-  test("file parents flow to patchEdges; the anchor resolution walks through uncaptured ceremony", async () => {
+  test("verified anchors flow to patchEdges; uncaptured ceremony carries only window-validated parents", async () => {
     const h = harness({ owlTail: "t0", size: 100, tail: facts([row("t0", "x"), row("j1", "t0"), row("u1", "j1")]) });
     h.proc.enqueue(ev("j1", false));
     h.proc.enqueue(ev("u1", true));
     await h.proc.flush();
-    // both queued rows' FILE parents are handed to the mirror verbatim
+    // the captured row's edge is its VERIFIED anchor (j1 is not
+    // observable — the walk lands on t0, the design's parent rule); the
+    // ceremony row keeps its own file parent, validated against the window
     expect(h.patched).toEqual([
       { uuid: "j1", parent: "t0" },
-      { uuid: "u1", parent: "j1" },
+      { uuid: "u1", parent: "t0" },
     ]);
     expect(h.rewinds).toEqual([]);
     expect((h.size.value ?? 0) >= 0).toBe(true);

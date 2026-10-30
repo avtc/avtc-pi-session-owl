@@ -68,6 +68,15 @@ interface QueuedEvent {
   captured: boolean;
 }
 
+/** A pending batch larger than this can never resolve inside the read
+ *  window — shed the oldest rows and keep the verifier live. */
+const MAX_QUEUE = 4096;
+/** Consecutive unresolved ticks before the pending batch is shed. */
+const MAX_RETRIES = 5;
+/** Uuid sanity bound — transcript rows are engine-written; anything past
+ *  this is foreign padding, never a chain identity. */
+const MAX_UUID = 128;
+
 /** The anchor a row's walk-back names. */
 interface Anchor {
   uuid: string | null;
@@ -104,6 +113,12 @@ export class LiveChainProcessor {
    *  tick so it fires after the LAST event, not the first. */
   enqueue(event: { uuid: string; door: string; captured: boolean; agentId?: unknown }): boolean {
     if (event.agentId !== undefined && event.agentId !== null) return false;
+    if (this.queue.length >= MAX_QUEUE) {
+      // an unbounded pending batch would wedge every later tick to the
+      // same unread anchor — shed the oldest and keep detecting
+      this.deps.log(`live chain: queue cap reached (${MAX_QUEUE}) — shedding the oldest pending rows`);
+      this.queue.splice(0, this.queue.length - MAX_QUEUE + 1);
+    }
     this.queue.push({ uuid: event.uuid, captured: event.captured });
     this.armTimer(this.tickDelayMs, true);
     return true;
@@ -153,6 +168,15 @@ export class LiveChainProcessor {
   private retry(ms: number): void {
     if (this.disposed) return;
     this.armTimer(ms);
+  }
+
+  /** Drop the pending batch after it stayed unresolved past the bound:
+   *  the ticks were wedged on the same unreachable anchor — shedding lets
+   *  later rows verify again (the shed rows keep their captures; the next
+   *  sweep or rewind verdict re-adjudicates them). */
+  private shedPending(): void {
+    this.queue.length = 0;
+    this.retries = 0;
   }
 
   private async process(): Promise<void> {
@@ -214,7 +238,10 @@ export class LiveChainProcessor {
       return;
     }
 
-    const byUuid = new Map(tail.rows.map((r) => [r.uuid, r] as const));
+    const sane = tail.rows.filter(
+      (r) => r.uuid.length <= MAX_UUID && (r.parentUuid === null || r.parentUuid.length <= MAX_UUID),
+    );
+    const byUuid = new Map(sane.map((r) => [r.uuid, r] as const));
     // Partition the queue against the tail. The PRESENT rows (in queue
     // order == file order) are this tick's batch; an ABSENT row positioned
     // before the last present one is amputation evidence (dead); an absent
@@ -244,6 +271,7 @@ export class LiveChainProcessor {
       this.deps.log(`live chain: ${deadAbsent} queued row(s) absent before a present one — amputation`);
     }
     const capturedByUuid = new Map(this.queue.map((e) => [e.uuid, e.captured] as const));
+    const indexOfUuid = new Map(sane.map((r, i) => [r.uuid, i] as const));
 
     // Verify the whole batch against the expected chain point. A mismatch
     // does NOT fire immediately: the expectation rebases onto the row's
@@ -255,11 +283,17 @@ export class LiveChainProcessor {
     let expected = this.deps.owlTailExcluding(new Set(this.queue.map((e) => e.uuid)));
     let rewound = false;
     const edges: Array<{ uuid: string; parent: string | null }> = [];
+    const ceremonyEdge = (row: TailRow): { uuid: string; parent: string | null } => ({
+      uuid: row.uuid,
+      parent: row.parentUuid !== null && byUuid.has(row.parentUuid) ? row.parentUuid : null,
+    });
     for (const event of present) {
       const row = byUuid.get(event.uuid);
       if (row === undefined) continue; // unreachable (present membership)
-      edges.push({ uuid: row.uuid, parent: row.parentUuid });
       if (row.boundary) {
+        // the chain's fresh root: the boundary edge marks it (the mirror
+        // never holds the row; the ledger keeps the reset point)
+        edges.push({ uuid: row.uuid, parent: null });
         // a compaction boundary: the chain's fresh root — never a rewind,
         // and the chain continues from it (captured or not: the boundary
         // row is ceremony the mirror never holds, but the file's truth is
@@ -272,24 +306,48 @@ export class LiveChainProcessor {
         // held nothing it is the first row of a fresh session; otherwise
         // the file was rebuilt past everything owl holds.
         if (expected === null) {
-          if (event.captured) expected = row.uuid;
+          if (event.captured) {
+            edges.push({ uuid: row.uuid, parent: null });
+            expected = row.uuid;
+          }
           continue;
         }
         this.deps.log(`live chain: rewind detected — row ${row.uuid} is a fresh root (expected ${String(expected)})`);
         rewound = true;
-        if (event.captured) expected = row.uuid;
+        if (event.captured) {
+          edges.push({ uuid: row.uuid, parent: null });
+          expected = row.uuid;
+        }
         continue;
       }
-      if (!event.captured) continue; // ceremony: no owl-chain slot, no check
-      const anchor = this.resolveAnchor(tail.rows, row, capturedByUuid, expected);
+      if (!event.captured) {
+        edges.push(ceremonyEdge(row)); // no owl-chain slot; the file's own
+        // parent only when it names a window row
+        continue;
+      }
+      const anchor = this.resolveAnchor(tail.rows, indexOfUuid, row, capturedByUuid, expected);
       if (anchor === undefined) {
         // the walk left the window before naming a known row — defer the
-        // whole batch (never a wrong verdict); the window grows on retry
-        this.retries = Math.min(this.retries + 1, 5);
+        // batch (never a wrong verdict); the window grows on retry, and a
+        // batch that NEVER resolves is eventually shed so later rows can
+        // still be verified
+        this.retries = Math.min(this.retries + 1, MAX_RETRIES);
+        if (this.retries >= MAX_RETRIES) {
+          this.deps.log(
+            `live chain: the anchor for row ${row.uuid} stayed outside the read window for ${this.retries} ticks — shedding the batch (detection continues with later rows)`,
+          );
+          this.shedPending();
+          return;
+        }
         this.retry(this.backoffMs());
         return;
       }
+      // the edge this row contributes is the VERIFIED anchor — never the
+      // raw file parent string (the design's own parent rule: the nearest
+      // preceding observable row)
+      const anchorEdge = { uuid: row.uuid, parent: anchor.uuid };
       if (anchor.uuid === expected && !anchor.boundary) {
+        edges.push(anchorEdge);
         expected = row.uuid;
         continue;
       }
@@ -297,6 +355,7 @@ export class LiveChainProcessor {
         // the anchor is a compaction boundary (this batch's or a
         // historical one): the chain restarted there — rebase, never a
         // verdict
+        edges.push(anchorEdge);
         expected = anchor.uuid;
         continue;
       }
@@ -306,6 +365,7 @@ export class LiveChainProcessor {
         `live chain: rewind detected — row ${row.uuid} anchors at ${String(anchor.uuid)} (expected ${String(expected)})`,
       );
       rewound = true;
+      edges.push(anchorEdge);
       expected = row.uuid;
     }
 
@@ -351,11 +411,12 @@ export class LiveChainProcessor {
    *  undefined when the walk runs off the window before naming one. */
   private resolveAnchor(
     rows: readonly TailRow[],
+    indexOfUuid: ReadonlyMap<string, number>,
     row: TailRow,
     capturedByUuid: Map<string, boolean>,
     expected: string | null,
   ): Anchor | undefined {
-    const idx = rows.findIndex((r) => r.uuid === row.uuid);
+    const idx = indexOfUuid.get(row.uuid) ?? -1;
     if (idx <= 0) {
       // no predecessors in the window: a genuine root when owl holds
       // nothing, unknowable (defer) when it does
@@ -369,6 +430,8 @@ export class LiveChainProcessor {
       if (this.deps.isKnownRow(prev.uuid)) return { uuid: prev.uuid, boundary: false };
       if (prev.uuid === expected) return { uuid: prev.uuid, boundary: false }; // the chain tail itself
     }
-    return undefined;
+    // the window holds no observable predecessor: with an empty chain this
+    // row simply starts it; otherwise the anchor is unknowable here
+    return expected === null ? { uuid: null, boundary: false } : undefined;
   }
 }

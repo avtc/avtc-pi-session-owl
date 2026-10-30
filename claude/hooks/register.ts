@@ -1336,7 +1336,9 @@ function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
         { size: lastStatSize, transcriptPath: path, pluginRoot: svcs.pluginRoot(), maxRows },
       );
     },
-    owlTailExcluding: (exclude: ReadonlySet<string>) => {
+    owlTailExcluding: (exclude: ReadonlySet<string>): string | null => {
+      const tail = checkpointDeps.knownTailExcluding?.(exclude);
+      if (tail !== undefined) return tail;
       const path = checkpointDeps.knownPath();
       for (let i = path.length - 1; i >= 0; i -= 1) {
         const uuid = path[i]?.uuid;
@@ -1362,12 +1364,20 @@ function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
       }
     },
     onRewind: async (verdict) => {
+      // one live-set fold per verdict: the order and the dead path share it
+      let liveMemo: { settle: string | null; order: string[] } | null = null;
+      const liveOrder = async (settle: string | null): Promise<string[]> => {
+        if (liveMemo !== null && liveMemo.settle === settle) return liveMemo.order;
+        const order = await checkpointDeps.liveSetFor(settle);
+        liveMemo = { settle, order };
+        return order;
+      };
       await applyLiveRewind(
         {
           abortAndAwaitInFlight: checkpointDeps.abortAndAwaitInFlight,
-          liveOrderFor: (settle) => checkpointDeps.liveSetFor(settle),
+          liveOrderFor: liveOrder,
           deadPath: async (settle) => {
-            const live = new Set(await checkpointDeps.liveSetFor(settle));
+            const live = new Set(await liveOrder(settle));
             return checkpointDeps
               .knownPath()
               .filter((r) => !live.has(r.uuid))
