@@ -57,9 +57,17 @@ export type BandDecision =
  *  line — a stale stage line must not outlive the pause, and the pause
  *  stays honest across mid-session flips; the survey still holds the band
  *  either way. */
-export function decideBand(hasSurvey: boolean, inner: unknown, pauseLine: string | null = null): BandDecision {
+export function decideBand(
+  hasSurvey: boolean,
+  inner: unknown,
+  pauseLine: string | null = null,
+  loadingLine: string | null = null,
+): BandDecision {
   if (hasSurvey) return { kind: "passthrough" };
-  const line = pauseLine ?? widgetLine();
+  // the loading line covers the read + details warm: the owl draws its
+  // "not ready yet" state instead of the store line (a pause still wins —
+  // it is the user-facing state)
+  const line = pauseLine ?? loadingLine ?? widgetLine();
   if (line !== null && line !== "") return { kind: "compose", inner, line };
   return { kind: "compose", inner, line: "", idle: true };
 }

@@ -48,7 +48,7 @@ describe("the port's default-model override", () => {
     expect(vendoredRow?.defaultValue).toBeNull();
   });
 
-  test("withPortDefaults overrides exactly the two port-defaulted shared rows — every other row is untouched", () => {
+  test("withPortDefaults overrides exactly the three port-defaulted shared rows — every other row is untouched", () => {
     const base = withPortFields(SESSION_OWL_SCHEMA);
     const overridden = withPortDefaults(base);
     expect(overridden.settings.length).toBe(base.settings.length);
@@ -60,6 +60,8 @@ describe("the port's default-model override", () => {
       } else if (row.id === "defaultThinkingLevel") {
         expect(after.defaultValue).toBe(PORT_DEFAULT_THINKING_LEVEL);
         expect(after.defaultValue).toBe("high");
+      } else if (row.id === "findTimeoutMs") {
+        expect(after.defaultValue).toBe(8_000); // under the host's ~10s hook cut
       } else {
         expect(after).toBe(row); // same reference — no accidental rebuild
       }

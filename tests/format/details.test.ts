@@ -205,3 +205,24 @@ describe("computeDetailsAndCache (capture-time pre-warm)", () => {
     resetConversationStates();
   });
 });
+
+describe("computeDetailsAndCacheFor (the keyed warm write)", () => {
+  it("writes the named conversation's bucket even while another key is active", async () => {
+    const { computeDetailsAndCacheFor } = await import("../../src/format/details.js");
+    // conversation A is ACTIVE; the warm writes conversation B's bucket
+    activateConversation("conv-A");
+    const resolver = (ids: readonly string[]) => [userEntry(ids[0] ?? "e1", `verbatim for ${ids[0]}`)];
+    const out = computeDetailsAndCacheFor("conv-B", "o-warm", ["e-warm"], resolver);
+    expect(out).not.toBeNull();
+    // the ACTIVE conversation's cache does NOT hold it (no cross-bucket leak)
+    expect(renderDetails("o-warm", ["e-warm"], resolver)?.text).toContain("verbatim for e-warm");
+    // rendering under B's key serves the WARMED entry without the resolver
+    activateConversation("conv-B");
+    const noResolve = () => {
+      throw new Error("resolver must not be called — the warm already cached the render");
+    };
+    const served = renderDetails("o-warm", ["e-warm"], noResolve);
+    expect(served?.text).toContain("verbatim for e-warm");
+    resetConversationStates();
+  });
+});

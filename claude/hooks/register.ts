@@ -52,7 +52,7 @@ import {
 } from "../host/conflicts/pause.js";
 import type { TimelineEvent } from "../host/conflicts/timeline.js";
 import { parseTimelines } from "../host/conflicts/timeline.js";
-import { evictResidentConversation, reloadCoreFor } from "../host/core-instances.js";
+import { evictResidentConversation, getCore, reloadCoreFor } from "../host/core-instances.js";
 import * as bridge from "../host/engine-bridge.js";
 import { mergePaneKeybindings } from "../host/keys/pane-bindings.js";
 import { initLogConsumer } from "../host/log/consumer.js";
@@ -93,6 +93,13 @@ import { runMirrorCompact } from "../host/start/compact-mirror.js";
 import { launchGoalExtract, registerGoalExtractLauncher } from "../host/start/goal-extract.js";
 import { runLedgerHeal } from "../host/start/ledger-heal.js";
 import { corePendingEvaluator } from "../host/start/pending.js";
+import { detailsWarmPending, markDetailsWarmDone, markDetailsWarmPending } from "../host/start/readiness.js";
+
+/** The band's not-ready line: the store read and the details warm are still
+ *  in flight — the owl draws its loading state instead of the store line. */
+const OWL_LOADING_LINE = "🦉 loading memory — please wait before you proceed";
+
+import { warmDetailsCache } from "../host/start/warm-details.js";
 import * as state from "../host/state.js";
 import {
   flushAllSessionStorage,
@@ -740,6 +747,12 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
         }));
       const convKey = state.conversationKey(e.session_id, null);
       const storage = getSessionStorage(convKey, e.session_id, null);
+      // the readiness gate opens only after the store read AND the details
+      // warm — the owl line waits for a system that can serve queries from
+      // cache. The warm is scheduled AFTER the backfill resolves (the core
+      // exists by then — an early getCore would materialize an empty one)
+      // and runs on the timer lane, away from every hook budget.
+      if (owlActive) markDetailsWarmPending();
       await runBackfill(storage.mirror, storage.ledger, {
         key: convKey,
         sessionId: e.session_id,
@@ -820,22 +833,74 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                 );
               }
             : undefined,
-      }).then((backfillResult) => {
-        // the blocked-backlog note for /owl-status (the ladder's rung 2 hint
-        // " + EM + " the exact manual command, cleared on every clean start)
-        state.setBootstrapBlockedCommand(
-          backfillResult.bootstrapBlocked && state.getCurrentTranscriptPath() !== null
-            ? manualBootstrapCommand({
-                surface: "terminal",
-                transcriptPath: state.getCurrentTranscriptPath() ?? "",
-                configDir,
-                sessionId: e.session_id,
-                pluginRoot: bridge.currentServices().pluginRoot(),
-              })
-            : null,
-        );
-        return backfillResult;
-      });
+      })
+        .then((backfillResult) => {
+          // the blocked-backlog note for /owl-status (the ladder's rung 2 hint
+          // " + EM + " the exact manual command, cleared on every clean start)
+          state.setBootstrapBlockedCommand(
+            backfillResult.bootstrapBlocked && state.getCurrentTranscriptPath() !== null
+              ? manualBootstrapCommand({
+                  surface: "terminal",
+                  transcriptPath: state.getCurrentTranscriptPath() ?? "",
+                  configDir,
+                  sessionId: e.session_id,
+                  pluginRoot: bridge.currentServices().pluginRoot(),
+                })
+              : null,
+          );
+          return backfillResult;
+        })
+        .then(async (backfillResult) => {
+          // the backfill created the core — the warm renders every
+          // observation's verbatim source into the conversation's cache so
+          // the first query serves from it instead of inside a
+          // budget-capped serve hook. It runs on the TIMER lane: pure JS
+          // never freezes the hook clock (only engine-served calls do), so
+          // an awaited warm would burn the start budget — the timer lane
+          // carries multi-second verdict applications already. The owl
+          // line (gated on readiness) appears when the warm completes.
+          if (owlActive) {
+            try {
+              $.clock.after(0, () => {
+                void (async () => {
+                  try {
+                    const handle = await getCore(convKey);
+                    const store = handle.store.getGraphStore();
+                    const resolver = store.resolveEntries;
+                    if (resolver !== null) {
+                      const report = await warmDetailsCache({
+                        key: convKey,
+                        graph: store.graph,
+                        resolver,
+                        detailsWrite: handle.details.computeDetailsAndCacheFor,
+                      });
+                      log.info(
+                        `owl ready — details cache warmed: ${report.warmed} observation(s) (${report.failed} failed) in ${report.ms}ms`,
+                      );
+                    } else {
+                      log.info("owl ready — no entry resolver yet (the cache warms on first serve)");
+                    }
+                  } catch (err) {
+                    log.warn(
+                      `details cache warm failed (queries render inline until the cache fills): ${errText(err)}`,
+                    );
+                  } finally {
+                    markDetailsWarmDone();
+                    try {
+                      $.ui.invalidate("ui.render");
+                    } catch {
+                      // the pane may not exist yet — the next engine render picks the line up
+                    }
+                  }
+                })();
+              });
+            } catch (err) {
+              log.warn(`details warm scheduling failed: ${errText(err)}`);
+              markDetailsWarmDone();
+            }
+          }
+          return backfillResult;
+        });
       // The mirror-retention sweep (the S5 read path): planned from the LIVE
       // settings (mirrorRetentionDays — keep-forever by default), run on CLI
       // surfaces via $.process.run, and never blocking the start sequence.
@@ -2144,7 +2209,12 @@ async function onUiRender($: any, e: AnyEvent, next: Next) {
             (e as { props?: { bodyColumns?: number } }).props?.bodyColumns ?? 80,
           )
         : null;
-    const decision = decideBand((e as { hasSurvey?: boolean }).hasSurvey === true, inner, pauseLine);
+    const decision = decideBand(
+      (e as { hasSurvey?: boolean }).hasSurvey === true,
+      inner,
+      pauseLine,
+      detailsWarmPending() ? OWL_LOADING_LINE : null,
+    );
     if (decision.kind === "passthrough") return inner;
     const table = $.ui.resolve(e);
     return composeBand(table as never, decision) as never;

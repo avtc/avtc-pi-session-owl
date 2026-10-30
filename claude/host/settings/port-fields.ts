@@ -136,6 +136,10 @@ export function withPortFields<S extends SchemaShape>(base: S): S {
 const PORT_SHARED_DEFAULTS: Readonly<Record<string, unknown>> = {
   defaultModel: PORT_DEFAULT_MODEL,
   defaultThinkingLevel: PORT_DEFAULT_THINKING_LEVEL,
+  // the host cuts a plugin's tool.call hook at ~10s; the search's own
+  // graceful stop (partial results + a refine hint) must land UNDER that
+  // cut or the hook dies first and the model sees no answer at all
+  findTimeoutMs: 8_000,
 };
 
 export function withPortDefaults<S extends SchemaShape>(base: S): S {
