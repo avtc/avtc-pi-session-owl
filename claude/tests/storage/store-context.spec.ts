@@ -133,21 +133,26 @@ describe("store-context — the pi contract", () => {
     expect(prepared.ctx.getLeafId()).toBe("u2");
   });
 
-  test("getBranch walks the parentUuid chain to the asked leaf (dead tail drops out)", async () => {
+  test("getBranch walks the parentUuid chain to the asked leaf (a dead-tail-marked record RIDES — kept for verdicts)", async () => {
     const { mirror, prepared } = await setup();
     mirror.bufferRow(row("u1", null));
     mirror.bufferRow(row("u2", "u1"));
     mirror.bufferRow(row("u3", "u2"));
     const branch = prepared.ctx.getBranch("u2");
     expect(branch.map((e) => e.id)).toEqual(["u1", "u2"]);
-    // a record marker on the dead tail is skipped (the liveness rule)
+    // a record marker on the dead tail is OFF the served rows but RIDES the
+    // fold (the fold never drops — a verdict decides its fate)
     const ledger2 = new LedgerWriter(fs, DIR, "other");
     ledger2.append("graph_delta", { op: 1 }, "u3");
     await ledger2.flush();
     const p2 = await prepareStoreContext(fs, DIR, new LedgerWriter(fs, DIR, "x"), mirror);
     const branch2 = p2.ctx.getBranch("u2");
-    expect(branch2.map((e: StoreEntry) => (e.type === "custom" ? e.customType : e.type))).toEqual([ROW_TYPE, ROW_TYPE]);
-    // ...and the full branch keeps it
+    expect(branch2.map((e: StoreEntry) => (e.type === "custom" ? e.customType : e.type))).toEqual([
+      ROW_TYPE,
+      ROW_TYPE,
+      GRAPH_DELTA_TYPE, // riding — after the served rows
+    ]);
+    // ...and the full branch places it at its row
     const branch3 = p2.ctx.getBranch("u3");
     expect(branch3.map((e: StoreEntry) => (e.type === "custom" ? e.customType : e.type))).toEqual([
       ROW_TYPE,
@@ -561,9 +566,11 @@ describe("observation batch refs (the ids-drill shortcut)", () => {
 // A restore fork never removes transcript rows (the engine keeps the whole
 // file), so every row — abandoned and kept — is PRESENT in the mirror.
 // Liveness therefore comes solely from the SERVED BRANCH: sibling-branch rows
-// drop out of getBranch, records marked on them stop serving with one
-// `branch-drop` trace per context, while the records themselves stay in the
-// ledger files (never rewritten — deletion is not the mechanism; the fold is).
+// drop out of getBranch, while records marked on them RIDE the fold (one
+// `branch-keep` trace per context) — the fold never drops a record; drops
+// happen only through logged verdicts/refolds (the blind-window quarantine
+// and the detection refolds), and the records themselves stay in the ledger
+// files either way (never rewritten — deletion is not the mechanism).
 describe("store-context — the restore-fork served-branch contract", () => {
   /** alpha → (fork) γ and alpha → β in one mirror, with one observation per
    *  branch and a seeded nGoal created while the tip sits on the served chain. */
@@ -594,12 +601,12 @@ describe("store-context — the restore-fork served-branch contract", () => {
     return { ledger, mirror, prepared: p };
   }
 
-  test("getBranch serves alpha+fork only: beta rows excluded, the beta-marked record dropped with ONE branch-drop trace", async () => {
+  test("getBranch serves alpha+fork rows; the beta-marked record RIDES the fold with ONE branch-keep trace", async () => {
     const { prepared } = await forkFixture(`${DIR}-fork`);
-    const warns: string[] = [];
+    const infos: string[] = [];
     const prev = _setBaseLoggerForTest({
-      info: () => {},
-      warn: (m: string) => warns.push(m),
+      info: (m: string) => infos.push(m),
+      warn: (m: string) => infos.push(`WARN ${m}`),
       error: () => {},
       debug: () => {},
     });
@@ -608,18 +615,20 @@ describe("store-context — the restore-fork served-branch contract", () => {
       const asKind = (e: StoreEntry): string =>
         e.type === "custom" ? ((e as { customType?: string }).customType ?? "custom") : e.type;
       const rowUuids = served.filter((e) => asKind(e) === ROW_TYPE).map((e) => e.id);
-      expect(rowUuids).toEqual(["a1", "a2", "g1"]); // the abandoned branch stays off
+      expect(rowUuids).toEqual(["a1", "a2", "g1"]); // the abandoned branch's ROWS stay off
       const customs = served.filter((e) => asKind(e) !== ROW_TYPE).map(asKind);
       expect(customs.filter((t) => t === GRAPH_DELTA_TYPE)).toHaveLength(1); // nGoal serves
-      expect(customs.filter((t) => t === OBSERVATION_TYPE)).toHaveLength(1); // only oA — oB dropped
-      // the silent-drop trace fired for the abandoned record, once
-      const trace = warns.join("\n");
-      expect(trace).toContain("branch-drop");
+      // the fold never drops: oA places on-branch, oB rides (verdicts decide)
+      expect(customs.filter((t) => t === OBSERVATION_TYPE)).toHaveLength(2);
+      // the ride trace fired for the abandoned record, once, informational
+      const trace = infos.join("\n");
+      expect(trace).toContain("branch-keep");
       expect(trace).toContain("b2");
-      // a second render re-masks nothing (the once-per-context dedup)
-      const warnsAfterFirst = warns.length;
+      expect(trace).not.toContain("WARN");
+      // a second render re-traces nothing (the once-per-context dedup)
+      const afterFirst = infos.length;
       prepared.ctx.getBranch(prepared.ctx.getLeafId());
-      expect(warns.length).toBe(warnsAfterFirst);
+      expect(infos.length).toBe(afterFirst);
     } finally {
       _setBaseLoggerForTest(prev);
     }
@@ -637,9 +646,10 @@ describe("store-context — the restore-fork served-branch contract", () => {
     const graphStore = await import("../../core/src/store/graph-store.js");
     await graphStore.load(p2.ctx);
     const store = graphStore.getGraphStore();
-    // the observation load sees belongs to the LIVE branch only
+    // the fold keeps every record: the abandoned world's observation loads
+    // too — its fate belongs to the verdict paths, never the boot fold
     const obsIds = [...store.graph.observations.values()].map((o) => o.id).sort();
-    expect(obsIds).toEqual(["oA"]);
+    expect(obsIds).toEqual(["oA", "oB"]);
     // nGoal anchors the roots listing (the input to /owl-ls' roots arm)
     const { nonObsoleteRoots } = await import("../../core/src/graph/read-tools.js");
     const roots = nonObsoleteRoots(store.graph);

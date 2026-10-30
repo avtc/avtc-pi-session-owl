@@ -93,15 +93,22 @@ function payloadOf(data: unknown): string {
  *  order) while a rewind still drops it by its marker. `onSkip` reports the
  *  two silent drop points (marker off-branch / `at` off-branch) once per
  *  record per prepared context — the trace seam for the skip forensics. */
+/** The branch fold: rows in serve order, records placed at their `at` rows.
+ *  A record whose marker or `at` row is off the served branch RIDES the fold
+ *  (appended after the branch rows, one informational trace per context) —
+ *  the fold NEVER drops a record: memory survives every serve, and drops
+ *  happen only through the logged verdict paths (the blind-window
+ *  quarantine and the detection refolds). */
 function buildBranch(
   branch: readonly string[],
   records: readonly LedgerRecord[],
   snapshot: { details: unknown; record: LedgerRecord } | null,
-  onSkip?: (r: LedgerRecord, reason: "marker" | "at") => void,
+  onRide?: (r: LedgerRecord, reason: "marker" | "at") => void,
 ): StoreEntry[] {
   const rowsInBranch = new Set(branch);
   const byAtRow = new Map<string, StoreEntry[]>();
   const seedFirst: StoreEntry[] = []; // records written at the pre-rows origin
+  const riding: StoreEntry[] = []; // off-branch records — kept, appended
   const seenRecordIds = new Set<string>(); // once each across fold ∪ live views
   for (const r of records) {
     if (r.kind === "CHECK" || r.kind === "lineage") continue;
@@ -112,10 +119,6 @@ function buildBranch(
     // was still empty — e.g. the nGoal seed at session start), not a row
     // uuid: it is always on-branch and lands BEFORE every row
     const onBranch = r.marker === "seed" || rowsInBranch.has(r.marker);
-    if (!onBranch) {
-      onSkip?.(r, "marker");
-      continue; // dead marker — skipped
-    }
     if (r.kind === "snapshot" || r.kind === "SNAPSHOT_PARTS") {
       if (snapshot !== null && r === snapshot.record) {
         const entry: StoreCompactionEntry = {
@@ -124,21 +127,23 @@ function buildBranch(
           details: snapshot.details,
         };
         if (r.at === "seed") seedFirst.push(entry);
-        else place(byAtRow, r.at, entry, rowsInBranch, () => onSkip?.(r, "at"));
+        else place(byAtRow, r.at, entry, rowsInBranch, riding, onBranch ? onRide?.bind(null, r) : undefined);
       }
       continue;
     }
     const customType = KIND_TO_TYPE[r.kind];
     if (customType === undefined) continue;
     const entry: StoreCustomEntry = { type: "custom", id: `${r.producerId}:${r.seq}`, customType, data: r.payload };
+    if (!onBranch) onRide?.(r, "marker");
     if (r.at === "seed") seedFirst.push(entry);
-    else place(byAtRow, r.at, entry, rowsInBranch, () => onSkip?.(r, "at"));
+    else place(byAtRow, r.at, entry, rowsInBranch, riding, onBranch ? onRide?.bind(null, r) : undefined);
   }
   const entries: StoreEntry[] = [...seedFirst];
   for (const uuid of branch) {
     entries.push(rowEntry(uuid));
     for (const e of byAtRow.get(uuid) ?? []) entries.push(e);
   }
+  entries.push(...riding);
   return entries;
 }
 
@@ -147,11 +152,13 @@ function place(
   at: string,
   entry: StoreEntry,
   rowsInBranch: Set<string>,
-  onSkip?: () => void,
+  riding: StoreEntry[],
+  onAtRide?: (reason: "at") => void,
 ): void {
   if (!rowsInBranch.has(at)) {
-    onSkip?.();
-    return; // written off-branch — skipped
+    riding.push(entry); // written off-branch — kept (verdicts decide, not the fold)
+    onAtRide?.("at");
+    return;
   }
   const list = byAtRow.get(at) ?? [];
   list.push(entry);
@@ -226,18 +233,19 @@ export async function prepareStoreContext(
   // re-derives (observations) arrive as fresh verdicts after a detection.
   const blindDropped = new Set<string>();
   const recordIdOf = (r: LedgerRecord): string => `${r.producerId}:${r.seq}`;
-  // The silent-drop trace: a record the branch fold skips (marker row or
-  // `at` row off-branch) is logged ONCE per prepared context — getBranch runs
-  // on every render, dedup keeps the trace to the first sighting.
-  const reportedSkips = new Set<string>();
-  const reportSkip = (r: LedgerRecord, reason: "marker" | "at"): void => {
+  // The ride trace: a record whose marker or `at` row is off the served
+  // branch RIDES the fold (kept — verdicts decide drops, never the fold);
+  // logged ONCE per prepared context at info level — getBranch runs on every
+  // render, dedup keeps the trace to the first sighting.
+  const reportedRides = new Set<string>();
+  const reportRide = (r: LedgerRecord, reason: "marker" | "at"): void => {
     const id = recordIdOf(r);
-    if (reportedSkips.has(id)) return;
-    reportedSkips.add(id);
+    if (reportedRides.has(id)) return;
+    reportedRides.add(id);
     const row = String(r[reason]);
-    log.warn(
-      `branch-drop: record ${id} (${r.kind}) dropped — ${reason} row ${row} not on the served branch ` +
-        `(${lastBranch.length}/${mirror.arrivalOrder().length} rows served)`,
+    log.info(
+      `branch-keep: record ${id} (${r.kind}) rides the fold — ${reason} row ${row} not on the served branch ` +
+        `(${lastBranch.length}/${mirror.arrivalOrder().length} rows served); a verdict decides, the fold never drops`,
     );
   };
   const refresh = async (override?: LivePredicate): Promise<void> => {
@@ -356,7 +364,7 @@ export async function prepareStoreContext(
         setLastBranch(branchForLeaf(mirror, leafId));
       }
       const records = [...flushed, ...ledger.liveRecords()];
-      return buildBranch(lastBranch, records, snapshot, reportSkip);
+      return buildBranch(lastBranch, records, snapshot, reportRide);
     },
   };
   // The core's swap re-fold hook (duck-typed at the swap site — the
