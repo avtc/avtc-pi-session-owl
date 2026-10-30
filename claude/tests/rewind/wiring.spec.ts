@@ -31,6 +31,19 @@ function promptRow(uuid: string, parentUuid: string | null, text: string): Recor
 
 const apiMsg = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
 
+/** A transcript file row (the live chain's truth channel). */
+const fileRow = (uuid: string, parentUuid: string | null, text: string): string =>
+  JSON.stringify({
+    uuid,
+    parentUuid,
+    sessionId: "sess-file",
+    timestamp: "2026-10-30T00:00:00.000Z",
+    type: "user",
+    message: { role: "user", content: text },
+  });
+
+const jsonl = (...rows: string[]) => `${rows.join("\n")}\n`;
+
 /** The reconciliation log lines land through the initLogConsumer backend
  *  (the translating seam) into the harness fs under /cfg/logs/. */
 async function logText(): Promise<string> {
@@ -106,22 +119,27 @@ describe("rewind wiring — the checkpoint at the turn boundary", () => {
 
   test("a rewind mid-session: divergence at the boundary, reconciliation logged, the blind-window quarantine applied, the flush still runs", async () => {
     await harness.dispatch("classic.SessionStart", { session_id: "sess-r3", transcript_path: "/t/r3.jsonl" });
-    // turn 1: u1..u2 observed, flushed, CHECKed
+    // turn 1: u1..u2 observed, flushed, CHECKed (the file catches up to the
+    // engine's own persist before the turn boundary reads it)
     await harness.dispatch("session.append", promptRow("u1", null, "hello"));
     await harness.dispatch("session.append", promptRow("u2", "u1", "world"));
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world")]);
+    await harness.fsWrite("/t/r3.jsonl", jsonl(fileRow("u1", null, "hello"), fileRow("u2", "u1", "world")));
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
-    // the user rewound to u2 and sent an edited prompt — u3 died, u4 lives
+    // the user rewound to u2 and sent an edited prompt — u3 died (the file
+    // was amputated past it), u4 chains from the settle point u2
     await harness.dispatch("session.append", promptRow("u3", "u2", "old tail"));
+    await harness.fsWrite("/t/r3.jsonl", jsonl(fileRow("u1", null, "hello"), fileRow("u2", "u1", "world")));
     await harness.dispatch("session.append", promptRow("u4", "u2", "new prompt"));
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world"), apiMsg("new prompt")]);
+    await harness.fsWrite(
+      "/t/r3.jsonl",
+      jsonl(fileRow("u1", null, "hello"), fileRow("u2", "u1", "world"), fileRow("u4", "u2", "new prompt")),
+    );
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
 
     await new Promise((r) => setTimeout(r, 30)); // the logger's async flush chain
     const text = await logText();
-    expect(text).toContain("rewind detected");
-    expect(text).toContain("sess-r3");
-    expect(text).toContain("1 dead row");
+    expect(text).toMatch(/live chain: rewind detected[^\n]*conv sess-r3/);
+    expect(text).toMatch(/amputated[^\n]*conv sess-r3/);
     // the turn still flushed its rows + boundary CHECK
     const ledgerFiles = harness.fsPaths().filter((p) => p.includes("sessions/sess-r3/") && /ledger-/.test(p));
     expect(ledgerFiles.length).toBeGreaterThanOrEqual(1);
@@ -155,20 +173,24 @@ describe("rewind wiring — the checkpoint at the turn boundary", () => {
   test("detection is sticky across turns: the turn after a rewind does not re-fire", async () => {
     await harness.dispatch("classic.SessionStart", { session_id: "sess-r7", transcript_path: "/t/r7.jsonl" });
     await harness.dispatch("session.append", promptRow("u1", null, "hello"));
-    harness.sessionApi.set([apiMsg("hello")]);
+    await harness.fsWrite("/t/r7.jsonl", jsonl(fileRow("u1", null, "hello")));
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
-    // the rewind: u2 dies, u3 is the edited prompt
+    // the rewind: u2 dies (amputated), u3 is the edited prompt
     await harness.dispatch("session.append", promptRow("u2", "u1", "old"));
     await harness.dispatch("session.append", promptRow("u3", "u1", "new"));
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("new")]);
+    await harness.fsWrite("/t/r7.jsonl", jsonl(fileRow("u1", null, "hello"), fileRow("u3", "u1", "new")));
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
     // the NEXT clean turn on the new branch
     await harness.dispatch("session.append", promptRow("u4", "u3", "more"));
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("new"), apiMsg("more")]);
+    await harness.fsWrite(
+      "/t/r7.jsonl",
+      jsonl(fileRow("u1", null, "hello"), fileRow("u3", "u1", "new"), fileRow("u4", "u3", "more")),
+    );
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
     await new Promise((r) => setTimeout(r, 30));
     const text = await logText();
-    expect(text.match(/rewind detected — conversation sess-r7/g)).toHaveLength(1);
+    expect(text.match(/live chain: rewind detected[^\n]*conv sess-r7/g)).toHaveLength(1);
+    expect(text).toMatch(/amputated[^\n]*conv sess-r7/);
   });
 
   test("session.measure feeds the tripwires: a fill drop with no compaction row fires the next degrade correctly", async () => {
@@ -280,39 +302,36 @@ describe("rewind wiring — the checkpoint at the turn boundary", () => {
     expect(timelineText).toContain('"t":"compact-answer"');
     expect(timelineText).toContain('"cut":"u2"');
 
-    // the post-compact turn: the api view legitimately lacks u1 — this is
-    // NOT a rewind; without the boundary it reads as one
+    // the post-compact turn: the file legitimately lacks u1 (the cut) —
+    // this is NOT a rewind; the chain continues from the kept tail
     await harness.dispatch("session.append", promptRow("u4", "u3", "after cut prompt"));
-    harness.sessionApi.set([
-      apiMsg("the summarized prefix stands here"),
-      apiMsg("alpha beta gamma"),
-      apiMsg("tail row"),
-      apiMsg("after cut prompt"),
-    ]);
+    await harness.fsWrite(
+      "/cfg/projects/p/r8.jsonl",
+      `${CUT_TRANSCRIPT}${fileRow("u4", "u3", "after cut prompt")}
+`,
+    );
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
     text = await logText();
-    expect(text).not.toContain("rewind detected — conversation sess-r8");
+    expect(text).not.toMatch(/live chain: rewind detected[^\n]*conv sess-r8/);
 
     // a REAL rewind of the kept tail still diverges: the exemption masks
     // only the summarized prefix, never the post-cut rows. The engine also
     // REWRITES the transcript — rows the file no longer holds are the dead
     // set's provenance class (u2/u3 carried exact lineage from the earlier
     // verifier pass; the never-filed mirror row alone proves nothing)
-    harness.fsWrite(
+    await harness.dispatch("session.append", promptRow("u5", "u2", "rewound branch"));
+    await harness.fsWrite(
       "/cfg/projects/p/r8.jsonl",
-      JSON.stringify({
-        uuid: "u1",
-        parentUuid: null,
-        sessionId: "sess-cut",
-        timestamp: "2026-10-11T10:00:01.000Z",
-        type: "user",
-        message: { role: "user", content: "one two three four five six seven eight nine ten" },
-      }),
+      jsonl(
+        fileRow("u1", null, "one two three four five six seven eight nine ten"),
+        fileRow("u2", "u1", "alpha beta gamma"),
+        fileRow("u5", "u2", "rewound branch"),
+      ),
     );
-    harness.sessionApi.set([apiMsg("the summarized prefix stands here")]);
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
     text = await logText();
-    expect(text).toContain("rewind detected — conversation sess-r8");
+    expect(text).toMatch(/live chain: rewind detected[^\n]*conv sess-r8/);
+    expect(text).toMatch(/anchors at u2[^\n]*conv sess-r8/);
   });
 
   test("session start re-seeds the compaction boundary from the timeline union (restart persistence)", async () => {
@@ -336,7 +355,7 @@ describe("rewind wiring — the checkpoint at the turn boundary", () => {
     expect(text).not.toContain("rewind detected — conversation sess-r9");
   });
 
-  test("an over-cap transcript read runs the verify helper on CLI surfaces and defers on desktop — the tier wiring", async () => {
+  test("an over-cap tail read escalates to the helper tier — the live chain's ladder", async () => {
     await harness.dispatch("classic.SessionStart", {
       source: "startup",
       session_id: "sess-r10",
@@ -345,32 +364,22 @@ describe("rewind wiring — the checkpoint at the turn boundary", () => {
     });
     await harness.dispatch("session.append", promptRow("u1", null, "hello"));
     await harness.dispatch("session.append", promptRow("u2", "u1", "world"));
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world")]);
-    await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
-    // the transcript read now REFUSES (over the 4 MiB cap) and the api
-    // view rewinds BELOW the watermark (junction u1, checked rows dead) —
-    // the divergence path consults the file tier
+    await harness.fsWrite(
+      "/cfg/projects/p/r10.jsonl",
+      jsonl(fileRow("u1", null, "hello"), fileRow("u2", "u1", "world")),
+    );
+    // the read now REFUSES (over the 4 MiB cap) — the tail tier escalates
+    // to the helper on EVERY surface (the process capsule is universal)
     harness.fsRefuse("/cfg/projects/p/r10.jsonl");
-    harness.sessionApi.set([apiMsg("hello")]);
     const before = harness.processRuns.length;
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
-    // CLI (no surface seen — the -p default): the helper ran with the
-    // transcript path
-    const verifyRun = harness.processRuns.slice(before).find((a) => a.some((x) => x.includes("verify.mjs")));
-    expect(verifyRun).toBeDefined();
-    expect(verifyRun).toContain("/cfg/projects/p/r10.jsonl");
-    // the harness's helper stdout is not a verify report ("pruned") — the
-    // tier degrades to missing and the layer-2 verdict proceeds (the
-    // documented behavior, never a blocked check)
+    const tailRun = harness.processRuns.slice(before).find((a) => a.some((x) => x.includes("verify.mjs")));
+    expect(tailRun).toBeDefined();
+    expect(tailRun).toContain("/cfg/projects/p/r10.jsonl");
+    expect(tailRun).toContain("--tail");
+    // the harness's helper stdout is not a tail report ("pruned") — the
+    // tier degrades to missing and the tick retries (never a wrong verdict)
     const text = await logText();
-    expect(text).toContain("rewind detected — conversation sess-r10");
-    expect(text).not.toContain("rewind check skipped");
-    // a DESKTOP surface defers the helper: the same refusal shape runs NO
-    // second helper invocation
-    await harness.dispatch("session.start", { surface: "desktop", prompt: true });
-    harness.sessionApi.set([]);
-    const count = harness.processRuns.filter((a) => a.some((x) => x.includes("verify.mjs"))).length;
-    await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
-    expect(harness.processRuns.filter((a) => a.some((x) => x.includes("verify.mjs"))).length).toBe(count);
+    expect(text).not.toMatch(/live chain: rewind detected[^\n]*conv sess-r10/);
   });
 });

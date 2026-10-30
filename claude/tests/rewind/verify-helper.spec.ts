@@ -20,9 +20,11 @@ const HELPER = join(__dirname, "..", "..", "helpers", "verify.mjs");
 
 interface VerifyReport {
   ok: boolean;
-  tip: string | null;
-  edges: [string, string | null][];
-  rowsAfter: number;
+  tip?: string | null;
+  edges?: [string, string | null][];
+  rowsAfter?: number;
+  torn?: boolean;
+  tail?: [string, string | null, number][];
 }
 
 async function verify(file: string, ...args: string[]): Promise<VerifyReport> {
@@ -82,7 +84,7 @@ describe("helpers/verify.mjs — the streaming over-cap pass", () => {
     expect(report.tip).toBe("c");
     // a cursor that never appears = the whole file
     const all = await verify(file, "--after", "zzz");
-    expect(all.edges.length).toBe(3);
+    expect((all.edges ?? []).length).toBe(3);
   });
 
   test("an absent file exits 1 with ok:false; a missing operand exits 2", async () => {
@@ -110,8 +112,61 @@ describe("helpers/verify.mjs — compaction-boundary logical edges", () => {
     );
     const report = await verify(file);
     expect(report.ok).toBe(true);
-    const byUuid = new Map(report.edges.map((e: [string, string | null]) => [e[0], e[1]] as const));
+    const byUuid = new Map((report.edges ?? []).map((e: [string, string | null]) => [e[0], e[1]] as const));
     expect(byUuid.get("sys-b")).toBe("sys-a");
     expect(byUuid.get("m-5")).toBe("sys-b");
+  });
+});
+
+describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", () => {
+  test("the LAST N uuid rows as [uuid, parent, boundary01] triples; metadata skips", async () => {
+    const file = tempTranscript(
+      [
+        '{"type":"cost-state","x":1}', // no uuid — skipped
+        '{"uuid":"u1","parentUuid":null,"type":"user"}',
+        '{"uuid":"b1","parentUuid":null,"logicalParentUuid":"old","type":"system","subtype":"compact_boundary"}',
+        '{"uuid":"u2","parentUuid":"b1","type":"user"}',
+        "",
+      ].join("\n"),
+    );
+    const report = await verify(file, "--tail", "2");
+    expect(report.ok).toBe(true);
+    expect(report.torn).toBe(false);
+    expect(report.tail).toEqual([
+      ["b1", "old", 1],
+      ["u2", "b1", 0],
+    ]);
+  });
+
+  test("a last byte that is not a newline is torn; the fragment is excluded", async () => {
+    const file = tempTranscript(
+      ['{"uuid":"u1","parentUuid":null,"type":"user"}', '{"uuid":"u2","parentUuid":"u1"'].join("\n"),
+    );
+    const report = await verify(file, "--tail", "8");
+    expect(report.ok).toBe(true);
+    expect(report.torn).toBe(true);
+    expect(report.tail).toEqual([["u1", null, 0]]);
+  });
+
+  test("a complete but unparsable final line is torn", async () => {
+    const file = tempTranscript(`${['{"uuid":"u1","parentUuid":null,"type":"user"}', "not json"].join("\n")}\n`);
+    const report = await verify(file, "--tail", "8");
+    expect(report.ok).toBe(true);
+    expect(report.torn).toBe(true);
+    expect(report.tail).toEqual([["u1", null, 0]]);
+  });
+
+  test("an empty file is ok, not torn, empty tail", async () => {
+    const file = tempTranscript("");
+    const report = await verify(file, "--tail", "8");
+    expect(report.ok).toBe(true);
+    expect(report.torn).toBe(false);
+    expect(report.tail).toEqual([]);
+  });
+
+  test("a missing file fails with ok:false", async () => {
+    const dir = tempDir("owl-verify");
+    const missing = join(dir, "absent.jsonl");
+    await expect(verify(missing, "--tail", "8")).rejects.toThrow();
   });
 });

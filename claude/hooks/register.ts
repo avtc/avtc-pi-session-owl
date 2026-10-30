@@ -65,7 +65,10 @@ import { runPruneHelper } from "../host/retention/prune-caller.js";
 import { type Fingerprint, fingerprintBlocks } from "../host/rewind/canonical-check.js";
 import { checkpointService } from "../host/rewind/checkpoint-service.js";
 import { isCapRefusal, runVerifyPass } from "../host/rewind/helper-pass.js";
+import { LiveChainProcessor } from "../host/rewind/live-chain.js";
+import { applyLiveRewind } from "../host/rewind/live-rewind.js";
 import { clearWatermarks, runCheckpoint } from "../host/rewind/reconcile.js";
+import { readTail } from "../host/rewind/tail-read.js";
 import { parseTranscript, type TranscriptPass } from "../host/rewind/verifier.js";
 import { getBinding, releaseAllBindings, releaseBinding, setSessionCwd } from "../host/runs/bind.js";
 import { installRunsLogSink } from "../host/runs/seams.js";
@@ -1125,11 +1128,17 @@ async function onSessionAppend($: any, e: AnyEvent, next: Next) {
         // Owl's own stage runs were handled above; the main loop has no agentId.
       } else {
         const conv = state.ensureConversation(sessionId, agentId);
-        captureAppend(
+        const captured = captureAppend(
           conv.key,
           e as unknown as ClaudeRow,
           (key, row) => getSessionStorage(key, sessionId, row?.agentId ?? null).mirror,
         );
+        // the live chain verifier's zero-latency queue (main loop only —
+        // subagent transcripts are separate files); the deferred tick reads
+        // the file tail and verifies the chain
+        if (agentId === null && state.isOwlEnabled() && typeof e.uuid === "string" && typeof e.door === "string") {
+          ensureLiveChain($, sessionId).enqueue({ uuid: e.uuid, door: e.door, captured });
+        }
       }
     }
   } catch (err) {
@@ -1167,6 +1176,9 @@ async function onSessionEnd(_$: any, _e: AnyEvent, next: Next) {
     checkpointService().releaseAll();
     clearWatermarks();
     lastCheckpointSkipped.clear();
+    if (liveChain !== null) liveChain.dispose();
+    liveChain = null;
+    liveChainKey = null;
   } catch (err) {
     report("teardown failed", err);
   }
@@ -1274,6 +1286,118 @@ async function runRewindCheckpoint($: any, sessionId: string, agentId: string | 
   } catch (err) {
     report("rewind check failed", err);
     lastCheckpointSkipped.add(key); // an errored check never advances the boundary
+  }
+}
+
+// The live chain verifier (main loop only — subagent loops keep the
+// checkpoint path): append events queue zero-latency; a deferred tick (or
+// the turn-complete flush) reads the transcript tail and feeds the file's
+// true parent edges to the mirror, detecting rewinds by anchor mismatch.
+// Built lazily at the first flush/enqueue of a session; released at
+// session end with the other per-session state.
+let liveChain: LiveChainProcessor | null = null;
+let liveChainKey: string | null = null;
+
+function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
+  const key = state.conversationKey(sessionId, null);
+  if (liveChain !== null && liveChainKey === key) return liveChain;
+  if (liveChain !== null) liveChain.dispose();
+  liveChainKey = key;
+  const storage = getSessionStorage(key, sessionId, null);
+  const checkpointDeps = checkpointService().buildDeps(key, storage, {
+    apiFingerprints: () => rewindApiFingerprints($, null),
+    transcriptPass: () => rewindTranscriptPass(null),
+    logLine: (line: string) => log.info(line),
+  });
+  let lastStatSize: number | null = null;
+  liveChain = new LiveChainProcessor({
+    statSize: async () => {
+      const path = state.getCurrentTranscriptPath();
+      if (path === null) return null;
+      try {
+        const st = (await bridge.currentServices().fsStat(path)) as { size?: unknown } | null;
+        lastStatSize = st !== null && typeof st.size === "number" ? st.size : null;
+        return lastStatSize;
+      } catch {
+        lastStatSize = null;
+        return null;
+      }
+    },
+    readTail: (maxRows) => {
+      const path = state.getCurrentTranscriptPath();
+      if (path === null) return Promise.resolve(null);
+      const svcs = bridge.currentServices();
+      return readTail(
+        {
+          fsRead: (p: string) => svcs.fsRead(p),
+          runProcess: (argv: string[]) => svcs.processRun(argv),
+          log: (m: string, e?: unknown) => log.warn(m + (e === undefined ? "" : `: ${errText(e)}`)),
+        },
+        { size: lastStatSize, transcriptPath: path, pluginRoot: svcs.pluginRoot(), maxRows },
+      );
+    },
+    owlTailExcluding: (exclude: ReadonlySet<string>) => {
+      const path = checkpointDeps.knownPath();
+      for (let i = path.length - 1; i >= 0; i -= 1) {
+        const uuid = path[i]?.uuid;
+        if (uuid !== undefined && !exclude.has(uuid)) return uuid;
+      }
+      return null;
+    },
+    isKnownRow: (uuid: string) => storage.mirror.rowByUuid(uuid) !== undefined,
+    patchEdges: (edges) => storage.mirror.patchEdges(edges),
+    onRewind: async (verdict) => {
+      await applyLiveRewind(
+        {
+          abortAndAwaitInFlight: checkpointDeps.abortAndAwaitInFlight,
+          liveOrderFor: (settle) => checkpointDeps.liveSetFor(settle),
+          deadPath: async (settle) => {
+            const order = await checkpointDeps.liveSetFor(settle);
+            const live = new Set(order);
+            return checkpointDeps
+              .knownPath()
+              .filter((r) => !live.has(r.uuid))
+              .map((r) => r.uuid);
+          },
+          refold: checkpointDeps.refold,
+          onDivergence: checkpointDeps.onDivergence,
+          log: (line: string) => log.info(line),
+        },
+        verdict,
+      );
+      const reloaded = await reloadCoreFor(key).catch((err: unknown) => {
+        report("graph reload after live rewind", err);
+        return false;
+      });
+      if (reloaded) log.info(`graph reloaded after live rewind refold for ${key}`);
+    },
+    schedule: (ms, fn) => {
+      try {
+        const pending = $.clock.after(ms, fn) as unknown;
+        if (typeof pending === "function") return pending as () => void;
+        const cancel = (pending as { cancel?: unknown } | null)?.cancel;
+        return typeof cancel === "function" ? () => (cancel as () => void)() : () => {};
+      } catch {
+        return () => {};
+      }
+    },
+    log: (line: string) => log.info(`${line} — conv ${key}`),
+  });
+  return liveChain;
+}
+
+/** The main loop's turn-boundary verification: the live chain flush (the
+ *  engine's forced drain has made the turn durable). Dormant while
+ *  disabled or conflict-paused, exactly like the checkpoint it replaces. */
+async function liveChainFlush($: any, sessionId: string): Promise<void> {
+  if (!state.isOwlEnabled()) return;
+  if (isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))) {
+    return;
+  }
+  try {
+    await ensureLiveChain($, sessionId).flush();
+  } catch (err) {
+    report("live chain flush failed", err);
   }
 }
 
@@ -1431,7 +1555,11 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
       // matrix and the capture skip use; a fully-disabled foreign subagent
       // loop has no mirrored rows to reconcile — skipping also keeps its
       // storage dir from ever being created).
-      if (agentId === null || (!bridge.isMachineryLoop(agentId) && !state.subagentsFullyDisabled())) {
+      if (agentId === null) {
+        // the main loop verifies through the live chain (the file tail),
+        // never the api view, in the steady state
+        await liveChainFlush($, sessionId);
+      } else if (!bridge.isMachineryLoop(agentId) && !state.subagentsFullyDisabled()) {
         await runRewindCheckpoint($, sessionId, agentId, false);
       }
       const cap = getCapture(key);
@@ -1592,7 +1720,9 @@ async function onSessionCompact(_$: any, e: AnyEvent, next: Next) {
     rewindCheck:
       compactAgentId !== null && bridge.isMachineryLoop(compactAgentId)
         ? async () => {}
-        : () => runRewindCheckpoint(_$, compactSessionId, compactAgentId, false),
+        : compactAgentId === null
+          ? () => liveChainFlush(_$, compactSessionId)
+          : () => runRewindCheckpoint(_$, compactSessionId, compactAgentId, false),
   });
   const compactSignal = next && typeof next.signal === "object" && next.signal !== null ? next.signal : undefined;
   const outcome = await raceTakeoverWithSignal(

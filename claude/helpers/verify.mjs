@@ -16,9 +16,13 @@
 // --after limits edges to rows appended after that uuid (the incremental
 // steady-state mode); the tip is always the file's live one. --max-edges
 // caps the output (default 30000, ~2.4 MB — under any truncation budget).
+// --tail N (exclusive mode) answers the live chain verifier's tail tier:
+// the LAST N uuid-bearing rows as [uuid,parent|null,boundary01] triples
+// plus a torn flag (the file's last byte is not a newline, or its final
+// line is not JSON — a mid-write tail the caller must back off from).
 // Exit codes: 0 ok, 1 stream/read failure ({"ok":false,"error":...}), 2 usage.
 
-import { createReadStream } from "node:fs";
+import { closeSync, createReadStream, fstatSync, openSync, readSync } from "node:fs";
 import process from "node:process";
 import { createInterface } from "node:readline";
 
@@ -30,10 +34,78 @@ const flag = (name, def) => {
 };
 const after = flag("after", null);
 const maxEdges = Number(flag("max-edges", 30000));
+const tailN = flag("tail", null) !== null ? Number(flag("tail", null)) : null;
 
-if (file === undefined || Number.isNaN(maxEdges) || maxEdges <= 0) {
-  process.stderr.write("usage: node helpers/verify.mjs <transcript.jsonl> [--after <uuid>] [--max-edges N]\n");
+if (
+  file === undefined ||
+  Number.isNaN(maxEdges) ||
+  maxEdges <= 0 ||
+  (tailN !== null && (Number.isNaN(tailN) || tailN <= 0))
+) {
+  process.stderr.write(
+    "usage: node helpers/verify.mjs <transcript.jsonl> [--after <uuid>] [--max-edges N] [--tail N]\n",
+  );
   process.exit(2);
+}
+
+// --tail mode: stream a ring buffer of the last N rows, then report.
+if (tailN !== null) {
+  const ring = [];
+  let lastLineJunk = false;
+  try {
+    const rl = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
+    let first = true;
+    let sawAny = false;
+    for await (const line of rl) {
+      sawAny = true;
+      first = false;
+      const trimmed = line.trim();
+      if (trimmed === "") continue;
+      let row;
+      try {
+        row = JSON.parse(trimmed);
+      } catch {
+        lastLineJunk = true; // provisional; cleared if more lines follow
+        continue;
+      }
+      if (row === null || typeof row !== "object") continue;
+      if (typeof row.uuid !== "string") continue;
+      lastLineJunk = false;
+      const parent =
+        typeof row.parentUuid === "string"
+          ? row.parentUuid
+          : typeof row.logicalParentUuid === "string"
+            ? row.logicalParentUuid
+            : null;
+      const boundary = row.type === "system" && row.subtype === "compact_boundary" ? 1 : 0;
+      ring.push([row.uuid, parent, boundary]);
+      if (ring.length > tailN) ring.shift();
+    }
+    if (first && !sawAny) lastLineJunk = false;
+    // the trailing-newline check: a last byte that is not \n means the
+    // final line may still be mid-write
+    let torn = lastLineJunk;
+    try {
+      const fd = openSync(file, "r");
+      try {
+        const st = fstatSync(fd);
+        if (st.size > 0) {
+          const buf = Buffer.alloc(1);
+          const got = readSync(fd, buf, 0, 1, st.size - 1);
+          if (got === 1 && buf[0] !== 0x0a) torn = true;
+        }
+      } finally {
+        closeSync(fd);
+      }
+    } catch {
+      // the byte check is best-effort; the line signals carry torn alone
+    }
+    process.stdout.write(`${JSON.stringify({ ok: true, torn, tail: ring })}\n`);
+  } catch (err) {
+    process.stdout.write(`${JSON.stringify({ ok: false, error: String(err?.message || err) })}\n`);
+    process.exit(1);
+  }
+  process.exit(0);
 }
 
 let rowsAfter = 0;

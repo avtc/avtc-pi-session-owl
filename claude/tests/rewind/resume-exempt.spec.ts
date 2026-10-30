@@ -67,6 +67,19 @@ function toolResultRow(uuid: string, parentUuid: string | null, toolUseId: strin
 }
 
 const apiMsg = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
+
+/** A transcript file row (the live chain's truth channel). */
+const fileRow = (uuid: string, parentUuid: string | null, text: string): string =>
+  JSON.stringify({
+    uuid,
+    parentUuid,
+    sessionId: "sess-file",
+    timestamp: "2026-10-30T00:00:00.000Z",
+    type: "user",
+    message: { role: "user", content: text },
+  });
+
+const jsonl = (...rows: string[]) => `${rows.join("\n")}\n`;
 const apiAssistantTools = () => ({
   role: "assistant",
   content: [
@@ -113,30 +126,34 @@ describe("resume exemption — the process-start check at a resume", () => {
     await harness.dispatch("classic.SessionStart", { session_id: "sess-rx2", transcript_path: "/t/rx2.jsonl" });
     await harness.dispatch("session.append", promptRow("u1", null, "hello"));
     await harness.dispatch("session.append", promptRow("u2", "u1", "world"));
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world")]);
+    await harness.fsWrite("/t/rx2.jsonl", jsonl(fileRow("u1", null, "hello"), fileRow("u2", "u1", "world")));
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
 
-    // resume + the first clean (the boundary clears here)
-    harness.sessionApi.set([]);
+    // resume + the first clean (the rebuilt view is the file's own shape —
+    // the live chain cannot false-fire on a re-render)
     await harness.dispatch("classic.SessionStart", {
       session_id: "sess-rx2",
       transcript_path: "/t/rx2.jsonl",
       source: "resume",
     });
-    // the resumed conversation serves its rebuilt view + the new turn
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world")]);
     await harness.dispatch("session.append", promptRow("u3", "u2", "third"));
+    await harness.fsWrite(
+      "/t/rx2.jsonl",
+      jsonl(fileRow("u1", null, "hello"), fileRow("u2", "u1", "world"), fileRow("u3", "u2", "third")),
+    );
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
 
-    // a REAL rewind now: u3 dies, the view carries the rewound branch
+    // a REAL rewind now: u3 dies (amputated), u4 chains from u2
     await harness.dispatch("session.append", promptRow("u4", "u2", "rewound branch"));
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world"), apiMsg("rewound branch")]);
+    await harness.fsWrite(
+      "/t/rx2.jsonl",
+      jsonl(fileRow("u1", null, "hello"), fileRow("u2", "u1", "world"), fileRow("u4", "u2", "rewound branch")),
+    );
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
 
     await new Promise((r) => setTimeout(r, 30));
     const text = await logText();
-    expect(text).toContain("rewind detected");
-    expect(text).toContain("sess-rx2");
+    expect(text).toMatch(/live chain: rewind detected[^\n]*conv sess-rx2/);
   });
 
   test("parallel tool calls survive the resumed clean check attached (the one-level parenting)", async () => {
