@@ -518,6 +518,25 @@ export class LiveChainProcessor {
     capturedByUuid: Map<string, boolean>,
     expected: string | null,
   ): Anchor | undefined {
+    // PARENT-CHAIN-FIRST: the row's own parentUuid links are the file's
+    // attachment truth. Walk up through transparent ceremony rows to the
+    // nearest ancestor owl knows — a rewound conversation re-sends its
+    // first row as a FRESH row forking at an earlier point, and that
+    // fork is invisible to file-order proximity (the re-sent row sits at
+    // the file tail, right after the rows it orphans).
+    let cursor: string | null = row.parentUuid;
+    const walked = new Set<string>();
+    while (cursor !== null && !walked.has(cursor) && indexOfUuid.has(cursor)) {
+      walked.add(cursor);
+      const cr = rows[indexOfUuid.get(cursor) ?? -1];
+      if (cr === undefined) break;
+      if (cr.boundary) return { uuid: cursor, boundary: true }; // a compaction boundary — rebase, never a verdict
+      if (cursor === expected) return { uuid: cursor, boundary: false }; // the chain tail itself
+      if (capturedByUuid.get(cursor) === true || this.deps.isKnownRow(cursor)) {
+        return { uuid: cursor, boundary: false }; // the true attach point
+      }
+      cursor = cr.parentUuid; // ceremony/unknown rows are transparent
+    }
     const idx = indexOfUuid.get(row.uuid) ?? -1;
     if (idx <= 0) {
       // no predecessors in the window: a genuine root when owl holds
