@@ -60,7 +60,6 @@ import { initLogConsumer } from "../host/log/consumer.js";
 import { errDetail, guarded, sayError } from "../host/log/err-detail.js";
 import { installUnhandledRejectionLogging } from "../host/log/unhandled.js";
 import { sessionOwlNoun } from "../host/noun.js";
-import { serveViaStageLane } from "../host/recall/budget-lane.js";
 import { handleOwlRecallCall, type OwlRecallCallEvent } from "../host/recall/handler.js";
 import { restyleToolResultProps } from "../host/recall/render.js";
 import { OWL_RECALL_FULL_NAME } from "../host/recall/spec.js";
@@ -1885,7 +1884,6 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
   // disabled reject) answer {deny: <exact text>}, which the engine delivers
   // to the model as an error result — a throw would be SKIPPED instead and
   // its text would stay in the debug log only.
-  let recallLaneSeq = 0;
   if (e && e.tool === OWL_RECALL_FULL_NAME) {
     const sessionId = state.getCurrentSession();
     // No current conversation ⇒ nothing to pin (the registration gate only
@@ -1911,40 +1909,17 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
     // SKIPPED by the engine ("no tool.call hook answered") — the same
     // linger/unload trap — so any unexpected failure answers in-band.
     try {
-      // A serve that may run long (a cold details cache, a broad regex)
-      // must not burn the ~10s hook budget on its own JS: park the serve
-      // under a per-call stage key and ride the await_stage dispatch loop
-      // — every engine-served $.tool.call keeps the budget clock paused,
-      // and the 9s slices answer before the engine's per-call ceiling (no
-      // linger, no worker respawn). A denied dispatch runs the work
-      // inline: one call's budget risk, never a broken serve.
-      const laneKey = `recall-serve:${key}:${Date.now().toString(36)}:${(recallLaneSeq += 1)}`;
-      const outcome = await serveViaStageLane({
-        key: laneKey,
-        park: (k, work) => stageWorkCall(k, work as () => Promise<unknown>),
-        startWork: () =>
-          handleOwlRecallCall(call, {
-            resolveKey: (loopId: string | null) => state.conversationKey(sessionId, loopId),
-            isDisabled: () => !state.isOwlEnabled(),
-            subagentsDisabled: () => state.subagentsFullyDisabled(),
-            isConflictPaused: () =>
-              isConflictPaused(() => ({
-                enabled: state.isOwlEnabled(),
-                ignoreConflicts: state.isOwlIgnoreConflicts(),
-              })),
-            checkThenServe: SKIP_REWIND_CHECK_IN_SERVE,
-            pinCore: async () => {
-              await getBinding(key, sessionId, agentId).pinCore();
-            },
-          }),
-        dispatch: () => $.tool.call({ tool: AWAIT_STAGE_TOOL, key: laneKey }) as Promise<never>,
-        signal: next && typeof next.signal === "object" && next.signal !== null ? next.signal : undefined,
-        sliceAbortResult: "aborted",
+      return await handleOwlRecallCall(call, {
+        resolveKey: (loopId: string | null) => state.conversationKey(sessionId, loopId),
+        isDisabled: () => !state.isOwlEnabled(),
+        subagentsDisabled: () => state.subagentsFullyDisabled(),
+        isConflictPaused: () =>
+          isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() })),
+        checkThenServe: SKIP_REWIND_CHECK_IN_SERVE,
+        pinCore: async () => {
+          await getBinding(key, sessionId, agentId).pinCore();
+        },
       });
-      if (typeof outcome === "object" && outcome !== null && "interrupted" in outcome) {
-        return { deny: "Error: session-owl recall interrupted" };
-      }
-      return outcome;
     } catch (err) {
       report("owl_recall serve failed", err);
       return { deny: `Error: session-owl recall failed: ${err instanceof Error ? err.message : String(err)}` };
