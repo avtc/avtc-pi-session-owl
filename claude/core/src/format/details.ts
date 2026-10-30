@@ -98,6 +98,27 @@ export function computeDetailsAndCache(
   return { lines: render.lines, tokens: render.tokens };
 }
 
+/** Compute the verbatim-source counts AND cache the rendered text keyed by
+ *  the observation id — into the NAMED conversation's bucket, regardless of
+ *  which key is currently active (the resume-time warm writes from a lane
+ *  where the active key belongs to nobody in particular). */
+export function computeDetailsAndCacheFor(
+  key: string,
+  obsId: string,
+  sourceEntryIds: readonly string[],
+  resolveEntries: EntryResolver,
+): { lines: number; tokens: number } | null {
+  const render = renderDetailsText(sourceEntryIds, resolveEntries);
+  if (render === null) return null;
+  let bucket = detailsCaches.get(key);
+  if (bucket === undefined) {
+    bucket = new Map<string, DetailsRender>();
+    detailsCaches.set(key, bucket);
+  }
+  bucket.set(obsId, render);
+  return { lines: render.lines, tokens: render.tokens };
+}
+
 /**
  * Re-render an observation's verbatim source from its sourceEntryIds (full
  * text). Cached per observation id: a second call with the same obs id returns
