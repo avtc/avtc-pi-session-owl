@@ -178,3 +178,75 @@ describe("helpers/ledger-compact.mjs", () => {
     rmSync(sessDir, { recursive: true, force: true });
   });
 });
+
+describe("helpers/ledger-compact.mjs — a mass that cannot fit one record", () => {
+  test("a unique-edge set over the byte budget splits across lineage records; every part fits the cap and the stream heals", async () => {
+    const tmp = tempDir("owl-ledger-compact-split");
+    const sessDir = join(tmp, "cfg", "session-owl", "sessions", "s-split");
+    mkdirSync(sessDir, { recursive: true });
+    // two restating batches whose union of unique edges exceeds 3 MiB
+    const CAP = 3 * 1024 * 1024;
+    const edges: Array<{ uuid: string; parent: string | null }> = [];
+    for (let i = 0; i < 60_000; i += 1) {
+      edges.push({ uuid: `e${i}x${"0".repeat(12)}`, parent: i === 0 ? null : `e${i - 1}x${"0".repeat(12)}` });
+    }
+    writeFileSync(join(sessDir, "ledger-0001aaaa.jsonl"), lineage(edges.slice(0, 30_000), 1, 1000) + "\n");
+    writeFileSync(
+      join(sessDir, "ledger-0002bbbb.jsonl"),
+      lineage(edges.slice(0, 20_000), 2, 1001) + "\n" + lineage(edges.slice(20_000), 3, 1002) + "\n",
+    );
+    const r = await run("node", [HELPER, "--session-dir", sessDir, "--apply"]);
+    const report = parseReport(r.stdout);
+    expect(report.done).toBe(true);
+    expect(report.restatedEdges).toBe(30_000);
+    expect(report.uniqueEdges).toBe(60_000);
+    // every written batch stays under the cap, and the lineage block split
+    const files = readdirSync(sessDir).filter((n) => n.startsWith("ledger-") && n.endsWith(".jsonl"));
+    expect(files.length).toBeGreaterThanOrEqual(2);
+    for (const f of files) {
+      expect(readFileSync(join(sessDir, f), "utf8").length).toBeLessThan(CAP);
+    }
+    const lines = readAll(sessDir);
+    const lineageLines = lines.filter((l) => (JSON.parse(l) as { kind: string }).kind === "lineage");
+    expect(lineageLines.length).toBeGreaterThanOrEqual(2);
+    const uuids: string[] = [];
+    for (const l of lineageLines) {
+      for (const e of (JSON.parse(l) as { payload: { edges: Array<{ uuid: string }> } }).payload.edges)
+        uuids.push(e.uuid);
+    }
+    expect(new Set(uuids).size).toBe(60_000); // every uuid exactly once across parts
+    // idempotent: the healed stream re-runs as a noop
+    const again = await run("node", [HELPER, "--session-dir", sessDir]);
+    const report2 = parseReport(again.stdout);
+    expect(report2.noop).toBe(true);
+  }, 60_000);
+
+  test("a single non-lineage record over the budget is skipped and counted, the rest heal", async () => {
+    const tmp = tempDir("owl-ledger-compact-oversize");
+    const sessDir = join(tmp, "cfg", "session-owl", "sessions", "s-ovs");
+    mkdirSync(sessDir, { recursive: true });
+    const huge = "z".repeat(3 * 1024 * 1024);
+    writeFileSync(
+      join(sessDir, "ledger-0001aaaa.jsonl"),
+      [
+        rec("observation", 1, 1000, { text: "first" }),
+        lineage([{ uuid: "u1", parent: null }], 2, 1001),
+        rec("usage", 3, 1002, { blob: huge }),
+      ].join("\n") + "\n",
+    );
+    writeFileSync(join(sessDir, "ledger-0002bbbb.jsonl"), lineage([{ uuid: "u1", parent: "x9" }], 4, 1003) + "\n");
+    const r = await run("node", [HELPER, "--session-dir", sessDir, "--apply"]);
+    const report = parseReport(r.stdout);
+    expect(report.done).toBe(true);
+    expect(report.skippedOversized).toBe(1);
+    const lines = readAll(sessDir);
+    const kinds = lines.map((l) => (JSON.parse(l) as { kind: string }).kind);
+    expect(kinds).toContain("observation");
+    expect(kinds).toContain("lineage");
+    expect(kinds).not.toContain("usage"); // the oversized record is gone
+    const lin = lines.find((l) => (JSON.parse(l) as { kind: string }).kind === "lineage");
+    const edges = (JSON.parse(lin as string) as { payload: { edges: Array<{ uuid: string; parent?: string | null }> } })
+      .payload.edges;
+    expect(edges).toEqual([{ uuid: "u1", parent: "x9", exact: true }]); // last-wins survived
+  });
+});

@@ -23,8 +23,10 @@ export function createHarness() {
   const registered: { tools: Spec[]; commands: Spec[]; agents: Spec[] } = { tools: [], commands: [], agents: [] };
   let dispatchDepth = 0;
 
+  const writeRefusals = new Set<string>();
   const fsNoun = {
     write: async (path: string, text: string) => {
+      for (const prefix of writeRefusals) if (path.startsWith(prefix)) throw new Error("write refused (test)");
       files.set(path, text);
     },
     read: async (path: string) => {
@@ -443,6 +445,10 @@ export function createHarness() {
     fsRefuse: (path: string | null) => {
       if (path === null) fsRefusals.clear();
       else fsRefusals.add(path);
+    },
+    fsRefuseWrite: (prefix: string | null) => {
+      if (prefix === null) writeRefusals.clear();
+      else writeRefusals.add(prefix);
     },
     sessionApiArmed: () => sessionApiMessages !== null,
     sessionAgentApi: {

@@ -157,11 +157,25 @@ export class LiveChainProcessor {
    *  parks a detected verdict's application on the timer lane (a
    *  serve-class caller leaves it inline — the compaction gate must read
    *  a folded store). */
+  /** The timer lane's in-flight run (a parked verdict's multi-second
+   *  application included) — flush() waits it out so a turn-complete tick
+   *  never runs concurrently against the mid-refold store. */
+  private laneRun: Promise<void> | null = null;
+
   async flush(opts: { deferVerdicts?: boolean } = {}): Promise<void> {
     if (this.cancelTimer !== null) {
       this.cancelTimer();
       this.cancelTimer = null;
       this.timerArmed = false;
+    }
+    if (this.laneRun !== null) {
+      // the lane never rejects past its own catch — this only ever fires on
+      // an unexpected bug, and flush() still never throws
+      await this.laneRun.catch((err: unknown) => {
+        this.deps.log(
+          `live chain: the deferred lane ended unexpectedly: ${String((err as { message?: unknown })?.message ?? err)}`,
+        );
+      });
     }
     if (this.processing !== null) {
       await this.processing; // process() never rejects (its catch arms the retry)
@@ -206,12 +220,17 @@ export class LiveChainProcessor {
       this.timerArmed = false;
       this.cancelTimer = null;
       // a parked verdict rides the head of the lane (applied before any
-      // further verification)
-      void (async () => {
+      // further verification); the whole run is tracked so a concurrent
+      // flush waits it out
+      const run = (async () => {
         if (this.processing !== null) await this.processing;
         await this.applyPendingRewind();
         if (!this.disposed) await this.process();
       })();
+      const tracked = run.finally(() => {
+        if (this.laneRun === tracked) this.laneRun = null;
+      });
+      this.laneRun = tracked;
     });
   }
 
@@ -238,6 +257,9 @@ export class LiveChainProcessor {
   private revive(): void {
     if (!this.stoodDown) return;
     this.stoodDown = false;
+    // the revived tier starts with a full retry budget — a single flaky
+    // read must not re-trigger the stand-down the ladder had already spent
+    this.retries = 0;
     this.deps.log("live chain: detection resumed — the tail tier serves again");
   }
 

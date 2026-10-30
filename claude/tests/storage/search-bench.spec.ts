@@ -4,12 +4,13 @@
 // Scratch bench (manual, real store copy): the owl_recall query path on a
 // resumed session — the cold details-cache render (first query after a
 // process start) vs the warm cache, against the 10s hook budget.
+// Opt-in everywhere: point SESSION_OWL_BENCH_DIR at a store copy.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { FsAdapter } from "../../host/storage/fs-adapter.js";
 
-const COPY_DIR = "D:/temp/rcv-cfg5/session-owl/sessions/16f51f7d-bbc8-49da-9854-016ea0b59dc0";
+const COPY_DIR = process.env.SESSION_OWL_BENCH_DIR ?? "";
 
 function nodeAdapter(): FsAdapter {
   return {

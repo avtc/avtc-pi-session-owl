@@ -179,7 +179,8 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
               },
               { pluginRoot: svcs.pluginRoot() as string, sessionDir: storage.dir },
             );
-          } catch {
+          } catch (err) {
+            log.warn(`ledger heal seam failed: ${err instanceof Error ? err.message : String(err)}`);
             return { done: false };
           }
         },

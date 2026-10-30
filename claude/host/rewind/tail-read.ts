@@ -128,8 +128,8 @@ export function planTailInvocation(input: {
 }
 
 /** Parse the helper's stdout (ONE JSON line: {ok, torn, tail: [[uuid,
- *  parent|null, 0|1], ...]}) into the tail facts; anything malformed or
- *  ok:false degrades to null. */
+ *  parent|null, 0|1, 0|1], ...] — boundary flag, then tool-result flag})
+ *  into the tail facts; anything malformed or ok:false degrades to null. */
 export function parseTailHelperOutput(raw: string, log?: (message: string, err?: unknown) => void): TailFacts | null {
   const line = raw.trim().split("\n").pop() ?? "";
   if (line === "") return null;

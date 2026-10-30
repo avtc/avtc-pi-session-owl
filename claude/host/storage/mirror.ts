@@ -437,6 +437,10 @@ export interface SweepResult {
   lines: number;
   /** Distinct uuids across the batches (== uuidFile.size). */
   uniqueUuids: number;
+  /** Batches the read tier refused over its cap — legacy/damaged files
+   *  the rows of which stay invisible this session (a rewrite through the
+   *  node seam is the repair; the sweep reports the damage). */
+  overCapFiles: number;
 }
 
 function errText(err: unknown): string {
@@ -458,12 +462,19 @@ export async function sweepMirror(fs: FsAdapter, dir: string): Promise<SweepResu
   const rows: MirroredRow[] = [];
   const uuidFile = new Map<string, string>();
   let lines = 0;
+  let overCapFiles = 0;
   for (const name of batchNames) {
     let text: string;
     try {
       text = await fs.readText(`${dir}/${name}`);
     } catch (err) {
-      log.info(`mirror sweep: batch unreadable, skipped (${name}): ${errText(err)}`);
+      const message = errText(err);
+      if (/4194304|4 ?MiB|byte limit|exceeds.*cap/i.test(message)) {
+        overCapFiles += 1;
+        log.warn(`mirror sweep: batch over the read cap — rows invisible until rewritten (${name})`);
+      } else {
+        log.info(`mirror sweep: batch unreadable, skipped (${name}): ${message}`);
+      }
       continue; // orphan class — re-listed next time, never fatal
     }
     for (const line of text.split("\n")) {
@@ -527,7 +538,7 @@ export async function sweepMirror(fs: FsAdapter, dir: string): Promise<SweepResu
       // corrupt anchor: hint data only — ignore
     }
   }
-  return { rows, uuidFile, anchors, lines, uniqueUuids: uuidFile.size };
+  return { rows, uuidFile, anchors, lines, uniqueUuids: uuidFile.size, overCapFiles };
 }
 
 function batchOrder(a: string, b: string): number {

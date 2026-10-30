@@ -36,7 +36,6 @@ import {
   joinStageRunSliced,
   raceTakeoverWithSignal,
   STAGE_SLICE_MS,
-  stageWorkCall,
   withBudgetFreeWait,
 } from "../host/compaction/budget-free.js";
 import { type CompactEvent, compactionTakeover } from "../host/compaction/hook.js";
@@ -532,6 +531,9 @@ async function runConflictActivationOnce($: any, configDir: string, selfRoot: st
 
 async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
   armAll($);
+  // released by the failure catch below when a start dies before the
+  // warm is ever scheduled (nothing else would clear the gate)
+  let warmGateArmed = false;
   // lifecycle trace: which start pulse actually fires, with
   // what source, and whether the envelope carries its cwd — every settings,
   // backfill and boundary decision below keys off these three facts
@@ -752,8 +754,13 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       // warm — the owl line waits for a system that can serve queries from
       // cache. The warm is scheduled AFTER the backfill resolves (the core
       // exists by then — an early getCore would materialize an empty one)
-      // and runs on the timer lane, away from every hook budget.
-      if (owlActive) markDetailsWarmPending();
+      // and runs on the timer lane, away from every hook budget. A start
+      // that fails before the warm is scheduled releases the gate here —
+      // nothing else would ever clear it.
+      if (owlActive) {
+        markDetailsWarmPending();
+        warmGateArmed = true;
+      }
       await runBackfill(storage.mirror, storage.ledger, {
         key: convKey,
         sessionId: e.session_id,
@@ -929,6 +936,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       }
     }
   } catch (err) {
+    if (warmGateArmed) markDetailsWarmDone();
     report("session bootstrap failed", err);
   }
   return next(e);

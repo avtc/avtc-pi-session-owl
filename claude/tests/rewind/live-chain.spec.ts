@@ -442,6 +442,24 @@ describe("live chain processor — the torn and missing tails", () => {
     expect(h.scheduled.length).toBe(schedules + 1);
   });
 
+  test("a revived tier starts with a fresh retry budget — one flaky read must not re-stand-down", async () => {
+    const h = harness({ owlTail: "t0", tail: null, size: 1000 });
+    h.proc.enqueue(ev("u1", true));
+    for (let i = 0; i < 5; i += 1) await h.proc.flush();
+    expect(h.logs.some((l) => l.includes("detection stands down"))).toBe(true);
+    // the tier serves again but the tail is TORN: the tick revives the
+    // lane yet never reaches a clean finish — the retry budget must
+    // already be fresh at the revival itself
+    h.setTail(facts([row("t0", "x"), row("u1", "t0")], true));
+    await h.proc.flush();
+    expect(h.logs.some((l) => l.includes("detection resumed"))).toBe(true);
+    // ONE missing-tier read after the revival must retry, not stand down again
+    h.setTail(null);
+    h.proc.enqueue(ev("u2", true));
+    await h.proc.flush();
+    expect(h.logs.filter((l) => l.includes("detection stands down"))).toHaveLength(1);
+  });
+
   test("a null read (tier missing) retries the normal delay without state change", async () => {
     const h = harness({ owlTail: "t0", tail: null });
     h.proc.enqueue(ev("u1", true));
@@ -598,6 +616,41 @@ describe("live chain processor — the verdict deferral (a flush context can par
     await new Promise((r) => setTimeout(r, 10));
     expect(h.rewinds).toEqual([{ settle: "u9" }]);
     expect(h.proc.hasPendingRewind()).toBe(false);
+  });
+
+  test("a flush arriving while the parked application is in flight waits it out", async () => {
+    let releaseApply: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      releaseApply = r;
+    });
+    let applyStarted = false;
+    const h = harness({
+      owlTail: "t2",
+      known: ["t1"],
+      tail: facts([row("t1", "x"), row("u9", "t1")]),
+      onRewind: async () => {
+        applyStarted = true;
+        await gate;
+      },
+    });
+    h.proc.enqueue(ev("u9", true));
+    await h.proc.flush({ deferVerdicts: true });
+    expect(h.proc.hasPendingRewind()).toBe(true);
+    // the timer lane starts applying and blocks mid-application
+    h.fireScheduled();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(applyStarted).toBe(true);
+    // a flush that lands NOW must wait the application out — never a
+    // concurrent verification tick against the mid-refold store
+    let flushDone = false;
+    const flushing = h.proc.flush().then(() => {
+      flushDone = true;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(flushDone).toBe(false);
+    (releaseApply as (() => void) | undefined)?.();
+    await flushing;
+    expect(flushDone).toBe(true);
   });
 
   test("a later serve-class flush (deferVerdicts off) applies a parked verdict FIRST — the gate reads a folded store", async () => {

@@ -3,9 +3,10 @@
 //
 // The ledger compaction helper: a lineage stream may state each uuid
 // exactly once, so the rewrite keeps every NON-lineage record verbatim and
-// in fold order and folds all lineage records into ONE consolidated record
+// in fold order and folds all lineage records into consolidated record(s)
 // (the final edge per uuid, last-wins — the same rule the load's fold
-// applies), deleting the superseded batch files. Real unlink needs a real
+// applies) — split across as many records as the byte budget needs, every
+// uuid still stated exactly once — deleting the superseded batch files. Real unlink needs a real
 // Node process, so the host invokes this through the process seam when the
 // load detects a restated lineage uuid. All-or-nothing: every batch is read
 // BEFORE any write, and the superseded files are unlinked only after every
@@ -20,7 +21,7 @@
 //
 // Summary JSON (the last stdout line; failures also mirror it to stderr):
 //   { done, noop, restatedEdges, uniqueEdges, keptRecords, lineageRecords,
-//     filesIn, filesOut, sessionDir }
+//     filesIn, filesOut, skippedOversized, sessionDir }
 // Exit codes: 0 ok (incl. no-op), 1 failure, 2 usage.
 
 import { randomUUID } from "node:crypto";
@@ -132,6 +133,7 @@ if (restated === 0) {
     lineageRecords,
     filesIn: batches.length,
     filesOut: batches.length,
+    skippedOversized: 0,
     sessionDir,
   });
   process.stdout.write(`${summary}\n`);
@@ -140,18 +142,42 @@ if (restated === 0) {
 
 // ---- the rewrite stream ---------------------------------------------------
 
-// non-lineage lines VERBATIM in fold order + one consolidated lineage record
-// reusing the LAST lineage record's envelope (its exact order triple — the
-// consolidated record sorts where the last lineage record sat)
+// non-lineage lines VERBATIM in fold order (a single record over the byte
+// budget is skipped and counted — it was already unreadable at that size)
+// + the consolidated lineage record(s) reusing the LAST lineage record's
+// envelope (its exact order triple — the lineage block sorts where the
+// last lineage record sat; parts share the triple, uuids never overlap)
 const outLines = [];
+let skippedOversized = 0;
 for (const { line, r } of parsed) {
   if (r !== null && r.kind === "lineage") continue;
+  if (Buffer.byteLength(line, "utf8") + 1 > READ_CAP_BYTES) {
+    skippedOversized += 1;
+    continue;
+  }
   outLines.push(line);
 }
 if (lastLineageEnvelope !== null) {
   const env = JSON.parse(lastLineageEnvelope);
-  env.payload = { edges: [...edgeMap.values()] };
-  outLines.push(JSON.stringify(env));
+  const edges = [...edgeMap.values()];
+  const overhead = Buffer.byteLength(JSON.stringify({ ...env, payload: { edges: [] } }), "utf8") + 2;
+  let part = [];
+  let partBytes = overhead;
+  for (const e of edges) {
+    const bytes = Buffer.byteLength(JSON.stringify(e), "utf8") + 1;
+    if (partBytes + bytes > READ_CAP_BYTES && part.length > 0) {
+      env.payload = { edges: part };
+      outLines.push(JSON.stringify(env));
+      part = [];
+      partBytes = overhead;
+    }
+    part.push(e);
+    partBytes += bytes;
+  }
+  if (part.length > 0) {
+    env.payload = { edges: part };
+    outLines.push(JSON.stringify(env));
+  }
 }
 
 // roll into fresh batches under the read cap
@@ -160,9 +186,6 @@ let current = [];
 let currentBytes = 0;
 for (const line of outLines) {
   const bytes = Buffer.byteLength(line, "utf8") + 1;
-  if (bytes > READ_CAP_BYTES) {
-    fail(`a single record exceeds the read cap (${bytes} bytes) — aborting before any write`, 1);
-  }
   if (currentBytes + bytes > READ_CAP_BYTES && current.length > 0) {
     outBatches.push({ name: `${LEDGER_PREFIX}${randomUUID()}${LEDGER_SUFFIX}`, text: `${current.join("\n")}\n` });
     current = [];
@@ -184,6 +207,7 @@ const summary = JSON.stringify({
   lineageRecords,
   filesIn: batches.length,
   filesOut: outBatches.length,
+  skippedOversized,
   sessionDir,
 });
 

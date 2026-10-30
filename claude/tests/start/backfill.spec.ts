@@ -988,3 +988,28 @@ describe("backfill — the restated-lineage heal hook", () => {
     expect(healed).toBe(0);
   });
 });
+
+describe("mirror sweep — an over-cap batch is damage, not a silent orphan", () => {
+  test("a cap-refused batch counts in overCapFiles and its rows stay out", async () => {
+    const dir = "/cfg/session-owl/sessions/sess-mcap";
+    const tr = parseTranscriptRows(
+      `${JSON.stringify({ uuid: "m1", parentUuid: null, type: "user", message: { role: "user", content: "x" } })}`,
+    );
+    const w = new MirrorWriter(mem.adapter, dir, "mcap-1");
+    for (const row of tr.rows) {
+      w.bufferRow({ uuid: row.uuid, parentUuid: row.parentUuid, row: rowFromTranscript(row) });
+    }
+    await w.flush();
+    const realRead = mem.adapter.readText.bind(mem.adapter);
+    const refusing = {
+      ...mem.adapter,
+      readText: async (p: string) => {
+        if (/\/m\d+-/.test(p)) throw new Error("a text is over the 4194304-byte limit");
+        return realRead(p);
+      },
+    };
+    const sweep = await sweepMirror(refusing, dir);
+    expect(sweep.overCapFiles).toBe(1);
+    expect(sweep.rows).toEqual([]);
+  });
+});
