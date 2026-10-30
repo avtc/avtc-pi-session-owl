@@ -4,7 +4,8 @@
 // The live chain processor: session.append events queue zero-latency; a
 // deferred tick (re-armed per event, torn-tail backoff, eager at
 // turn.complete) reads the transcript tail, verifies each queued row's
-// anchor (the nearest preceding observable row by file order) against
+// anchor (the row's parent chain first for conversation rows, file order
+// for tool_result rows and out-of-window chains) against
 // owl's expected chain, feeds the VERIFIED edges to the lineage seam, and
 // hands rewinds to the refold seam with the whole new world proven. All
 // seams injected; the engine wiring spells the $ calls literally.

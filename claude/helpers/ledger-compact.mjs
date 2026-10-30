@@ -18,7 +18,7 @@
 // Usage:
 //   node helpers/ledger-compact.mjs --session-dir <dir> [--apply]
 //
-// Summary JSON (stdout + stderr, the scan.mjs protocol):
+// Summary JSON (the last stdout line; failures also mirror it to stderr):
 //   { done, noop, restatedEdges, uniqueEdges, keptRecords, lineageRecords,
 //     filesIn, filesOut, sessionDir }
 // Exit codes: 0 ok (incl. no-op), 1 failure, 2 usage.

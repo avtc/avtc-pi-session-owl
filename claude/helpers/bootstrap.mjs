@@ -109,7 +109,14 @@ const knownUuids = new Set();
 let mirrorLines = 0;
 for (const name of readdirSync(sessDir)) {
   if (!/^m\d+-[0-9a-f]+(\.k\d+)?\.jsonl$/.test(name)) continue;
-  const text = readFileSync(join(sessDir, name), "utf8");
+  let text;
+  try {
+    text = readFileSync(join(sessDir, name), "utf8");
+  } catch (err) {
+    // an unreadable batch is inert to the census — skipped, never fatal
+    process.stderr.write(`census skipped unreadable batch ${name}: ${err?.message ?? err}\n`);
+    continue;
+  }
   for (const line of text.split("\n")) {
     if (line === "") continue;
     mirrorLines += 1;

@@ -116,3 +116,25 @@ describe("helpers/mirror-compact.mjs", () => {
     expect(report.noop).toBe(true);
   }, 30_000);
 });
+
+describe("mirror-compact — review round 1 hardening", () => {
+  test("a crash-truncated line is skipped (counted), never a permanent abort", async () => {
+    const tmp = tempDir("owl-compact-trunc");
+    const sessDir = join(tmp, "cfg", "session-owl", "sessions", "s-trunc");
+    mkdirSync(sessDir, { recursive: true });
+    // one healthy duplicate pair + a torn final line (a crash mid-write)
+    writeFileSync(
+      join(sessDir, "m1-aaaa1111.jsonl"),
+      `${line("u1", null, "one")}\n${line("u2", "u1", "two")}\n` +
+        '{"uuid":"u3","parentUuid":"u2","row":{"role":"user","content":"thr',
+    );
+    writeFileSync(join(sessDir, "m2-bbbb2222.jsonl"), `${line("u1", null, "one")}\n${line("u2", "u1", "two")}\n`);
+    const r = await run("node", [HELPER, "--config-dir", join(tmp, "cfg"), "--session-id", "s-trunc", "--apply"]);
+    const report = JSON.parse(r.stdout.trim().split("\n").pop() ?? "{}");
+    expect(report.done).toBe(true);
+    // the torn u3 line dropped; the duplicate u1/u2 collapsed
+    const kept = countLines(sessDir);
+    expect(kept.total).toBe(2);
+    expect(kept.files).toHaveLength(1);
+  });
+});

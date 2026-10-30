@@ -133,8 +133,8 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     expect(report.ok).toBe(true);
     expect(report.torn).toBe(false);
     expect(report.tail).toEqual([
-      ["b1", "old", 1],
-      ["u2", "b1", 0],
+      ["b1", "old", 1, 0],
+      ["u2", "b1", 0, 0],
     ]);
   });
 
@@ -145,7 +145,7 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     const report = await verify(file, "--tail", "8");
     expect(report.ok).toBe(true);
     expect(report.torn).toBe(true);
-    expect(report.tail).toEqual([["u1", null, 0]]);
+    expect(report.tail).toEqual([["u1", null, 0, 0]]);
   });
 
   test("a multibyte character straddling a 64 KiB block boundary survives (block-safe decode)", async () => {
@@ -182,8 +182,8 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     expect(report.ok).toBe(true);
     expect(report.torn).toBe(false);
     expect(report.tail).toEqual([
-      ["owl1", null, 0],
-      ["owl2", "owl1", 0],
+      ["owl1", null, 0, 0],
+      ["owl2", "owl1", 0, 0],
     ]);
   });
 
@@ -203,9 +203,9 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     expect(report.ok).toBe(true);
     expect(report.torn).toBe(false);
     expect(report.tail).toEqual([
-      ["m2398", "m2397", 0],
-      ["m2399", "m2398", 0],
-      ["m2400", "m2399", 0],
+      ["m2398", "m2397", 0, 0],
+      ["m2399", "m2398", 0, 0],
+      ["m2400", "m2399", 0, 0],
     ]);
   });
 
@@ -214,7 +214,7 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     const report = await verify(file, "--tail", "8");
     expect(report.ok).toBe(true);
     expect(report.torn).toBe(true);
-    expect(report.tail).toEqual([["u1", null, 0]]);
+    expect(report.tail).toEqual([["u1", null, 0, 0]]);
   });
 
   test("an empty file is ok, not torn, empty tail", async () => {

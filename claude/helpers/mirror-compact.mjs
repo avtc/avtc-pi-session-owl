@@ -14,7 +14,7 @@
 // Usage:
 //   node helpers/mirror-compact.mjs --config-dir <dir> --session-id <id> [--apply]
 //
-// Summary JSON (stdout + stderr, the scan.mjs protocol):
+// Summary JSON (the last stdout line; failures also mirror it to stderr):
 //   { done, noop, kept, removed, lines, unique, filesIn, filesOut, sessionDir }
 // Exit codes: 0 ok (incl. no-op), 1 failure (report carries {error}).
 
@@ -67,7 +67,14 @@ try {
     for (const line of text.split("\n")) {
       if (line === "") continue;
       lines += 1;
-      const uuid = JSON.parse(line)?.uuid;
+      // a crash-truncated line is inert garbage to the reader — skipped
+      // here too (counted, never kept), never a permanent abort
+      let uuid;
+      try {
+        uuid = JSON.parse(line)?.uuid;
+      } catch {
+        continue;
+      }
       if (typeof uuid !== "string") continue; // malformed — counted, never kept
       if (!byUuid.has(uuid)) order.push(uuid);
       byUuid.set(uuid, line);
@@ -119,28 +126,46 @@ function byteLength(text) {
 
 const ROLL = 3 * 1024 * 1024; // the mirror's split budget — stay under the platform cap
 const written = [];
-if (apply) {
-  let cont = 0;
-  let batch = [];
-  let bytes = 0;
-  const flush = () => {
-    if (batch.length === 0) return;
-    const name = `m${seq}-${producer8}${cont > 0 ? `.k${cont}` : ""}.jsonl`;
-    writeFileSync(join(sessDir, name), `${batch.join("\n")}\n`, "utf8");
-    written.push(name);
-    cont += 1;
-    batch = [];
-    bytes = 0;
-  };
-  for (const uuid of order) {
-    const line = byUuid.get(uuid);
-    if (bytes + byteLength(line) + 1 > ROLL) flush();
-    batch.push(line);
-    bytes += byteLength(line) + 1;
+try {
+  if (apply) {
+    let cont = 0;
+    let batch = [];
+    let bytes = 0;
+    const flush = () => {
+      if (batch.length === 0) return;
+      const name = `m${seq}-${producer8}${cont > 0 ? `.k${cont}` : ""}.jsonl`;
+      writeFileSync(join(sessDir, name), `${batch.join("\n")}\n`, "utf8");
+      written.push(name);
+      cont += 1;
+      batch = [];
+      bytes = 0;
+    };
+    for (const uuid of order) {
+      const line = byUuid.get(uuid);
+      if (bytes + byteLength(line) + 1 > ROLL) flush();
+      batch.push(line);
+      bytes += byteLength(line) + 1;
+    }
+    flush();
+    // delete the superseded batches — only after every new write succeeded
+    for (const f of files) {
+      try {
+        unlinkSync(join(sessDir, f.name));
+      } catch {
+        // already gone (a concurrent pass or a manual clean) — the rewrite
+        // stands either way
+      }
+    }
   }
-  flush();
-  // delete the superseded batches — only after every new write succeeded
-  for (const f of files) unlinkSync(join(sessDir, f.name));
+} catch (err) {
+  const report = JSON.stringify({
+    done: false,
+    error: `rewrite failed mid-way (old and new batches coexist — the next pass re-runs): ${err?.message ?? err}`,
+    sessionDir: sessDir,
+  });
+  process.stderr.write(`${report}\n`);
+  process.stdout.write(`${report}\n`);
+  process.exit(1);
 }
 
 const summary = JSON.stringify({

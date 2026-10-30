@@ -26,6 +26,9 @@ export interface TailRow {
   parentUuid: string | null;
   /** true on system/compact_boundary rows — the chain's fresh roots */
   boundary: boolean;
+  /** true on tool_result rows: their parent names the tool_use row, NOT a
+   *  chain attachment — siblings of a batch share one parent legitimately */
+  toolResult?: boolean;
 }
 
 export interface TailFacts {
@@ -71,6 +74,7 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
       logicalParentUuid?: unknown;
       type?: unknown;
       subtype?: unknown;
+      message?: unknown;
     };
     if (typeof row.uuid !== "string") continue; // metadata without a chain slot
     const parent =
@@ -79,10 +83,18 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
         : typeof row.logicalParentUuid === "string"
           ? row.logicalParentUuid
           : null;
+    const content =
+      row.message !== null && typeof row.message === "object"
+        ? (row.message as { content?: unknown }).content
+        : undefined;
+    const toolResult =
+      Array.isArray(content) &&
+      content.some((b) => b !== null && typeof b === "object" && (b as { type?: unknown }).type === "tool_result");
     rows.push({
       uuid: row.uuid,
       parentUuid: parent,
       boundary: row.type === "system" && row.subtype === "compact_boundary",
+      ...(toolResult ? { toolResult: true } : {}),
     });
   }
   return { rows: rows.reverse(), torn };
@@ -138,6 +150,7 @@ export function parseTailHelperOutput(raw: string, log?: (message: string, err?:
       uuid: entry[0],
       parentUuid: typeof entry[1] === "string" ? entry[1] : null,
       boundary: entry[2] === 1,
+      ...(entry[3] === 1 ? { toolResult: true } : {}),
     });
   }
   return { rows, torn: report.torn === true };

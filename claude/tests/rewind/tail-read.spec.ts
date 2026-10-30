@@ -244,3 +244,33 @@ describe("tail-read — the orchestrating read", () => {
     expect(logs.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("tail facts — the tool_result flag", () => {
+  test("capsule parse marks tool_result rows (parallel-batch siblings)", () => {
+    const line = (uuid: string, parent: string | null, content: unknown): string =>
+      JSON.stringify({ uuid, parentUuid: parent, type: "user", message: { role: "user", content } });
+    const text =
+      [
+        line("u1", null, "plain"),
+        line("r1", "u1", [{ type: "tool_result", tool_use_id: "t1" }]),
+        line("r2", "u1", [{ type: "tool_result", tool_use_id: "t2" }]),
+      ].join("\n") + "\n";
+    const facts = parseCapsuleTail(text, 10);
+    expect(facts.rows.map((r) => r.toolResult === true)).toEqual([false, true, true]);
+  });
+
+  test("helper output triples carry the flag as the fourth element", () => {
+    const raw =
+      JSON.stringify({
+        ok: true,
+        torn: false,
+        tail: [
+          ["r1", "u1", 0, 1],
+          ["u1", null, 0, 0],
+        ],
+      }) + "\n";
+    const facts = parseTailHelperOutput(raw);
+    expect(facts?.rows[0]).toMatchObject({ uuid: "r1", parentUuid: "u1", toolResult: true });
+    expect(facts?.rows[1]?.toolResult).toBeUndefined();
+  });
+});

@@ -82,3 +82,91 @@ test("the mid-chain fork raises exactly one rewind verdict (live probe shape)", 
   // the settle point = the last verified row of the new world
   expect(rewinds[0]?.settle).toBe(EPSILON_A);
 });
+
+describe("the anchor walk tolerates same-parent shapes (no false rewind)", () => {
+  const T0 = "t0-0000-4000-8000-000000000000";
+  const USE1 = "a1-0000-4000-8000-000000000000"; // the tool_use row
+  const R1 = "r1-0000-4000-8000-000000000000"; // tool_result 1 (parents at USE1)
+  const R2 = "r2-0000-4000-8000-000000000000"; // tool_result 2 (SAME parent — parallel batch)
+  const U1 = "u1-0000-4000-8000-000000000000"; // sibling user rows (a skipped reply)
+  const U2 = "u2-0000-4000-8000-000000000000";
+
+  function h(tailRows: TailRow[], toolFlags: Record<string, boolean>) {
+    const logs: string[] = [];
+    const rewinds: Array<{ settle: string | null }> = [];
+    const patched: Array<{ uuid: string; parent: string | null }> = [];
+    const known = new Set(tailRows.map((r) => r.uuid));
+    const proc = new LiveChainProcessor({
+      statSize: async () => 1000,
+      readTail: async () => ({ rows: tailRows, torn: false }),
+      owlTailExcluding: (exclude: ReadonlySet<string>) => {
+        const order = tailRows.map((r) => r.uuid).filter((u) => !exclude.has(u));
+        return order.length > 0 ? order[order.length - 1] : null;
+      },
+      isKnownRow: (uuid: string) => known.has(uuid),
+      patchEdges: (edges) => {
+        for (const e of edges) patched.push({ uuid: e.uuid, parent: e.parent });
+      },
+      onRewind: async (v) => {
+        rewinds.push(v);
+      },
+      dormant: () => false,
+      schedule: () => () => {},
+      log: (m) => {
+        logs.push(m);
+      },
+    });
+    return { proc, logs, rewinds, patched, toolFlags };
+  }
+
+  test("parallel tool_results share a parent — no verdict, chain continues in file order", async () => {
+    const rows: TailRow[] = [
+      { uuid: T0, parentUuid: null, boundary: false },
+      { uuid: USE1, parentUuid: T0, boundary: false },
+      { uuid: R1, parentUuid: USE1, boundary: false, toolResult: true },
+      { uuid: R2, parentUuid: USE1, boundary: false, toolResult: true },
+    ];
+    const x = h(rows, {});
+    x.proc.enqueue({ uuid: R1, door: "attachment", captured: true });
+    x.proc.enqueue({ uuid: R2, door: "attachment", captured: true });
+    await x.proc.flush();
+    expect(x.rewinds).toEqual([]);
+    expect(x.logs.join("\n")).not.toContain("rewind detected");
+    // both results chain in FILE order (the sibling semantics)
+    expect(x.patched).toEqual([
+      { uuid: R1, parent: USE1 },
+      { uuid: R2, parent: R1 },
+    ]);
+  });
+
+  test("sibling conversation rows (a skipped reply) — no verdict", async () => {
+    const rows: TailRow[] = [
+      { uuid: T0, parentUuid: null, boundary: false },
+      { uuid: U1, parentUuid: T0, boundary: false },
+      { uuid: U2, parentUuid: T0, boundary: false },
+    ];
+    const x = h(rows, {});
+    x.proc.enqueue({ uuid: U1, door: "response", captured: true });
+    x.proc.enqueue({ uuid: U2, door: "response", captured: true });
+    await x.proc.flush();
+    expect(x.rewinds).toEqual([]);
+    expect(x.logs.join("\n")).not.toContain("rewind detected");
+  });
+
+  test("a tool_result whose parent differs from the chain stays file-ordered (no walk)", async () => {
+    const rows: TailRow[] = [
+      { uuid: T0, parentUuid: null, boundary: false },
+      { uuid: USE1, parentUuid: T0, boundary: false },
+      { uuid: R1, parentUuid: USE1, boundary: false, toolResult: true },
+      { uuid: U2, parentUuid: USE1, boundary: false },
+      { uuid: R2, parentUuid: USE1, boundary: false, toolResult: true },
+    ];
+    const x = h(rows, {});
+    x.proc.enqueue({ uuid: R1, door: "attachment", captured: true });
+    x.proc.enqueue({ uuid: U2, door: "response", captured: true });
+    x.proc.enqueue({ uuid: R2, door: "attachment", captured: true });
+    await x.proc.flush();
+    expect(x.rewinds).toEqual([]);
+    expect(x.patched.at(-1)).toEqual({ uuid: R2, parent: U2 });
+  });
+});

@@ -118,7 +118,12 @@ if (tailN !== null) {
             ? row.logicalParentUuid
             : null;
       const boundary = row.type === "system" && row.subtype === "compact_boundary" ? 1 : 0;
-      newest.push([row.uuid, parent, boundary]);
+      const content = row.message && typeof row.message === "object" ? row.message.content : undefined;
+      const toolResult =
+        Array.isArray(content) && content.some((b) => b !== null && typeof b === "object" && b.type === "tool_result")
+          ? 1
+          : 0;
+      newest.push([row.uuid, parent, boundary, toolResult]);
     }
     if (lastLineJunk) torn = true;
     const out = newest.slice(0, tailN).reverse(); // oldest-first
