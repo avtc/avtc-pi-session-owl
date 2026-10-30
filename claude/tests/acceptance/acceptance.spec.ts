@@ -206,16 +206,17 @@ describe("acceptance sweep — the thirteen done-condition areas", () => {
     pass();
   });
 
-  test("area 13 — rewind/fork: layered check, orphan-fork class, blind-window quarantine", () => {
+  test("area 13 — rewind/fork: the live chain verifier, file-order anchors, refold quarantine", () => {
     area(13, "rewind/fork");
     const rewindSpecs =
-      reads("claude/tests/rewind/canonical-check.spec.ts") +
+      reads("claude/tests/rewind/live-chain.spec.ts") +
       reads("claude/tests/rewind/lineage.spec.ts") +
-      reads("claude/tests/rewind/reconcile.spec.ts");
-    expect(has(rewindSpecs, "rewind: the absent tail is contiguous; P* is the row before it")).toBe(true);
-    expect(has(rewindSpecs, "deep rewind beyond the api window")).toBe(true); // the 4096 window bound
-    expect(has(rewindSpecs, "orphan-fork class")).toBe(true); // dead-marked, never repaired
-    expect(exists("claude/host/rewind/reconcile.ts")).toBe(true);
+      reads("claude/tests/rewind/bootstrap-resume.spec.ts");
+    expect(has(rewindSpecs, "anchors at u2")).toBe(true); // the settle point is named
+    expect(has(rewindSpecs, "no cascade")).toBe(true); // the post-rewind world survives
+    expect(has(rewindSpecs, "extends past the removed boundary")).toBe(true); // between-process surgery
+    expect(exists("claude/host/rewind/live-chain.ts")).toBe(true);
+    expect(exists("claude/host/rewind/checkpoint-service.ts")).toBe(true);
     expect(exists("claude/host/rewind/tripwires.ts")).toBe(true);
     pass();
   });

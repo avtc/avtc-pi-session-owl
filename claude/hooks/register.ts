@@ -50,7 +50,7 @@ import {
   isConflictPaused,
 } from "../host/conflicts/pause.js";
 import type { TimelineEvent } from "../host/conflicts/timeline.js";
-import { newestCompactionCut, parseTimelines } from "../host/conflicts/timeline.js";
+import { parseTimelines } from "../host/conflicts/timeline.js";
 import { evictResidentConversation, reloadCoreFor } from "../host/core-instances.js";
 import * as bridge from "../host/engine-bridge.js";
 import { mergePaneKeybindings } from "../host/keys/pane-bindings.js";
@@ -62,14 +62,10 @@ import { handleOwlRecallCall, type OwlRecallCallEvent } from "../host/recall/han
 import { restyleToolResultProps } from "../host/recall/render.js";
 import { OWL_RECALL_FULL_NAME } from "../host/recall/spec.js";
 import { runPruneHelper } from "../host/retention/prune-caller.js";
-import { type Fingerprint, fingerprintBlocks } from "../host/rewind/canonical-check.js";
 import { checkpointService } from "../host/rewind/checkpoint-service.js";
-import { isCapRefusal, runVerifyPass } from "../host/rewind/helper-pass.js";
 import { LiveChainProcessor } from "../host/rewind/live-chain.js";
 import { applyLiveRewind } from "../host/rewind/live-rewind.js";
-import { clearWatermarks, runCheckpoint } from "../host/rewind/reconcile.js";
 import { readTail } from "../host/rewind/tail-read.js";
-import { parseTranscript, type TranscriptPass } from "../host/rewind/verifier.js";
 import { getBinding, releaseAllBindings, releaseBinding, setSessionCwd } from "../host/runs/bind.js";
 import { installRunsLogSink } from "../host/runs/seams.js";
 import { getInstalledSettingsHandle, initSettingsConsumer } from "../host/settings/consumer.js";
@@ -95,7 +91,6 @@ import { copyBranchLineageStore } from "../host/start/branch-copy.js";
 import { launchGoalExtract, registerGoalExtractLauncher } from "../host/start/goal-extract.js";
 import { corePendingEvaluator } from "../host/start/pending.js";
 import * as state from "../host/state.js";
-import { type MirroredRow, sweepMirror } from "../host/storage/mirror.js";
 import {
   flushAllSessionStorage,
   flushSessionStorage,
@@ -704,80 +699,6 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       // + the resume exemption — BOTH must precede the process-start
       // checkpoint below: that check adjudicates the resumed view against
       // the mirror, and these boundaries change what it expects.
-      try {
-        const seededCut = newestCompactionCut(await readTimelineUnion());
-        if (seededCut !== null) {
-          checkpointService().noteCompactionBoundary(
-            state.conversationKey(e.session_id, null),
-            seededCut.uuid,
-            seededCut.at,
-          );
-        }
-      } catch (err) {
-        log.info(`compaction cut re-seed skipped: ${errText(err)}`);
-      }
-      // The resume/clear/fork re-attach: owl's capture runs AHEAD of the engine's
-      // own persistence — the command/exit ceremony and tail batches still
-      // in the engine's flush window are mirrored live but never reach the
-      // transcript, so the un-exempted first check adjudicates exactly those
-      // rows dead and re-anchors. Seed a ONE-SHOT boundary at the pre-start
-      // mirror tip: rows at-or-below it are capture-ahead residue expected
-      // absent at the first check, rows after it are judged normally; the
-      // first check that KNOWS our rows clears it (a knowledge-less
-      // process-start clean validates nothing and keeps the boundary armed).
-      // In every real resume the assembly is fresh — session.end released
-      // the old one — so an empty writer falls back to the PERSISTED mirror
-      // (a directory sweep); a genuinely new conversation has no mirror rows
-      // and stays untouched.
-      {
-        const startSource = (e as { source?: unknown }).source;
-        const convKeyEarly = state.conversationKey(e.session_id, null);
-        if (startSource === "resume" || startSource === "clear" || startSource === "fork") {
-          const storageEarly = getSessionStorage(convKeyEarly, e.session_id, null);
-          let tip = storageEarly.mirror.tipUuid();
-          let tipAt = Number.NaN;
-          let tipOrigin = "resident";
-          if (tip !== null) {
-            const tipRow = storageEarly.mirror.rowByUuid(tip);
-            const tsRaw = (tipRow?.row as { timestamp?: unknown } | undefined)?.timestamp;
-            tipAt = typeof tsRaw === "string" ? Date.parse(tsRaw) : Date.now();
-          } else {
-            // the released-assembly shape: this writer has captured nothing
-            // yet — the previous process's rows sit in the persisted batches
-            const swept = await sweepMirror(storageEarly.fs, storageEarly.dir);
-            let newest: { uuid: string; at: number } | null = null;
-            for (const r of swept.rows as readonly MirroredRow[]) {
-              const raw = (r.row as { timestamp?: unknown } | undefined)?.timestamp;
-              const ts = typeof raw === "string" ? Date.parse(raw) : Number.NaN;
-              const at = Number.isNaN(ts) ? Number.NEGATIVE_INFINITY : ts;
-              if (newest === null || at >= newest.at) newest = { uuid: r.uuid, at };
-            }
-            if (newest !== null) {
-              tip = newest.uuid;
-              tipAt = newest.at;
-              tipOrigin = "persisted";
-            }
-          }
-          if (tip !== null) {
-            checkpointService().noteResumeBoundary(convKeyEarly, tip, Number.isNaN(tipAt) ? Date.now() : tipAt);
-            diag(
-              `start boundary: resume exemption seeded conv=${convKeyEarly} source=${String(startSource)} tip=${tip} from=${tipOrigin}`,
-            );
-          } else {
-            diag(
-              `start boundary: no resume exemption (no mirror tip yet) conv=${convKeyEarly} source=${String(startSource)}`,
-            );
-          }
-        } else {
-          // the trace the /branch shape needs: did this start source get the
-          // exemption at all, or was it armed only for resume/clear/fork?
-          diag(`start boundary: no resume exemption (source=${String(startSource ?? "?")}) conv=${convKeyEarly}`);
-        }
-      }
-      // The process-start checkpoint (a rewind that happened while owl was
-      // absent reconciles here, before any observation of this session) — a
-      // CHECK-appending point.
-      await runRewindCheckpoint($, e.session_id, null, true);
       // The conflict activation (Channels A + A-prime over the live B merge):
       // deterministic, activation-time, precedes-all-LLM-cost self-restraint.
       // Runs once per process (the installed set cannot change mid-process;
@@ -1028,19 +949,9 @@ async function onSessionAppend($: any, e: AnyEvent, next: Next) {
       checkpointService()
         .tripwires()
         .noteCompactionRow((e as { uuid: string }).uuid);
-      // the alignment's prefix-exemption boundary (belt-and-suspenders: the
-      // structural root-side rule already exempts windowed/summarized rows).
-      // A LOOP's compaction row feeds its OWN key, never the main boundary.
       const boundarySession = state.getCurrentSession();
       const compactionAgentId =
         e && typeof (e as { agentId?: unknown }).agentId === "string" ? (e as { agentId: string }).agentId : null;
-      if (boundarySession !== null) {
-        checkpointService().noteCompactionBoundary(
-          state.conversationKey(boundarySession, compactionAgentId),
-          (e as { uuid: string }).uuid,
-          Date.now(),
-        );
-      }
       const rowUuid = (e as { uuid: string }).uuid;
       const rowAt =
         typeof (e as { timestamp?: unknown }).timestamp === "number"
@@ -1174,8 +1085,6 @@ async function onSessionEnd(_$: any, _e: AnyEvent, next: Next) {
     // boundaries, prepared registrations, watermarks, skip marks — never
     // leak across sessions)
     checkpointService().releaseAll();
-    clearWatermarks();
-    lastCheckpointSkipped.clear();
     if (liveChain !== null) liveChain.dispose();
     liveChain = null;
     liveChainKey = null;
@@ -1198,97 +1107,6 @@ function errText(err: unknown): string {
   return errDetail(err);
 }
 
-async function rewindApiFingerprints($: any, agentId: string | null): Promise<Fingerprint[]> {
-  // A subagent loop aligns against ITS OWN canonical view (the agentId
-  // scopes the read); without it every loop would compare its rows against
-  // the main conversation's form — a guaranteed false divergence.
-  const msgs = (await $.session.messages({
-    as: "api",
-    ...(agentId !== null ? { agentId } : {}),
-  })) as unknown[];
-  return msgs.map((m) => fingerprintBlocks((m as { content?: unknown }).content ?? m));
-}
-
-async function rewindTranscriptPass(agentId: string | null): Promise<TranscriptPass | null> {
-  // The transcript path is the MAIN conversation's file; a loop's rows live
-  // elsewhere — the verifier layer stays off for loop keys.
-  if (agentId !== null) return null;
-  const path = state.getCurrentTranscriptPath();
-  if (path === null) return null;
-  try {
-    const text = await bridge.currentServices().fsRead(path);
-    if (typeof text === "string") return parseTranscript(text);
-    return null;
-  } catch (err) {
-    const message = errText(err);
-    // The over-cap tier: $.fs.read refuses files over the 4 MiB platform
-    // cap — on CLI surfaces the streaming Node helper supplies the same
-    // facts (rows + tip); every other surface defers to the next CLI open
-    // (the tier goes missing, layer 2 carries the verdict).
-    if (!isCapRefusal(message)) {
-      log.info(`transcript read for the rewind verifier failed (${path}): ${message}`);
-      return null;
-    }
-    const svcs = bridge.currentServices();
-    return await runVerifyPass(
-      {
-        runProcess: (argv) => svcs.processRun(argv),
-        log: (m: string, e?: unknown) => log.warn(m + (e === undefined ? "" : `: ${errText(e)}`)),
-      },
-      { surface: lastStartSurface, transcriptPath: path, pluginRoot: svcs.pluginRoot() },
-    );
-  }
-}
-
-async function runRewindCheckpoint($: any, sessionId: string, agentId: string | null, persist: boolean): Promise<void> {
-  // Dormant while disabled (no owl records) or conflict-paused (pi's
-  // session_tree handler early-returns when paused — the dormant pause).
-  if (!state.isOwlEnabled()) return;
-  if (isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))) {
-    return;
-  }
-  const key = state.conversationKey(sessionId, agentId);
-  try {
-    const storage = getSessionStorage(key, sessionId, agentId);
-    const deps = checkpointService().buildDeps(key, storage, {
-      apiFingerprints: () => rewindApiFingerprints($, agentId),
-      ...(agentId === null
-        ? {
-            // the rows-form double check: the platform's messages() rows
-            // carry NO uuid field (the pinned types) — unavailable here, the
-            // check degrades to the api form (tailConfirmed stays true)
-            rowUuids: async () => null as string[] | null,
-          }
-        : {}),
-      transcriptPass: () => rewindTranscriptPass(agentId),
-      logLine: (line) => log.info(line),
-    });
-    const verdict = await runCheckpoint(deps, { persist });
-    if (verdict.kind === "skipped") {
-      lastCheckpointSkipped.add(key);
-      log.warn(`rewind check skipped for ${key}: ${verdict.reason}`);
-    } else {
-      lastCheckpointSkipped.delete(key);
-      if (verdict.kind === "divergence") {
-        // The refold swapped the branch truth under the live store — the
-        // observer frontier may now name a row the branch no longer carries
-        // (the forked-off dead tail), and an unresolvable frontier silences
-        // the observer for the rest of the session. Reload the SAME key so
-        // the store re-derives from the refolded branch (a non-live key is a
-        // no-op — its next swap loads the refolded truth anyway).
-        const reloaded = await reloadCoreFor(key).catch((err: unknown) => {
-          report("graph reload after rewind", err);
-          return false;
-        });
-        if (reloaded) log.info(`graph reloaded after rewind refold for ${key}`);
-      }
-    }
-  } catch (err) {
-    report("rewind check failed", err);
-    lastCheckpointSkipped.add(key); // an errored check never advances the boundary
-  }
-}
-
 // The live chain verifier (main loop only — subagent loops keep the
 // checkpoint path): append events queue zero-latency; a deferred tick (or
 // the turn-complete flush) reads the transcript tail and feeds the file's
@@ -1305,8 +1123,6 @@ function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
   liveChainKey = key;
   const storage = getSessionStorage(key, sessionId, null);
   const checkpointDeps = checkpointService().buildDeps(key, storage, {
-    apiFingerprints: () => rewindApiFingerprints($, null),
-    transcriptPass: () => rewindTranscriptPass(null),
     logLine: (line: string) => log.info(line),
   });
   let lastStatSize: number | null = null;
@@ -1429,11 +1245,6 @@ async function liveChainFlush($: any, sessionId: string): Promise<void> {
     report("live chain flush failed", err);
   }
 }
-
-/** The verdict of the last checkpoint per conversation (the flush consults
- *  it: a SKIPPED check must not advance the quarantine boundary — its
- *  turn's flush appends no CHECK). */
-const lastCheckpointSkipped = new Set<string>();
 
 /** The stage launch broker: stage agents spawn THROUGH the subagent
  *  companion (the engine re-entry-skips a plugin's hooks for its own
@@ -1585,17 +1396,17 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
       // loop has no mirrored rows to reconcile — skipping also keeps its
       // storage dir from ever being created).
       if (agentId === null) {
-        // the main loop verifies through the live chain (the file tail),
-        // never the api view, in the steady state
+        // the main loop verifies through the live chain (the file tail);
+        // subagent loops keep no per-turn verifier (their transcripts are
+        // separate files, their stores short-lived)
         await liveChainFlush($, sessionId);
-      } else if (!bridge.isMachineryLoop(agentId) && !state.subagentsFullyDisabled()) {
-        await runRewindCheckpoint($, sessionId, agentId, false);
       }
       const cap = getCapture(key);
       if (cap !== undefined) {
         await flushTurn(cap.mirror, getSessionStorage(key, sessionId, agentId).ledger, cap.mirror.tipUuid(), {
-          // a skipped/errored check must not advance the quarantine boundary
-          check: !lastCheckpointSkipped.has(key),
+          // the live chain's verified edges (written before any verdict)
+          // are this turn's provenance — the flush's CHECK seals them
+          check: true,
         });
       }
       // pi parity: the initial-prompt capture runs at EVERY turn end of
@@ -1746,12 +1557,9 @@ async function onSessionCompact(_$: any, e: AnyEvent, next: Next) {
     // last check-point re-folds BEFORE the gate reads the store. Machinery
     // loops skip it (own-run exclusion, the same predicate the turn
     // boundary uses).
-    rewindCheck:
-      compactAgentId !== null && bridge.isMachineryLoop(compactAgentId)
-        ? async () => {}
-        : compactAgentId === null
-          ? () => liveChainFlush(_$, compactSessionId)
-          : () => runRewindCheckpoint(_$, compactSessionId, compactAgentId, false),
+    // the main loop verifies through the live chain before the gate reads
+    // the store; machinery loops and subagent loops check nothing
+    rewindCheck: compactAgentId === null ? () => liveChainFlush(_$, compactSessionId) : async () => {},
   });
   const compactSignal = next && typeof next.signal === "object" && next.signal !== null ? next.signal : undefined;
   const outcome = await raceTakeoverWithSignal(
@@ -1790,15 +1598,12 @@ async function onSessionCompact(_$: any, e: AnyEvent, next: Next) {
     // VERDICT (the gate above may have run for many minutes; an entry-time
     // claim would already be expired when the rows land)
     compactClaims.set(claimKey, { at: Date.now(), kind: "answer" });
-    // The engine writes NO row for a hook-answered compaction, so nothing
-    // re-derives where the summarized prefix ends: the answer itself seeds
-    // the rewind alignment's exemption boundary (rows behind the cut are
-    // expected-absent from the api view — never a rewind signal) and
-    // persists it for restarts. The uuid-less timeline row is inert for
-    // row adjudication (only uuid-bearing events index a row).
+    // The engine writes NO row for a hook-answered compaction, so the
+    // timeline's compact-answer row is what records where the summarized
+    // prefix ends (the uuid-less row is inert for row adjudication — only
+    // uuid-bearing events index a row).
     if (outcome.kind === "answer" && typeof outcome.cut === "string" && outcome.cut !== "") {
       const answerAt = Date.now();
-      checkpointService().noteCompactionBoundary(claimKey, outcome.cut, answerAt);
       guarded(appendTimelineEvent({ t: "compact-answer", at: answerAt, cut: outcome.cut }), "timeline append");
     }
     return outcome.result;

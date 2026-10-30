@@ -11,9 +11,8 @@
 // cleared by the first check that actually knows our rows.
 
 import { beforeEach, describe, expect, test } from "vitest";
-import { checkpointService } from "../../host/rewind/checkpoint-service.js";
 import { conversationKey as conversationKeyOf } from "../../host/state.js";
-import { getSessionStorage, releaseSessionStorage } from "../../host/storage/session-storage.js";
+import { getSessionStorage } from "../../host/storage/session-storage.js";
 import { createHarness } from "../helpers/harness.js";
 
 const harness = createHarness();
@@ -195,122 +194,5 @@ describe("resume exemption — the process-start check at a resume", () => {
     expect(served).toContain("a1");
     expect(served).toContain("r1");
     expect(served).toContain("r2");
-  });
-});
-
-describe("resume exemption — the released-storage (real cross-process) shape", () => {
-  /** Prior process: run the conversation, capture + FLUSH its rows (one of
-   *  them the exit-ceremony row the engine never writes to any transcript),
-   *  then release the assembly — exactly what session.end teardown does to
-   *  a process that is about to resume. */
-  async function releasedStartIntoResume(sessionId: string): Promise<string> {
-    await harness.dispatch("classic.SessionStart", {
-      session_id: sessionId,
-      transcript_path: `/t/${sessionId}.jsonl`,
-    });
-    await harness.dispatch("session.append", promptRow("u1", null, "hello"));
-    await harness.dispatch("session.append", promptRow("u2", "u1", "world"));
-    // the capture-ahead residue: an exit ceremony mirrored live, never in
-    // the transcript file (the engine drops it at command-exit)
-    await harness.dispatch("session.append", promptRow("x1", "u2", "<command-name>/exit</command-name>"));
-    const key = conversationKeyOf(sessionId, null);
-    await getSessionStorage(key, sessionId, null).mirror.flush();
-    releaseSessionStorage(key);
-    harness.sessionApi.set([]);
-    await harness.dispatch("classic.SessionStart", {
-      session_id: sessionId,
-      transcript_path: `/t/${sessionId}.jsonl`,
-      source: "resume",
-    });
-    await new Promise((r) => setTimeout(r, 30));
-    return key;
-  }
-
-  test("the tip comes from the PERSISTED mirror when the writer assembly is fresh", async () => {
-    const key = await releasedStartIntoResume("sess-rxp1");
-    const text = await logText();
-    expect(text).toContain(`start boundary: resume exemption seeded conv=${key} source=resume tip=`);
-    expect(checkpointService().resumeBoundaryOf(key)).not.toBeNull();
-  });
-
-  test("the knowledge-less process-start check does NOT consume the one-shot", async () => {
-    const key = await releasedStartIntoResume("sess-rxp2");
-    // the start checkpoint runs BEFORE the sweep: it knows no rows of ours,
-    // so its (vacuous) clean must leave the boundary armed for the first
-    // check that does know them
-    expect(checkpointService().resumeBoundaryOf(key)).not.toBeNull();
-  });
-
-  test("the first turn after a released resume stays clean (no re-anchor over the exit row)", async () => {
-    const _key = await releasedStartIntoResume("sess-rxp3");
-    // the restarted session: the rebuilt view carries the pre-exit rows,
-    // never the ceremony — x1 is exempt at-or-below the seeded tip
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world")]);
-    await harness.dispatch("session.append", promptRow("u2b", "x1", "again"));
-    // NOTE: the view's tip rows chain through x1 (mirrored), so a live
-    // junction here exercises the exempted tail rather than a real rewind
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world"), apiMsg("again")]);
-    await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
-    await new Promise((r) => setTimeout(r, 30));
-    const text = await logText();
-    const mine = text
-      .split("\n")
-      .filter((l) => l.includes("sess-rxp3"))
-      .join("\n");
-    expect(mine).toContain("start boundary: resume exemption seeded");
-    expect(mine).not.toContain("re-anchored");
-    expect(mine).not.toContain("records quarantined");
-  });
-
-  /** The fork shape: the engine COPIES the transcript under a new session id
-   *  and (branch store copy) the origin's owl store travels with it — but the
-   *  transcript copy never gains the capture-ahead residue. Same
-   *  released-assembly mechanics as above; only the start source differs. */
-  async function releasedStartIntoFork(sessionId: string): Promise<string> {
-    await harness.dispatch("classic.SessionStart", {
-      session_id: sessionId,
-      transcript_path: `/t/${sessionId}.jsonl`,
-    });
-    await harness.dispatch("session.append", promptRow("u1", null, "hello"));
-    await harness.dispatch("session.append", promptRow("u2", "u1", "world"));
-    // mirrror-only residue the copied transcript will never carry
-    await harness.dispatch("session.append", promptRow("x1", "u2", "<command-name>/exit</command-name>"));
-    const key = conversationKeyOf(sessionId, null);
-    await getSessionStorage(key, sessionId, null).mirror.flush();
-    releaseSessionStorage(key);
-    harness.sessionApi.set([]);
-    await harness.dispatch("classic.SessionStart", {
-      session_id: sessionId,
-      transcript_path: `/t/${sessionId}.jsonl`,
-      source: "fork",
-    });
-    await new Promise((r) => setTimeout(r, 30));
-    return key;
-  }
-
-  test("a fork start whose carried store knows our rows seeds the exemption (source=fork)", async () => {
-    const key = await releasedStartIntoFork("sess-rxf1");
-    const text = await logText();
-    expect(text).toContain(`start boundary: resume exemption seeded conv=${key} source=fork tip=`);
-    expect(checkpointService().resumeBoundaryOf(key)).not.toBeNull();
-  });
-
-  test("the first turn after a fork stays clean (no re-anchor over the copied residue)", async () => {
-    const _key = await releasedStartIntoFork("sess-rxf2");
-    // the forked session serves the copied view (pre-exit rows only) and
-    // continues — x1's residue must be tolerated once, then detection is live
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world")]);
-    await harness.dispatch("session.append", promptRow("u2b", "x1", "again"));
-    harness.sessionApi.set([apiMsg("hello"), apiMsg("world"), apiMsg("again")]);
-    await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
-    await new Promise((r) => setTimeout(r, 30));
-    const text = await logText();
-    const mine = text
-      .split("\n")
-      .filter((l) => l.includes("sess-rxf2"))
-      .join("\n");
-    expect(mine).toContain("start boundary: resume exemption seeded");
-    expect(mine).not.toContain("re-anchored");
-    expect(mine).not.toContain("records quarantined");
   });
 });

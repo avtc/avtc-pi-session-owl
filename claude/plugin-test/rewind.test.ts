@@ -4,46 +4,59 @@
 // Engine-run rewind twins. KIT REALITY (same class as the conflicts twin):
 // the kit's $ carries no session.messages view the test controls, and the
 // plugin-under-test's session.start arm does not fire by itself — so the
-// live boundary choreography rides the Node harness suites. What this twin
+// live chain choreography rides the Node harness suites. What this twin
 // proves under the REAL kit loader: (a) the rewind modules load inside the
 // plugin's closure (the loader accepts their import graph — the closure
 // guarantee for the whole layer stack), (b) the layer stack decides over
-// real module code: the canonical alignment, the tripwire degrade, the
-// checkpoint dep assembly, and the reconciliation ordering (abort before
-// refold, CHECK after).
+// real module code: the live chain's verdict, the rewind application
+// ordering (abort before refold), the lineage fold, and the tail tier's
+// parse.
 import { describe, expect, mock as kitMock, test } from "claude-code/testing";
-import { alignCanonical, type Fingerprint, fingerprintBlocks } from "../host/rewind/canonical-check.js";
 import { checkpointService } from "../host/rewind/checkpoint-service.js";
-import { appendEdges, foldLineage, type LineageEdge, livePathFor } from "../host/rewind/lineage.js";
-import { runCheckpoint } from "../host/rewind/reconcile.js";
+import { appendEdges, foldLineage, livePathFor } from "../host/rewind/lineage.js";
+import { LiveChainProcessor } from "../host/rewind/live-chain.js";
+import { applyLiveRewind } from "../host/rewind/live-rewind.js";
+import { parseCapsuleTail } from "../host/rewind/tail-read.js";
 import { TruncationTripwires } from "../host/rewind/tripwires.js";
 import { exactEdges, parseTranscript, verifyJunction } from "../host/rewind/verifier.js";
-
-const fp = (o: Partial<Fingerprint> = {}): Fingerprint => ({ toolUseIds: [], toolResultIds: [], textSig: "", ...o });
 
 describe("rewind layers — engine-run twin (kit loader closure + decisions)", () => {
   test("the module graph loads inside the plugin closure (every layer importable)", () => {
     expect(typeof kitMock).toBeDefined();
-    expect(typeof alignCanonical).toBe("function");
-    expect(typeof runCheckpoint).toBe("function");
+    expect(typeof LiveChainProcessor).toBe("function");
+    expect(typeof applyLiveRewind).toBe("function");
     expect(typeof parseTranscript).toBe("function");
   });
 
-  test("the canonical alignment decides a rewind over real module code", () => {
-    const known = [
-      { uuid: "r1", f: fingerprintBlocks([{ type: "tool_use", id: "t1", name: "x", input: {} }]) },
-      { uuid: "r2", f: fingerprintBlocks([{ type: "tool_result", tool_use_id: "t1", content: "ok" }]) },
-      { uuid: "r3", f: fingerprintBlocks([{ type: "tool_use", id: "t2", name: "x", input: {} }]) },
-    ];
-    const api = [
-      fingerprintBlocks([{ type: "tool_use", id: "t1", name: "x", input: {} }]),
-      fingerprintBlocks([{ type: "tool_result", tool_use_id: "t1", content: "ok" }]),
-      fingerprintBlocks([{ type: "tool_use", id: "t9", name: "x", input: {} }]),
-    ];
-    const v = alignCanonical(known, api);
-    if (v.kind !== "divergence") throw new Error(`expected divergence, got ${v.kind}`);
-    expect(v.P).toBe("r2");
-    expect(v.provisional).toBe(false);
+  test("the live chain detects an anchor mismatch over real module code", async () => {
+    const patched: Array<{ uuid: string; parent: string | null }> = [];
+    const rewinds: Array<{ settle: string | null }> = [];
+    const proc = new LiveChainProcessor({
+      statSize: async () => 1000,
+      readTail: async () =>
+        parseCapsuleTail(
+          `${[JSON.stringify({ uuid: "t1", parentUuid: null }), JSON.stringify({ uuid: "u9", parentUuid: "t1" })].join(
+            "\n",
+          )}\n`,
+          64,
+        ),
+      owlTailExcluding: () => "t2",
+      isKnownRow: (uuid) => uuid === "t1",
+      patchEdges: (edges) => {
+        for (const e of edges) patched.push({ uuid: e.uuid, parent: e.parent });
+      },
+      onRewind: (v) => {
+        rewinds.push(v);
+      },
+      schedule: () => () => {},
+      log: () => {},
+    });
+    expect(proc.enqueue({ uuid: "u9", door: "response", captured: true })).toBe(true);
+    await proc.flush();
+    // the settle is the LAST VERIFIED row (the new world's tip), never the
+    // pre-rewind anchor
+    expect(rewinds).toEqual([{ settle: "u9" }]);
+    expect(patched).toEqual([{ uuid: "u9", parent: "t1" }]);
   });
 
   test("the transcript pass resolves the tip from the last-prompt marker + exact edges fold into a live path", () => {
@@ -71,80 +84,59 @@ describe("rewind layers — engine-run twin (kit loader closure + decisions)", (
     expect(livePathFor(edges, "r3")).toEqual(["r1", "r2", "r3"]);
   });
 
-  test("the reconciliation ordering holds over the real deps (abort awaits BEFORE refold; the divergence CHECK lands after)", async () => {
+  test("the rewind application ordering holds over the real deps (abort awaits BEFORE refold; divergence is recorded)", async () => {
     const order: string[] = [];
-    const tripwires = new TruncationTripwires();
     const logs: string[] = [];
-    const deps = {
-      key: "twin-main",
-      apiMessages: async () => [fp({ toolUseIds: ["t1"] }), fp({ toolUseIds: ["t9"] })],
-      knownPath: () => [
-        { uuid: "k1", f: fp({ toolUseIds: ["t1"] }) },
-        { uuid: "k2", f: fp({ toolUseIds: ["t2"] }) },
-      ],
-      knownTip: () => "k2",
-      tripwires,
-      abortAndAwaitInFlight: async () => {
-        order.push("abort");
-      },
-      liveSetFor: async (p: string | null) => (p !== null ? ["k1"] : []),
-      refold: async () => {
-        order.push("refold");
-        return { quarantined: 1 };
-      },
-      appendCheck: (marker: string) => {
-        order.push(`check:${marker}`);
-      },
-      appendEdges: (edges: LineageEdge[], marker: string) => {
-        appendEdges(
-          {
-            append: (_kind: "lineage", _payload: unknown, _marker: string) => "x",
-          },
-          edges,
-          marker,
-        );
-        order.push("edges");
-      },
-      log: (line: string) => logs.push(line),
-    };
-    const v = await runCheckpoint(deps, { persist: true });
-    if (v.kind !== "divergence") throw new Error(`expected divergence, got ${v.kind}`);
-    expect(v.P).toBe("k1");
-    expect(v.quarantined).toBe(1);
-    expect(order).toEqual(["abort", "refold", "check:k1"]);
-    expect(logs[0]).toContain("rewind detected");
-    expect(logs[0]).toContain("twin-main");
-  });
-
-  test("the tripwire degrade: api unavailable + suspected ⇒ skipped-and-logged (never a blind call)", async () => {
-    const tripwires = new TruncationTripwires();
-    tripwires.observeMeasure("twin-main", 100);
-    tripwires.observeMeasure("twin-main", 40);
-    const logs: string[] = [];
-    const v = await runCheckpoint(
+    await applyLiveRewind(
       {
-        key: "twin-main",
-        apiMessages: async () => {
-          throw new Error("no messages noun");
+        abortAndAwaitInFlight: async () => {
+          order.push("abort");
         },
-        knownPath: () => [],
-        knownTip: () => null,
-        tripwires,
-        abortAndAwaitInFlight: async () => {},
-        liveSetFor: async () => [],
-        refold: async () => ({ quarantined: 0 }),
-        appendCheck: () => {},
-        log: (line: string) => logs.push(line),
+        liveOrderFor: async () => ["k1"],
+        deadPath: async () => ["k2"],
+        refold: async () => {
+          order.push("refold");
+          return { quarantined: 1 };
+        },
+        onDivergence: (_p, dead) => {
+          order.push(`divergence:${dead.join(",")}`);
+        },
+        log: (line) => logs.push(line),
       },
-      { persist: true },
+      { settle: "k1" },
     );
-    expect(v.kind).toBe("skipped");
-    // the unreadable-api note precedes the skip warning — nothing silent
-    expect(logs.some((l) => l.includes("rewind check skipped"))).toBe(true);
-    expect(logs.some((l) => l.includes("api view unreadable"))).toBe(true);
+    expect(order).toEqual(["abort", "refold", "divergence:k2"]);
+    expect(logs[0]).toContain("live rewind");
   });
 
-  test("the checkpoint service assembly exists (one tripwire instance per process)", () => {
+  test("the lineage ledger append feeds the fold the exact edges", () => {
+    const records: unknown[] = [];
+    appendEdges(
+      {
+        append: (kind: "lineage", payload: unknown, marker: string) => {
+          records.push({ kind, payload, marker });
+          return "x";
+        },
+      },
+      [{ uuid: "r9", parent: "r1", exact: true }],
+      "r9",
+    );
+    const edges = foldLineage(
+      records.map((r, i) => ({
+        producerId: "p1",
+        seq: i + 1,
+        ts: 1,
+        marker: "r9",
+        at: "r9",
+        kind: "lineage" as const,
+        payload: (r as { payload: unknown }).payload,
+      })),
+    );
+    expect(edges.get("r9")).toEqual({ parent: "r1", exact: true });
+  });
+
+  test("the rewind service assembly exists (one tripwire instance per process)", () => {
     expect(checkpointService().tripwires()).toBe(checkpointService().tripwires());
+    expect(typeof TruncationTripwires).toBe("function");
   });
 });

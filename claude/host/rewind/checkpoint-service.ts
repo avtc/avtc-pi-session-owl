@@ -1,40 +1,70 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The checkpoint service: assembles the reconciliation deps for a
-// conversation key from the session storage + a registered prepared
-// context. Every `$` literal stays OUT of this module — the register
-// wiring injects the api-fingerprint and transcript-text thunks (they
-// spell $.session.messages / $.fs.read literally inside handler closures).
-// One tripwire instance serves every key (series isolate inside); the
-// run-lock surface is injected at wiring time (the same module the stage
-// engine uses).
+// The rewind service: assembles the live chain's deps for a conversation
+// key from the session storage + a registered prepared context. Every `$`
+// literal stays OUT of this module — the register wiring injects the log
+// seam (it spells log.info literally inside handler closures). One
+// tripwire instance serves every key (series isolate inside); the run-lock
+// surface is injected at wiring time (the same module the stage engine
+// uses).
 
 import { foldLedger } from "../storage/ledger.js";
 import type { SessionStorage } from "../storage/session-storage.js";
 import type { PreparedContext } from "../storage/store-context.js";
 import { prepareStoreContext } from "../storage/store-context.js";
 import { abortInFlight, inFlight } from "../triggers/run-locks.js";
-import type { Fingerprint, KnownRow } from "./canonical-check.js";
-import { fingerprintBlocks } from "./canonical-check.js";
 import { foldLineage, type LineageEdge, livePathFor } from "./lineage.js";
-import { type CheckpointDeps, runCheckpoint } from "./reconcile.js";
 import { TruncationTripwires } from "./tripwires.js";
-import type { TranscriptPass } from "./verifier.js";
 
-/** The wiring-injected platform thunks (no $ literals below this type). */
+/** The wiring-injected platform seams (no $ literals below this type). */
 export interface PlatformThunks {
-  /** The canonical view's fingerprints — `messages({as:"api"})` mapped. */
-  apiFingerprints: () => Promise<Fingerprint[]>;
-  /** The messages() rows form uuids where available (null = unavailable). */
-  rowUuids?: () => Promise<string[] | null>;
-  /** The transcript file's text where readable; null = unavailable. */
-  transcriptText?: () => Promise<string | null>;
-  /** The pre-parsed transcript pass (the over-cap CLI helper route);
-   *  null = the tier is missing. Preferred over transcriptText. */
-  transcriptPass?: () => Promise<TranscriptPass | null>;
   /** The logger sink for reconciliation + skip lines. */
   logLine: (line: string) => void;
+}
+
+/** The deps the live chain (and the refold seam it drives) consumes. */
+export interface CheckpointDeps {
+  /** The conversation key (the main session). */
+  key: string;
+  /** The previously-known path (tip LAST). */
+  knownPath: () => KnownRow[];
+  /** The uuid-only chain tail, skipping dead + excluded rows (the live
+   *  chain's per-tick base — no ts materialization); absent = derive
+   *  from knownPath */
+  knownTailExcluding?: (exclude: ReadonlySet<string>) => string | null;
+  /** The current known tip. */
+  knownTip: () => string | null;
+  /** The per-conversation tripwires. */
+  tripwires?: TruncationTripwires;
+  /** Abort the conversation's in-flight stage runs and await their release. */
+  abortAndAwaitInFlight: () => Promise<void>;
+  /** The live path for a junction anchor (the mirror's edges, the lineage
+   *  ledger's, or the arrival order — by edge authority). */
+  liveSetFor: (p: string | null) => Promise<string[]>;
+  /** Re-fold the store (quarantine + marker liveness) — the divergence
+   *  move; the detected live set feeds marker liveness (the snapshot
+   *  selection rule) and its order becomes the served branch. */
+  refold: (
+    liveSet: ReadonlySet<string>,
+    liveOrder: readonly string[],
+    dead: ReadonlySet<string>,
+  ) => Promise<{ quarantined: number }>;
+  /** Divergence notification (the caller records the dead set — the known
+   *  path of FUTURE checks excludes it; a re-detected old divergence would
+   *  otherwise re-fire on every clean turn). */
+  onDivergence?: (p: string | null, dead: string[]) => void;
+  /** Persist exact lineage edges from a verified pass (ledger + mirror). */
+  appendEdges?: (edges: LineageEdge[], marker: string) => void;
+  /** The logger line sink. */
+  log: (line: string) => void;
+}
+
+/** One known row: its uuid and stored timestamp (arrival order lives in
+ *  the mirror; the dead set is applied before the rows land here). */
+export interface KnownRow {
+  uuid: string;
+  ts?: number;
 }
 
 /** The run-lock surface (overridable for tests; defaults to the real locks). */
@@ -47,20 +77,49 @@ export interface RunLockSurface {
 
 const EMPTY_DEAD: ReadonlySet<string> = new Set<string>();
 
-class CheckpointServiceImpl {
+class RewindServiceImpl {
   private readonly tripwireState = new TruncationTripwires();
   private readonly preparedByKey = new Map<string, PreparedContext>();
-  /** Cached fingerprints per key → uuid. The value keeps the row OBJECT the
-   *  fingerprint was computed from: a re-buffered/re-adopted row (same uuid,
-   *  fresh object) invalidates by identity — mirror rows are immutable in
-   *  practice, and the reference compare makes the cache safe even where
-   *  they are not. Keeps the per-turn checkpoint off the O(session-content)
-   *  recompute path (it runs at EVERY turn.complete). */
-  private readonly fpByKey = new Map<string, Map<string, { src: object; f: Fingerprint }>>();
-  private fpComputes = 0;
   /** Dead rows per key, accumulated at each detected divergence — future
    *  checks exclude them from the known path (the detection is sticky). */
   private readonly deadByKey = new Map<string, Set<string>>();
+  private locks: RunLockSurface = {
+    inFlight: (key) => inFlight(key),
+    abort: (key) => abortInFlight(key),
+    waitMs: 25,
+  };
+
+  tripwires(): TruncationTripwires {
+    return this.tripwireState;
+  }
+
+  /** Register the prepared context a key's core holds (the refold's live
+   *  target — set at core creation, cleared at release). */
+  register(key: string, prepared: PreparedContext): void {
+    this.preparedByKey.set(key, prepared);
+  }
+
+  /** Drop a key's registered context (session end / storage release). */
+  releaseKey(key: string): void {
+    this.preparedByKey.delete(key);
+    this.deadByKey.delete(key);
+  }
+
+  reset(): void {
+    this.preparedByKey.clear();
+    this.deadByKey.clear();
+    this.locks = { inFlight: (key) => inFlight(key), abort: (key) => abortInFlight(key), waitMs: 25 };
+  }
+
+  /** Test seam for the run-lock surface. */
+  installRunLocksForTest(locks: RunLockSurface): void {
+    this.locks = locks;
+  }
+
+  /** Drop every key's state (the wiring's full reset). */
+  releaseAll(): void {
+    this.reset();
+  }
 
   /** The reconciliation's dead rows for a conversation (empty until a
    *  divergence marks any): the served-branch filter's authority —
@@ -77,109 +136,12 @@ class CheckpointServiceImpl {
     for (const uuid of dead) set.add(uuid);
     this.deadByKey.set(key, set);
   }
-  /** The newest observed door-compaction row per key (the alignment's
-   *  prefix exemption boundary). The arrival time rides along for the
-   *  inert-anchor fallback (a cut uuid that never reached the mirror). */
-  private readonly compactionBoundaryByKey = new Map<string, { uuid: string; at: number | null }>();
-  /** The one-shot resume exemption per key: a check right after a
-   *  resume/clear start must not misread owl's capture-ahead residue
-   *  (rows mirrored live that the engine never persists — the command/
-   *  exit ceremony) for a rewind. The boundary is the pre-start mirror tip
-   *  (persisted fallback when the assembly is fresh); it exempts exactly
-   *  the rows at-or-below it at the first KNOWN-rows check, which clears it
-   *  — a knowledge-less process-start clean never consumes it. */
-  private readonly resumeBoundaryByKey = new Map<string, { uuid: string; at: number }>();
-  private locks: RunLockSurface = {
-    inFlight: (key) => inFlight(key),
-    abort: (key) => abortInFlight(key),
-    waitMs: 25,
-  };
-
-  tripwires(): TruncationTripwires {
-    return this.tripwireState;
-  }
-
-  /** Record an observed compaction-boundary row (the alignment exemption). */
-  noteCompactionBoundary(key: string, uuid: string, at: number | null = null): void {
-    this.compactionBoundaryByKey.set(key, { uuid, at });
-  }
-
-  /** Seed the one-shot resume exemption (the pre-start mirror tip). */
-  noteResumeBoundary(key: string, uuid: string, at: number): void {
-    this.resumeBoundaryByKey.set(key, { uuid, at });
-  }
-
-  /** Clear the one-shot resume exemption (the first clean verdict). */
-  clearResumeBoundary(key: string): void {
-    this.resumeBoundaryByKey.delete(key);
-  }
-
-  /** The armed one-shot resume exemption, or null (observability seam — a
-   *  check that knows no rows must leave this non-null after a resume). */
-  resumeBoundaryOf(key: string): { uuid: string; at: number } | null {
-    return this.resumeBoundaryByKey.get(key) ?? null;
-  }
-
-  /** Register the prepared context the core was built over — refold must
-   *  refresh THAT object (the ctxFactory closure holds it). */
-  registerPrepared(key: string, prepared: PreparedContext): void {
-    this.preparedByKey.set(key, prepared);
-  }
-
-  preparedFor(key: string): PreparedContext | null {
-    return this.preparedByKey.get(key) ?? null;
-  }
-
-  releaseKey(key: string): void {
-    this.preparedByKey.delete(key);
-    this.deadByKey.delete(key);
-    this.compactionBoundaryByKey.delete(key);
-    this.resumeBoundaryByKey.delete(key);
-    this.fpByKey.delete(key);
-  }
-
-  /** Release every key's checkpoint state (session end — the tripwire
-   *  series follow the session out too). */
-  releaseAll(): void {
-    this.preparedByKey.clear();
-    this.deadByKey.clear();
-    this.compactionBoundaryByKey.clear();
-    this.resumeBoundaryByKey.clear();
-    this.fpByKey.clear();
-    this.tripwireState.releaseAll();
-  }
-
-  reset(): void {
-    this.preparedByKey.clear();
-    this.deadByKey.clear();
-    this.compactionBoundaryByKey.clear();
-    this.resumeBoundaryByKey.clear();
-    this.fpByKey.clear();
-    this.fpComputes = 0;
-    this.locks = { inFlight: (key) => inFlight(key), abort: (key) => abortInFlight(key), waitMs: 25 };
-  }
-
-  /** Test seam: how many fingerprint computations the cache actually paid. */
-  _fpComputesForTest(): number {
-    return this.fpComputes;
-  }
-
-  /** Test seam for the run-lock surface. */
-  installRunLocksForTest(locks: RunLockSurface): void {
-    this.locks = locks;
-  }
 
   /** Assemble the deps for one conversation. */
   buildDeps(key: string, storage: SessionStorage, thunks: PlatformThunks): CheckpointDeps {
-    const transcriptThunk = thunks.transcriptText;
-    const transcriptPassThunk = thunks.transcriptPass;
-    const rowUuidsThunk = thunks.rowUuids;
     return {
       key,
-      apiMessages: () => thunks.apiFingerprints(),
       knownPath: () => this.knownPathOf(key, storage, this.deadByKey.get(key)),
-      // the uuid-only tail (the live chain's per-tick base): skips the
-      // fingerprint/ts materialization knownPath pays for
       knownTailExcluding: (exclude: ReadonlySet<string>): string | null => {
         const dead = this.deadByKey.get(key);
         const order = storage.mirror.arrivalOrder();
@@ -192,9 +154,6 @@ class CheckpointServiceImpl {
         return null;
       },
       knownTip: () => storage.mirror.tipUuid(),
-      ...(transcriptThunk !== undefined ? { transcriptText: () => transcriptThunk() } : {}),
-      ...(transcriptPassThunk !== undefined ? { transcriptPass: () => transcriptPassThunk() } : {}),
-      ...(rowUuidsThunk !== undefined ? { rowUuids: () => rowUuidsThunk() } : {}),
       tripwires: this.tripwireState,
       abortAndAwaitInFlight: async () => {
         this.locks.abort(key);
@@ -209,17 +168,6 @@ class CheckpointServiceImpl {
         }
       },
       liveSetFor: async (p: string | null) => resolveLiveSet(storage, p),
-      // file-proven rows for the absent-row verdict: exact edges folded from
-      // the durable lineage (past verifier passes) + this boundary's buffer
-      fileProvenUuids: async () => {
-        const fold = await foldLedger(storage.fs, storage.dir);
-        const edges = foldLineage([...fold.records, ...storage.ledger.bufferedRecords()]);
-        const proven = new Set<string>();
-        for (const [uuid, edge] of edges) {
-          if (edge.exact) proven.add(uuid);
-        }
-        return proven;
-      },
       refold: async (liveSet: ReadonlySet<string>, liveOrder: readonly string[], dead: ReadonlySet<string>) => {
         const pred = (uuid: string) => liveSet.has(uuid);
         const registered = this.preparedByKey.get(key);
@@ -237,23 +185,6 @@ class CheckpointServiceImpl {
       onDivergence: (_p: string | null, dead: string[]) => {
         this.noteDivergenceDead(key, dead);
       },
-      compactionBoundary: () => this.compactionBoundaryByKey.get(key)?.uuid ?? null,
-      compactionBoundaryAt: () => this.compactionBoundaryByKey.get(key)?.at ?? null,
-      resumeBoundary: () => this.resumeBoundaryByKey.get(key)?.uuid ?? null,
-      resumeBoundaryAt: () => this.resumeBoundaryByKey.get(key)?.at ?? null,
-      clearResumeBoundary: () => {
-        this.resumeBoundaryByKey.delete(key);
-      },
-      appendCheck: (marker: string) => {
-        storage.ledger.append("CHECK", {}, marker);
-        // the CHECK seals the blind window — its durability is immediate: a
-        // boundary product never rides an unrelated stage flush
-        void storage.ledger.flush().catch((reason: unknown) => {
-          thunks.logLine(
-            `session-owl: checkpoint CHECK flush failed — buffered records kept for retry: ${reason instanceof Error ? reason.message : String(reason)}`,
-          );
-        });
-      },
       appendEdges: (edges: LineageEdge[], marker: string) => {
         storage.ledger.append("lineage", { edges }, marker);
         // the file's exact edges also true-up the mirror's chain: the
@@ -262,7 +193,6 @@ class CheckpointServiceImpl {
         // meta-row-interspersed chain real (resolve-through onto captured
         // ancestors happens inside the mirror)
         storage.mirror.patchEdges(edges);
-        // lineage is a boundary product too — durable with its CHECK
         void storage.ledger.flush().catch((reason: unknown) => {
           thunks.logLine(
             `session-owl: lineage flush failed — buffered records kept for retry: ${reason instanceof Error ? reason.message : String(reason)}`,
@@ -272,34 +202,18 @@ class CheckpointServiceImpl {
       log: (line: string) => thunks.logLine(line),
     };
   }
-  /** The previously-known path with per-row fingerprint caching (see
-   *  fpByKey): each row's fingerprint computes once per key lifetime; a
-   *  replaced row object recomputes (identity invalidation). */
+
+  /** The previously-known path (arrival order minus the dead set, each row
+   *  with its stored timestamp where parseable). */
   private knownPathOf(key: string, storage: SessionStorage, dead: ReadonlySet<string> | undefined): KnownRow[] {
-    let cache = this.fpByKey.get(key);
-    if (cache === undefined) {
-      cache = new Map();
-      this.fpByKey.set(key, cache);
-    }
+    void key;
     const known: KnownRow[] = [];
     for (const uuid of storage.mirror.arrivalOrder()) {
       if (dead?.has(uuid)) continue;
       const raw = storage.mirror.rowByUuid(uuid);
-      const src =
-        (raw?.row as { message?: { content?: unknown }; timestamp?: unknown } | undefined)?.message?.content ?? [];
-      const rowObj = raw as object | undefined;
-      const hit = cache.get(uuid);
-      let f: Fingerprint;
-      if (hit !== undefined && hit.src === rowObj) {
-        f = hit.f;
-      } else {
-        f = fingerprintBlocks(src);
-        this.fpComputes += 1;
-        if (rowObj !== undefined) cache.set(uuid, { src: rowObj, f });
-      }
       const tsRaw = (raw?.row as { timestamp?: unknown } | undefined)?.timestamp;
       const ts = typeof tsRaw === "string" ? Date.parse(tsRaw) : Number.NaN;
-      known.push(Number.isNaN(ts) ? { uuid, f } : { uuid, f, ts });
+      known.push(Number.isNaN(ts) ? { uuid } : { uuid, ts });
     }
     return known;
   }
@@ -334,13 +248,5 @@ export async function resolveLiveSet(storage: SessionStorage, p: string | null):
   return storage.mirror.arrivalOrder();
 }
 
-let instance: CheckpointServiceImpl | null = null;
-
-/** The process-wide service (mirrors the other host singletons). */
-export function checkpointService(): CheckpointServiceImpl {
-  if (instance === null) instance = new CheckpointServiceImpl();
-  return instance;
-}
-
-export type { CheckpointDeps };
-export { runCheckpoint };
+const rewindServiceImpl = new RewindServiceImpl();
+export const checkpointService = () => rewindServiceImpl;
