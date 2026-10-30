@@ -76,7 +76,7 @@ test("the mid-chain fork raises exactly one rewind verdict (live probe shape)", 
   proc.enqueue({ uuid: BETA_RE, door: "response", captured: true });
   proc.enqueue({ uuid: EPSILON_A, door: "response", captured: true });
   // the eager turn.complete flush (inline processing)
-  await proc.process();
+  await proc.flush();
   expect(logs.join("\n")).toContain("rewind detected");
   expect(rewinds).toHaveLength(1);
   // the settle point = the last verified row of the new world
