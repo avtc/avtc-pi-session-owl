@@ -138,8 +138,7 @@ describe("rewind wiring — the checkpoint at the turn boundary", () => {
 
     await new Promise((r) => setTimeout(r, 30)); // the logger's async flush chain
     const text = await logText();
-    expect(text).toMatch(/live chain: rewind detected[^\n]*conv sess-r3/);
-    expect(text).toMatch(/amputated[^\n]*conv sess-r3/);
+    expect(text).toMatch(/amputated row\(s\), settle at u4[^\n]*conv sess-r3/);
     // the turn still flushed its rows + boundary CHECK
     const ledgerFiles = harness.fsPaths().filter((p) => p.includes("sessions/sess-r3/") && /ledger-/.test(p));
     expect(ledgerFiles.length).toBeGreaterThanOrEqual(1);
@@ -189,8 +188,7 @@ describe("rewind wiring — the checkpoint at the turn boundary", () => {
     await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
     await new Promise((r) => setTimeout(r, 30));
     const text = await logText();
-    expect(text.match(/live chain: rewind detected[^\n]*conv sess-r7/g)).toHaveLength(1);
-    expect(text).toMatch(/amputated[^\n]*conv sess-r7/);
+    expect(text.match(/amputated row\(s\), settle at[^\n]*conv sess-r7/g)).toHaveLength(1);
   });
 
   test("session.measure feeds the tripwires: a fill drop with no compaction row fires the next degrade correctly", async () => {

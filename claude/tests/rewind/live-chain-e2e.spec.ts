@@ -164,16 +164,24 @@ describe("the live chain end-to-end — one session, every scenario", () => {
     expect(text.match(/live chain: rewind detected[^\n]*conv sess-e2e/g) ?? []).toHaveLength(1);
 
     // -- a torn giant tail: the last row is mid-write (no trailing
-    // newline); the deferred tick backs off with no verdict, the repaired
-    // row verifies clean on its own turn
+    // newline); the DEFERRED tick reads it, backs off with no verdict, and
+    // the queue survives; the repaired row verifies clean on its own turn
     const giant = "g".repeat(4096);
     await harness.dispatch("session.append", promptRow("u6", giant));
-    await harness.fsWrite(
-      FILE,
-      `${jsonl(fileRow("u5", "s", "after compact"))}${fileRow("u6", "u5", giant).slice(0, -3)}`,
-    );
-    // (the file above is deliberately a torn variant; the repaired write
-    // lands before the turn boundary — the drain completes the row)
+    const tornFile = `${jsonl(
+      fileRow("u1", null, "hello"),
+      fileRow("u2", "u1", "world"),
+      fileRow("u4", "u2", "the edited branch"),
+      boundaryFileRow("b"),
+      summaryFileRow("s", "b"),
+      fileRow("u5", "s", "after compact"),
+    )}${fileRow("u6", "u5", giant).slice(0, -3)}`;
+    await harness.fsWrite(FILE, tornFile);
+    // let the deferred tick fire on the torn tail (the wait adapts to the
+    // last event; 1.2 s covers it)
+    await new Promise((r) => setTimeout(r, 1200));
+    text = await logText();
+    expect(text.match(/live chain: rewind detected/g) ?? []).toHaveLength(1); // no verdict on a torn read
     await harness.fsWrite(
       FILE,
       jsonl(

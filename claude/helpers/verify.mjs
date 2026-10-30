@@ -54,11 +54,7 @@ if (tailN !== null) {
   let lastLineJunk = false;
   try {
     const rl = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
-    let first = true;
-    let sawAny = false;
     for await (const line of rl) {
-      sawAny = true;
-      first = false;
       const trimmed = line.trim();
       if (trimmed === "") continue;
       let row;
@@ -68,9 +64,11 @@ if (tailN !== null) {
         lastLineJunk = true; // provisional; cleared if more lines follow
         continue;
       }
+      // any parseable line clears the junk flag — uuid-less metadata rows
+      // are legitimate content, never torn evidence
+      lastLineJunk = false;
       if (row === null || typeof row !== "object") continue;
       if (typeof row.uuid !== "string") continue;
-      lastLineJunk = false;
       const parent =
         typeof row.parentUuid === "string"
           ? row.parentUuid
@@ -81,7 +79,6 @@ if (tailN !== null) {
       ring.push([row.uuid, parent, boundary]);
       if (ring.length > tailN) ring.shift();
     }
-    if (first && !sawAny) lastLineJunk = false;
     // the trailing-newline check: a last byte that is not \n means the
     // final line may still be mid-write
     let torn = lastLineJunk;

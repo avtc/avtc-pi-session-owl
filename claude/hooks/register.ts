@@ -1345,15 +1345,29 @@ function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
       return null;
     },
     isKnownRow: (uuid: string) => storage.mirror.rowByUuid(uuid) !== undefined,
-    patchEdges: (edges) => storage.mirror.patchEdges(edges),
+    patchEdges: (edges) => {
+      // the file's verified edges are DURABLE (ledger lineage) before any
+      // refold walks them — the ledger owns the chain the refold resolves
+      // live sets through; the same call true-ups the mirror. Without the
+      // ledger seam the mirror still gets the file's truth.
+      if (edges.length === 0) return;
+      const feed = checkpointDeps.appendEdges;
+      if (feed !== undefined) {
+        feed(
+          edges.map((e) => ({ uuid: e.uuid, parent: e.parent, exact: true })),
+          edges[edges.length - 1]?.uuid ?? "",
+        );
+      } else {
+        storage.mirror.patchEdges(edges);
+      }
+    },
     onRewind: async (verdict) => {
       await applyLiveRewind(
         {
           abortAndAwaitInFlight: checkpointDeps.abortAndAwaitInFlight,
           liveOrderFor: (settle) => checkpointDeps.liveSetFor(settle),
           deadPath: async (settle) => {
-            const order = await checkpointDeps.liveSetFor(settle);
-            const live = new Set(order);
+            const live = new Set(await checkpointDeps.liveSetFor(settle));
             return checkpointDeps
               .knownPath()
               .filter((r) => !live.has(r.uuid))
@@ -1371,13 +1385,17 @@ function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
       });
       if (reloaded) log.info(`graph reloaded after live rewind refold for ${key}`);
     },
+    dormant: () =>
+      !state.isOwlEnabled() ||
+      isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() })),
     schedule: (ms, fn) => {
       try {
         const pending = $.clock.after(ms, fn) as unknown;
         if (typeof pending === "function") return pending as () => void;
         const cancel = (pending as { cancel?: unknown } | null)?.cancel;
         return typeof cancel === "function" ? () => (cancel as () => void)() : () => {};
-      } catch {
+      } catch (err) {
+        log.warn(`live chain timer arm failed — the tick is lost until the next event: ${errText(err)}`);
         return () => {};
       }
     },
@@ -1388,7 +1406,7 @@ function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
 
 /** The main loop's turn-boundary verification: the live chain flush (the
  *  engine's forced drain has made the turn durable). Dormant while
- *  disabled or conflict-paused, exactly like the checkpoint it replaces. */
+ *  disabled or conflict-paused. */
 async function liveChainFlush($: any, sessionId: string): Promise<void> {
   if (!state.isOwlEnabled()) return;
   if (isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))) {

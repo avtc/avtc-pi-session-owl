@@ -3,23 +3,24 @@
 
 // The live chain processor — the steady-state rewind detector. Every
 // session.append event queues zero-latency (the engine never waits); a
-// deferred tick (≥1 s after the first queued event — the engine's file
-// writer is a 100 ms debounce queue with forced drains, so the file is
-// always a beat ahead) reads the transcript TAIL through the tier, feeds
-// the file's true parent edges to the mirror (patchEdges — it resolves
-// through uncaptured ceremony onto the nearest captured ancestor), and
-// detects rewinds: each queued row's anchor (its parent chain walked back
-// to a known row, the chain tail, or a root) must equal owl's expected
-// chain point. A mismatch names the settle point — everything owl holds
-// after it belongs to the amputated world — and hands the refold to the
-// rewind seam; nothing is patched in that tick. Rewinds amputate the file
-// (the engine's own /rewind removes rows), so a queued row ABSENT from the
+// deferred tick (re-armed on every event, ≥1 s after the LAST one — the
+// engine's file writer is a 100 ms debounce queue with forced drains, so
+// the file is always a beat ahead) or the turn-complete flush reads the
+// transcript TAIL through the tier, verifies each queued captured row
+// against owl's expected chain point, and feeds the file's true parent
+// edges to the lineage seam (ledger + mirror — the ledger owns the chain
+// the refold walks). An anchor mismatch REBASES the expectation and the
+// batch keeps verifying: the whole new world is proven before the verdict
+// fires, so the refold settles at the last verified row and nothing of
+// the post-rewind world is ever quarantined. A boundary row (or a
+// boundary anchor) resets the chain the same way — silently, never a
+// verdict. Rewinds amputate the file, so a queued row ABSENT from the
 // tail while a later queued row is present is itself amputation evidence
 // (it leaves the queue; its mirror row dies in the refold), while a
 // tail-end absence is only the debounce lag (it waits for the next tick).
 // A torn tail (a mid-write last line — one row can be ~100 MB) backs off
 // instead of judging; a missing tier (absent file, helper crash) retries
-// later — never a wrong verdict.
+// with a growing window and a capped backoff — never a wrong verdict.
 
 import type { TailFacts, TailRow } from "./tail-read.js";
 
@@ -34,10 +35,16 @@ export interface LiveChainDeps {
   owlTailExcluding: (exclude: ReadonlySet<string>) => string | null;
   /** does the mirror hold this row? (the anchor walk's known-row test) */
   isKnownRow: (uuid: string) => boolean;
-  /** feed verified file edges to the mirror (patchEdges) */
+  /** feed verified file edges to the lineage seam (the durable ledger
+   *  record AND the mirror's own chain — the refold resolves live sets
+   *  through the ledger, so both must carry the file's truth) */
   patchEdges: (edges: readonly { uuid: string; parent: string | null }[]) => void;
-  /** a detected rewind: the settle point, null = the chain's root */
+  /** a detected rewind: the settle point = the last verified row (null =
+   *  the chain's root); everything else on the known path is dead */
   onRewind: (verdict: { settle: string | null }) => void | Promise<void>;
+  /** dormant (disabled or conflict-paused): a deferred tick drops its
+   *  queue instead of verifying — the flush path re-checks the same gate */
+  dormant?: () => boolean;
   /** one-shot timer (the wiring's clock seam); returns a cancel */
   schedule: (ms: number, fn: () => void) => () => void;
   log: (message: string) => void;
@@ -50,12 +57,22 @@ export interface LiveChainOptions {
   tornBackoffMs?: number;
   /** the tail window's floor (default 64 rows) */
   minTailRows?: number;
+  /** the retry backoff's ceiling (default 30000 ms) */
+  maxRetryMs?: number;
+  /** the tail window's ceiling (default 4096 rows) */
+  maxTailRows?: number;
 }
 
 interface QueuedEvent {
   uuid: string;
-  door: string;
   captured: boolean;
+}
+
+/** The anchor a row's walk-back names. */
+interface Anchor {
+  uuid: string | null;
+  /** the anchor is a compaction boundary — the chain's fresh root */
+  boundary: boolean;
 }
 
 export class LiveChainProcessor {
@@ -63,31 +80,41 @@ export class LiveChainProcessor {
   private readonly tickDelayMs: number;
   private readonly tornBackoffMs: number;
   private readonly minTailRows: number;
+  private readonly maxRetryMs: number;
+  private readonly maxTailRows: number;
   private readonly queue: QueuedEvent[] = [];
   private timerArmed = false;
   private cancelTimer: (() => void) | null = null;
   private trackedSize: number | null = null;
-  private processing = false;
+  private processing: Promise<void> | null = null;
+  private retries = 0;
+  private disposed = false;
 
   constructor(deps: LiveChainDeps, options?: LiveChainOptions) {
     this.deps = deps;
     this.tickDelayMs = options?.tickDelayMs ?? 1000;
     this.tornBackoffMs = options?.tornBackoffMs ?? 2500;
     this.minTailRows = options?.minTailRows ?? 64;
+    this.maxRetryMs = options?.maxRetryMs ?? 30000;
+    this.maxTailRows = options?.maxTailRows ?? 4096;
   }
 
   /** Queue one append event. Rows of other loops (agentId — subagent
-   *  transcripts are separate files) are refused. */
+   *  transcripts are separate files) are refused. Re-arms the deferred
+   *  tick so it fires after the LAST event, not the first. */
   enqueue(event: { uuid: string; door: string; captured: boolean; agentId?: unknown }): boolean {
     if (event.agentId !== undefined && event.agentId !== null) return false;
-    this.queue.push({ uuid: event.uuid, door: event.door, captured: event.captured });
-    this.armTimer(this.tickDelayMs);
+    this.queue.push({ uuid: event.uuid, captured: event.captured });
+    this.armTimer(this.tickDelayMs, true);
     return true;
   }
 
-  /** Stop the processor: cancel the pending tick and drop the queue (the
-   *  session is over — a dangling timer chain must not outlive it). */
+  /** Stop the processor: cancel the pending tick, drop the queue, and pin
+   *  it dead — an in-flight tick's completion paths all check the flag,
+   *  so nothing re-arms, restores or reads after this (the session is
+   *  over; a dangling chain must not outlive its storage). */
   dispose(): void {
+    this.disposed = true;
     if (this.cancelTimer !== null) {
       this.cancelTimer();
       this.cancelTimer = null;
@@ -97,19 +124,24 @@ export class LiveChainProcessor {
   }
 
   /** The eager path (turn.complete — the engine's forced drain has made
-   *  the whole turn durable). Supersedes any pending deferred tick. Never
-   *  throws. */
+   *  the whole turn durable). Supersedes any pending deferred tick; waits
+   *  out an in-flight tick and runs once more so this flush never
+   *  resolves while rows sit unverified. Never throws. */
   async flush(): Promise<void> {
     if (this.cancelTimer !== null) {
       this.cancelTimer();
       this.cancelTimer = null;
       this.timerArmed = false;
     }
+    if (this.processing !== null) {
+      await this.processing; // process() never rejects (its catch arms the retry)
+    }
     await this.process();
   }
 
-  private armTimer(ms: number): void {
-    if (this.timerArmed) return;
+  private armTimer(ms: number, rearm = false): void {
+    if (this.timerArmed && !rearm) return;
+    if (this.cancelTimer !== null) this.cancelTimer();
     this.timerArmed = true;
     this.cancelTimer = this.deps.schedule(ms, () => {
       this.timerArmed = false;
@@ -119,28 +151,50 @@ export class LiveChainProcessor {
   }
 
   private retry(ms: number): void {
+    if (this.disposed) return;
     this.armTimer(ms);
   }
 
   private async process(): Promise<void> {
-    if (this.processing) return;
-    this.processing = true;
-    try {
-      await this.tick();
-    } catch (err) {
+    if (this.disposed || this.processing !== null) return;
+    const run = this.tick().catch((err: unknown) => {
       this.deps.log(`live chain tick failed: ${String((err as { message?: unknown })?.message ?? err)}`);
-      this.retry(this.tickDelayMs);
+      this.retries = Math.min(this.retries + 1, 5);
+      this.retry(this.backoffMs());
+    });
+    this.processing = run;
+    try {
+      await run;
     } finally {
-      this.processing = false;
+      this.processing = null;
     }
+  }
+
+  /** The retry delay grows with consecutive failures (torn reads, absent
+   *  tiers, walk-offs) and caps; a clean tick resets the ladder. */
+  private backoffMs(): number {
+    return Math.min(this.tickDelayMs * 2 ** this.retries, this.maxRetryMs);
+  }
+
+  /** The tail window grows with consecutive failures: a walk-off means
+   *  the anchor sits further back than the window reached. */
+  private windowRows(): number {
+    const grown = this.minTailRows * 2 ** Math.min(this.retries, 6);
+    return Math.min(this.queue.length + grown, this.maxTailRows);
   }
 
   private async tick(): Promise<void> {
     if (this.queue.length === 0) return;
+    if (this.deps.dormant?.()) {
+      this.queue.length = 0;
+      this.deps.log("live chain: dormant — queue dropped");
+      return;
+    }
     const size = await this.deps.statSize();
     if (size === null) {
       this.deps.log("live chain: the transcript is absent — retrying");
-      this.retry(this.tickDelayMs);
+      this.retries = Math.min(this.retries + 1, 5);
+      this.retry(this.backoffMs());
       return;
     }
     if (this.trackedSize !== null && size < this.trackedSize) {
@@ -148,12 +202,14 @@ export class LiveChainProcessor {
       // anchor resolution below decides where the chain settles
       this.deps.log(`live chain: transcript shrank ${this.trackedSize} -> ${size}`);
     }
-    const tail = await this.deps.readTail(this.queue.length + this.minTailRows);
+    const tail = await this.deps.readTail(this.windowRows());
     if (tail === null) {
-      this.retry(this.tickDelayMs);
+      this.retries = Math.min(this.retries + 1, 5);
+      this.retry(this.backoffMs());
       return;
     }
     if (tail.torn) {
+      this.retries = Math.min(this.retries + 1, 5);
       this.retry(this.tornBackoffMs);
       return;
     }
@@ -165,7 +221,7 @@ export class LiveChainProcessor {
     // row after it is only the debounce lag (kept for the next tick).
     const present: QueuedEvent[] = [];
     const keep: QueuedEvent[] = [];
-    let deadAbsent = 0;
+    const amputated: QueuedEvent[] = [];
     let sawPresent = false;
     for (let i = this.queue.length - 1; i >= 0; i -= 1) {
       const event = this.queue[i];
@@ -175,11 +231,13 @@ export class LiveChainProcessor {
         present.unshift(event);
         continue;
       }
-      if (sawPresent) deadAbsent += 1;
+      if (sawPresent) amputated.unshift(event);
       else keep.unshift(event);
     }
+    const deadAbsent = amputated.length;
     if (present.length === 0) {
-      this.retry(this.tickDelayMs);
+      this.retries = Math.min(this.retries + 1, 5);
+      this.retry(this.backoffMs());
       return;
     }
     if (deadAbsent > 0) {
@@ -187,7 +245,15 @@ export class LiveChainProcessor {
     }
     const capturedByUuid = new Map(this.queue.map((e) => [e.uuid, e.captured] as const));
 
+    // Verify the whole batch against the expected chain point. A mismatch
+    // does NOT fire immediately: the expectation rebases onto the row's
+    // anchor and the batch keeps verifying, so the verdict (if one is due)
+    // fires only after the new world is proven end-to-end — the settle
+    // point is then the LAST VERIFIED row and the refold's live set (walked
+    // through the freshly fed edges) contains every surviving row,
+    // including the queued ones. A boundary anchor rebases silently.
     let expected = this.deps.owlTailExcluding(new Set(this.queue.map((e) => e.uuid)));
+    let rewound = false;
     const edges: Array<{ uuid: string; parent: string | null }> = [];
     for (const event of present) {
       const row = byUuid.get(event.uuid);
@@ -202,89 +268,106 @@ export class LiveChainProcessor {
         continue;
       }
       if (row.parentUuid === null) {
-        // a NON-boundary row with no parent mid-batch: the file was
-        // rebuilt past everything owl holds — a rewind to the root when
-        // owl had a tail, or an acceptable root when it had none
+        // a NON-boundary row with no parent: the chain's root. When owl
+        // held nothing it is the first row of a fresh session; otherwise
+        // the file was rebuilt past everything owl holds.
         if (expected === null) {
           if (event.captured) expected = row.uuid;
           continue;
         }
         this.deps.log(`live chain: rewind detected — row ${row.uuid} is a fresh root (expected ${String(expected)})`);
-        await this.deps.onRewind({ settle: null });
-        this.finishTick(keep, size);
-        return;
+        rewound = true;
+        if (event.captured) expected = row.uuid;
+        continue;
       }
       if (!event.captured) continue; // ceremony: no owl-chain slot, no check
       const anchor = this.resolveAnchor(tail.rows, row, capturedByUuid, expected);
       if (anchor === undefined) {
         // the walk left the window before naming a known row — defer the
-        // whole batch (never a wrong verdict)
-        this.retry(this.tickDelayMs);
+        // whole batch (never a wrong verdict); the window grows on retry
+        this.retries = Math.min(this.retries + 1, 5);
+        this.retry(this.backoffMs());
         return;
       }
-      if (anchor !== expected) {
-        // the file says this row attaches at a DIFFERENT point than owl's
-        // chain — a rewind; the settle point names what survives
-        this.deps.log(
-          `live chain: rewind detected — row ${row.uuid} anchors at ${String(anchor)} (expected ${String(expected)})`,
-        );
-        await this.deps.onRewind({ settle: anchor });
-        this.finishTick(keep, size);
-        return;
+      if (anchor.uuid === expected && !anchor.boundary) {
+        expected = row.uuid;
+        continue;
       }
+      if (anchor.boundary) {
+        // the anchor is a compaction boundary (this batch's or a
+        // historical one): the chain restarted there — rebase, never a
+        // verdict
+        expected = anchor.uuid;
+        continue;
+      }
+      // the file says this row attaches at a DIFFERENT point than owl's
+      // chain — a rewind; rebase and keep verifying the new world
+      this.deps.log(
+        `live chain: rewind detected — row ${row.uuid} anchors at ${String(anchor.uuid)} (expected ${String(expected)})`,
+      );
+      rewound = true;
       expected = row.uuid;
     }
 
+    // the file's verified edges are durable BEFORE any verdict: the
+    // refold resolves live sets through the ledger, and the dead-absent
+    // rows' surviving siblings must already chain by file truth
     this.deps.patchEdges(edges);
-    if (deadAbsent > 0) {
-      // The anchors line up, but queued rows DIED between them (the file
-      // was amputated mid-chain): the surviving edges are patched first,
-      // then the refold quarantines the dead (the live set runs to the
-      // surviving tail; everything else on the known path is dead).
+    if (rewound || deadAbsent > 0) {
+      // the settle point is the LAST VERIFIED row — the new world's tip.
+      // The refold's live set (walked through the freshly fed edges)
+      // contains every surviving row, queued ones included; everything
+      // else on the known path is dead.
       this.deps.log(
-        `live chain: rewind detected — ${deadAbsent} queued row(s) amputated before the surviving chain; refolding onto ${String(expected)}`,
+        `live chain: ${deadAbsent} amputated row(s), settle at ${String(expected)} — refolding onto the verified chain`,
       );
       await this.deps.onRewind({ settle: expected });
     }
-    this.finishTick(keep, size);
+    this.finishTick(present, amputated, size);
   }
 
-  /** End the tick: the queue keeps only the debounce-lag tail; the size
-   *  baseline advances; a non-empty tail retries on the deferred timer. */
-  private finishTick(keep: readonly QueuedEvent[], size: number): void {
+  /** End the tick: the processed rows leave the queue (anything enqueued
+   *  DURING the tick — including through the refold's await — stays), the
+   *  size baseline advances, a non-empty remainder retries on the deferred
+   *  timer. */
+  private finishTick(present: readonly QueuedEvent[], amputated: readonly QueuedEvent[], size: number): void {
+    if (this.disposed) return;
+    const done = new Set<string>();
+    for (const e of present) done.add(e.uuid);
+    for (const e of amputated) done.add(e.uuid); // dead rows never return
+    const remaining = this.queue.filter((e) => !done.has(e.uuid));
     this.queue.length = 0;
-    for (const event of keep) this.queue.push(event);
+    for (const e of remaining) this.queue.push(e);
     this.trackedSize = size;
+    this.retries = 0;
     if (this.queue.length > 0) this.retry(this.tickDelayMs);
   }
 
   /** Name the row's owl-chain anchor: the nearest PRECEDING observable
    *  row by FILE ORDER (the file is serialized — event order == file
-   *  order; call/result tree links are ignored by design). Observable =
-   *  a row this batch captured or one the mirror already holds. A
-   *  boundary row of THIS batch names itself (the fresh root the chain
-   *  restarted at); a historical boundary is walked past like any other
-   *  ceremony. Returns the anchor uuid, null = the chain's root, or
+   *  order; call/result tree links are ignored by design). Observable = a
+   *  row this batch captured or one the mirror already holds; a boundary
+   *  row is named as the fresh root it is. Returns the anchor, or
    *  undefined when the walk runs off the window before naming one. */
   private resolveAnchor(
     rows: readonly TailRow[],
     row: TailRow,
     capturedByUuid: Map<string, boolean>,
     expected: string | null,
-  ): string | null | undefined {
+  ): Anchor | undefined {
     const idx = rows.findIndex((r) => r.uuid === row.uuid);
     if (idx <= 0) {
       // no predecessors in the window: a genuine root when owl holds
       // nothing, unknowable (defer) when it does
-      return expected === null ? null : undefined;
+      return expected === null ? { uuid: null, boundary: false } : undefined;
     }
     for (let i = idx - 1; i >= 0; i -= 1) {
       const prev = rows[i];
       if (prev === undefined) break;
-      if (capturedByUuid.get(prev.uuid) === true) return prev.uuid;
-      if (prev.boundary) return prev.uuid; // the chain's fresh root
-      if (this.deps.isKnownRow(prev.uuid)) return prev.uuid;
-      if (prev.uuid === expected) return prev.uuid; // the chain tail itself
+      if (capturedByUuid.get(prev.uuid) === true) return { uuid: prev.uuid, boundary: false };
+      if (prev.boundary) return { uuid: prev.uuid, boundary: true };
+      if (this.deps.isKnownRow(prev.uuid)) return { uuid: prev.uuid, boundary: false };
+      if (prev.uuid === expected) return { uuid: prev.uuid, boundary: false }; // the chain tail itself
     }
     return undefined;
   }

@@ -13,8 +13,9 @@
 // row. Every failure degrades to null — a missing tier is never a wrong
 // verdict; the caller decides what an absent read means.
 
-import { errDetail, sayError } from "../log/err-detail.js";
+import { errDetail } from "../log/err-detail.js";
 import type { RunProcessFn } from "../retention/prune-caller.js";
+import { isCapRefusal } from "./helper-pass.js";
 
 /** The platform's whole-file read cap (bytes). */
 const CAPSULE_CAP_BYTES = 4 * 1024 * 1024;
@@ -48,16 +49,17 @@ export function parseCapsuleTail(text: string, maxRows: number): TailFacts {
   if (!endsWithNewline && lines.length > 0) {
     lines.pop(); // the unterminated fragment is excluded from the rows
   }
+  // scan from the END: only the last maxRows uuid-bearing rows matter, so
+  // the prefix is never parsed
   const rows: TailRow[] = [];
-  let lastLineWasJunk = false;
-  for (let i = 0; i < lines.length; i += 1) {
+  for (let i = lines.length - 1; i >= 0 && rows.length < maxRows; i -= 1) {
     const line = lines[i]?.trim() ?? "";
     if (line === "") continue;
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
     } catch {
-      if (i === lines.length - 1) lastLineWasJunk = true;
+      if (i === lines.length - 1) torn = true; // the final line is mid-write junk
       continue; // tolerated mid-file junk
     }
     if (parsed === null || typeof parsed !== "object") continue;
@@ -81,8 +83,7 @@ export function parseCapsuleTail(text: string, maxRows: number): TailFacts {
       boundary: row.type === "system" && row.subtype === "compact_boundary",
     });
   }
-  if (lastLineWasJunk) torn = true;
-  return { rows: rows.length > maxRows ? rows.slice(rows.length - maxRows) : rows, torn };
+  return { rows: rows.reverse(), torn };
 }
 
 /** Which tier serves this read: the capsule under the cap, the helper over
@@ -115,14 +116,14 @@ export function planTailInvocation(input: {
 /** Parse the helper's stdout (ONE JSON line: {ok, torn, tail: [[uuid,
  *  parent|null, 0|1], ...]}) into the tail facts; anything malformed or
  *  ok:false degrades to null. */
-export function parseTailHelperOutput(raw: string): TailFacts | null {
+export function parseTailHelperOutput(raw: string, log?: (message: string, err?: unknown) => void): TailFacts | null {
   const line = raw.trim().split("\n").pop() ?? "";
   if (line === "") return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
   } catch (err) {
-    sayError(`session-owl: tail-helper output line was not JSON: ${errDetail(err)}`);
+    log?.(`tail-helper output line was not JSON: ${errDetail(err)}`, err);
     return null;
   }
   if (parsed === null || typeof parsed !== "object") return null;
@@ -165,7 +166,7 @@ export async function readTail(
       return parseCapsuleTail(await deps.fsRead(input.transcriptPath), input.maxRows);
     } catch (err) {
       const message = String((err as { message?: unknown })?.message ?? err);
-      if (!/4194304|4 ?MiB|byte limit/i.test(message)) {
+      if (!isCapRefusal(message)) {
         deps.log(`tail read (capsule) failed: ${message}`, err);
         return null;
       }
@@ -183,7 +184,7 @@ export async function readTail(
       deps.log(`tail helper exited ${exitCode}`, new Error(`tail helper exited ${exitCode}`));
       return null;
     }
-    return parseTailHelperOutput(stdout);
+    return parseTailHelperOutput(stdout, deps.log);
   } catch (err) {
     deps.log(`tail read (helper) failed: ${errDetail(err)}`, err);
     return null;

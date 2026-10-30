@@ -10,7 +10,7 @@
 // the processor's tick retries and the rewind re-detects (never silently
 // dropped).
 
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import { applyLiveRewind } from "../../host/rewind/live-rewind.js";
 
 function deps(overrides?: Partial<Parameters<typeof applyLiveRewind>[0]>) {
@@ -93,6 +93,5 @@ describe("applyLiveRewind", () => {
     await applyLiveRewind(d, { settle: "t1" });
     expect(seen[0]).toBeInstanceOf(Set);
     expect([...(seen[0] as Set<string>)].sort()).toEqual(["b1", "t1"]);
-    expect(vi.fn()).toBeDefined();
   });
 });

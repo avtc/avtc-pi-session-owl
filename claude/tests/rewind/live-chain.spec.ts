@@ -10,7 +10,7 @@
 // refold to the rewind seam. All seams injected; the engine wiring
 // spells the $ calls literally.
 
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import { LiveChainProcessor } from "../../host/rewind/live-chain.js";
 import type { TailFacts, TailRow } from "../../host/rewind/tail-read.js";
 
@@ -37,6 +37,7 @@ function harness(init?: {
   size?: number | null;
   tail?: TailFacts | null;
   known?: string[];
+  onRewind?: () => void | Promise<void>;
 }): Harness {
   const patched: Array<{ uuid: string; parent: string | null }> = [];
   const rewinds: Array<{ settle: string | null }> = [];
@@ -53,8 +54,9 @@ function harness(init?: {
     patchEdges: (edges) => {
       for (const e of edges) patched.push({ uuid: e.uuid, parent: e.parent });
     },
-    onRewind: (v) => {
+    onRewind: async (v) => {
       rewinds.push(v);
+      if (init?.onRewind !== undefined) await init.onRewind();
     },
     schedule: (ms, _fn) => {
       scheduled.push(ms);
@@ -89,11 +91,11 @@ describe("live chain processor — enqueue", () => {
     expect(h.proc.enqueue({ ...ev("u1", true), agentId: "ag-1" })).toBe(false);
     expect(h.proc.enqueue(ev("u1", true))).toBe(true);
   });
-  test("the first enqueue arms the deferred tick; further enqueues do not stack timers", () => {
+  test("every enqueue re-arms the deferred tick (the wait adapts to the LAST event)", () => {
     const h = harness();
     h.proc.enqueue(ev("u1", true));
     h.proc.enqueue(ev("u2", true));
-    expect(h.scheduled).toEqual([1000]);
+    expect(h.scheduled).toEqual([1000, 1000]);
   });
 });
 
@@ -162,7 +164,7 @@ describe("live chain processor — the torn and missing tails", () => {
 });
 
 describe("live chain processor — rewind detection", () => {
-  test("an anchor behind owl's tail is a rewind: no patch, settle named, queue drained after the refold", async () => {
+  test("an anchor behind owl's tail is a rewind: the batch verifies on, edges feed the lineage, the settle is the last verified row", async () => {
     const h = harness({
       owlTail: "t2",
       known: ["t1"],
@@ -170,8 +172,58 @@ describe("live chain processor — rewind detection", () => {
     });
     h.proc.enqueue(ev("u9", true));
     await h.proc.flush();
-    expect(h.patched).toEqual([]);
-    expect(h.rewinds).toEqual([{ settle: "t1" }]);
+    // the file's true edge is durable BEFORE the verdict: the refold
+    // resolves live sets through the ledger
+    expect(h.patched).toEqual([{ uuid: "u9", parent: "t1" }]);
+    // the settle is the LAST VERIFIED row (the new world's tip), never
+    // the pre-rewind anchor — the new world survives the refold
+    expect(h.rewinds).toEqual([{ settle: "u9" }]);
+  });
+
+  test("rows enqueued DURING the refold's await survive the tick (buffered, never discarded)", async () => {
+    let rewinds = 0;
+    const h = harness({
+      owlTail: "t2",
+      known: ["t1"],
+      tail: facts([row("t1", "x"), row("u9", "t1")]),
+      onRewind: async () => {
+        rewinds += 1;
+        // a streaming append lands while the refold awaits — it belongs to
+        // the post-rewind world and must stay queued for the next tick
+        h.proc.enqueue(ev("u10", true));
+      },
+    });
+    h.proc.enqueue(ev("u9", true));
+    await h.proc.flush();
+    expect(rewinds).toBe(1);
+    // the mid-refold row is still pending: the next tick (fed the file's
+    // truth) verifies it — no silent loss
+    h.setOwlTail("u9");
+    h.setTail(facts([row("t1", "x"), row("u9", "t1"), row("u10", "u9")]));
+    h.proc.enqueue(ev("u11", true));
+    h.setTail(facts([row("t1", "x"), row("u9", "t1"), row("u10", "u9"), row("u11", "u10")]));
+    await h.proc.flush();
+    expect(rewinds).toBe(1);
+    expect(h.patched.map((e) => e.uuid)).toContain("u10");
+    expect(h.patched.map((e) => e.uuid)).toContain("u11");
+  });
+
+  test("a second clean turn after a mismatch rewind stays quiet (no cascade)", async () => {
+    const h = harness({
+      owlTail: "t2",
+      known: ["t1"],
+      tail: facts([row("t1", "x"), row("u9", "t1")]),
+    });
+    h.proc.enqueue(ev("u9", true));
+    await h.proc.flush();
+    expect(h.rewinds).toHaveLength(1);
+    // the next turn chains from the new world's tip
+    h.setOwlTail("u9");
+    h.setTail(facts([row("t1", "x"), row("u9", "t1"), row("u10", "u9")]));
+    h.proc.enqueue(ev("u10", true));
+    await h.proc.flush();
+    expect(h.rewinds).toHaveLength(1);
+    expect(h.patched.at(-1)).toEqual({ uuid: "u10", parent: "u9" });
   });
 
   test("a size shrink alone logs but does not invent a rewind while the queue resolves cleanly", async () => {
@@ -199,24 +251,25 @@ describe("live chain processor — rewind detection", () => {
     expect(h.rewinds).toEqual([{ settle: "u3" }]);
   });
 
-  test("a settle at a boundary row keeps it (drop everything after it)", async () => {
+  test("a boundary anchor rebases the chain silently — never a verdict", async () => {
     const h = harness({
       owlTail: "gone",
       tail: facts([row("b1", null, true), row("u9", "b1")]),
     });
     h.proc.enqueue(ev("u9", true));
     await h.proc.flush();
-    expect(h.rewinds).toEqual([{ settle: "b1" }]);
+    expect(h.rewinds).toEqual([]);
+    expect(h.patched).toEqual([{ uuid: "u9", parent: "b1" }]);
   });
 
-  test("a row parented at null (a fresh root after full amputation) settles at null", async () => {
+  test("a row parented at null (a fresh root after full amputation) settles at the root row", async () => {
     const h = harness({
       owlTail: "gone",
       tail: facts([row("u9", null)]),
     });
     h.proc.enqueue(ev("u9", true));
     await h.proc.flush();
-    expect(h.rewinds).toEqual([{ settle: null }]);
+    expect(h.rewinds).toEqual([{ settle: "u9" }]);
   });
 
   test("an anchor that resolves outside the window defers (never a wrong verdict)", async () => {
@@ -236,6 +289,5 @@ describe("live chain processor — vi sanity", () => {
     expect(h.patched).toEqual([]);
     expect(h.rewinds).toEqual([]);
     expect(h.scheduled).toEqual([]);
-    expect(vi.fn()).toBeDefined();
   });
 });
