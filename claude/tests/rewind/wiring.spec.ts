@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-// The rewind wiring surface: the turn.complete checkpoint runs BEFORE the
-// turn's mirror flush (the ordering that makes the alignment junction the
-// rewind point), classic session.start arms the transcript path + the
-// process-start check, session.measure feeds the tripwires, and a
-// door-compaction row clears the next fill-drop suspicion.
+// The rewind wiring surface: the turn.complete live-chain flush verifies
+// the turn's rows against the transcript file (the file is the truth
+// channel — amputation there is the rewind signal), classic session.start
+// arms the transcript path + the process-start check, session.measure
+// feeds the tripwires, and a door-compaction row clears the next
+// fill-drop suspicion.
 
 import { beforeEach, describe, expect, test } from "vitest";
 import { checkpointService } from "../../host/rewind/checkpoint-service.js";
@@ -54,13 +55,13 @@ async function logText(): Promise<string> {
   return parts.join("\n");
 }
 
-describe("rewind wiring — the checkpoint at the turn boundary", () => {
+describe("rewind wiring — the live chain at the turn boundary", () => {
   test("classic session.start arms the transcript path (state slot)", async () => {
     await harness.dispatch("classic.SessionStart", { session_id: "sess-r1", transcript_path: "/t/r1.jsonl" });
     expect(hostState.getCurrentTranscriptPath()).toBe("/t/r1.jsonl");
   });
 
-  test("a clean turn: the checkpoint runs before the flush and appends NO extra CHECK (the flush's CHECK is the boundary)", async () => {
+  test("a clean turn: the live chain verifies before the flush and appends NO extra CHECK (the flush's CHECK is the boundary)", async () => {
     await harness.dispatch("classic.SessionStart", { session_id: "sess-r2", transcript_path: "/t/r2.jsonl" });
     await harness.dispatch("session.append", promptRow("u1", null, "hello"));
     await harness.dispatch("session.append", promptRow("u2", "u1", "world"));
@@ -142,6 +143,68 @@ describe("rewind wiring — the checkpoint at the turn boundary", () => {
     // the turn still flushed its rows + boundary CHECK
     const ledgerFiles = harness.fsPaths().filter((p) => p.includes("sessions/sess-r3/") && /ledger-/.test(p));
     expect(ledgerFiles.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("a clean turn writes the verified edges into the LEDGER lineage (exact, marker at the batch tip)", async () => {
+    await harness.dispatch("classic.SessionStart", { session_id: "sess-lin", transcript_path: "/t/lin.jsonl" });
+    await harness.dispatch("session.append", promptRow("u1", null, "hello"));
+    await harness.dispatch("session.append", promptRow("u2", "u1", "world"));
+    await harness.fsWrite("/t/lin.jsonl", jsonl(fileRow("u1", null, "hello"), fileRow("u2", "u1", "world")));
+    await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
+    const ledgerFiles = harness.fsPaths().filter((p) => p.includes("sessions/sess-lin/") && /ledger-/.test(p));
+    expect(ledgerFiles.length).toBeGreaterThanOrEqual(1);
+    const lines: string[] = [];
+    for (const f of ledgerFiles)
+      lines.push(...((await harness.fsRead(f)) ?? "").split("\n").filter((l) => l.trim() !== ""));
+    const lineage = lines
+      .map(
+        (l) =>
+          JSON.parse(l) as {
+            kind?: string;
+            payload?: { edges?: Array<{ uuid: string; parent: string | null; exact: boolean }> };
+            marker?: string;
+          },
+      )
+      .find((r) => r.kind === "lineage");
+    expect(lineage).toBeDefined();
+    expect(lineage?.payload?.edges).toEqual([
+      { uuid: "u1", parent: null, exact: true },
+      { uuid: "u2", parent: "u1", exact: true },
+    ]);
+    // the marker names the write-tip row the pass read up to
+    expect(lineage?.marker).toBe("u2");
+  });
+
+  test("session.end disposes the live chain: nothing fires after; the next session's chain is fresh", async () => {
+    await harness.dispatch("classic.SessionStart", { session_id: "sess-end", transcript_path: "/t/end.jsonl" });
+    await harness.dispatch("session.append", promptRow("u1", null, "hello"));
+    await harness.dispatch("session.append", promptRow("u2", "u1", "world"));
+    await harness.fsWrite("/t/end.jsonl", jsonl(fileRow("u1", null, "hello"), fileRow("u2", "u1", "world")));
+    await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
+    // the session ends with a pending row queued (its turn never completed)
+    await harness.dispatch("session.append", promptRow("u3", "u2", "pending"));
+    await harness.dispatch("session.end", {});
+    // an amputated transcript appears AFTER the end — the disposed chain
+    // must not read it or fire anything
+    await harness.fsWrite("/t/end.jsonl", jsonl(fileRow("u1", null, "hello")));
+    await new Promise((r) => setTimeout(r, 40));
+    const text = await logText();
+    expect(text).not.toMatch(/live chain:[^\n]*conv sess-end[^\n]*(rewind|shedding|shrank)/);
+    // a NEW session builds its own chain and detects its own rewind
+    await harness.dispatch("classic.SessionStart", { session_id: "sess-next", transcript_path: "/t/next.jsonl" });
+    await harness.dispatch("session.append", promptRow("v1", null, "one"));
+    await harness.dispatch("session.append", promptRow("v2", "v1", "two"));
+    await harness.fsWrite("/t/next.jsonl", jsonl(fileRow("v1", null, "one"), fileRow("v2", "v1", "two")));
+    await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
+    await harness.dispatch("session.append", promptRow("v3", "v2", "doomed"));
+    await harness.dispatch("session.append", promptRow("v4", "v2", "branch"));
+    await harness.fsWrite(
+      "/t/next.jsonl",
+      jsonl(fileRow("v1", null, "one"), fileRow("v2", "v1", "two"), fileRow("v4", "v2", "branch")),
+    );
+    await harness.dispatch("turn.complete", { answer: "done", isAborted: false });
+    const text2 = await logText();
+    expect(text2).toMatch(/live chain:[^\n]*conv sess-next/);
   });
 
   test("a subagent loop's turn.complete reads ITS OWN canonical view (agentId-scoped), never the main one", async () => {
@@ -296,7 +359,6 @@ describe("rewind wiring — the checkpoint at the turn boundary", () => {
     const timelineText = (
       await Promise.all(timelineFiles.map((p) => harness.fsRead(p).then((t: string | undefined) => t ?? "")))
     ).join("\n");
-    console.log("TIMELINE-DUMP:", JSON.stringify(timelineText), "FILES:", JSON.stringify(timelineFiles));
     expect(timelineText).toContain('"t":"compact-answer"');
     expect(timelineText).toContain('"cut":"u2"');
 

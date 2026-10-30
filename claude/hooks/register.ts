@@ -1318,7 +1318,8 @@ function ensureLiveChain($: any, sessionId: string): LiveChainProcessor {
         const st = (await bridge.currentServices().fsStat(path)) as { size?: unknown } | null;
         lastStatSize = st !== null && typeof st.size === "number" ? st.size : null;
         return lastStatSize;
-      } catch {
+      } catch (err) {
+        log.warn(`live chain stat failed: ${errText(err)}`);
         lastStatSize = null;
         return null;
       }

@@ -148,6 +148,67 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     expect(report.tail).toEqual([["u1", null, 0]]);
   });
 
+  test("a multibyte character straddling a 64 KiB block boundary survives (block-safe decode)", async () => {
+    // place a row whose emoji content crosses the read-block boundary;
+    // a naive block decode would emit U+FFFD, fail JSON.parse, and drop
+    // the row (reading as amputation in the caller)
+    const emoji = "\u{1F989}".repeat(4);
+    const rowText = JSON.stringify({
+      uuid: "owl1",
+      parentUuid: null,
+      message: { role: "user", content: `night ${emoji} bird` },
+    });
+    const filler = `${JSON.stringify({ uuid: "f0", parentUuid: null, message: { role: "user", content: "x".repeat(60) } })}\n`;
+    const target = 64 * 1024;
+    const prefixRows: string[] = [];
+    let prefixLen = 0;
+    let i = 1;
+    while (prefixLen + filler.length < target - rowText.length - 64) {
+      prefixRows.push(
+        JSON.stringify({
+          uuid: `p${i}`,
+          parentUuid: i === 1 ? null : `p${i - 1}`,
+          message: { role: "user", content: "y".repeat(60) },
+        }),
+      );
+      prefixLen += prefixRows[prefixRows.length - 1].length + 1;
+      i += 1;
+    }
+    // the emoji row sits so its multibyte bytes straddle the boundary
+    const pad = target - prefixLen - rowText.length - 10;
+    const file = `${[...prefixRows, `${JSON.stringify({ uuid: "pad", parentUuid: null, message: { role: "user", content: "z".repeat(Math.max(0, pad)) } })}`].join("\n")}\n${rowText}\n${JSON.stringify({ uuid: "owl2", parentUuid: "owl1", message: { role: "user", content: "tail" } })}\n`;
+    const tmp = tempTranscript(file);
+    const report = await verify(tmp, "--tail", "2");
+    expect(report.ok).toBe(true);
+    expect(report.torn).toBe(false);
+    expect(report.tail).toEqual([
+      ["owl1", null, 0],
+      ["owl2", "owl1", 0],
+    ]);
+  });
+
+  test("a multi-block file (>128 KiB) reads the tail across blocks in file order", async () => {
+    const rows: string[] = [];
+    for (let i = 1; i <= 2400; i += 1) {
+      rows.push(
+        JSON.stringify({
+          uuid: `m${i}`,
+          parentUuid: i === 1 ? null : `m${i - 1}`,
+          message: { role: "user", content: "c".repeat(60) },
+        }),
+      );
+    }
+    const tmp = tempTranscript(`${rows.join("\n")}\n`);
+    const report = await verify(tmp, "--tail", "3");
+    expect(report.ok).toBe(true);
+    expect(report.torn).toBe(false);
+    expect(report.tail).toEqual([
+      ["m2398", "m2397", 0],
+      ["m2399", "m2398", 0],
+      ["m2400", "m2399", 0],
+    ]);
+  });
+
   test("a complete but unparsable final line is torn", async () => {
     const file = tempTranscript(`${['{"uuid":"u1","parentUuid":null,"type":"user"}', "not json"].join("\n")}\n`);
     const report = await verify(file, "--tail", "8");

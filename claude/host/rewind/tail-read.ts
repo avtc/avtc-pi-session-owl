@@ -39,7 +39,7 @@ export interface TailFacts {
  *  like every transcript parser here); suspicious only at the very end: a
  *  last line without a trailing newline, or one that fails to parse, is
  *  torn and excluded from the rows. */
-export function parseCapsuleTail(text: string, maxRows: number): TailFacts {
+export function parseCapsuleTail(text: string, maxRows: number, log?: (message: string) => void): TailFacts {
   if (text === "") return { rows: [], torn: false };
   const endsWithNewline = text.endsWith("\n");
   const lines = text.split("\n");
@@ -59,8 +59,10 @@ export function parseCapsuleTail(text: string, maxRows: number): TailFacts {
     try {
       parsed = JSON.parse(line);
     } catch {
-      if (i === lines.length - 1) torn = true; // the final line is mid-write junk
-      continue; // tolerated mid-file junk
+      if (i === lines.length - 1)
+        torn = true; // the final line is mid-write junk
+      else log?.(`tail parse: a mid-file line was skipped: ${line.slice(0, 80)}`);
+      continue;
     }
     if (parsed === null || typeof parsed !== "object") continue;
     const row = parsed as {
@@ -163,7 +165,7 @@ export async function readTail(
   if (tier.tier === "absent") return null;
   if (tier.tier === "capsule") {
     try {
-      return parseCapsuleTail(await deps.fsRead(input.transcriptPath), input.maxRows);
+      return parseCapsuleTail(await deps.fsRead(input.transcriptPath), input.maxRows, (m) => deps.log(m));
     } catch (err) {
       const message = String((err as { message?: unknown })?.message ?? err);
       if (!isCapRefusal(message)) {

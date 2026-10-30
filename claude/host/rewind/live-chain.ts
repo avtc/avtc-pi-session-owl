@@ -73,6 +73,8 @@ interface QueuedEvent {
 const MAX_QUEUE = 4096;
 /** Consecutive unresolved ticks before the pending batch is shed. */
 const MAX_RETRIES = 5;
+/** The window-growth ladder's cap (2^6 = 64x the floor). */
+const GROWTH_LADDER_CAP = 6;
 /** Uuid sanity bound — transcript rows are engine-written; anything past
  *  this is foreign padding, never a chain identity. */
 const MAX_UUID = 128;
@@ -113,6 +115,7 @@ export class LiveChainProcessor {
    *  tick so it fires after the LAST event, not the first. */
   enqueue(event: { uuid: string; door: string; captured: boolean; agentId?: unknown }): boolean {
     if (event.agentId !== undefined && event.agentId !== null) return false;
+    if (event.uuid.length > MAX_UUID) return false; // engine uuids are sane
     if (this.queue.length >= MAX_QUEUE) {
       // an unbounded pending batch would wedge every later tick to the
       // same unread anchor — shed the oldest and keep detecting
@@ -183,7 +186,7 @@ export class LiveChainProcessor {
     if (this.disposed || this.processing !== null) return;
     const run = this.tick().catch((err: unknown) => {
       this.deps.log(`live chain tick failed: ${String((err as { message?: unknown })?.message ?? err)}`);
-      this.retries = Math.min(this.retries + 1, 5);
+      this.retries = Math.min(this.retries + 1, MAX_RETRIES);
       this.retry(this.backoffMs());
     });
     this.processing = run;
@@ -203,7 +206,7 @@ export class LiveChainProcessor {
   /** The tail window grows with consecutive failures: a walk-off means
    *  the anchor sits further back than the window reached. */
   private windowRows(): number {
-    const grown = this.minTailRows * 2 ** Math.min(this.retries, 6);
+    const grown = this.minTailRows * 2 ** Math.min(this.retries, GROWTH_LADDER_CAP);
     return Math.min(this.queue.length + grown, this.maxTailRows);
   }
 
@@ -217,7 +220,7 @@ export class LiveChainProcessor {
     const size = await this.deps.statSize();
     if (size === null) {
       this.deps.log("live chain: the transcript is absent — retrying");
-      this.retries = Math.min(this.retries + 1, 5);
+      this.retries = Math.min(this.retries + 1, MAX_RETRIES);
       this.retry(this.backoffMs());
       return;
     }
@@ -228,19 +231,21 @@ export class LiveChainProcessor {
     }
     const tail = await this.deps.readTail(this.windowRows());
     if (tail === null) {
-      this.retries = Math.min(this.retries + 1, 5);
+      this.retries = Math.min(this.retries + 1, MAX_RETRIES);
       this.retry(this.backoffMs());
       return;
     }
     if (tail.torn) {
-      this.retries = Math.min(this.retries + 1, 5);
+      this.retries = Math.min(this.retries + 1, MAX_RETRIES);
       this.retry(this.tornBackoffMs);
       return;
     }
 
-    const sane = tail.rows.filter(
-      (r) => r.uuid.length <= MAX_UUID && (r.parentUuid === null || r.parentUuid.length <= MAX_UUID),
-    );
+    // absurd uuids never enter the window (the parentUuid is never read
+    // for anchors — file order rules — and ceremony parents are fed only
+    // when the window itself carries them, so a huge parent string is
+    // inert comparison input, never stored)
+    const sane = tail.rows.filter((r) => r.uuid.length <= MAX_UUID);
     const byUuid = new Map(sane.map((r) => [r.uuid, r] as const));
     // Partition the queue against the tail. The PRESENT rows (in queue
     // order == file order) are this tick's batch; an ABSENT row positioned
@@ -263,7 +268,7 @@ export class LiveChainProcessor {
     }
     const deadAbsent = amputated.length;
     if (present.length === 0) {
-      this.retries = Math.min(this.retries + 1, 5);
+      this.retries = Math.min(this.retries + 1, MAX_RETRIES);
       this.retry(this.backoffMs());
       return;
     }
@@ -342,9 +347,8 @@ export class LiveChainProcessor {
         this.retry(this.backoffMs());
         return;
       }
-      // the edge this row contributes is the VERIFIED anchor — never the
-      // raw file parent string (the design's own parent rule: the nearest
-      // preceding observable row)
+      // the edge this row contributes is its VERIFIED anchor (the nearest
+      // preceding observable row) — never the raw file parent string
       const anchorEdge = { uuid: row.uuid, parent: anchor.uuid };
       if (anchor.uuid === expected && !anchor.boundary) {
         edges.push(anchorEdge);

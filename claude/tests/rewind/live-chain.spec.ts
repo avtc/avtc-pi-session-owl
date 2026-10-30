@@ -1,14 +1,13 @@
-// SPDX-License-Identifier: MIT;
+// SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 //
 // The live chain processor: session.append events queue zero-latency; a
-// deferred tick (≥1 s, torn-tail backoff, eager at turn.complete) reads the
-// transcript tail, feeds the FILE's true parent edges to the mirror
-// (patchEdges), and detects rewinds by resolving each queued row's anchor
-// (its parent chain, walked through uncaptured ceremony rows) against
-// owl's expected chain — a mismatch names the settle point and hands the
-// refold to the rewind seam. All seams injected; the engine wiring
-// spells the $ calls literally.
+// deferred tick (re-armed per event, torn-tail backoff, eager at
+// turn.complete) reads the transcript tail, verifies each queued row's
+// anchor (the nearest preceding observable row by file order) against
+// owl's expected chain, feeds the VERIFIED edges to the lineage seam, and
+// hands rewinds to the refold seam with the whole new world proven. All
+// seams injected; the engine wiring spells the $ calls literally.
 
 import { describe, expect, test } from "vitest";
 import { LiveChainProcessor } from "../../host/rewind/live-chain.js";
@@ -27,9 +26,18 @@ interface Harness {
   patched: Array<{ uuid: string; parent: string | null }>;
   rewinds: Array<{ settle: string | null }>;
   scheduled: number[];
+  logs: string[];
+  /** seam calls in arrival order: "patch" / "rewind" (the ordering pin) */
+  order: string[];
   size: { value: number | null };
   setTail: (f: TailFacts | null) => void;
   setOwlTail: (t: string | null) => void;
+  setDormant: (d: boolean) => void;
+  /** run the newest armed deferred tick callback (the timer path) */
+  fireScheduled: () => void;
+  /** park the next statSize/readTail call on a manually-resolved promise */
+  park: <T>(which: "stat" | "read") => { resolve: (v: T) => void };
+  readCalls: number[];
 }
 
 function harness(init?: {
@@ -45,36 +53,84 @@ function harness(init?: {
   const size = { value: init?.size ?? 1000 };
   let tail: TailFacts | null = init?.tail ?? null;
   let owlTail: string | null = init?.owlTail ?? null;
+  let dormant = false;
+  let lastScheduled: (() => void) | null = null;
+  const logs: string[] = [];
+  const order: string[] = [];
+  const readCalls: number[] = [];
+  let parkWhich: "stat" | "read" | null = null;
+  let parkedCb: ((resolve: (v: unknown) => void) => void) | null = null;
+  const tryPark = (which: "stat" | "read"): Promise<unknown> | null => {
+    if (parkedCb === null || parkWhich !== which) return null;
+    const cb = parkedCb;
+    parkedCb = null;
+    parkWhich = null;
+    return new Promise((res) => cb(res));
+  };
   const known = new Set(init?.known ?? []);
   const proc = new LiveChainProcessor({
-    statSize: async () => size.value,
-    readTail: async () => tail,
+    statSize: async () => {
+      const p = tryPark("stat");
+      if (p !== null) return (await p) as number | null;
+      return size.value;
+    },
+    readTail: async (maxRows) => {
+      readCalls.push(maxRows);
+      const p = tryPark("read");
+      if (p !== null) return (await p) as TailFacts | null;
+      return tail;
+    },
     owlTailExcluding: () => owlTail,
     isKnownRow: (uuid) => known.has(uuid),
     patchEdges: (edges) => {
+      order.push("patch");
       for (const e of edges) patched.push({ uuid: e.uuid, parent: e.parent });
     },
     onRewind: async (v) => {
+      order.push("rewind");
       rewinds.push(v);
       if (init?.onRewind !== undefined) await init.onRewind();
     },
-    schedule: (ms, _fn) => {
+    dormant: () => dormant,
+    schedule: (ms, fn) => {
       scheduled.push(ms);
+      lastScheduled = fn;
       return () => {};
     },
-    log: () => {},
+    log: (m) => {
+      logs.push(m);
+    },
   });
   return {
     proc,
     patched,
     rewinds,
     scheduled,
+    logs,
+    order,
+    readCalls,
     size,
     setTail: (f) => {
       tail = f;
     },
     setOwlTail: (t) => {
       owlTail = t;
+    },
+    setDormant: (d) => {
+      dormant = d;
+    },
+    fireScheduled: () => {
+      const fn = lastScheduled;
+      lastScheduled = null;
+      if (fn !== null) fn();
+    },
+    park: <T>(which: "stat" | "read") => {
+      const holder: { resolve: (v: T) => void } = { resolve: () => {} };
+      parkWhich = which;
+      parkedCb = (res) => {
+        holder.resolve = res as (v: T) => void;
+      };
+      return holder;
     },
   };
 }
@@ -137,6 +193,199 @@ describe("live chain processor — the normal tick", () => {
       { uuid: "b1", parent: null },
       { uuid: "u1", parent: "b1" },
     ]);
+  });
+});
+
+describe("live chain processor — bounds, lifecycle and containment", () => {
+  test("the queue cap sheds the OLDEST pending rows and detection stays live", async () => {
+    const h = harness({ owlTail: "t0", known: ["t0"], tail: facts([row("t0", null)]) });
+    for (let i = 1; i <= 4097; i += 1) h.proc.enqueue(ev(`q${i}`, true));
+    expect(h.logs.some((l) => l.includes("queue cap reached"))).toBe(true);
+    // the newest rows still verify once the file catches up
+    const rows: TailRow[] = [row("t0", null)];
+    for (let i = 2; i <= 4097; i += 1) rows.push(row(`q${i}`, `q${i - 1}`));
+    h.setTail(facts(rows));
+    await h.proc.flush();
+    expect(h.patched.some((e) => e.uuid === "q4097")).toBe(true);
+    // the shed oldest (q1) never returns
+    expect(h.patched.some((e) => e.uuid === "q1")).toBe(false);
+  });
+
+  test("an anchor stuck outside the window for the bound's ticks is shed; detection continues", async () => {
+    // the row's only predecessor is unobservable and owl holds a tail —
+    // every tick defers until the shed bound
+    const h = harness({ owlTail: "t2", tail: facts([row("u9", "ancient")]) });
+    h.proc.enqueue(ev("u9", true));
+    for (let i = 0; i < 4; i += 1) await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    expect(h.logs.some((l) => l.includes("shedding the batch"))).toBe(false);
+    await h.proc.flush(); // the 5th
+    expect(h.logs.some((l) => l.includes("shedding the batch"))).toBe(true);
+    // later rows verify again
+    h.setOwlTail("t2");
+    h.setTail(facts([row("t2", null), row("u10", "t2")]));
+    h.proc.enqueue(ev("u10", true));
+    await h.proc.flush();
+    expect(h.patched.map((e) => e.uuid)).toContain("u10");
+  });
+
+  test("dispose pins the processor dead: an in-flight tick completes into nothing", async () => {
+    const h = harness({ owlTail: "t0", known: ["t0"], tail: facts([row("t0", null), row("u1", "t0")]) });
+    h.proc.enqueue(ev("u1", true));
+    const parkedRead = h.park<TailFacts | null>("read");
+    const tick = h.proc.flush(); // parks inside readTail
+    await new Promise((r) => setTimeout(r, 0)); // let the tick reach the park
+    h.proc.dispose();
+    parkedRead.resolve(facts([row("t0", null), row("u1", "t0")]));
+    await tick;
+    expect(h.patched).toEqual([]);
+    expect(h.rewinds).toEqual([]);
+    const schedules = h.scheduled.length;
+    await h.proc.flush(); // a no-op
+    expect(h.scheduled.length).toBe(schedules); // nothing re-armed
+    expect(h.readCalls.length).toBe(1); // no further reads
+  });
+
+  test("flush during an in-flight tick waits it out and runs once more", async () => {
+    const h = harness({ owlTail: "t0", known: ["t0"], tail: facts([row("t0", null), row("u1", "t0")]) });
+    h.proc.enqueue(ev("u1", true));
+    const parkedRead = h.park<TailFacts | null>("read");
+    const first = h.proc.flush(); // parks inside readTail
+    await new Promise((r) => setTimeout(r, 0)); // let the tick reach the park
+    const second = h.proc.flush(); // must wait the first, then process again
+    expect(h.readCalls.length).toBe(1);
+    // the parked read answers with a tail that does NOT hold u1 yet (a
+    // defer); the complete file lands before the flush's own pass re-reads
+    h.setTail(facts([row("t0", null), row("u1", "t0")]));
+    parkedRead.resolve(facts([row("t0", null)]));
+    await first;
+    await second;
+    expect(h.readCalls.length).toBe(2); // the flush's own pass ran
+    expect(h.patched).toEqual([{ uuid: "u1", parent: "t0" }]);
+  });
+
+  test("a dormant tick drops its queue; the rows do not resurrect", async () => {
+    const h = harness({ owlTail: "t0", known: ["t0"], tail: facts([row("t0", null), row("u1", "t0")]) });
+    h.proc.enqueue(ev("u1", true));
+    h.setDormant(true);
+    await h.proc.flush();
+    expect(h.logs.some((l) => l.includes("dormant — queue dropped"))).toBe(true);
+    expect(h.patched).toEqual([]);
+    h.setDormant(false);
+    await h.proc.flush(); // the queue is gone — nothing verifies
+    expect(h.patched).toEqual([]);
+  });
+
+  test("absurd uuids never enter the window: their edges never feed the lineage", async () => {
+    const huge = "z".repeat(200);
+    const h = harness({
+      owlTail: "t0",
+      known: ["t0"],
+      // the captured row's FILE parent names the foreign padding row
+      tail: facts([row("t0", null), row(huge, "t0"), row("u1", huge)]),
+    });
+    // the padding row itself is refused at the door (engine uuids are sane)
+    expect(h.proc.enqueue(ev(huge, false))).toBe(false);
+    h.proc.enqueue(ev("u1", true));
+    await h.proc.flush();
+    // u1's edge is its verified anchor (t0 — the walk skips the padding),
+    // and the padding row contributes nothing
+    expect(h.patched).toEqual([{ uuid: "u1", parent: "t0" }]);
+  });
+
+  test("an uncaptured row's OFF-WINDOW file parent is clamped to null, never fed raw", async () => {
+    const h = harness({
+      owlTail: "t0",
+      known: ["t0"],
+      tail: facts([row("t0", null), row("j1", "off-window"), row("u1", "t0")]),
+    });
+    h.proc.enqueue(ev("j1", false));
+    h.proc.enqueue(ev("u1", true));
+    await h.proc.flush();
+    expect(h.patched).toContainEqual({ uuid: "j1", parent: null });
+    expect(h.patched).not.toContainEqual({ uuid: "j1", parent: "off-window" });
+  });
+
+  test("a batch entirely absent from the tail is debounce lag: retry, keep, no verdict", async () => {
+    const h = harness({ owlTail: "t0", known: ["t0"], tail: facts([row("t0", null)]) });
+    h.proc.enqueue(ev("u1", true));
+    h.proc.enqueue(ev("u2", true));
+    await h.proc.flush();
+    expect(h.patched).toEqual([]);
+    expect(h.rewinds).toEqual([]);
+    // the deferred retry is armed
+    expect(h.scheduled.length).toBeGreaterThanOrEqual(2);
+    // once the file catches up, both verify
+    h.setTail(facts([row("t0", null), row("u1", "t0"), row("u2", "u1")]));
+    h.fireScheduled();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.patched).toEqual([
+      { uuid: "u1", parent: "t0" },
+      { uuid: "u2", parent: "u1" },
+    ]);
+  });
+
+  test("a throwing onRewind propagates: the tick fails, the retry is armed, the verdict re-detects", async () => {
+    let fails = 0;
+    const h = harness({
+      owlTail: "t2",
+      known: ["t1"],
+      tail: facts([row("t1", null), row("u9", "t1")]),
+      onRewind: () => {
+        fails += 1;
+        if (fails === 1) throw new Error("refold exploded");
+      },
+    });
+    h.proc.enqueue(ev("u9", true));
+    await h.proc.flush();
+    expect(fails).toBe(1);
+    expect(h.logs.some((l) => l.includes("tick failed"))).toBe(true);
+    expect(h.scheduled.length).toBeGreaterThanOrEqual(2); // the retry armed
+    // the retried tick re-detects and the refold succeeds
+    h.fireScheduled();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fails).toBe(2);
+    // the verdict was DELIVERED both times — a detected rewind is never
+    // silently dropped, the refold retry re-receives it
+    expect(h.rewinds).toEqual([{ settle: "u9" }, { settle: "u9" }]);
+  });
+
+  test("the deferred tick itself fires the verification (the timer path, no flush)", async () => {
+    const h = harness({ owlTail: "t0", known: ["t0"] });
+    h.proc.enqueue(ev("u1", true));
+    h.setTail(facts([row("t0", null), row("u1", "t0")]));
+    expect(h.patched).toEqual([]); // nothing yet
+    h.fireScheduled();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.patched).toEqual([{ uuid: "u1", parent: "t0" }]);
+  });
+
+  test("edges are durable BEFORE the verdict (patch precedes rewind)", async () => {
+    const h = harness({
+      owlTail: "t2",
+      known: ["t1"],
+      tail: facts([row("t1", null), row("u9", "t1")]),
+    });
+    h.proc.enqueue(ev("u9", true));
+    await h.proc.flush();
+    expect(h.order).toEqual(["patch", "rewind"]);
+  });
+
+  test("the retry ladder grows the window and backs off (capped)", async () => {
+    const h = harness({ owlTail: "t2", tail: facts([row("u9", "ancient")]) });
+    h.proc.enqueue(ev("u9", true));
+    await h.proc.flush(); // defer 1
+    await h.proc.flush(); // defer 2 (flush path resets processing each time)
+    expect(h.readCalls.length).toBeGreaterThanOrEqual(2);
+    expect(h.readCalls[1]).toBeGreaterThan(h.readCalls[0]); // the window grew
+  });
+
+  test("a walk off the window with an EMPTY chain starts the chain (never defers)", async () => {
+    const h = harness({ owlTail: null, tail: facts([row("j1", "ancient"), row("u1", "j1")]) });
+    h.proc.enqueue(ev("u1", true));
+    await h.proc.flush();
+    expect(h.patched).toEqual([{ uuid: "u1", parent: null }]);
+    expect(h.rewinds).toEqual([]);
   });
 });
 
