@@ -19,7 +19,7 @@ import { corePendingEvaluator } from "../../host/start/pending.js";
 import { parseTranscriptRows, rowFromTranscript } from "../../host/start/transcript-reader.js";
 import { createMemoryFs } from "../../host/storage/fs-adapter.js";
 import { LedgerWriter } from "../../host/storage/ledger.js";
-import { MirrorWriter } from "../../host/storage/mirror.js";
+import { MirrorWriter, sweepMirror } from "../../host/storage/mirror.js";
 import { prepareStoreContext, sweepSession } from "../../host/storage/store-context.js";
 
 const FIX = join(__dirname, "..", "fixtures", "transcripts");
@@ -55,6 +55,109 @@ function makeStorage(sessionId: string): { mirror: MirrorWriter; ledger: LedgerW
     dir,
   };
 }
+
+describe("backfill — the resume-time mirror compaction hook", () => {
+  test("a crossing census fires compactMirror and the re-sweep adopts the rewritten batches", async () => {
+    // 1500 rows mirrored TWICE — the re-stream duplication shape, past the
+    // threshold floor (1500 duplicate lines >= 1000 and >= 30%)
+    const NL = String.fromCharCode(10);
+    const lines: string[] = [];
+    for (let i = 1; i <= 1500; i += 1) {
+      lines.push(
+        JSON.stringify({
+          uuid: `c${String(i)}`,
+          parentUuid: i === 1 ? null : `c${String(i - 1)}`,
+          type: "user",
+          message: { role: "user", content: `row ${String(i)}` },
+        }),
+      );
+    }
+    const transcript = lines.join(NL);
+    await mem.adapter.writeText("/t/s-comp.jsonl", transcript);
+    const dir = "/cfg/session-owl/sessions/sess-comp";
+    {
+      const parsed = parseTranscriptRows(transcript);
+      const dup = new MirrorWriter(mem.adapter, dir, "dup-1");
+      for (const tr of parsed.rows) {
+        dup.bufferRow({ uuid: tr.uuid, parentUuid: tr.parentUuid, row: rowFromTranscript(tr) });
+      }
+      await dup.flush();
+      const dup2 = new MirrorWriter(mem.adapter, dir, "dup-2");
+      for (const tr of parsed.rows) {
+        dup2.bufferRow({ uuid: tr.uuid, parentUuid: tr.parentUuid, row: rowFromTranscript(tr) });
+      }
+      await dup2.flush();
+    }
+    const storage = makeStorage("sess-comp");
+    let called = 0;
+    const result = await runBackfill(storage.mirror, storage.ledger, {
+      key: "sess-comp",
+      sessionId: "sess-comp",
+      agentId: null,
+      fs: mem.adapter,
+      transcriptPath: "/t/s-comp.jsonl",
+      enabled: true,
+      fireGoalExtract: () => {},
+      compactMirror: async () => {
+        called += 1;
+        // simulate the helper: rewrite to one line per uuid
+        const sweep = await sweepMirror(mem.adapter, dir);
+        const seen = new Set<string>();
+        for (const name of await mem.adapter.listDir(dir)) {
+          if (!/^m\d+-[0-9a-f]+(?:\.k\d+)?\.jsonl$/.test(name)) continue;
+          const text = await mem.adapter.readText(`${dir}/${name}`);
+          const kept: string[] = [];
+          const NL = String.fromCharCode(10);
+          for (const line of text.split(NL)) {
+            if (line === "") continue;
+            const uuid = (JSON.parse(line) as { uuid?: string }).uuid;
+            if (uuid !== undefined && seen.has(uuid)) continue;
+            if (uuid !== undefined) seen.add(uuid);
+            kept.push(line);
+          }
+          await mem.adapter.writeText(`${dir}/${name}`, `${kept.join(NL)}${NL}`);
+        }
+        void sweep;
+        return true;
+      },
+    });
+    expect(called).toBe(1);
+    expect(result.remirrored).toBe(0); // rows all present — the census, not the re-mirror, drove the hook
+    // the index still holds the unique set after the re-sweep
+    const reswept = await sweepMirror(mem.adapter, dir);
+    expect(reswept.uniqueUuids).toBeGreaterThanOrEqual(1);
+    expect(reswept.lines).toBe(reswept.uniqueUuids);
+  });
+
+  test("a healthy census never fires the hook (absent hook is fine too)", async () => {
+    await mem.adapter.writeText("/t/s-clean.jsonl", jsonl("main-simple"));
+    const dir = "/cfg/session-owl/sessions/sess-clean";
+    {
+      const parsed = parseTranscriptRows(jsonl("main-simple"));
+      const mirror = new MirrorWriter(mem.adapter, dir, "seed-a");
+      for (const tr of parsed.rows) {
+        mirror.bufferRow({ uuid: tr.uuid, parentUuid: tr.parentUuid, row: rowFromTranscript(tr) });
+      }
+      await mirror.flush();
+    }
+    const storage = makeStorage("sess-clean");
+    let called = 0;
+    await runBackfill(storage.mirror, storage.ledger, {
+      key: "sess-clean",
+      sessionId: "sess-clean",
+      agentId: null,
+      fs: mem.adapter,
+      transcriptPath: "/t/s-clean.jsonl",
+      enabled: true,
+      fireGoalExtract: () => {},
+      compactMirror: async () => {
+        called += 1;
+        return true;
+      },
+    });
+    expect(called).toBe(0); // below the threshold — the rewrite never fires
+  });
+});
 
 describe("backfill — restart on a populated dir", () => {
   test("fold + frontier + pending reconstruct (records carry the frontier)", async () => {

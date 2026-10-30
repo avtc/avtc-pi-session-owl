@@ -51,6 +51,66 @@ describe("bootstrap-ladder — rung selection", () => {
 });
 
 describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
+  test("a rerun writes only ABSENT rows: the absent-check census + idempotence", async () => {
+    const run = promisify(execFile);
+    const tmp = tempDir("owl-boot-rerun");
+    const transcript = [
+      JSON.stringify({ uuid: "r-1", parentUuid: null, type: "user", message: { role: "user", content: "one" } }),
+      JSON.stringify({
+        uuid: "r-2",
+        parentUuid: "r-1",
+        type: "assistant",
+        message: { id: "m1", model: "m", content: [{ type: "text", text: "two" }] },
+      }),
+    ].join("\n");
+    const transcriptPath = join(tmp, "sess-rerun.jsonl");
+    writeFileSync(transcriptPath, transcript, "utf8");
+    const cfg = join(tmp, "cfg");
+    mkdirSync(cfg, { recursive: true });
+
+    // first run: both rows stream (mirror empty)
+    const first = await run(process.execPath, [
+      join(__dirname, "..", "..", "helpers", "bootstrap.mjs"),
+      transcriptPath,
+      "--config-dir",
+      cfg,
+      "--session-id",
+      "sess-rerun",
+    ]);
+    const s1 = JSON.parse(first.stderr.trim().split("\n").pop() ?? "{}");
+    expect(s1.done).toBe(true);
+    expect(s1.rows).toBe(2);
+    expect(s1.skippedKnown).toBe(0);
+    expect(s1.mirrorUnique).toBe(0); // the census runs BEFORE this run's writes
+
+    // second run (same mirror): everything known, NOTHING re-written
+    const second = await run(process.execPath, [
+      join(__dirname, "..", "..", "helpers", "bootstrap.mjs"),
+      transcriptPath,
+      "--config-dir",
+      cfg,
+      "--session-id",
+      "sess-rerun",
+    ]);
+    const s2 = JSON.parse(second.stderr.trim().split("\n").pop() ?? "{}");
+    expect(s2.done).toBe(true);
+    expect(s2.rows).toBe(0); // the bleeding stopped: no duplicate lines
+    expect(s2.skippedKnown).toBe(2);
+    expect(s2.mirrorLines).toBe(2);
+    expect(s2.mirrorUnique).toBe(2);
+
+    // the mirror still sweeps both rows exactly once each
+    const sessDir = join(cfg, "session-owl", "sessions", "sess-rerun");
+    const mem = createMemoryFs();
+    const sep = join("x", "y").slice(1, -1);
+    const norm = (p: string) => p.split(sep).join("/");
+    for (const f of readdirSync(sessDir)) {
+      mem.adapter.writeText(`${norm(sessDir)}/${f}`, readFileSync(join(sessDir, f), "utf8"));
+    }
+    const sweep = await sweepMirror(mem.adapter, norm(sessDir));
+    expect(sweep.rows.map((r) => r.uuid).sort()).toEqual(["r-1", "r-2"]);
+  }, 30_000);
+
   test("writes owl mirror batches from a transcript, streamed, sweep-compatible", async () => {
     const run = promisify(execFile);
     const tmp = tempDir("owl-boot");

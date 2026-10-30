@@ -22,6 +22,7 @@ import type { LedgerWriter } from "../storage/ledger.js";
 import { batchNameParts, type MirrorWriter, sweepMirror } from "../storage/mirror.js";
 import { SESSION_MARKER_FILENAME } from "../storage/session-marker.js";
 import { prepareStoreContext, ROW_TYPE } from "../storage/store-context.js";
+import { shouldCompactMirror } from "./compact-mirror.js";
 import { captureInitialPrompt, ensureNGoalSeeded } from "./initial-prompt.js";
 import type { PendingEvaluator } from "./pending.js";
 import { carriedAncestor, livePath, readTranscript, rowFromTranscript } from "./transcript-reader.js";
@@ -58,6 +59,12 @@ export interface BackfillOptions {
    *  writes mirror batches into the session directory and the sweep picks
    *  them up. Absent = the ladder defers (blocked backlog, rung 4). */
   bootstrapOverCap?: (transcriptPath: string) => Promise<boolean>;
+  /** The resume-time mirror compaction (injected; the register wiring runs
+   *   helpers/mirror-compact.mjs via the process seam). Called AFTER the
+   *   sweep when the duplicate census crosses the threshold — one rewrite
+   *   collapses the duplicate mass; healthy stores never cross. Absent =
+   *   the duplicates stay (disk cost only, never correctness). */
+  compactMirror?: () => Promise<boolean>;
 }
 
 export interface BackfillResult {
@@ -166,6 +173,20 @@ export async function runBackfill(
   // readable backlog; only the transcript re-mirror waits for the ladder)
   const sweep = await sweepMirror(fs, dir);
   mirror.adoptRows(sweep.rows);
+
+  // the duplicate census crossed: one compaction rewrite (write-new
+  // batches, then unlink the superseded ones), then a FRESH sweep re-adopts
+  // so this process's uuid->file refs name the surviving batches
+  if (shouldCompactMirror(sweep) && opts.compactMirror !== undefined) {
+    const compacted = await opts.compactMirror();
+    if (compacted) {
+      const reswept = await sweepMirror(fs, dir);
+      mirror.adoptRows(reswept.rows);
+      log.info(
+        `mirror compacted: ${String(sweep.lines)} line(s) -> ${String(reswept.lines)} (${String(reswept.uniqueUuids)} unique)`,
+      );
+    }
+  }
 
   let remirrored = 0;
   if (!transcript.tooLarge) {

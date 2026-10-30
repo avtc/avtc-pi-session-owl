@@ -430,6 +430,13 @@ export interface SweepResult {
   uuidFile: Map<string, string>;
   /** Anchor files read: producer8 -> anchor. */
   anchors: Map<string, MirrorAnchor>;
+  /** The duplicate census: total batch lines read (`lines`) and distinct
+   *  uuids among them (`uuidFile.size` is the unique count — a uuid
+   *  re-written by a later producer counts once per write). The gap is the
+   *  duplicate mass a compaction pass could reclaim. */
+  lines: number;
+  /** Distinct uuids across the batches (== uuidFile.size). */
+  uniqueUuids: number;
 }
 
 function errText(err: unknown): string {
@@ -450,6 +457,7 @@ export async function sweepMirror(fs: FsAdapter, dir: string): Promise<SweepResu
   const batchNames = names.filter((n) => BATCH_RE.test(n)).sort(batchOrder);
   const rows: MirroredRow[] = [];
   const uuidFile = new Map<string, string>();
+  let lines = 0;
   for (const name of batchNames) {
     let text: string;
     try {
@@ -460,6 +468,7 @@ export async function sweepMirror(fs: FsAdapter, dir: string): Promise<SweepResu
     }
     for (const line of text.split("\n")) {
       if (line.length === 0) continue;
+      lines += 1;
       try {
         const parsed = JSON.parse(line) as MirroredRow & { rowParts?: unknown; rowPrefix?: unknown };
         if (typeof parsed.uuid !== "string") continue;
@@ -518,7 +527,7 @@ export async function sweepMirror(fs: FsAdapter, dir: string): Promise<SweepResu
       // corrupt anchor: hint data only — ignore
     }
   }
-  return { rows, uuidFile, anchors };
+  return { rows, uuidFile, anchors, lines, uniqueUuids: uuidFile.size };
 }
 
 function batchOrder(a: string, b: string): number {

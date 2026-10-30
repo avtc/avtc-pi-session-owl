@@ -89,6 +89,7 @@ import { completionUsageOf } from "../host/stage/usage.js";
 import { runBackfill } from "../host/start/backfill.js";
 import { manualBootstrapCommand, runBootstrapHelper } from "../host/start/bootstrap-caller.js";
 import { copyBranchLineageStore } from "../host/start/branch-copy.js";
+import { runMirrorCompact } from "../host/start/compact-mirror.js";
 import { launchGoalExtract, registerGoalExtractLauncher } from "../host/start/goal-extract.js";
 import { corePendingEvaluator } from "../host/start/pending.js";
 import * as state from "../host/state.js";
@@ -772,6 +773,29 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                   },
                 );
                 return result.ok;
+              }
+            : undefined,
+        compactMirror:
+          state.getCurrentTranscriptPath() !== null
+            ? async () => {
+                // the resume-time rewrite when the duplicate census crosses:
+                // real unlink needs the node process seam (a surface without
+                // it keeps the duplicates — disk cost only, never correctness)
+                const result = await runMirrorCompact(
+                  {
+                    runProcess: (argv) => bridge.currentServices().processRun(argv),
+                    log: (m, err) =>
+                      log.warn(
+                        `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
+                      ),
+                  },
+                  {
+                    pluginRoot: bridge.currentServices().pluginRoot(),
+                    configDir,
+                    sessionId: e.session_id,
+                  },
+                );
+                return result.done;
               }
             : undefined,
       }).then((backfillResult) => {

@@ -19,7 +19,7 @@
 // budget lands whole — unreachable at observed row sizes). Exit codes:
 // 0 ok, 1 stream/read failure (summary carries {error}), 2 usage.
 
-import { createReadStream, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import { createInterface } from "node:readline";
@@ -58,7 +58,7 @@ const numericFlag = (name, def) => {
 if (file === undefined) {
   process.stderr.write(
     "usage: node helpers/bootstrap.mjs <transcript.jsonl> [--config-dir <dir>] [--session-id <id>] [--after <uuid>] [--live-path] [--page-bytes N] [--limit K]\n" +
-      "note: a rerun re-writes rows (no absent-check here — pass --after <lastMirroredUuid> to bound it)\n",
+      "note: a rerun writes only rows ABSENT from the mirror (absent-check first; --after bounds the scan position)\n",
   );
   process.exit(2);
 }
@@ -89,7 +89,7 @@ if (afterPresent && (typeof afterRaw !== "string" || afterRaw === "undefined" ||
   // sibling helpers reject malformed values
   process.stderr.write(
     "usage: node helpers/bootstrap.mjs <transcript.jsonl> [--config-dir <dir>] [--session-id <id>] [--after <uuid>] [--live-path] [--page-bytes N] [--limit K]\n" +
-      "note: a rerun re-writes rows (no absent-check here — pass --after <lastMirroredUuid> to bound it)\n",
+      "note: a rerun writes only rows ABSENT from the mirror (absent-check first; --after bounds the scan position)\n",
   );
   process.exit(2);
 }
@@ -100,6 +100,29 @@ const limit = numericFlag("limit", Infinity);
 
 const sessDir = join(configDir, "session-owl", "sessions", sessionId);
 mkdirSync(sessDir, { recursive: true });
+
+// the absent-check: one pass over the existing mirror batches builds the
+// known-uuid set — a rerun writes ONLY rows the mirror lacks (the crash
+// window / the genuinely new tail). The same pass is the duplicate census
+// the host's compaction trigger reads: total lines vs unique uuids.
+const knownUuids = new Set();
+let mirrorLines = 0;
+for (const name of readdirSync(sessDir)) {
+  if (!/^m\d+-[0-9a-f]+(\.k\d+)?\.jsonl$/.test(name)) continue;
+  const text = readFileSync(join(sessDir, name), "utf8");
+  for (const line of text.split("\n")) {
+    if (line === "") continue;
+    mirrorLines += 1;
+    try {
+      const uuid = JSON.parse(line)?.uuid;
+      if (typeof uuid === "string") knownUuids.add(uuid);
+    } catch {
+      // a corrupt line counts toward the census, never fatal
+    }
+  }
+}
+const mirrorUnique = knownUuids.size;
+let skippedKnown = 0;
 
 // the producer tag must be hexadecimal (the batch-name grammar) and carry
 // BOTH a timestamp and the pid inside its 8 chars: last-4 ts hex + pid hex
@@ -319,6 +342,10 @@ try {
       if (uuid === afterUuid) seenAfter = true;
       continue;
     }
+    if (knownUuids.has(uuid) || mirrored.has(uuid)) {
+      skippedKnown += 1;
+      continue; // already mirrored — a rerun writes only what is absent
+    }
     if (n >= limit) break;
     mirrored.add(uuid);
     const rawParent = typeof row.parentUuid === "string" ? row.parentUuid : null;
@@ -342,8 +369,17 @@ try {
 }
 const summary = JSON.stringify(
   streamError === null
-    ? { done: true, rows: n, sourceBytes: out.toString(), pages, sessionDir: sessDir }
-    : { done: false, error: streamError, rows: n, pages, sessionDir: sessDir },
+    ? {
+        done: true,
+        rows: n,
+        skippedKnown,
+        mirrorLines,
+        mirrorUnique,
+        sourceBytes: out.toString(),
+        pages,
+        sessionDir: sessDir,
+      }
+    : { done: false, error: streamError, rows: n, skippedKnown, mirrorLines, mirrorUnique, pages, sessionDir: sessDir },
 );
 // stderr for humans; the SAME line on stdout for the engine-run caller
 // ($.process.run exposes stdout - the startup wiring parses the last line)
