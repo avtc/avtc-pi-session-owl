@@ -332,3 +332,56 @@ describe("ledger — tolerant fold", () => {
     expect(fold.unreadableFiles).toEqual([]);
   });
 });
+
+describe("ledger — restated lineage uuid detection", () => {
+  const linRec = (edges: Array<{ uuid: string; parent: string | null }>, seq: number, ts: number): string =>
+    JSON.stringify({
+      producerId: "p-detect",
+      seq,
+      ts,
+      marker: "m" + seq,
+      at: "m" + seq,
+      kind: "lineage",
+      payload: { edges },
+    });
+
+  test("a restated uuid is counted; a clean stream reports zero", async () => {
+    await fs.writeText(`${DIR}/ledger-d1000001.jsonl`, `${linRec([{ uuid: "u1", parent: null }], 1, 1000)}\n`);
+    await fs.writeText(`${DIR}/ledger-d2000002.jsonl`, `${linRec([{ uuid: "u1", parent: null }], 2, 1001)}\n`);
+    const fold = await foldLedger(fs, DIR);
+    expect(fold.lineageRestatements).toBe(1);
+    const clean = await foldLedger(fs, DIR.replace(/s$/, "s-clean"));
+    expect(clean.lineageRestatements).toBe(0);
+  });
+
+  test("stopOnRestatement stops reading further files once a restatement is found", async () => {
+    const dir = `${DIR}-stop`;
+    await fs.writeText(`${dir}/ledger-a1000001.jsonl`, `${linRec([{ uuid: "u1", parent: null }], 1, 1000)}\n`);
+    await fs.writeText(`${dir}/ledger-b2000002.jsonl`, `${linRec([{ uuid: "u1", parent: null }], 2, 1001)}\n`);
+    await fs.writeText(`${dir}/ledger-c3000003.jsonl`, `${linRec([{ uuid: "u2", parent: "u1" }], 3, 1002)}\n`);
+    const fold = await foldLedger(fs, dir, { stopOnRestatement: true });
+    expect(fold.lineageRestatements).toBeGreaterThanOrEqual(1);
+    expect(fold.stoppedEarly).toBe(true);
+    expect(fold.records.every((r) => r.seq <= 2)).toBe(true); // the third file was never read
+    const full = await foldLedger(fs, dir);
+    expect(full.stoppedEarly).toBe(false);
+    expect(full.records).toHaveLength(3);
+  });
+
+  test("a duplicate uuid WITHIN one record counts as a restatement too", async () => {
+    const dir = `${DIR}-within`;
+    await fs.writeText(
+      `${dir}/ledger-d4000004.jsonl`,
+      `${linRec(
+        [
+          { uuid: "u1", parent: null },
+          { uuid: "u1", parent: null },
+        ],
+        1,
+        1000,
+      )}\n`,
+    );
+    const fold = await foldLedger(fs, dir);
+    expect(fold.lineageRestatements).toBe(1);
+  });
+});

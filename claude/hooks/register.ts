@@ -91,6 +91,7 @@ import { manualBootstrapCommand, runBootstrapHelper } from "../host/start/bootst
 import { copyBranchLineageStore } from "../host/start/branch-copy.js";
 import { runMirrorCompact } from "../host/start/compact-mirror.js";
 import { launchGoalExtract, registerGoalExtractLauncher } from "../host/start/goal-extract.js";
+import { runLedgerHeal } from "../host/start/ledger-heal.js";
 import { corePendingEvaluator } from "../host/start/pending.js";
 import * as state from "../host/state.js";
 import {
@@ -796,6 +797,27 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                   },
                 );
                 return result.done;
+              }
+            : undefined,
+        healLedger:
+          state.getCurrentTranscriptPath() !== null
+            ? async () => {
+                // restated lineage storage heals through the node process
+                // seam (a surface without it loads the redundant stream and
+                // a later load retries — correctness never depends on it)
+                return runLedgerHeal(
+                  {
+                    runProcess: (argv) => bridge.currentServices().processRun(argv),
+                    log: (m, err) =>
+                      log.warn(
+                        `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
+                      ),
+                  },
+                  {
+                    pluginRoot: bridge.currentServices().pluginRoot(),
+                    sessionDir: state.sessionDirPath(configDir, e.session_id, null),
+                  },
+                );
               }
             : undefined,
       }).then((backfillResult) => {

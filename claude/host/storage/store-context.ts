@@ -217,7 +217,15 @@ export async function prepareStoreContext(
   dir: string,
   ledger: LedgerWriter,
   mirror: MirrorWriter,
-  opts: { isLive?: LivePredicate; clock?: () => number } = {},
+  opts: {
+    isLive?: LivePredicate;
+    clock?: () => number;
+    /** Heal restated lineage storage (the rewrite runs through the process
+     *  seam; NEVER throws — done:false keeps loading from the redundant
+     *  files and a later load retries). Absent: restatements are tolerated
+     *  in memory (the fold is last-wins either way) and only logged. */
+    healLedger?: () => Promise<{ done: boolean; restatedEdges?: number; uniqueEdges?: number }>;
+  } = {},
 ): Promise<PreparedContext> {
   const isLive = opts.isLive ?? (() => true);
   let snapshot: { details: unknown; record: LedgerRecord } | null = null;
@@ -238,6 +246,7 @@ export async function prepareStoreContext(
   // logged ONCE per prepared context at info level — getBranch runs on every
   // render, dedup keeps the trace to the first sighting.
   const reportedRides = new Set<string>();
+  let reportedRestatements = false;
   const reportRide = (r: LedgerRecord, reason: "marker" | "at"): void => {
     const id = recordIdOf(r);
     if (reportedRides.has(id)) return;
@@ -250,7 +259,35 @@ export async function prepareStoreContext(
   };
   const refresh = async (override?: LivePredicate): Promise<void> => {
     const live = override ?? isLive;
-    const fold = await foldLedger(fs, dir);
+    let fold = await foldLedger(fs, dir, { stopOnRestatement: opts.healLedger !== undefined });
+    if (fold.lineageRestatements > 0) {
+      if (opts.healLedger !== undefined) {
+        // one heal attempt per refresh: a legitimate stream states each
+        // lineage uuid exactly once, so a restatement is storage damage —
+        // stop early, rewrite through the seam, re-read the healed files
+        let report: { done: boolean; restatedEdges?: number; uniqueEdges?: number } | null = null;
+        try {
+          report = await opts.healLedger();
+        } catch (err) {
+          log.warn(
+            `ledger heal seam threw (loading the redundant stream): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        if (report !== null && report.done) {
+          log.info(
+            `ledger healed: ${report.restatedEdges ?? "?"} restated edge(s) folded to ${report.uniqueEdges ?? "?"} unique — re-reading`,
+          );
+        } else {
+          log.warn("ledger heal unavailable — loading the redundant stream in memory (a later load retries)");
+        }
+        fold = await foldLedger(fs, dir); // full read: healed files, or the redundant originals
+      } else if (!reportedRestatements) {
+        reportedRestatements = true;
+        log.info(
+          `ledger fold: ${fold.lineageRestatements} restated lineage edge(s) — no heal seam on this surface; the fold is last-wins in memory`,
+        );
+      }
+    }
     let records = fold.records;
     let freshDrops = 0;
     if (override !== undefined) {

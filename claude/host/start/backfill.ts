@@ -65,6 +65,9 @@ export interface BackfillOptions {
    *   collapses the duplicate mass; healthy stores never cross. Absent =
    *   the duplicates stay (disk cost only, never correctness). */
   compactMirror?: () => Promise<boolean>;
+  /** Heal restated lineage storage through the process seam (see
+   *  ledger-heal.ts); the fold inside this backfill detects and re-reads. */
+  healLedger?: () => Promise<{ done: boolean; restatedEdges?: number; uniqueEdges?: number }>;
 }
 
 export interface BackfillResult {
@@ -242,7 +245,9 @@ export async function runBackfill(
   // 3. reconstruct through the core multiplexer: fold + load + frontier
   // prepareStoreContext folds + resolves as its last construction step —
   // no redundant second fold here
-  const prepared = await prepareStoreContext(fs, dir, ledger, mirror);
+  const prepared = await prepareStoreContext(fs, dir, ledger, mirror, {
+    ...(opts.healLedger !== undefined ? { healLedger: opts.healLedger } : {}),
+  });
   const handle = await getCore(opts.key, {
     ctxFactory: () => prepared.ctx,
     resolverFactory: () => makeEntryResolver({ rows: () => mirrorRowsOf(mirror), version: () => mirror.rowVersion() }),

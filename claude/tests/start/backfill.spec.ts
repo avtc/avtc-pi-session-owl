@@ -18,7 +18,7 @@ import { captureInitialPrompt } from "../../host/start/initial-prompt.js";
 import { corePendingEvaluator } from "../../host/start/pending.js";
 import { parseTranscriptRows, rowFromTranscript } from "../../host/start/transcript-reader.js";
 import { createMemoryFs } from "../../host/storage/fs-adapter.js";
-import { LedgerWriter } from "../../host/storage/ledger.js";
+import { foldLedger, LedgerWriter } from "../../host/storage/ledger.js";
 import { MirrorWriter, sweepMirror } from "../../host/storage/mirror.js";
 import { prepareStoreContext, sweepSession } from "../../host/storage/store-context.js";
 
@@ -907,5 +907,84 @@ describe("backfill — a rewind fork across a compaction boundary", () => {
     expect(storage.mirror.rowByUuid("m-5")?.parentUuid).toBe("m-2b");
     const chain = storage.mirror.chainTo("m-6");
     expect(chain).toEqual(["m-1", "m-2", "m-2b", "m-5", "m-6"]);
+  });
+});
+
+describe("backfill — the restated-lineage heal hook", () => {
+  test("a restated lineage uuid fires healLedger and the fold serves the healed stream", async () => {
+    const dir = "/cfg/session-owl/sessions/sess-lheal";
+    const linRec = (edges: Array<{ uuid: string; parent: string | null }>, seq: number): string =>
+      JSON.stringify({
+        producerId: "p-lh",
+        seq,
+        ts: 3000 + seq,
+        marker: "m" + seq,
+        at: "m" + seq,
+        kind: "lineage",
+        payload: { edges },
+      });
+    {
+      const transcript = jsonl("main-simple");
+      await mem.adapter.writeText("/t/sess-lheal.jsonl", transcript);
+      const parsed = parseTranscriptRows(transcript);
+      const mirror = new MirrorWriter(mem.adapter, dir, "seed-lh");
+      for (const tr of parsed.rows) {
+        mirror.bufferRow({ uuid: tr.uuid, parentUuid: tr.parentUuid, row: rowFromTranscript(tr) });
+      }
+      await mirror.flush();
+    }
+    // the damaged shape: the same edge stated twice
+    await mem.adapter.writeText(`${dir}/ledger-l1000001.jsonl`, `${linRec([{ uuid: "z1", parent: null }], 1)}\n`);
+    await mem.adapter.writeText(`${dir}/ledger-l2000002.jsonl`, `${linRec([{ uuid: "z1", parent: null }], 2)}\n`);
+    const storage = makeStorage("sess-lheal");
+    let healed = 0;
+    await runBackfill(storage.mirror, storage.ledger, {
+      key: "sess-lheal",
+      sessionId: "sess-lheal",
+      agentId: null,
+      fs: mem.adapter,
+      transcriptPath: "/t/sess-lheal.jsonl",
+      enabled: true,
+      fireGoalExtract: () => {},
+      healLedger: async () => {
+        healed += 1;
+        await mem.adapter.writeText(`${dir}/ledger-l1000001.jsonl`, `${linRec([{ uuid: "z1", parent: null }], 1)}\n`);
+        await mem.adapter.writeText(`${dir}/ledger-l2000002.jsonl`, "");
+        return { done: true, restatedEdges: 1, uniqueEdges: 1 };
+      },
+    });
+    expect(healed).toBe(1);
+    const fold = await foldLedger(mem.adapter, dir);
+    expect(fold.lineageRestatements).toBe(0);
+  });
+
+  test("a clean stream never fires healLedger", async () => {
+    const dir = "/cfg/session-owl/sessions/sess-lclean";
+    {
+      const transcript = jsonl("main-simple");
+      await mem.adapter.writeText("/t/sess-lclean.jsonl", transcript);
+      const parsed = parseTranscriptRows(transcript);
+      const mirror = new MirrorWriter(mem.adapter, dir, "seed-lc");
+      for (const tr of parsed.rows) {
+        mirror.bufferRow({ uuid: tr.uuid, parentUuid: tr.parentUuid, row: rowFromTranscript(tr) });
+      }
+      await mirror.flush();
+    }
+    const storage = makeStorage("sess-lclean");
+    let healed = 0;
+    await runBackfill(storage.mirror, storage.ledger, {
+      key: "sess-lclean",
+      sessionId: "sess-lclean",
+      agentId: null,
+      fs: mem.adapter,
+      transcriptPath: "/t/sess-lclean.jsonl",
+      enabled: true,
+      fireGoalExtract: () => {},
+      healLedger: async () => {
+        healed += 1;
+        return { done: true };
+      },
+    });
+    expect(healed).toBe(0);
   });
 });

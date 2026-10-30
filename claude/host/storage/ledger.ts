@@ -267,6 +267,19 @@ export interface FoldResult {
   /** Individual lines skipped (corrupt, tolerated — same class as pi's
    *  skipped bad deltas). */
   skippedLines: number;
+  /** Lineage edges restating a uuid an earlier record already stated (any
+   *  value): a legitimate stream states each uuid exactly once, so a
+   *  restated uuid is storage damage — the caller may heal and re-read. */
+  lineageRestatements: number;
+  /** stopOnRestatement fired: `records` is PARTIAL (the remaining files
+   *  were never read — only meaningful for a heal-then-reread caller). */
+  stoppedEarly: boolean;
+}
+
+export interface FoldLedgerOpts {
+  /** Stop reading at the first restated lineage uuid (the heal caller
+   *  re-reads everything after the rewrite; a full fold re-runs otherwise). */
+  stopOnRestatement?: boolean;
 }
 
 function errText(err: unknown): string {
@@ -274,7 +287,7 @@ function errText(err: unknown): string {
 }
 
 /** Fold every ledger batch in the directory into the total order. */
-export async function foldLedger(fs: FsAdapter, dir: string): Promise<FoldResult> {
+export async function foldLedger(fs: FsAdapter, dir: string, opts: FoldLedgerOpts = {}): Promise<FoldResult> {
   let names: string[];
   try {
     names = await fs.listDir(dir);
@@ -286,8 +299,26 @@ export async function foldLedger(fs: FsAdapter, dir: string): Promise<FoldResult
   const records: LedgerRecord[] = [];
   const unreadableFiles: string[] = [];
   let skippedLines = 0;
+  // the lineage duplicate census: a uuid may be stated exactly once —
+  // a second statement (any value) is damage; the set holds first-seen uuids
+  const lineageUuids = new Set<string>();
+  let lineageRestatements = 0;
+  let stoppedEarly = false;
+  const countRestatements = (r: LedgerRecord): void => {
+    if (r.kind !== "lineage") return;
+    const edges = (r.payload as { edges?: unknown } | null)?.edges;
+    if (!Array.isArray(edges)) return;
+    for (const e of edges) {
+      if (e === null || typeof e !== "object") continue;
+      const uuid = (e as Partial<{ uuid: unknown }>).uuid;
+      if (typeof uuid !== "string") continue;
+      if (lineageUuids.has(uuid)) lineageRestatements += 1;
+      else lineageUuids.add(uuid);
+    }
+  };
   for (const name of names) {
     if (!name.startsWith(LEDGER_PREFIX) || !name.endsWith(LEDGER_SUFFIX)) continue;
+    if (stoppedEarly) break; // an unread file leaves no census trace
     let text: string;
     try {
       text = await fs.readText(`${dir}/${name}`);
@@ -299,19 +330,22 @@ export async function foldLedger(fs: FsAdapter, dir: string): Promise<FoldResult
     for (const line of text.split("\n")) {
       if (line.length === 0) continue;
       try {
-        records.push(JSON.parse(line) as LedgerRecord);
+        const parsed = JSON.parse(line) as LedgerRecord;
+        countRestatements(parsed);
+        records.push(parsed);
       } catch (err) {
         log.info(`ledger fold: malformed line dropped in ${name}: ${line.slice(0, 60)} — ${errText(err)}`);
         skippedLines += 1;
       }
     }
+    if (opts.stopOnRestatement === true && lineageRestatements > 0) stoppedEarly = true;
   }
   records.sort((a, b) => {
     if (a.ts !== b.ts) return a.ts - b.ts;
     if (a.producerId !== b.producerId) return a.producerId < b.producerId ? -1 : 1;
     return a.seq - b.seq;
   });
-  return { records, unreadableFiles, skippedLines };
+  return { records, unreadableFiles, skippedLines, lineageRestatements, stoppedEarly };
 }
 
 // ---- quarantine -----------------------------------------------------------------

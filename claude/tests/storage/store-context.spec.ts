@@ -670,3 +670,115 @@ describe("store-context — resolvedSnapshot (the compaction counter's restore s
     expect((resolved?.details as { compactionsAfter?: unknown })?.compactionsAfter).toBe(4);
   });
 });
+
+describe("prepareStoreContext — the restated-lineage heal seam", () => {
+  const linRec = (edges: Array<{ uuid: string; parent: string | null }>, seq: number): string =>
+    JSON.stringify({
+      producerId: "p-heal",
+      seq,
+      ts: 2000 + seq,
+      marker: "m" + seq,
+      at: "m" + seq,
+      kind: "lineage",
+      payload: { edges },
+    });
+
+  async function seedDamaged(dir: string, mirror: MirrorWriter): Promise<void> {
+    await mirror.bufferRow(row("u1", null));
+    await mirror.bufferRow(row("u2", "u1"));
+    await mirror.flush();
+    await fs.writeText(
+      `${dir}/ledger-h1000001.jsonl`,
+      `${linRec(
+        [
+          { uuid: "u1", parent: null },
+          { uuid: "u2", parent: "u1" },
+        ],
+        1,
+      )}\n`,
+    );
+    await fs.writeText(
+      `${dir}/ledger-h2000002.jsonl`,
+      `${linRec(
+        [
+          { uuid: "u1", parent: null },
+          { uuid: "u2", parent: "u1" },
+        ],
+        2,
+      )}\n`,
+    );
+  }
+
+  test("restatements fire the heal and the re-fold serves the healed stream", async () => {
+    const dir = "/sess-heal";
+    const mirror = new MirrorWriter(fs, dir, "seed-heal");
+    await seedDamaged(dir, mirror);
+    const ledger = new LedgerWriter(fs, dir, "p-x");
+    let healed = 0;
+    const prepared = await prepareStoreContext(fs, dir, ledger, mirror, {
+      healLedger: async () => {
+        healed += 1;
+        // simulate the helper: collapse to one record (the memory adapter
+        // cannot unlink — the superseded batch is emptied instead)
+        await fs.writeText(
+          `${dir}/ledger-h1000001.jsonl`,
+          `${linRec(
+            [
+              { uuid: "u1", parent: null },
+              { uuid: "u2", parent: "u1" },
+            ],
+            3,
+          )}\n`,
+        );
+        await fs.writeText(`${dir}/ledger-h2000002.jsonl`, "");
+        return { done: true, restatedEdges: 2, uniqueEdges: 2 };
+      },
+    });
+    expect(healed).toBe(1);
+    const foldNow = await (await import("../../host/storage/ledger.js")).foldLedger(fs, dir);
+    expect(foldNow.lineageRestatements).toBe(0); // the healed stream is clean
+    expect(prepared.recordsRef.flushed.filter((r) => r.kind === "lineage")).toHaveLength(1);
+  });
+
+  test("a failed heal keeps loading from the redundant files (no throw, records complete)", async () => {
+    const dir = "/sess-heal-fail";
+    const mirror = new MirrorWriter(fs, dir, "seed-heal-fail");
+    await seedDamaged(dir, mirror);
+    const ledger = new LedgerWriter(fs, dir, "p-y");
+    let attempts = 0;
+    const prepared = await prepareStoreContext(fs, dir, ledger, mirror, {
+      healLedger: async () => {
+        attempts += 1;
+        return { done: false };
+      },
+    });
+    expect(attempts).toBe(1);
+    expect(prepared.recordsRef.flushed.filter((r) => r.kind === "lineage")).toHaveLength(2);
+  });
+
+  test("no seam: restatements are tolerated, the load completes on the redundant stream", async () => {
+    const dir = "/sess-heal-noseam";
+    const mirror = new MirrorWriter(fs, dir, "seed-noseam");
+    await seedDamaged(dir, mirror);
+    const ledger = new LedgerWriter(fs, dir, "p-z");
+    const prepared = await prepareStoreContext(fs, dir, ledger, mirror);
+    expect(prepared.recordsRef.flushed.filter((r) => r.kind === "lineage")).toHaveLength(2);
+  });
+
+  test("a clean stream never calls the heal", async () => {
+    const dir = "/sess-heal-clean";
+    const mirror = new MirrorWriter(fs, dir, "seed-clean");
+    await mirror.bufferRow(row("u1", null));
+    await mirror.flush();
+    await fs.writeText(`${dir}/ledger-h4000004.jsonl`, `${linRec([{ uuid: "u1", parent: null }], 4)}\n`);
+    const ledger = new LedgerWriter(fs, dir, "p-w");
+    let healed = 0;
+    await prepareStoreContext(fs, dir, ledger, mirror, {
+      healLedger: async () => {
+        healed += 1;
+        return { done: true, restatedEdges: 0, uniqueEdges: 1 };
+      },
+    });
+    expect(healed).toBe(0);
+  });
+});

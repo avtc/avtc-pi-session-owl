@@ -34,6 +34,7 @@ import { checkpointService } from "../rewind/checkpoint-service.js";
 import { getInstalledSettingsHandle, PORT_DEFAULTS_CONFIG } from "../settings/consumer.js";
 import { PORT_KEEP_RECENT_TOKENS_DEFAULT } from "../settings/port-fields.js";
 import { captureInitialPrompt } from "../start/initial-prompt.js";
+import { runLedgerHeal } from "../start/ledger-heal.js";
 import * as state from "../state.js";
 import { serveStatusReport } from "../status/report.js";
 import { sweepMirror } from "../storage/mirror.js";
@@ -161,7 +162,28 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
     prepared ??= (async () => {
       const sweep = await sweepMirror(storage.fs, storage.dir);
       storage.mirror.adoptRows(sweep.rows);
-      return prepareStoreContext(storage.fs, storage.dir, storage.ledger, storage.mirror);
+      return prepareStoreContext(storage.fs, storage.dir, storage.ledger, storage.mirror, {
+        // restated lineage storage heals through the process seam mid-load:
+        // detect, rewrite, re-read (never throws — a missing seam loads the
+        // redundant stream and a later load retries)
+        healLedger: async () => {
+          try {
+            const svcs = services();
+            return await runLedgerHeal(
+              {
+                runProcess: (argv: string[]) => svcs.processRun(argv) as Promise<{ stdout: string; exitCode: number }>,
+                log: (message: string, err?: unknown) =>
+                  log.warn(
+                    message + (err === undefined ? "" : `: ${err instanceof Error ? err.message : String(err)}`),
+                  ),
+              },
+              { pluginRoot: svcs.pluginRoot() as string, sessionDir: storage.dir },
+            );
+          } catch {
+            return { done: false };
+          }
+        },
+      });
     })();
     return prepared;
   };
