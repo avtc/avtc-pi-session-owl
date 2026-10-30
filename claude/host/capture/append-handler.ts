@@ -73,6 +73,10 @@ export function captureAppend(
   // would make the rewind check see a dead row at every turn boundary — a
   // false rewind aborting in-flight runs and quarantining their records.
   if (row.message.type === "system") return false;
+  // Hook-context rows are engine plumbing: delivered through the append
+  // event but NEVER written to the transcript file. Capturing them would
+  // leave permanent mirror residue the file can never confirm.
+  if (row.door === "hook-context") return false;
   const cap = ensureCapture(key, mirrorFor, row);
   const known = cap.rowCache.has(row.uuid);
   // The envelope carries no timestamp either — a row without one is stamped

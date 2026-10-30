@@ -306,6 +306,21 @@ describe("live chain processor — bounds, lifecycle and containment", () => {
     expect(h.patched).not.toContainEqual({ uuid: "j1", parent: "off-window" });
   });
 
+  test("uncaptured absent rows behind a present one are never amputation evidence", async () => {
+    // engine ceremony (hook-context and its kin) is delivered through the
+    // append event but never persisted — its absence proves nothing; only
+    // a CAPTURED row vanishing from the file is amputation
+    const h = harness({ owlTail: "t0", known: ["t0"] });
+    h.proc.enqueue(ev("hc1", false)); // ceremony, never in the file
+    h.proc.enqueue(ev("hc2", false));
+    h.proc.enqueue(ev("u1", true));
+    h.setTail(facts([row("t0", null), row("u1", "t0")]));
+    await h.proc.flush();
+    expect(h.patched).toEqual([{ uuid: "u1", parent: "t0" }]);
+    expect(h.rewinds).toEqual([]); // no verdict, no refold
+    expect(h.logs.some((l) => l.includes("amputat"))).toBe(false);
+  });
+
   test("a batch entirely absent from the tail is debounce lag: retry, keep, no verdict", async () => {
     const h = harness({ owlTail: "t0", known: ["t0"], tail: facts([row("t0", null)]) });
     h.proc.enqueue(ev("u1", true));

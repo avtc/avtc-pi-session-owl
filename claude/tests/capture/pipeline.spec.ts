@@ -60,6 +60,20 @@ describe("append-handler — capture", () => {
     expect(cap.pending).toEqual([]);
   });
 
+  test("hook-context rows are NOT captured — engine plumbing that never reaches the transcript file", () => {
+    // Capturing them leaves permanent mirror residue the file can never
+    // confirm (the row is delivered through the append event but never
+    // persisted), and the live chain would read its absence as amputation.
+    const hookCtx = row("hc-1", null, {
+      door: "hook-context",
+      message: { type: "attachment", name: "hook-context", content: [] } as never,
+    });
+    expect(captureAppend("s1", hookCtx, mirrorFor)).toBe(false);
+    const cap = ensureCapture("s1", mirrorFor);
+    expect(cap.rowCache.has("hc-1")).toBe(false);
+    expect(cap.pending).toEqual([]);
+  });
+
   test("rows land in the row cache, the pending list, and the mirror buffer", () => {
     const owlLoops = new Set<string>(["owl-agent-1"]);
     const isOwl = (agentId: string | undefined) => agentId !== undefined && owlLoops.has(agentId);

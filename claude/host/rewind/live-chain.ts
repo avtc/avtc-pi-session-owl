@@ -248,9 +248,12 @@ export class LiveChainProcessor {
     const sane = tail.rows.filter((r) => r.uuid.length <= MAX_UUID);
     const byUuid = new Map(sane.map((r) => [r.uuid, r] as const));
     // Partition the queue against the tail. The PRESENT rows (in queue
-    // order == file order) are this tick's batch; an ABSENT row positioned
-    // before the last present one is amputation evidence (dead); an absent
-    // row after it is only the debounce lag (kept for the next tick).
+    // order == file order) are this tick's batch; an absent CAPTURED row
+    // positioned before the last present one is amputation evidence (it
+    // was mirrored — the file no longer carries it); an absent UNCERTAIN
+    // row (ceremony the engine never persists) simply leaves the queue —
+    // it never had a file slot, so its absence proves nothing; an absent
+    // row after the last present one is only the debounce lag (kept).
     const present: QueuedEvent[] = [];
     const keep: QueuedEvent[] = [];
     const amputated: QueuedEvent[] = [];
@@ -263,8 +266,10 @@ export class LiveChainProcessor {
         present.unshift(event);
         continue;
       }
-      if (sawPresent) amputated.unshift(event);
-      else keep.unshift(event);
+      if (!sawPresent) keep.unshift(event);
+      else if (event.captured) amputated.unshift(event);
+      // an uncaptured absent row behind a present one: never-persisted
+      // ceremony — dropped without evidence
     }
     const deadAbsent = amputated.length;
     if (present.length === 0) {
