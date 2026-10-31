@@ -129,9 +129,13 @@ function makeCtx(branch: FakeEntry[]): {
     },
   };
   const ctx = {
+    hasUI: false,
+    ui: { notify: () => {} },
     sessionManager: {
       getLeafId: () => "leaf-1",
       getBranch: () => branch,
+      getEntries: () => branch,
+      getSessionFile: () => undefined,
       getEntry: (id: string) => branch.find((e) => e.id === id),
       getSessionId: () => "01a02596-de2e-707b-8016-1df74d3f13ce",
     },

@@ -29,6 +29,7 @@ import { terminateRegexWorker } from "./graph/regex-runner.js";
 import { clearLogSessionScope, log, setLogSessionScope } from "./log.js";
 import { abortAndAwaitIdle, abortInFlight } from "./runtime/run-lock.js";
 import { clearSessionOwlSessionBase, setSessionOwlSessionBase } from "./runtime/session-affinity.js";
+import { runChainRepairFlow } from "./store/chain-repair.js";
 import { encodeObservation, type ObservationEntry } from "./store/codecs.js";
 import {
   appendGraphDelta,
@@ -226,6 +227,15 @@ async function gatedLoadAndSeed(pi: ExtensionAPI, ctx: ExtensionContext, widget:
   widget.render();
 }
 
+/** The startup chain-repair gate: detect broken parent links (a lost append
+ *  truncates every later load) and offer/do the in-place repair before the
+ *  store folds the branch. On a completed repair pi is shutting down — the
+ *  caller skips the load (the fixed file needs a restart to be seen). */
+async function gateChainRepair(ctx: ExtensionContext): Promise<boolean> {
+  const outcome = await runChainRepairFlow(ctx);
+  return outcome !== "repaired";
+}
+
 /** Startup: reconstruct the graph + seed nGoal on an empty graph (no oInitialPrompt).
  *  Reconstruction always runs (read-only state for a mid-session enable); the nGoal
  *  seed WRITE is gated on `enabled` so a disabled session persists nothing. */
@@ -253,6 +263,7 @@ export async function onSessionStart(
   // Clear the per-observation details cache (entry ids are per-session — a
   // stale render must not survive a new/resume/fork).
   clearDetailsCache();
+  if (!(await gateChainRepair(ctx))) return; // repaired — pi is closing
   await gatedLoadAndSeed(pi, ctx, widget);
 }
 
@@ -368,6 +379,7 @@ export async function onSessionTree(
   // Clear the per-observation details cache — size hints + rendered texts from
   // the old branch must not survive the switch (mirrors session_start).
   clearDetailsCache();
+  if (!(await gateChainRepair(ctx))) return; // repaired — pi is closing
   await gatedLoadAndSeed(pi, ctx, widget);
 }
 

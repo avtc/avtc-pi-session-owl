@@ -128,6 +128,8 @@ function makeFakeCtx(state: FakePiState): ExtensionContext {
     sessionManager: {
       getLeafId: () => "leaf-1",
       getBranch: () => [...state.branch],
+      getEntries: () => [...state.branch],
+      getSessionFile: () => undefined,
       getEntry: (id: string) => state.branch.find((e) => e.id === id),
       getSessionId: () => "a1b2c3d4-0000-0000-0000-000000000000",
     },
