@@ -382,7 +382,16 @@ export class LiveChainProcessor {
       return;
     }
     if (deadAbsent > 0) {
-      this.deps.log(`live chain: ${deadAbsent} queued row(s) absent before a present one — amputation`);
+      // the absent rows' uuids ride the line (up to three) — the live
+      // transcript is the adjudication ground, so naming the rows makes a
+      // wrong verdict checkable against the file
+      const named = amputated
+        .slice(0, 3)
+        .map((e) => e.uuid)
+        .join(", ");
+      this.deps.log(
+        `live chain: ${deadAbsent} queued row(s) absent before a present one — amputation (${named}${deadAbsent > 3 ? ", …" : ""})`,
+      );
     }
     const capturedByUuid = new Map(this.queue.map((e) => [e.uuid, e.captured] as const));
     const indexOfUuid = new Map(sane.map((r, i) => [r.uuid, i] as const));

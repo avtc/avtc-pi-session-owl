@@ -20,13 +20,17 @@ describe("installUnhandledRejectionLogging (the process-level net)", () => {
     };
     try {
       installUnhandledRejectionLogging();
-      expect(handlers.length).toBe(1);
+      expect(handlers.length).toBe(2); // the rejection arm + the uncaught arm
       const boom = new Error("net caught the slip");
       handlers[0](boom);
       expect(warned.length).toBe(1);
       expect(warned[0].startsWith("unhandled rejection (process net): ")).toBe(true);
       expect(warned[0]).toContain("net caught the slip");
       expect(warned[0]).toContain("at "); // the stack survived into the log
+      // the synchronous twin: an uncaught exception is logged, not fatal
+      handlers[1](new Error("sync throw survived"));
+      expect(warned[1].startsWith("uncaught exception (process net — the worker survived): ")).toBe(true);
+      expect(warned[1]).toContain("sync throw survived");
     } finally {
       (globalThis as { process?: unknown }).process = savedGlobal;
       warnSpy.mockRestore();
