@@ -47,7 +47,11 @@ export interface WarmReport {
 export async function warmDetailsCache(deps: WarmDetailsDeps): Promise<WarmReport> {
   const t0 = Date.now();
   const chunk = deps.chunkSize ?? 200;
-  const yieldLane = deps.yieldLane ?? (() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const yieldLane =
+    deps.yieldLane ??
+    (typeof setImmediate === "function"
+      ? () => new Promise<void>((resolve) => setImmediate(resolve))
+      : () => Promise.resolve());
   let warmed = 0;
   let failed = 0;
   let sinceYield = 0;
