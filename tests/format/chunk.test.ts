@@ -17,7 +17,13 @@ import type {
   SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { buildChunks, type ChunkOptions, hasAssistantText, renderBlocks } from "../../src/format/chunk.js";
+import {
+  buildChunks,
+  type ChunkOptions,
+  hasAssistantText,
+  includeThinkingFor,
+  renderBlocks,
+} from "../../src/format/chunk.js";
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -650,5 +656,13 @@ describe("buildChunks: shortEntryIds", () => {
     expect(chunks[0].text).toBe(`<USER entryId=${UUID1}>hello world</USER>`);
     expect(chunks[0].idMap).toBeUndefined();
     expect(chunks[0].allowedIds).toEqual(new Set([UUID1]));
+  });
+});
+
+describe("includeThinkingFor — the global hideThinking kill-switch", () => {
+  it("observer's knob ANDs with hideThinking (hidden thinking never renders)", () => {
+    expect(includeThinkingFor({ observerIncludeThinking: true, hideThinking: true })).toBe(false);
+    expect(includeThinkingFor({ observerIncludeThinking: true, hideThinking: false })).toBe(true);
+    expect(includeThinkingFor({ observerIncludeThinking: false, hideThinking: false })).toBe(false);
   });
 });

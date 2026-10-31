@@ -48,7 +48,7 @@ test("the mid-chain fork raises exactly one rewind verdict (live probe shape)", 
   const logs: string[] = [];
   const rewinds: Array<{ settle: string | null }> = [];
   const patched: Array<{ uuid: string; parent: string | null }> = [];
-  let fire: (() => void) | null = null;
+  let _fire: (() => void) | null = null;
   const proc = new LiveChainProcessor({
     statSize: async () => 1000,
     readTail: async () => tail(),
@@ -66,7 +66,7 @@ test("the mid-chain fork raises exactly one rewind verdict (live probe shape)", 
     },
     dormant: () => false,
     schedule: (_ms, fn) => {
-      fire = fn;
+      _fire = fn;
       return () => {};
     },
     log: (m) => {

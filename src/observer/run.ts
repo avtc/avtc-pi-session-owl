@@ -25,7 +25,7 @@ import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-wor
 import { Type } from "typebox";
 import { getSessionOwlSettings, type SessionOwlConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
-import { buildChunks, type ChunkOptions, type RenderedChunk } from "../format/chunk.js";
+import { buildChunks, type ChunkOptions, includeThinkingFor, type RenderedChunk } from "../format/chunk.js";
 import { computeDetailsAndCache, type EntryResolver } from "../format/details.js";
 import { toStoredTimestamp } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
@@ -302,7 +302,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   const chunkOptions: ChunkOptions = {
     tokenThreshold: input.settings.observerThresholdTokens,
     toolBlockCapTokens: input.settings.observerToolBlockCapTokens,
-    includeThinking: input.settings.observerIncludeThinking,
+    includeThinking: includeThinkingFor(input.settings),
     includeEntryId: true,
   };
   const chunks = buildChunks(input.unobserved, chunkOptions);

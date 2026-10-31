@@ -14,7 +14,7 @@
 
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { getSessionOwlSettings, type SessionOwlConfig } from "./config/schema.js";
-import { type ChunkOptions, isRenderableEntry, renderBlocks } from "./format/chunk.js";
+import { type ChunkOptions, includeThinkingFor, isRenderableEntry, renderBlocks } from "./format/chunk.js";
 import { measureRootViewTokens } from "./graph/read-tools.js";
 import { log } from "./log.js";
 import { acquireOrSkip, armRearmOnRelease, inFlight, type StageName } from "./runtime/run-lock.js";
@@ -85,7 +85,7 @@ function estimateUnobservedTokens(unobserved: SessionEntry[], settings: SessionO
   const options: ChunkOptions = {
     tokenThreshold: Number.POSITIVE_INFINITY,
     toolBlockCapTokens: settings.observerToolBlockCapTokens,
-    includeThinking: settings.observerIncludeThinking,
+    includeThinking: includeThinkingFor(settings),
     includeEntryId: true,
   };
   const blocks = renderBlocks(unobserved, options);

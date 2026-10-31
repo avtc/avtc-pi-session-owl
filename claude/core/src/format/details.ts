@@ -6,10 +6,11 @@
 // chunk tag format — but as a recall consumer (no entryId=id attribute, since the
 // agent/Builder/Selector have no use for raw session entry ids).
 //
-// FULL VERBATIM: thinking is ALWAYS included and tool args/results are NEVER
-// capped — the Observer's observerIncludeThinking / observerToolBlockCapTokens
-// exist so the Observer LLM doesn't choke on huge content; the verbatim source
-// (counts at capture, full text at recall) is always complete.
+// FULL VERBATIM: tool args/results are NEVER capped — the Observer's
+// observerToolBlockCapTokens exists so the Observer LLM doesn't choke on huge
+// content; the verbatim source (counts at capture, full text at recall) is
+// always complete. Thinking is included unless hideThinking is on (some hosts
+// review model-facing content for reasoning-like text).
 //
 // The toolCallId pairing (call -> its result, interleaved) is handled by
 // renderGroups over the WHOLE resolved entry list — per-entry standalone flatten
@@ -17,6 +18,7 @@
 // list is rendered together.
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { getSessionOwlSettings } from "../config/schema.js";
 import { currentConversationKey } from "../runtime/conversation-key.js";
 import { countLines, estimateContentTokens } from "../types.js";
 import { BLOCK_SEP, type ChunkOptions, renderBlocks } from "./chunk.js";
@@ -58,20 +60,30 @@ function cacheForActiveConversation(): Map<string, DetailsRender> {
   return cache;
 }
 
-/** Render options for the verbatim-source details render: full, no entryId=id. */
-const DETAILS_OPTIONS: ChunkOptions = {
-  tokenThreshold: Number.POSITIVE_INFINITY,
-  toolBlockCapTokens: null, // untruncated — full verbatim
-  includeThinking: true, // always — the verbatim source, not observer-gated
-  includeEntryId: false, // recall consumers can't act on raw entry ids
-};
+/** Render options for the verbatim-source details render: full, no entryId=id.
+ *  Thinking rides the hideThinking gate (the cache key carries the flag, so a
+ *  flip never serves a stale render). */
+function detailsOptions(): ChunkOptions {
+  return {
+    tokenThreshold: Number.POSITIVE_INFINITY,
+    toolBlockCapTokens: null, // untruncated — full verbatim
+    includeThinking: !getSessionOwlSettings().hideThinking,
+    includeEntryId: false, // recall consumers can't act on raw entry ids
+  };
+}
+
+/** Cache key for an observation render — the hideThinking flag rides the key
+ *  so flipping the setting never serves a render from the other mode. */
+function cacheKey(obsId: string): string {
+  return getSessionOwlSettings().hideThinking ? `${obsId}:ht` : obsId;
+}
 
 /** Core render: resolve entries, render untruncated, count lines + tokens.
  *  Returns null when nothing resolves or nothing renderable. Pure (no cache). */
 function renderDetailsText(sourceEntryIds: readonly string[], resolveEntries: EntryResolver): DetailsRender | null {
   const entries = resolveEntries(sourceEntryIds) as readonly SessionEntry[];
   if (entries.length === 0) return null; // source_unavailable
-  const text = renderBlocks(entries, DETAILS_OPTIONS)
+  const text = renderBlocks(entries, detailsOptions())
     .map((block) => block.text)
     .join(BLOCK_SEP);
   if (text.length === 0) return null; // resolved but nothing renderable
@@ -94,7 +106,7 @@ export function computeDetailsAndCache(
 ): { lines: number; tokens: number } | null {
   const render = renderDetailsText(sourceEntryIds, resolveEntries);
   if (render === null) return null;
-  cacheForActiveConversation().set(obsId, render);
+  cacheForActiveConversation().set(cacheKey(obsId), render);
   return { lines: render.lines, tokens: render.tokens };
 }
 
@@ -115,7 +127,7 @@ export function computeDetailsAndCacheFor(
     bucket = new Map<string, DetailsRender>();
     detailsCaches.set(key, bucket);
   }
-  bucket.set(obsId, render);
+  bucket.set(cacheKey(obsId), render);
   return { lines: render.lines, tokens: render.tokens };
 }
 
@@ -132,11 +144,12 @@ export function renderDetails(
   resolveEntries: EntryResolver,
 ): DetailsRender | null {
   const cache = cacheForActiveConversation();
-  const cached = cache.get(obsId);
+  const key = cacheKey(obsId);
+  const cached = cache.get(key);
   if (cached !== undefined) return cached;
   const render = renderDetailsText(sourceEntryIds, resolveEntries);
   if (render === null) return null;
-  cache.set(obsId, render);
+  cache.set(key, render);
   return render;
 }
 

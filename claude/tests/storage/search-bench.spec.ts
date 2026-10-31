@@ -6,7 +6,6 @@
 // process start) vs the warm cache, against the 10s hook budget.
 // Opt-in everywhere: point SESSION_OWL_BENCH_DIR at a store copy.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { FsAdapter } from "../../host/storage/fs-adapter.js";
 

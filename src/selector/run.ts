@@ -19,6 +19,7 @@ import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SessionOwlConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
+import { includeThinkingFor } from "../format/chunk.js";
 import { renderTreeTotal } from "../format/render.js";
 import { formatTokens } from "../format/tokens.js";
 import { measureRootViewTokens, nonObsoleteRoots, renderRootViewFromRoots } from "../graph/read-tools.js";
@@ -365,7 +366,7 @@ function buildInputView(sourceGraph: Graph, input: SelectorRunInput): SelectorIn
     chunkOptions: {
       tokenThreshold: input.settings.observerThresholdTokens,
       toolBlockCapTokens: input.settings.observerToolBlockCapTokens,
-      includeThinking: input.settings.observerIncludeThinking,
+      includeThinking: includeThinkingFor(input.settings),
       includeEntryId: false,
     },
   });

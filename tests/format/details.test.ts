@@ -2,7 +2,8 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { clearDetailsCache, computeDetailsAndCache, renderDetails } from "../../src/format/details.js";
 import { activateConversation, resetConversationStates } from "../../src/store/graph-store.js";
 import { estimateContentTokens } from "../../src/types.js";
@@ -224,5 +225,57 @@ describe("computeDetailsAndCacheFor (the keyed warm write)", () => {
     const served = renderDetails("o-warm", ["e-warm"], noResolve);
     expect(served?.text).toContain("verbatim for e-warm");
     resetConversationStates();
+  });
+});
+
+/** An assistant entry carrying a non-redacted thinking part (verbatim source). */
+function thinkingEntry(id: string, thinking: string, text: string): SessionEntry {
+  return {
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: 0,
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking },
+        { type: "text", text },
+      ],
+      timestamp: 0,
+    },
+  } as unknown as SessionEntry;
+}
+
+describe("renderDetails — the hideThinking gate", () => {
+  beforeEach(() => clearDetailsCache());
+  afterEach(() => _resetGetSessionOwlSettings());
+
+  it("omits thinking blocks when hideThinking is on", () => {
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, hideThinking: true }));
+    const e = thinkingEntry("t1", "my hidden reasoning", "the answer");
+    const out = renderDetails("oh1", ["t1"], resolverFor([e]));
+    expect(out?.text).toBe("<ASSISTANT>the answer</ASSISTANT>");
+    expect(out?.text).not.toContain("hidden reasoning");
+    expect(out?.text).not.toContain("THINKING");
+  });
+
+  it("includes thinking when hideThinking is off (default)", () => {
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, hideThinking: false }));
+    const e = thinkingEntry("t1", "my visible reasoning", "the answer");
+    const out = renderDetails("oh2", ["t1"], resolverFor([e]));
+    expect(out?.text).toContain("<THINKING>my visible reasoning</THINKING>");
+    expect(out?.text).toContain("<ASSISTANT>the answer</ASSISTANT>");
+  });
+
+  it("a flag flip never serves the other mode's cached render", () => {
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, hideThinking: false }));
+    const e = thinkingEntry("t1", "cache flip reasoning", "the answer");
+    const visible = renderDetails("oh3", ["t1"], resolverFor([e]));
+    expect(visible?.text).toContain("cache flip reasoning");
+    // flip ON: the cached visible render must not be reused
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, hideThinking: true }));
+    const hidden = renderDetails("oh3", ["t1"], resolverFor([e]));
+    expect(hidden?.text).not.toContain("cache flip reasoning");
+    expect(hidden?.text).toContain("<ASSISTANT>the answer</ASSISTANT>");
   });
 });

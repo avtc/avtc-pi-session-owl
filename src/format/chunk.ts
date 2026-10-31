@@ -50,6 +50,13 @@ export interface ChunkOptions {
   readonly shortEntryIds?: boolean;
 }
 
+/** The effective includeThinking for a chunk render: the observer's own knob
+ *  ANDed with the global hideThinking kill-switch (hidden thinking is never
+ *  rendered anywhere verbatim source could reach a model). */
+export function includeThinkingFor(settings: { observerIncludeThinking: boolean; hideThinking: boolean }): boolean {
+  return settings.observerIncludeThinking && !settings.hideThinking;
+}
+
 export interface RenderedChunk {
   readonly text: string;
   readonly allowedIds: ReadonlySet<string>;

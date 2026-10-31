@@ -44,6 +44,10 @@ export interface SessionOwlConfig {
   /** Register even when a conflicting compaction extension is detected
    *  (deliberate co-run, e.g. benchmarking). */
   ignoreConflicts: boolean;
+  /** Never render non-redacted thinking blocks in any verbatim render that
+   *  could reach a model — owl_recall details and grep excerpts, Observer
+   *  and Selector input, the Builder/Selector read tools. */
+  hideThinking: boolean;
   defaultModel: string | null;
   /** Thinking level for all stages when a stage doesn't override. null = reuse
    *  the session's thinking level (ctx.thinkingLevel). "off" = no thinking. */
@@ -146,6 +150,7 @@ export const DEFAULT_CONFIG: Readonly<SessionOwlConfig> = Object.freeze({
   enabled: true,
   subagentMode: "on-compaction",
   ignoreConflicts: false,
+  hideThinking: false,
   defaultModel: NO_MODEL,
   defaultThinkingLevel: NO_MODEL,
   renderMode: DEFAULT_RENDER_MODE,
@@ -318,6 +323,13 @@ const SETTINGS: readonly SettingSchema[] = [
       "Register even when a conflicting compaction extension is detected (for deliberate co-runs, e.g. benchmarking).",
     type: "boolean",
     defaultValue: DEFAULT_CONFIG.ignoreConflicts,
+  }),
+  setting("hideThinking", {
+    label: "Hide thinking blocks",
+    description:
+      "Skip non-redacted thinking blocks in every verbatim render — owl_recall details and excerpts, Observer and Selector input.",
+    type: "boolean",
+    defaultValue: DEFAULT_CONFIG.hideThinking,
   }),
   setting("defaultModel", {
     label: "Default model",
@@ -599,6 +611,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "enabled",
       "subagentMode",
       "ignoreConflicts",
+      "hideThinking",
       "defaultModel",
       "defaultThinkingLevel",
       "renderMode",

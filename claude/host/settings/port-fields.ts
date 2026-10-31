@@ -140,6 +140,9 @@ const PORT_SHARED_DEFAULTS: Readonly<Record<string, unknown>> = {
   // graceful stop (partial results + a refine hint) must land UNDER that
   // cut or the hook dies first and the model sees no answer at all
   findTimeoutMs: 8_000,
+  // the host's auto mode reviews model-facing content and can stop a
+  // response over reasoning-like verbatim text; hidden by default here
+  hideThinking: true,
 };
 
 export function withPortDefaults<S extends SchemaShape>(base: S): S {
