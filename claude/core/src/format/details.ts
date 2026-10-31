@@ -161,6 +161,31 @@ export function clearDetailsCache(): void {
   if (cache !== undefined) cache.clear();
 }
 
+/** Detach the ACTIVE conversation's details bucket and hand it to the
+ *  caller. A same-conversation reload (the rewind refold) detaches before
+ *  the load clears, then re-attaches: renders are stable per observation id
+ *  (no bust logic), so the surviving rows' entries stay valid and the next
+ *  recall stays warm. Returns null when there is no bucket yet. */
+export function detachActiveDetailsBucket(): Map<string, DetailsRender> | null {
+  const key = currentConversationKey();
+  const bucket = detailsCaches.get(key);
+  if (bucket === undefined) return null;
+  detailsCaches.delete(key);
+  return bucket;
+}
+
+/** Re-install a detached bucket as the ACTIVE conversation's cache, merging
+ *  any entries rendered while it was detached (renders are deterministic, so
+ *  the pairs agree by construction). */
+export function reattachActiveDetailsBucket(bucket: Map<string, DetailsRender>): void {
+  const key = currentConversationKey();
+  const existing = detailsCaches.get(key);
+  if (existing !== undefined) {
+    for (const [entryKey, render] of existing) bucket.set(entryKey, render);
+  }
+  detailsCaches.set(key, bucket);
+}
+
 /** Drop every conversation's bucket — the process-wide reset (test/teardown
  *  seam; graph-store's resetConversationStates calls this). */
 export function clearAllDetailsCaches(): void {

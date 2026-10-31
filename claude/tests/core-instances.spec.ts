@@ -233,6 +233,43 @@ describe("core multiplexer — serialized swap", () => {
     expect(unobserved.map((e) => e.id)).toEqual(["e1", "e3", "e4"]); // the observer sees work again
   });
 
+  test("a same-key refold reload keeps the warmed details cache; a conversation switch clears it", async () => {
+    // Renders are stable per observation id (the details cache has no bust
+    // logic), so a rewind refold's forced reload must not freeze the whole
+    // bucket — the next recall would re-render every observation verbatim
+    // and wedge the worker. A real conversation switch still clears (entry
+    // ids are per-conversation).
+    const ctx = makeFakeCtx();
+    await getCore("sA", { ctxFactory: () => ctx });
+    let resolverCalls = 0;
+    const countingResolver = ((ids: readonly string[]) => {
+      resolverCalls += 1;
+      return [
+        {
+          type: "message",
+          id: ids[0],
+          parentId: null,
+          timestamp: 0,
+          message: { role: "user", content: "verbatim", timestamp: 0 },
+        },
+      ];
+    }) as never;
+    const { computeDetailsAndCacheFor, renderDetails } = await import("../core/src/format/details.js");
+    expect(computeDetailsAndCacheFor("sA", "o1", ["e0"], countingResolver)).not.toBeNull();
+    expect(resolverCalls).toBe(1); // the warm render
+    expect(renderDetails("o1", ["e0"], countingResolver)).not.toBeNull();
+    expect(resolverCalls).toBe(1); // served from the cache
+
+    expect(await reloadCoreFor("sA")).toBe(true); // the refold's forced reload
+    expect(renderDetails("o1", ["e0"], countingResolver)).not.toBeNull();
+    expect(resolverCalls).toBe(1); // PRESERVED — the refold reload must not clear
+
+    await getCore("sB", { ctxFactory: () => makeFakeCtx() });
+    await getCore("sA", { ctxFactory: () => ctx }); // cold reload of sA
+    expect(renderDetails("o1", ["e0"], countingResolver)).not.toBeNull();
+    expect(resolverCalls).toBe(2); // re-rendered — the switch-away cleared the bucket
+  });
+
   test("reloadCoreFor is a no-op for a key that is not live (the next swap loads fresh)", async () => {
     const ctxA = makeFakeCtx();
     await getCore("sA", { ctxFactory: () => ctxA });

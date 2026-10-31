@@ -211,6 +211,11 @@ async function swapTo(key: string, forceLoad = false): Promise<void> {
     return;
   }
   const f = factories.get(key);
+  // A same-conversation forced reload (the rewind refold) preserves the
+  // warmed details bucket across the load: renders are stable per
+  // observation id, and re-freezing them would make the next recall render
+  // every observation verbatim again.
+  const keptDetailsBucket = currentKey === key ? details.detachActiveDetailsBucket() : null;
   // Cold (or forced) load: activate already pointed the singleton at `key`;
   // drop any stale/partial state for THIS key before installing its view —
   // the previous conversation's resident state stays in its map entry.
@@ -227,6 +232,7 @@ async function swapTo(key: string, forceLoad = false): Promise<void> {
     await (ctx as { refresh?: () => Promise<void> }).refresh?.();
     await graphStore.load(ctx);
   }
+  if (keptDetailsBucket !== null) details.reattachActiveDetailsBucket(keptDetailsBucket);
   const g = graphStore.getGraphStore().graph as { nodes: Map<string, unknown>; observations: Map<string, unknown> };
   traceSeq += 1;
   (g as unknown as { owlTrace?: number }).owlTrace = traceSeq; // cross-module identity: which swap installed this graph object
