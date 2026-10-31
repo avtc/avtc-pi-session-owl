@@ -136,6 +136,32 @@ export function formatWidgetLine(snap: WidgetSnapshot, theme: ThemeSeam): string
 }
 
 /**
+ * The idle store line: the structural counts without the runtime cluster —
+ * between runs there is no stage context or streaming to report, so the line
+ * reads `🦉 {obs} obs → {roots} roots` and nothing trailing.
+ */
+export function formatIdleLine(snap: WidgetSnapshot, theme: ThemeSeam): string {
+  const owl = paint(theme, "text", `${OWL} `);
+  // idle carries no run-scoped state: the batch counter and the per-run
+  // deltas (vs the last run's baseline) do not ride it
+  const effective: WidgetSnapshot = {
+    ...snap,
+    batch: null,
+    inFlightObs: 0,
+    obs: { ...snap.obs, delta: 0 },
+    roots: { ...snap.roots, countDelta: 0, tokenDelta: 0 },
+    selected: snap.selected === null ? null : { ...snap.selected, countDelta: 0, tokenDelta: 0 },
+  };
+  const structuralParts: string[] = [obsSection(effective, theme), rootsSection(effective, theme)];
+  const selected = selectedSection(effective, theme);
+  if (selected !== null) structuralParts.push(selected);
+  return `${owl}${structuralParts.join(paint(theme, "dim", SEP))}`;
+}
+
+/** The store-load gate line (static until the session's fold lands). */
+export const OWL_LOADING_TEXT = "🦉 loading memory — please wait before you proceed";
+
+/**
  * The conflict-pause line (static — no stages run while paused):
  * `🦉 ⚠ paused — {names} also handle(s) compaction (/owl:status)`.
  * Width-aware degradation ladder — the resolution hint `(/owl:status)` is the

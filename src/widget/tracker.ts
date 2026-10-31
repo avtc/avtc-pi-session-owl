@@ -19,7 +19,7 @@ import type { StageUsage } from "../runtime/agent-loop.js";
 import { deltaTextOf, deltaTokens, messageEndUsage, streamedOutputUsage } from "../runtime/streaming-tokens.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { estimateContentTokens, type SessionOwlGraph } from "../types.js";
-import { formatConflictLine, formatWidgetLine } from "./render.js";
+import { formatConflictLine, formatIdleLine, formatWidgetLine, OWL_LOADING_TEXT } from "./render.js";
 
 /** The maintenance stages the widget surfaces (one at a time; run-level). */
 export type WidgetStage = "observe" | "build" | "select";
@@ -70,7 +70,8 @@ const ZERO_USAGE: StageUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 
 
 /** A render-time snapshot of the tracker + live graph/config counts. */
 export interface WidgetSnapshot {
-  stage: WidgetStage;
+  /** The active stage, or null between runs (no section takes the accent). */
+  stage: WidgetStage | null;
   pass: number;
   batch: BatchProgress | null;
   usage: StageUsage;
@@ -412,7 +413,7 @@ export function buildSnapshot(tracker: ProgressTracker, ctx: ExtensionContext): 
       : null;
 
   return {
-    stage: (tracker.stage ?? "observe") as WidgetStage,
+    stage: tracker.stage,
     pass: tracker.pass,
     batch: tracker.batch,
     usage: tracker.usage,
@@ -441,6 +442,9 @@ export interface WidgetController extends StageController {
   setCtx(ctx: ExtensionContext): void;
   clearCtx(): void;
   render(): void;
+  /** Show (or clear) the store-load gate line — the widget stays visible from
+   *  session start, announcing the load until the fold lands. */
+  setLoading(on: boolean): void;
   /** Conflict-pause mode: publish the static paused line instead of stage
    *  progress (names = conflicting package names; null-able via []). */
   setConflict(names: string[]): void;
@@ -453,6 +457,7 @@ export const NO_OP_WIDGET: WidgetController = {
   setCtx: NO_OP,
   clearCtx: NO_OP,
   render: NO_OP,
+  setLoading: NO_OP,
   setConflict: NO_OP,
   startStage: NO_OP,
   setPass: NO_OP,
@@ -467,6 +472,7 @@ export function initWidget(): WidgetController {
   const tracker = createTracker();
   let ctxRef: ExtensionContext | null = null;
   let conflictNames: string[] | null = null;
+  let loading = false;
   // Throttle renders: a fast stream emits many message_update events, but the
   // widget only needs a fresh line every so often — and rendering every chunk
   // (microtask) can saturate pi's event loop on a runaway generation, freezing
@@ -481,19 +487,23 @@ export function initWidget(): WidgetController {
     const elapsed = now - lastRenderMs;
     if (trailingTimer === null && elapsed >= RENDER_INTERVAL_MS) {
       lastRenderMs = now;
-      renderWidget(tracker, ctxRef, conflictNames);
+      renderWidget(tracker, ctxRef, conflictNames, loading);
       return;
     }
     if (trailingTimer !== null) return; // a trailing render is already pending
     trailingTimer = setTimeout(() => {
       trailingTimer = null;
       lastRenderMs = Date.now();
-      renderWidget(tracker, ctxRef, conflictNames);
+      renderWidget(tracker, ctxRef, conflictNames, loading);
     }, RENDER_INTERVAL_MS - elapsed);
   };
   return {
     setCtx(ctx) {
       ctxRef = ctx;
+    },
+    setLoading(on) {
+      loading = on;
+      scheduleRender();
     },
     clearCtx() {
       // hide the widget before dropping the ref (session-switch/fork teardown —
@@ -520,18 +530,18 @@ export function initWidget(): WidgetController {
       // ends with no further events, so without this the last stage's line
       // (e.g. the Selector's final `N selected`) would persist forever. The
       // onEvent path coalesces its own renders; endStage is one-shot.
-      renderWidget(tracker, ctxRef, conflictNames);
+      renderWidget(tracker, ctxRef, conflictNames, loading);
     },
     onEvent(event) {
       tracker.onEvent(event);
       scheduleRender();
     },
     render() {
-      renderWidget(tracker, ctxRef, conflictNames);
+      renderWidget(tracker, ctxRef, conflictNames, loading);
     },
     setConflict(names) {
       conflictNames = names;
-      renderWidget(tracker, ctxRef, conflictNames);
+      renderWidget(tracker, ctxRef, conflictNames, loading);
     },
   };
 }
@@ -546,7 +556,12 @@ const TEXT_PAD_X = 0;
 const TEXT_PAD_Y = 0;
 
 /** Publish the widget line (or hide it) via ctx.ui.setWidget. */
-function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null, conflictNames: string[] | null): void {
+function renderWidget(
+  tracker: ProgressTracker,
+  ctx: ExtensionContext | null,
+  conflictNames: string[] | null,
+  loading: boolean,
+): void {
   if (ctx === null) return;
   // TUI-only: no-op in rpc/json/print.
   if (ctx.mode !== "tui" || !ctx.hasUI) return;
@@ -564,9 +579,27 @@ function renderWidget(tracker: ProgressTracker, ctx: ExtensionContext | null, co
     );
     return;
   }
-  // idle → hide the line (a prior render may have shown it during a run).
+  // the store-load gate: the widget stays visible from session start,
+  // announcing the load until the session's fold lands
+  if (loading && tracker.stage === null) {
+    ctx.ui.setWidget(WIDGET_KEY, () => new Text(OWL_LOADING_TEXT, TEXT_PAD_X, TEXT_PAD_Y), {
+      placement: WIDGET_PLACEMENT,
+    });
+    return;
+  }
+  // idle → the store line (always visible): live structural counts, no stage
+  // accent, no runtime cluster. A disabled owl owns no widget.
   if (tracker.stage === null) {
-    hideWidget(ctx);
+    if (!getSessionOwlSettings().enabled) {
+      hideWidget(ctx);
+      return;
+    }
+    const idleSnapshot = buildSnapshot(tracker, ctx);
+    ctx.ui.setWidget(
+      WIDGET_KEY,
+      (_tui, theme) => new Text(formatIdleLine(idleSnapshot, theme), TEXT_PAD_X, TEXT_PAD_Y),
+      { placement: WIDGET_PLACEMENT },
+    );
     return;
   }
   const snapshot = buildSnapshot(tracker, ctx);

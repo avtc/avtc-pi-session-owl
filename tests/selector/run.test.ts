@@ -149,6 +149,7 @@ function selectionWidget(): WidgetController & {
   return {
     setConflict: () => {},
     setCtx: base.setCtx,
+    setLoading: base.setLoading,
     clearCtx: base.clearCtx,
     render: base.render,
     startStage(stage, init) {

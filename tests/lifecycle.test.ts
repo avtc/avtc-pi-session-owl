@@ -142,6 +142,7 @@ function makeCtx(branch: FakeEntry[]): {
 const noopWidget: WidgetController = {
   setConflict: () => {},
   setCtx: () => {},
+  setLoading: () => {},
   clearCtx: () => {},
   render: () => {},
   startStage: () => {},
@@ -211,6 +212,14 @@ describe("onSessionStart", () => {
   afterEach(() => {
     _resetGetSessionOwlSettings();
     clearLogSessionScope();
+  });
+
+  it("gates the widget on loading across the store load (true before, false after)", async () => {
+    const calls: boolean[] = [];
+    const widget: WidgetController = { ...noopWidget, setLoading: (on: boolean) => calls.push(on) };
+    const { ctx, pi } = makeCtx([]);
+    await onSessionStart({ type: "session_start", reason: "startup" }, ctx, pi, widget);
+    expect(calls).toEqual([true, false]);
   });
 
   it("loads the store + seeds nGoal on an empty graph (no oInitialPrompt)", async () => {

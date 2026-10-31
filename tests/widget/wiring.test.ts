@@ -7,6 +7,7 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { resetForNewSession } from "../../src/store/graph-store.js";
 import { initWidget, WIDGET_KEY } from "../../src/widget/tracker.js";
 
@@ -68,23 +69,65 @@ describe("initWidget wiring", () => {
     expect(lines[0]).toContain("🦉");
   });
 
-  it("render() idle (stage null) → setWidget(key, undefined) to hide", () => {
+  function renderFactory(calls: SetWidgetCall[], at: number): (w: number) => string[] {
+    const factory = calls[at]?.content as unknown as (
+      tui: unknown,
+      theme: unknown,
+    ) => { render: (w: number) => string[] };
+    const fakeTheme = { fg: (_c: string, t: string) => t };
+    return (w: number) => factory({}, fakeTheme).render(w);
+  }
+
+  it("render() idle (stage null) → the store line stays visible (counts, no runtime cluster)", () => {
     const widget = initWidget();
     const { ctx, calls } = makeCtx(null);
     widget.setCtx(ctx);
-    // show first, then endStage → render hides (endStage itself republishes a
-    // hide, so the subsequent render() is a redundant re-hide)
     widget.startStage("observe");
     widget.render();
     widget.endStage();
     widget.render();
-    // every call after endStage hides (content undefined)
-    const hideCalls = calls.filter((c) => c.content === undefined);
-    expect(hideCalls.length).toBeGreaterThanOrEqual(1);
-    expect(hideCalls.every((c) => c.key === WIDGET_KEY)).toBe(true);
+    const last = calls[calls.length - 1];
+    expect(last?.key).toBe(WIDGET_KEY);
+    expect(last?.content).toBeDefined(); // NOT hidden — the idle store line
+    const line = renderFactory(calls, calls.length - 1)(120)[0] ?? "";
+    expect(line).toContain("🦉");
+    expect(line).toContain(" obs");
+    expect(line).toContain(" roots");
+    expect(line).not.toContain("tok"); // no runtime cluster when idle
   });
 
-  it("endStage() republishes so the line hides when the stage drops to null (no follow-up render needed)", () => {
+  it("a disabled owl owns no widget — idle hides", () => {
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
+    try {
+      const widget = initWidget();
+      const { ctx, calls } = makeCtx(null);
+      widget.setCtx(ctx);
+      widget.render();
+      const last = calls[calls.length - 1];
+      expect(last?.content).toBeUndefined();
+    } finally {
+      _resetGetSessionOwlSettings();
+    }
+  });
+
+  it("setLoading(true) → the loading line; cleared → the store line", () => {
+    const widget = initWidget();
+    const { ctx, calls } = makeCtx(null);
+    widget.setCtx(ctx);
+    widget.setLoading(true);
+    widget.render();
+    const atLoad = calls.length - 1;
+    expect(calls[atLoad]?.key).toBe(WIDGET_KEY);
+    const loadingLine = renderFactory(calls, atLoad)(120)[0] ?? "";
+    expect(loadingLine).toContain("🦉 loading memory — please wait before you proceed");
+    widget.setLoading(false);
+    widget.render();
+    const idleLine = renderFactory(calls, calls.length - 1)(120)[0] ?? "";
+    expect(idleLine).toContain(" obs");
+    expect(idleLine).toContain(" roots");
+  });
+
+  it("endStage() republishes the store line when the stage drops to null (no follow-up render needed)", () => {
     // A run ends with no further events; without endStage republishing, the
     // last stage's line (e.g. the Selector's final `N selected`) persists.
     const widget = initWidget();
@@ -93,11 +136,11 @@ describe("initWidget wiring", () => {
     widget.startStage("select");
     widget.render(); // shown (stage active)
     const shownCount = calls.length;
-    widget.endStage(); // must itself hide — no explicit render() follows
+    widget.endStage(); // must itself republish the idle store line
     expect(calls.length).toBeGreaterThan(shownCount);
-    const hideCall = calls[calls.length - 1];
-    expect(hideCall?.key).toBe(WIDGET_KEY);
-    expect(hideCall?.content).toBeUndefined();
+    const last = calls[calls.length - 1];
+    expect(last?.key).toBe(WIDGET_KEY);
+    expect(last?.content).toBeDefined();
   });
 
   it("render() is a no-op in non-TUI modes (rpc/json/print)", () => {

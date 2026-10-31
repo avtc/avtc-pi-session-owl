@@ -448,11 +448,18 @@ describe("WidgetController conflict mode liveness (un-pause mid-session)", () =>
       };
       expect(factory1({}, fakeTheme).render(200)[0]).toContain("⚠ paused");
 
-      // flip ignoreConflicts mid-session: the gate goes live-un-paused — the line
-      // must DROP on the next render (stage null → hide), not linger forever
+      // flip ignoreConflicts mid-session: the gate goes live-un-paused — the
+      // pause line must give way to the store line on the next render, not
+      // linger forever (the widget stays visible with the idle counts)
       _setGetSessionOwlSettings(() => ({ enabled: true, ignoreConflicts: true }) as SessionOwlConfig);
       widget.render();
-      expect(setWidget).toHaveBeenLastCalledWith("session_owl_progress", undefined, { placement: "aboveEditor" });
+      const factory2 = setWidget.mock.calls[setWidget.mock.calls.length - 1]?.[1] as (
+        tui: unknown,
+        theme: unknown,
+      ) => {
+        render: (w: number) => string[];
+      };
+      expect(factory2({}, fakeTheme).render(200)[0]).toContain(" obs");
     } finally {
       // an assertion mid-test must not leak either singleton past this file
       // (the shared registry runs the next file here)

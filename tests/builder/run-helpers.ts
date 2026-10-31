@@ -101,6 +101,7 @@ export function scriptRunStageWithError(
 export const NO_OP_WIDGET: WidgetController = {
   setConflict: () => {},
   setCtx: () => {},
+  setLoading: () => {},
   clearCtx: () => {},
   render: () => {},
   startStage: () => {},
@@ -119,6 +120,7 @@ export function recordingWidget(): WidgetController & {
   return {
     setConflict: () => {},
     setCtx: () => {},
+    setLoading: () => {},
     clearCtx: () => {},
     render: () => {},
     startStage: (stage, init) => {

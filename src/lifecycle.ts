@@ -207,6 +207,25 @@ function ensureNGoalSeeded(store: StoreContext): void {
 
 // --- lifecycle events ------------------------------------------------------
 
+/** Fold the store under the widget's loading gate, then the enabled-gated
+ *  seed (nGoal + the initial-prompt capture) — the store's counts line
+ *  replaces the loading text when the whole sequence lands. Shared by the
+ *  session_start and session_tree flows. */
+async function gatedLoadAndSeed(pi: ExtensionAPI, ctx: ExtensionContext, widget: WidgetController): Promise<void> {
+  const store = toStoreContext(pi, ctx);
+  widget.setLoading(true);
+  await load(store);
+  // Fresh-session seed: if the graph is empty (no snapshot/deltas), nGoal must
+  // exist before any observation arrives. Gated on enabled: a disabled session
+  // persists no graph_delta (the seed self-heals on enable via capture).
+  if (getSessionOwlSettings().enabled) {
+    ensureNGoalSeeded(store);
+    captureInitialPromptAndExtract(ctx, pi, widget);
+  }
+  widget.setLoading(false);
+  widget.render();
+}
+
 /** Startup: reconstruct the graph + seed nGoal on an empty graph (no oInitialPrompt).
  *  Reconstruction always runs (read-only state for a mid-session enable); the nGoal
  *  seed WRITE is gated on `enabled` so a disabled session persists nothing. */
@@ -226,7 +245,6 @@ export async function onSessionStart(
   // shutdown. Random per session instance — not content-derived — so a resumed
   // session does not couple to the prior instance's node/cache namespace.
   setSessionOwlSessionBase(randomUUID());
-  const store = toStoreContext(pi, ctx);
   // Refresh the session-entry resolver on every session_start — a ctx captured
   // once goes stale across session changes (new/resume/fork), and entry ids are
   // per-session (NOT globally unique), so a stale resolver would resolve wrong
@@ -235,22 +253,7 @@ export async function onSessionStart(
   // Clear the per-observation details cache (entry ids are per-session — a
   // stale render must not survive a new/resume/fork).
   clearDetailsCache();
-  await load(store);
-  // Fresh-session seed: if the graph is empty (no snapshot/deltas), nGoal must
-  // exist before any observation arrives. Gated on enabled: a disabled session
-  // persists no graph_delta (the seed self-heals on enable via capture).
-  if (getSessionOwlSettings().enabled) {
-    ensureNGoalSeeded(store);
-    // Capture oInitialPrompt now too: for a RESUMED session the branch already
-    // holds the first user message, and session_start may be the only hook
-    // before a compaction (no turn_end yet) — without this, the compaction's
-    // Observer catch-up would observe the first user message as a regular obs
-    // (or lose it) instead of capturing it as oInitialPrompt. Idempotent
-    // (guarded by hasInitialPrompt); a new session's empty branch → no-op.
-    // On a fresh capture this also fires the one-shot goal extraction
-    // (fire-and-forget) that sets nGoal.summary from the verbatim prompt.
-    captureInitialPromptAndExtract(ctx, pi, widget);
-  }
+  await gatedLoadAndSeed(pi, ctx, widget);
 }
 
 /**
@@ -365,12 +368,7 @@ export async function onSessionTree(
   // Clear the per-observation details cache — size hints + rendered texts from
   // the old branch must not survive the switch (mirrors session_start).
   clearDetailsCache();
-  const store = toStoreContext(pi, ctx);
-  await load(store);
-  if (getSessionOwlSettings().enabled) {
-    ensureNGoalSeeded(store);
-    captureInitialPromptAndExtract(ctx, pi, widget);
-  }
+  await gatedLoadAndSeed(pi, ctx, widget);
 }
 
 /** Shutdown: abort any in-flight stage (so it stops wasting LLM tokens on a
@@ -386,5 +384,6 @@ export function onSessionShutdown(_event: SessionShutdownEvent, widget: WidgetCo
   clearEntryResolver();
   clearDetailsCache();
   widget.endStage();
+  widget.setLoading(false);
   widget.clearCtx();
 }
