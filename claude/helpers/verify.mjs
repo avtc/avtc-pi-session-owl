@@ -68,8 +68,45 @@ if (tailN !== null) {
     const CHUNK = 64 * 1024;
     let pos = size;
     let carry = Buffer.alloc(0); // bytes after the newest complete newline
-    const lines = []; // newest-first complete lines
-    while (pos > 0 && lines.length < tailN + 2) {
+    let sawNewestComplete = false; // the newest complete line has a junk rule
+    const collect = (line) => {
+      if (line === undefined || line.trim() === "") return;
+      if (!sawNewestComplete) {
+        sawNewestComplete = true;
+        // the newest complete line failing to parse is mid-write suspicion
+        try {
+          JSON.parse(line);
+        } catch {
+          torn = true;
+        }
+      }
+      let row;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        return; // middle junk — skipped as content, never torn evidence
+      }
+      if (row === null || typeof row !== "object") return;
+      if (typeof row.uuid !== "string") return; // metadata — never a tail row
+      const parent =
+        typeof row.parentUuid === "string"
+          ? row.parentUuid
+          : typeof row.logicalParentUuid === "string"
+            ? row.logicalParentUuid
+            : null;
+      const boundary = row.type === "system" && row.subtype === "compact_boundary" ? 1 : 0;
+      const content = row.message && typeof row.message === "object" ? row.message.content : undefined;
+      const toolResult =
+        Array.isArray(content) && content.some((b) => b !== null && typeof b === "object" && b.type === "tool_result")
+          ? 1
+          : 0;
+      newest.push([row.uuid, parent, boundary, toolResult]);
+    };
+    // the ring fills with UUID rows only: a raw-line window lets dense
+    // metadata (api requests, queue operations, attachments) crowd the
+    // uuid rows out of the scan and the caller reads queued rows as
+    // absent — a false amputation verdict
+    while (pos > 0 && newest.length < tailN) {
       const readLen = Math.min(CHUNK, pos);
       pos -= readLen;
       const buf = Buffer.alloc(readLen);
@@ -90,42 +127,13 @@ if (tailN !== null) {
       const text = block.toString("utf8", from, lastNl + 1);
       const parts = text.split("\n");
       for (let i = parts.length - 1; i >= 0; i -= 1) {
-        const line = parts[i];
-        if (line !== undefined && line.trim() !== "") lines.push(line);
+        collect(parts[i]);
+        if (newest.length >= tailN) break;
       }
     }
     // the carried bytes past the last newline: an unterminated final
-    // fragment (already flagged torn) — never parsed; `lines` holds only
-    // complete lines, newest-first
-    let lastLineJunk = false;
-    for (let i = 0; i < lines.length && newest.length < tailN; i += 1) {
-      const trimmed = lines[i].trim();
-      let row;
-      try {
-        row = JSON.parse(trimmed);
-      } catch {
-        if (i === 0) lastLineJunk = true; // the FINAL line is mid-write junk
-        continue;
-      }
-      // any parseable line is fine — uuid-less metadata rows are skipped
-      // as content, never torn evidence
-      if (row === null || typeof row !== "object") continue;
-      if (typeof row.uuid !== "string") continue;
-      const parent =
-        typeof row.parentUuid === "string"
-          ? row.parentUuid
-          : typeof row.logicalParentUuid === "string"
-            ? row.logicalParentUuid
-            : null;
-      const boundary = row.type === "system" && row.subtype === "compact_boundary" ? 1 : 0;
-      const content = row.message && typeof row.message === "object" ? row.message.content : undefined;
-      const toolResult =
-        Array.isArray(content) && content.some((b) => b !== null && typeof b === "object" && b.type === "tool_result")
-          ? 1
-          : 0;
-      newest.push([row.uuid, parent, boundary, toolResult]);
-    }
-    if (lastLineJunk) torn = true;
+    // fragment (already flagged torn) — never parsed; `newest` holds only
+    // complete uuid rows, newest-first
     const out = newest.slice(0, tailN).reverse(); // oldest-first
     process.stdout.write(`${JSON.stringify({ ok: true, torn, tail: out })}\n`);
     process.exit(0);

@@ -138,6 +138,32 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     ]);
   });
 
+  test("the window counts UUID rows, not raw lines — dense metadata cannot push queued rows out of the tail", async () => {
+    // a busy turn's file: every uuid row is surrounded by several metadata
+    // lines (api-request, queue-operation, ...). A raw-line window would
+    // return fewer uuid rows than asked and the oldest queued row would read
+    // as absent — a false amputation. The collection must stop only after N
+    // uuid-bearing lines.
+    const rows: string[] = [];
+    const meta = (n: number): string => JSON.stringify({ type: "queue-operation", operation: "op", n });
+    for (let i = 1; i <= 6; i += 1) {
+      rows.push(meta(i * 10), meta(i * 10 + 1), meta(i * 10 + 2));
+      rows.push(JSON.stringify({ uuid: `u${i}`, parentUuid: i === 1 ? null : `u${i - 1}`, type: "user" }));
+    }
+    const file = tempTranscript(`${rows.join("\n")}\n`);
+    const report = await verify(file, "--tail", "5");
+    expect(report.ok).toBe(true);
+    expect(report.torn).toBe(false);
+    // FIVE uuid rows come back — not five raw lines' worth (~1-2 uuid rows)
+    expect(report.tail).toEqual([
+      ["u2", "u1", 0, 0],
+      ["u3", "u2", 0, 0],
+      ["u4", "u3", 0, 0],
+      ["u5", "u4", 0, 0],
+      ["u6", "u5", 0, 0],
+    ]);
+  });
+
   test("a last byte that is not a newline is torn; the fragment is excluded", async () => {
     const file = tempTranscript(
       ['{"uuid":"u1","parentUuid":null,"type":"user"}', '{"uuid":"u2","parentUuid":"u1"'].join("\n"),

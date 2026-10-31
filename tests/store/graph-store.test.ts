@@ -1648,9 +1648,7 @@ describe("load: snapshot horizon (superseded pre-snapshot records stay dead)", (
     fake.leafId = "e2";
 
     await load(fake);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("dropped 1 superseded pre-snapshot observation(s)"),
-    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("dropped 1 superseded pre-snapshot observation(s)"));
     warn.mockRestore();
   });
 });

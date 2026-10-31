@@ -441,7 +441,11 @@ interface ReconcileCounts {
   dropped: number;
 }
 
-function reconcileLinks(graph: SessionOwlGraph, reusePending: boolean, snapshotHorizon: number | null): ReconcileCounts {
+function reconcileLinks(
+  graph: SessionOwlGraph,
+  reusePending: boolean,
+  snapshotHorizon: number | null,
+): ReconcileCounts {
   const touched = new Set<NodeId>();
   let rewrapped = 0;
   let dropped = 0;
