@@ -881,6 +881,14 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                         graph: store.graph,
                         resolver,
                         detailsWrite: handle.details.computeDetailsAndCacheFor,
+                        // the hooks sandbox has no setImmediate — the engine's
+                        // own timer is the sanctioned event-loop yield (a
+                        // microtask lane starves the host heartbeat and the
+                        // worker is respawned with the plugin unloaded)
+                        yieldLane: () =>
+                          new Promise<void>((resolve) => {
+                            $.clock.after(0, () => resolve());
+                          }),
                       });
                       log.info(
                         `owl ready — details cache warmed: ${report.warmed} observation(s) (${report.failed} failed) in ${report.ms}ms`,
