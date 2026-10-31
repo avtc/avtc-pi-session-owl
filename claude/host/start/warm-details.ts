@@ -29,7 +29,10 @@ export interface WarmDetailsDeps {
   ) => { lines: number; tokens: number } | null;
   /** How many observations to render per chunk (default 200). */
   chunkSize?: number;
-  /** Called between chunks (default: a microtask yield). */
+  /** Called between chunks (default: a MACROTASK yield — setImmediate — so
+   *  the host's heartbeat pings get answered while the warm runs; a
+   *  microtask lane never returns to the event loop and the worker reads
+   *  as wedged, which unloads the plugin). */
   yieldLane?: () => Promise<void> | void;
 }
 
@@ -44,7 +47,7 @@ export interface WarmReport {
 export async function warmDetailsCache(deps: WarmDetailsDeps): Promise<WarmReport> {
   const t0 = Date.now();
   const chunk = deps.chunkSize ?? 200;
-  const yieldLane = deps.yieldLane ?? (() => Promise.resolve());
+  const yieldLane = deps.yieldLane ?? (() => new Promise<void>((resolve) => setImmediate(resolve)));
   let warmed = 0;
   let failed = 0;
   let sinceYield = 0;

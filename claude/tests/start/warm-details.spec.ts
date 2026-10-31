@@ -110,3 +110,37 @@ describe("warmDetailsCache", () => {
     expect(resolved).toBe(5);
   });
 });
+
+describe("the default yield lane keeps the event loop alive (heartbeat safety)", () => {
+  test("macrotask turns happen DURING the warm — a microtask-only lane would starve them", async () => {
+    let macrotaskTurns = 0;
+    const tick = (): void => {
+      macrotaskTurns += 1;
+      immediateAgain(tick);
+    };
+    const immediateAgain = (fn: () => void): void => {
+      setImmediate(fn);
+    };
+    tick();
+    const obs = Array.from({ length: 450 }, (_, i) => ({ id: String(i), sourceEntryIds: [String(i)] }));
+    const report = await warmDetailsCache({
+      key: "k-macro",
+      graph: fakeGraph(obs) as never,
+      resolver: ((ids: readonly string[]) => [
+        {
+          type: "message",
+          id: ids[0],
+          parentId: null,
+          timestamp: 0,
+          message: { role: "user", content: "x", timestamp: 0 },
+        },
+      ]) as never,
+      detailsWrite: () => ({ lines: 1, tokens: 1 }),
+    });
+    const during = macrotaskTurns;
+    expect(report.warmed).toBe(450);
+    // a microtask-only lane completes the warm with ZERO macrotask turns;
+    // the macrotask default must let several through mid-warm
+    expect(during).toBeGreaterThanOrEqual(2);
+  });
+});
