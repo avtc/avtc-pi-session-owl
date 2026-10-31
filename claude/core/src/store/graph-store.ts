@@ -434,9 +434,17 @@ function materializeBase(details: SessionOwlDetails): SessionOwlGraph {
  *    load, so nothing captured is ever dropped.
  *  Each node whose evidence set changed has its range recomputed once.
  *  Returns the number of re-wrapped orphans (a corruption diagnostic). */
-function reconcileLinks(graph: SessionOwlGraph, reusePending: boolean): number {
+/** The reconcile outcome: re-wrapped tail orphans and dropped superseded
+ *  pre-snapshot records (each counted once per load, logged once). */
+interface ReconcileCounts {
+  rewrapped: number;
+  dropped: number;
+}
+
+function reconcileLinks(graph: SessionOwlGraph, reusePending: boolean, snapshotHorizon: number | null): ReconcileCounts {
   const touched = new Set<NodeId>();
   let rewrapped = 0;
+  let dropped = 0;
   // Pass 1: prune phantom listings; collect the surviving listers per record.
   const listersOf = new Map<ObsId, NodeId[]>();
   for (const node of graph.nodes.values()) {
@@ -489,6 +497,14 @@ function reconcileLinks(graph: SessionOwlGraph, reusePending: boolean): number {
       sawPending = true;
       continue;
     }
+    if (snapshotHorizon !== null) {
+      const seq = parseSeq(obsId);
+      if (seq > 0 && seq < snapshotHorizon) {
+        graph.observations.delete(obsId);
+        dropped += 1;
+        continue;
+      }
+    }
     const parent = graph.nodes.get(obs.parentNode);
     if (parent !== undefined) {
       if (!parent.observationIds.includes(obsId)) parent.observationIds.push(obsId);
@@ -507,7 +523,7 @@ function reconcileLinks(graph: SessionOwlGraph, reusePending: boolean): number {
     const n = graph.nodes.get(id);
     if (n !== undefined) recomputeRange(graph, n);
   }
-  return rewrapped;
+  return { rewrapped, dropped };
 }
 
 /** Re-wrap an orphaned record in a fresh root node mirroring the Observer's
@@ -547,6 +563,10 @@ function rewrapOrphan(graph: SessionOwlGraph, obs: Observation): NodeId | null {
 export interface LoadResult {
   /** graph deltas skipped as inapplicable (corrupt/truncated tail). */
   skippedDeltas: number;
+  /** superseded pre-snapshot records dropped by the reconciliation pass —
+   *  unlisted by the snapshot's authoritative node lists and older than its
+   *  id horizon, so their structure was already consolidated away. */
+  droppedSuperseded: number;
   /** orphaned observation records re-wrapped in fresh roots by the
    *  reconciliation pass (their listing was lost to a skipped delta). */
   rewrappedOrphans: number;
@@ -652,7 +672,19 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
   //    pending pool). The latest marker's mode decides: plainAt === structureAt
   //    means the latest rescan marker is a plain one (no reuse pending).
   const latestIsReuse = structureAt !== -1 && plainAt !== structureAt;
-  const rewrappedOrphans = reconcileLinks(graph, latestIsReuse);
+  // The snapshot's id horizon: records below it predate the snapshot, whose
+  // node lists are the authoritative post-consolidation structure. An
+  // unlisted pre-horizon record is a superseded version whose wrapper was
+  // consolidated away — resurrecting it (relist or fresh root) would duplicate
+  // already-summarized content. Post-horizon records are the tail: their
+  // listing can genuinely be missing (a skipped delta), so they keep the
+  // relist/re-wrap repair. No snapshot -> no horizon (deltas-only rebuild).
+  const snapshotHorizon = snapshot === null ? null : snapshot.details.nextObsId;
+  const { rewrapped: rewrappedOrphans, dropped: droppedSuperseded } = reconcileLinks(
+    graph,
+    latestIsReuse,
+    snapshotHorizon,
+  );
 
   // 4. Guarantee the id counters are past every loaded node/observation id.
   //    The snapshot fields + graph_delta replay advance them in the common case,
@@ -685,10 +717,10 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
   if (!structurallyValid) {
     log.warn("graph-store: reconstructed graph failed final structural validation");
   }
-  if (skippedDeltas > 0 || rewrappedOrphans > 0) {
+  if (skippedDeltas > 0 || droppedSuperseded > 0 || rewrappedOrphans > 0) {
     log.warn(
-      `graph-store: load skipped ${skippedDeltas} graph delta(s) and re-wrapped ${rewrappedOrphans} orphaned observation(s) — a corrupt/truncated tail; the affected structure rebuilds on the next Builder run`,
+      `graph-store: load skipped ${skippedDeltas} graph delta(s), dropped ${droppedSuperseded} superseded pre-snapshot observation(s), and re-wrapped ${rewrappedOrphans} orphaned tail observation(s) — the affected structure rebuilds on the next Builder run`,
     );
   }
-  return { skippedDeltas, rewrappedOrphans };
+  return { skippedDeltas, droppedSuperseded, rewrappedOrphans };
 }

@@ -1419,7 +1419,7 @@ describe("load replay faithfulness (observer create+record batches + builder ops
     expect(g.observations.get("o2")?.parentNode).toBe(merge.resolvedDestId);
     // the reconstructed root count matches the live one exactly
     expect([...g.nodes.values()].filter((n) => n.parentNode === null).length).toBe(liveRoots);
-    expect(result).toEqual({ skippedDeltas: 0, rewrappedOrphans: 0 });
+    expect(result).toEqual({ skippedDeltas: 0, droppedSuperseded: 0, rewrappedOrphans: 0 });
   });
 
   it("survives the reload cascade: post-reload builder ops on pre-reload nodes replay on the NEXT reload (no skipped deltas)", async () => {
@@ -1501,7 +1501,7 @@ describe("load replay faithfulness (observer create+record batches + builder ops
 
     const result = await load(fake);
     const g = getGraphStore().graph;
-    expect(result).toEqual({ skippedDeltas: 0, rewrappedOrphans: 0 });
+    expect(result).toEqual({ skippedDeltas: 0, droppedSuperseded: 0, rewrappedOrphans: 0 });
     expect(g.nodes.get("n1" as NodeId)?.observationIds).toEqual(["o1"]);
     expect(g.observations.get("o1")?.parentNode).toBe("n1");
   });
@@ -1534,7 +1534,7 @@ describe("load replay faithfulness (observer create+record batches + builder ops
 
     const result = await load(fake);
     const g = getGraphStore().graph;
-    expect(result).toEqual({ skippedDeltas: 0, rewrappedOrphans: 0 });
+    expect(result).toEqual({ skippedDeltas: 0, droppedSuperseded: 0, rewrappedOrphans: 0 });
     expect(g.nodes.get(N_GOAL)?.observationIds).toEqual(["oInitialPrompt"]);
     expect(g.observations.get("oInitialPrompt")?.parentNode).toBe(N_GOAL);
   });
@@ -1553,6 +1553,104 @@ describe("load replay faithfulness (observer create+record batches + builder ops
     expect(result.skippedDeltas).toBe(1);
     expect(result.rewrappedOrphans).toBe(0);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("skipped 1 graph delta"));
+    warn.mockRestore();
+  });
+});
+
+describe("load: snapshot horizon (superseded pre-snapshot records stay dead)", () => {
+  it("drops an unlisted pre-snapshot record whose wrapper dissolved — no fresh root", async () => {
+    // o5 was captured and its wrapper consolidated away BEFORE the snapshot
+    // (the snapshot's node lists are the authority and do not list o5). The
+    // immutable record still folds in — it must not resurrect as a fresh root.
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [
+        obsRecord("o2", "n2", "2026-08-01T00:00:00.000Z"),
+        obsRecord("o5", "nGone", "2026-08-02T00:00:00.000Z"),
+      ],
+      tokenCount: 2,
+    } satisfies ObservationEntry);
+    fake.addCompaction("e2", snapshotDetails([snapNode("n2", ["o2"])], 10, 3));
+    fake.leafId = "e2";
+
+    const result = await load(fake);
+    const g = getGraphStore().graph;
+    expect(g.observations.has("o2")).toBe(true); // listed -> survives
+    expect(g.observations.has("o5")).toBe(false); // superseded -> dropped
+    expect(g.nodes.has("n5" as NodeId)).toBe(false); // no fresh root minted
+    expect(result.droppedSuperseded).toBe(1);
+    expect(result.rewrappedOrphans).toBe(0);
+  });
+
+  it("drops an unlisted pre-snapshot record whose parentNode still exists — no relist", async () => {
+    // Same era, but the capture-time wrapper node n1 survived (obsolete). The
+    // snapshot still does not list o5 under it — relisting would re-attach a
+    // superseded record to old structure; the horizon drops it either way.
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [obsRecord("o5", "n1", "2026-08-02T00:00:00.000Z")],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCompaction("e2", snapshotDetails([snapNode("n1", [])], 10, 3));
+    fake.leafId = "e2";
+
+    const result = await load(fake);
+    const g = getGraphStore().graph;
+    expect(g.observations.has("o5")).toBe(false);
+    expect(g.nodes.get("n1" as NodeId)?.observationIds).toEqual([]);
+    expect(result.droppedSuperseded).toBe(1);
+  });
+
+  it("still re-wraps unlisted records at the horizon and beyond (the truncated tail)", async () => {
+    // o10 sits exactly at the snapshot's id counter (captured after it), o15
+    // later: both are tail-era — the rewrap path keeps serving them.
+    freshStore();
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [
+        obsRecord("o10", "nGone", "2026-08-03T00:00:00.000Z"),
+        obsRecord("o15", "nGone", "2026-08-04T00:00:00.000Z"),
+      ],
+      tokenCount: 2,
+    } satisfies ObservationEntry);
+    fake.addCompaction("e2", snapshotDetails([snapNode("n2", [])], 10, 3));
+    fake.leafId = "e2";
+
+    const result = await load(fake);
+    const g = getGraphStore().graph;
+    expect(g.observations.has("o10")).toBe(true);
+    expect(g.observations.has("o15")).toBe(true);
+    expect(g.nodes.get("n10" as NodeId)?.observationIds).toEqual(["o10"]);
+    expect(g.nodes.get("n15" as NodeId)?.observationIds).toEqual(["o15"]);
+    expect(result.droppedSuperseded).toBe(0);
+    expect(result.rewrappedOrphans).toBe(2);
+  });
+
+  it("the load warn names the dropped count", async () => {
+    freshStore();
+    const warn = vi.spyOn(log, "warn");
+    const fake = new FakeStore();
+    fake.addCustomAt("e1", OBSERVATION_TYPE, {
+      coversFromId: null,
+      coversUpToId: "e1",
+      records: [obsRecord("o5", "nGone", "2026-08-02T00:00:00.000Z")],
+      tokenCount: 1,
+    } satisfies ObservationEntry);
+    fake.addCompaction("e2", snapshotDetails([snapNode("n2", [])], 10, 3));
+    fake.leafId = "e2";
+
+    await load(fake);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("dropped 1 superseded pre-snapshot observation(s)"),
+    );
     warn.mockRestore();
   });
 });
