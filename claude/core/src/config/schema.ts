@@ -734,12 +734,33 @@ export function initSessionOwlSettings(
   return handle;
 }
 
+/** session-owl subagent policy (self-applied): in a subagent child session — marked by
+ *  PI_SUBAGENT_PARENT_PID, set by avtc-pi-subagent on every spawn (fresh and fork,
+ *  nested included) — the config's own `subagentMode` decides the child's effective
+ *  behavior:
+ *    disabled      → the child owl instance is fully off (no capture, no takeover)
+ *    on-compaction → the child's memory is captured only if/when the child itself
+ *                    compacts (the compaction catch-up owns it)
+ *    inherited     → untouched (the child gets the parent's settings verbatim)
+ *  Applied to the EFFECTIVE config in-memory: the inherited PI_SETTINGS_SESSION_OWL
+ *  env blob cascades verbatim (nobody rewrites it at spawn — the old spawn-side
+ *  rewrite in avtc-pi-subagent was this repo's logic leaked there; now the policy
+ *  lives here, next to the schema it reads). Idempotent with the legacy spawn-side
+ *  rewrite (old subagent + new owl rewrite the blob AND self-apply — same result). */
+function applySubagentPolicy(config: SessionOwlConfig): SessionOwlConfig {
+  if (process.env.PI_SUBAGENT_PARENT_PID === undefined) return config;
+  if (config.subagentMode === "disabled") return { ...config, enabled: false };
+  if (config.subagentMode === "on-compaction") return { ...config, observerMode: "on-compaction" };
+  return config;
+}
+
 /** Live config read — every entry point calls this at trigger time (NOT cached at session start).
  *  Test override takes precedence; otherwise the real handle when initialized, or the frozen
- *  DEFAULT_CONFIG before init (early callers never crash). */
+ *  DEFAULT_CONFIG before init (early callers never crash). The subagent policy self-applies
+ *  on top (see applySubagentPolicy — a no-op in the root session). */
 export function getSessionOwlSettings(): SessionOwlConfig {
-  if (_getSettingsOverride) return _getSettingsOverride();
-  return handle ? handle.getSettings() : DEFAULT_CONFIG;
+  const base = _getSettingsOverride ? _getSettingsOverride() : handle ? handle.getSettings() : DEFAULT_CONFIG;
+  return applySubagentPolicy(base);
 }
 
 /** Re-read settings from env (PI_SETTINGS_SESSION_OWL) first, then files — refreshes the
