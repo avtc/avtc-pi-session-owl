@@ -51,16 +51,19 @@ const restoreTypes = () => {
 };
 const t0 = Date.now();
 
-const r = await runClaude(["-p", "say ok", "--dangerously-skip-permissions", "--plugin-dir", pluginDir, "--debug-file", debugFile], {
-  env: {
-    ...process.env,
-    CLAUDE_CONFIG_DIR: cfg,
-    ANTHROPIC_BASE_URL: base,
-    ANTHROPIC_AUTH_TOKEN: "smoke",
-    ANTHROPIC_MODEL: "mock-model",
+const r = await runClaude(
+  ["-p", "say ok", "--dangerously-skip-permissions", "--plugin-dir", pluginDir, "--debug-file", debugFile],
+  {
+    env: {
+      ...process.env,
+      CLAUDE_CONFIG_DIR: cfg,
+      ANTHROPIC_BASE_URL: base,
+      ANTHROPIC_AUTH_TOKEN: "smoke",
+      ANTHROPIC_MODEL: "mock-model",
+    },
+    cwd: cfg,
   },
-  cwd: cfg,
-});
+);
 
 const log = existsSync(debugFile) ? readFileSync(debugFile, "utf8") : "";
 const loaded = log.includes("hooks module session-owl@inline loaded");
@@ -76,16 +79,19 @@ const seq = await startSequencedMock(RECALL, { take: 0 }, TU);
 const cfg2 = mkdtempSync(join(tmpdir(), "owl-live-smoke-serve-"));
 const debug2 = join(cfg2, "debug.log");
 const t1 = Date.now();
-const r2 = await runClaude(["-p", "use the memory tool", "--dangerously-skip-permissions", "--plugin-dir", pluginDir, "--debug-file", debug2], {
-  env: {
-    ...process.env,
-    CLAUDE_CONFIG_DIR: cfg2,
-    ANTHROPIC_BASE_URL: seq.base,
-    ANTHROPIC_AUTH_TOKEN: "smoke",
-    ANTHROPIC_MODEL: "mock-model",
+const r2 = await runClaude(
+  ["-p", "use the memory tool", "--dangerously-skip-permissions", "--plugin-dir", pluginDir, "--debug-file", debug2],
+  {
+    env: {
+      ...process.env,
+      CLAUDE_CONFIG_DIR: cfg2,
+      ANTHROPIC_BASE_URL: seq.base,
+      ANTHROPIC_AUTH_TOKEN: "smoke",
+      ANTHROPIC_MODEL: "mock-model",
+    },
+    cwd: cfg2,
   },
-  cwd: cfg2,
-});
+);
 const log2 = existsSync(debug2) ? readFileSync(debug2, "utf8") : "";
 const registered = new RegExp(`${RECALL} visible after \\d+ms`).test(log2);
 // the model's tool_result row for the forced call (the serve's truth)
