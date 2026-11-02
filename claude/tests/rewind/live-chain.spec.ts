@@ -240,6 +240,33 @@ describe("live chain processor — verdict application is single-flight across l
   });
 });
 
+describe("live chain processor — the absent partition is door-aware", () => {
+  test("an unknown-door captured row absent behind a present one is SKIPPED with a loud log — never amputation evidence", async () => {
+    const h = harness({
+      owlTail: "t0",
+      tail: facts([row("t0", "x"), row("r1", "t0")]),
+    });
+    h.proc.enqueue({ uuid: "x1", door: "some-new-door", captured: true });
+    h.proc.enqueue(ev("r1", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    expect(h.logs.some((l) => /some-new-door/.test(l) && /unknown door/.test(l))).toBe(true);
+    expect(h.patched).toEqual([{ uuid: "r1", parent: "t0" }]);
+  });
+
+  test("a persisting-door captured row absent behind a present one IS amputation evidence", async () => {
+    const h = harness({
+      owlTail: "t0",
+      tail: facts([row("t0", "x"), row("r1", "t0")]),
+    });
+    h.proc.enqueue(ev("x1", true)); // door=response by default in ev()
+    h.proc.enqueue(ev("r1", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([{ settle: "r1" }]);
+    expect(h.logs.some((l) => /amputation \(x1/.test(l))).toBe(true);
+  });
+});
+
 describe("live chain processor — bounds, lifecycle and containment", () => {
   test("the queue cap sheds the OLDEST pending rows and detection stays live", async () => {
     const h = harness({ owlTail: "t0", known: ["t0"], tail: facts([row("t0", null)]) });

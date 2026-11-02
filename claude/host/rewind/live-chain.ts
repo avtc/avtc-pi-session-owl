@@ -65,6 +65,7 @@ export interface LiveChainOptions {
 
 interface QueuedEvent {
   uuid: string;
+  door: string;
   captured: boolean;
 }
 
@@ -78,6 +79,22 @@ const GROWTH_LADDER_CAP = 6;
 /** Uuid sanity bound — transcript rows are engine-written; anything past
  *  this is foreign padding, never a chain identity. */
 const MAX_UUID = 128;
+
+/** Doors the engine provably persists to the transcript file. A captured
+ *  row of one of these doors ABSENT from the file is amputation evidence.
+ *  Any other door's absent captured row is an engine-internal delivery
+ *  (task notifications proved the class) — it is skipped with a loud log,
+ *  never verdict evidence. */
+const PERSISTING_DOORS = new Set([
+  "response",
+  "tool-result",
+  "tool-message",
+  "attachment",
+  "prompt",
+  "delivery",
+  "note",
+  "compaction",
+]);
 
 /** The anchor a row's walk-back names. */
 interface Anchor {
@@ -122,7 +139,7 @@ export class LiveChainProcessor {
       this.deps.log(`live chain: queue cap reached (${MAX_QUEUE}) — shedding the oldest pending rows`);
       this.queue.splice(0, this.queue.length - MAX_QUEUE + 1);
     }
-    this.queue.push({ uuid: event.uuid, captured: event.captured });
+    this.queue.push({ uuid: event.uuid, door: event.door, captured: event.captured });
     if (!this.stoodDown) this.armTimer(this.tickDelayMs, true);
     return true;
   }
@@ -361,6 +378,7 @@ export class LiveChainProcessor {
     const present: QueuedEvent[] = [];
     const keep: QueuedEvent[] = [];
     const amputated: QueuedEvent[] = [];
+    const skipped: QueuedEvent[] = [];
     let sawPresent = false;
     for (let i = this.queue.length - 1; i >= 0; i -= 1) {
       const event = this.queue[i];
@@ -370,10 +388,16 @@ export class LiveChainProcessor {
         present.unshift(event);
         continue;
       }
-      if (!sawPresent) keep.unshift(event);
-      else if (event.captured) amputated.unshift(event);
-      // an uncaptured absent row behind a present one: never-persisted
-      // ceremony — dropped without evidence
+      if (!sawPresent) {
+        keep.unshift(event);
+        continue;
+      }
+      if (!event.captured) continue; // never-persisted ceremony — dropped without evidence
+      if (PERSISTING_DOORS.has(event.door)) {
+        amputated.unshift(event);
+        continue;
+      }
+      skipped.push(event); // an unknown door's absent row: skipped loudly, never evidence
     }
     const deadAbsent = amputated.length;
     if (present.length === 0) {
@@ -391,6 +415,12 @@ export class LiveChainProcessor {
         .join(", ");
       this.deps.log(
         `live chain: ${deadAbsent} queued row(s) absent before a present one — amputation (${named}${deadAbsent > 3 ? ", …" : ""})`,
+      );
+    }
+    if (skipped.length > 0) {
+      const doors = [...new Set(skipped.map((e) => e.door))].join(", ");
+      this.deps.log(
+        `live chain: ${skipped.length} absent captured row(s) of unknown door(s) (${doors}) skipped — the engine never persists them; not amputation evidence`,
       );
     }
     const capturedByUuid = new Map(this.queue.map((e) => [e.uuid, e.captured] as const));
