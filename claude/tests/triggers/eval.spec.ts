@@ -93,6 +93,71 @@ beforeEach(() => {
   getGraphStore().observerFrontier = null;
 });
 
+describe("the stale observer frontier vs the summary floor (the compaction re-anchor)", () => {
+  const SUMMARY_TEXT = "# Memory root view as the compaction answer";
+  function scopedRows(): SessionEntry[] {
+    const mk = (id: string, role: "user" | "assistant"): SessionEntry =>
+      ({
+        id,
+        timestamp: `${id}-ts`,
+        type: "message",
+        message: { role, content: `${id} ${PAD}` },
+      }) as unknown as SessionEntry;
+    return [
+      mk("e1", "user"),
+      mk("e2", "assistant"),
+      {
+        id: "floor",
+        timestamp: "floor-ts",
+        type: "message",
+        message: { role: "user", content: SUMMARY_TEXT },
+      } as unknown as SessionEntry,
+      mk("s1", "user"),
+      mk("s2", "assistant"),
+      mk("s3", "user"),
+      mk("s4", "assistant"),
+    ];
+  }
+  const ids = (xs: readonly SessionEntry[]): string[] => xs.map((e) => e.id);
+
+  test("a frontier found in the FULL branch behind the floor back-fills strictly after it (the stuck-span heal)", async () => {
+    noteOwnSummary(getGraphStore(), SUMMARY_TEXT);
+    const deps = makeDeps({ rows: scopedRows(), getObserverFrontier: () => "e2" });
+    await evaluateAndLaunch(deps, false);
+    expect(ids(deps.launches[0]?.unobserved ?? [])).toEqual(["floor", "s1", "s2", "s3", "s4"]);
+  });
+
+  test("a frontier predating the floor observes the WHOLE scoped segment (nothing covered)", async () => {
+    noteOwnSummary(getGraphStore(), SUMMARY_TEXT);
+    const deps = makeDeps({ rows: scopedRows(), getObserverFrontier: () => "old-era-frontier" });
+    await evaluateAndLaunch(deps, false);
+    expect(ids(deps.launches[0]?.unobserved ?? [])).toEqual(["s1", "s2", "s3", "s4"]);
+  });
+
+  test("a covered scoped prefix skips re-observation — the anchor is the last covered entry", async () => {
+    noteOwnSummary(getGraphStore(), SUMMARY_TEXT);
+    const obs = {
+      id: "obs-1",
+      timestamp: "obs-ts",
+      type: "custom",
+      customType: "session-owl.observation",
+      data: { coversFromId: "s1", coversUpToId: "s2", records: [{ sourceEntryIds: ["s1", "s2"] }] },
+    } as unknown as SessionEntry;
+    const rows = scopedRows();
+    rows.splice(4, 0, obs); // inside the scoped segment, after s1
+    const deps = makeDeps({ rows, getObserverFrontier: () => "old-era-frontier" });
+    await evaluateAndLaunch(deps, false);
+    expect(ids(deps.launches[0]?.unobserved ?? [])).toEqual(["s3", "s4"]);
+  });
+
+  test("a frontier inside the scoped segment is untouched (strictly-after it)", async () => {
+    noteOwnSummary(getGraphStore(), SUMMARY_TEXT);
+    const deps = makeDeps({ rows: scopedRows(), getObserverFrontier: () => "s2" });
+    await evaluateAndLaunch(deps, false);
+    expect(ids(deps.launches[0]?.unobserved ?? [])).toEqual(["s3", "s4"]);
+  });
+});
+
 describe("onStepBoundary — the mid-turn cheap matrix (primary point)", () => {
   test("a firing matrix launches the chain fire-and-forget (observer gets its unobserved slice)", async () => {
     const deps = makeDeps();
