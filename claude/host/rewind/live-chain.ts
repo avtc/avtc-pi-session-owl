@@ -9,8 +9,14 @@
 // transcript TAIL through the tier, verifies each queued captured row
 // against owl's expected chain point, and feeds the file's true parent
 // edges to the lineage seam (ledger + mirror — the ledger owns the chain
-// the refold walks). An anchor mismatch REBASES the expectation and the
-// batch keeps verifying: the whole new world is proven before the verdict
+// the refold walks). An anchor mismatch is classified by the DEPTH of
+// the anchor on the expected row's own ancestry: one step up (a sibling
+// candidate the engine wrote and skipped) or off the ancestry entirely
+// (a parallel line's continuation) rebases QUIETLY — the engine drops
+// candidate rows without any rewind; an anchor deeper than one step
+// proves the chain moved back, and the mismatch REBASES the expectation
+// while the batch keeps verifying: the whole new world is proven before
+// the verdict
 // fires, so the refold settles at the last verified row and nothing of
 // the post-rewind world is ever quarantined. A boundary row (or a
 // boundary anchor) resets the chain the same way — silently, never a
@@ -512,7 +518,21 @@ export class LiveChainProcessor {
         continue;
       }
       // the file says this row attaches at a DIFFERENT point than owl's
-      // chain — a rewind; rebase and keep verifying the new world
+      // chain. The DEPTH of that point on the expected row's own ancestry
+      // separates the shapes: one step up is a sibling candidate the
+      // engine wrote and skipped, and an anchor NOT on the ancestry at
+      // all is a parallel line's continuation — both quiet rebases. An
+      // anchor deeper than one step proves the chain moved back: the
+      // rewind verdict, and the anchor slot is the cut boundary the
+      // engine amputated at. An expectation outside the read window (the
+      // file no longer holds owl's tail) keeps the verdict — the anchor
+      // at a known older row is then amputation evidence on its own.
+      const depth = this.chainDepthTo(tail.rows, indexOfUuid, expected, anchor.uuid);
+      if (depth === 1 || depth === null) {
+        edges.push(anchorEdge);
+        expected = row.uuid;
+        continue;
+      }
       this.deps.log(
         `live chain: rewind detected — row ${row.uuid} anchors at ${String(anchor.uuid)} (expected ${String(expected)})`,
       );
@@ -566,11 +586,38 @@ export class LiveChainProcessor {
     if (this.queue.length > 0) this.retry(this.tickDelayMs);
   }
 
+  /** Count the parent steps from the chain's expected row up to a target
+   *  row, inside the read window. 1 — the target is the expected row's
+   *  own parent. null — the walk ran and the target is NOT on the
+   *  ancestry (a parallel line), or a null target. undefined — the walk
+   *  cannot start: the expected row is outside the window, so the
+   *  ancestry is unverifiable here. */
+  private chainDepthTo(
+    rows: readonly TailRow[],
+    indexOfUuid: ReadonlyMap<string, number>,
+    from: string | null,
+    target: string | null,
+  ): number | null | undefined {
+    if (from === null || target === null) return null;
+    if (!indexOfUuid.has(from)) return undefined;
+    const walked = new Set<string>();
+    let cursor: string | null = from;
+    let depth = 0;
+    while (cursor !== null && !walked.has(cursor) && indexOfUuid.has(cursor)) {
+      if (cursor === target) return depth;
+      walked.add(cursor);
+      const r: TailRow | undefined = rows[indexOfUuid.get(cursor) ?? -1];
+      if (r === undefined) break;
+      cursor = r.parentUuid;
+      depth += 1;
+    }
+    return null;
+  }
+
   /** Name the row's owl-chain anchor. For a CONVERSATION row the row's
    *  own parentUuid chain comes first: walk up through transparent
    *  ceremony rows to the nearest ancestor owl knows (a boundary names the
-   *  fresh root; the expected tail terminates the walk; landing on the
-   *  expected row's own parent is a sibling continuation, not a fork).
+   *  fresh root; the expected tail terminates the walk).
    *  tool_result rows and parent chains that leave the window fall back
    *  to FILE ORDER: the nearest preceding observable row — the file is
    *  serialized, so event order == file order there (a parallel
@@ -606,12 +653,6 @@ export class LiveChainProcessor {
         if (cr.boundary) return { uuid: cursor, boundary: true }; // a compaction boundary — rebase, never a verdict
         if (cursor === expected) return { uuid: cursor, boundary: false }; // the chain tail itself
         if (capturedByUuid.get(cursor) === true || this.deps.isKnownRow(cursor)) {
-          // SIBLING TOLERANCE: when the walk lands on the expected row's
-          // OWN parent, this row is a continuation sibling (a skipped
-          // reply leaves consecutive rows with one parent) — the chain
-          // proceeds in file order, not a fork
-          const expectedRow = expected === null ? undefined : rows[indexOfUuid.get(expected) ?? -1];
-          if (expectedRow !== undefined && expectedRow.parentUuid === cursor) break; // fall to file order
           return { uuid: cursor, boundary: false }; // the true attach point
         }
         cursor = cr.parentUuid; // ceremony/unknown rows are transparent

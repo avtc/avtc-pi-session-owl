@@ -547,6 +547,67 @@ describe("live chain processor — the torn and missing tails", () => {
   });
 });
 
+describe("live chain processor — the mismatch depth rule", () => {
+  // The engine writes a user-row candidate NEXT TO the assistant answer
+  // (both children of one parent) and continues from the assistant. When
+  // the candidate arrives after the answer, owl's expectation sits on it
+  // and the next row anchors at the candidate's OWN parent — exactly one
+  // step up from the expectation. A quiet rebase: the edge keeps the
+  // file's parent truth.
+  test("depth 1 — the orphan candidate: no verdict, the edge keeps the file's truth", async () => {
+    const h = harness({
+      owlTail: "P",
+      known: ["P", "A"],
+      tail: facts([row("P", "root"), row("A", "P"), row("U", "P")]),
+    });
+    h.proc.enqueue(ev("A", true));
+    await h.proc.flush();
+    h.setOwlTail("A");
+    h.proc.enqueue(ev("U", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    expect(h.patched.at(-1)).toEqual({ uuid: "U", parent: "P" });
+  });
+
+  // The follow-up: the conversation continues from the SIBLING assistant
+  // row, which is a child of the shared parent — never on the orphan's
+  // own ancestry. A quiet rebase onto the sibling's line.
+  test("anchor off the ancestry — the sibling continuation: no verdict", async () => {
+    const h = harness({
+      owlTail: "P",
+      known: ["P", "A", "U"],
+      tail: facts([row("P", "root"), row("A", "P"), row("U", "P"), row("T", "A")]),
+    });
+    h.proc.enqueue(ev("A", true));
+    h.proc.enqueue(ev("U", true));
+    await h.proc.flush();
+    h.setOwlTail("U");
+    h.proc.enqueue(ev("T", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    expect(h.patched.at(-1)).toEqual({ uuid: "T", parent: "A" });
+    expect(h.logs.some((l) => /rewind detected/.test(l))).toBe(false);
+  });
+
+  // A re-sent prompt anchors at its turn's parent — deeper than one step
+  // once the dead turn's rows sit between: the chain provably moved back.
+  test("depth > 1 — a dead turn's re-sent prompt: the rewind verdict fires", async () => {
+    const h = harness({
+      owlTail: "P",
+      known: ["P", "U", "C"],
+      tail: facts([row("P", "root"), row("U", "P"), row("C", "U"), row("U2", "P")]),
+    });
+    h.proc.enqueue(ev("U", true));
+    h.proc.enqueue(ev("C", true));
+    await h.proc.flush();
+    h.setOwlTail("C");
+    h.proc.enqueue(ev("U2", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([{ settle: "U2" }]);
+    expect(h.patched.at(-1)).toEqual({ uuid: "U2", parent: "P" });
+  });
+});
+
 describe("live chain processor — rewind detection", () => {
   test("an anchor behind owl's tail is a rewind: the batch verifies on, edges feed the lineage, the settle is the last verified row", async () => {
     const h = harness({
