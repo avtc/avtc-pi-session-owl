@@ -90,7 +90,7 @@ export interface ConversationBinding {
     coversFromId: string | null;
     coversUpToId: string;
     sourceEntryIds: string[];
-  }>;
+  }> | null;
   /** The conversation's entry view (the capture grouper over the row cache). */
   branch(): SessionEntry[];
   /** The entry view's leaf id (null when empty). */
@@ -463,7 +463,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
       return pinnedStoreView;
     },
     observerFrontier: () => pinnedStoreView?.observerFrontier ?? null,
-    observationCoverages: () => pinnedStoreView?.observationCoverages ?? [],
+    observationCoverages: () => pinnedStoreView?.observationCoverages ?? null,
     // The branch = the durable mirror (arrival order — the backfill's rows
     // included, so a restarted process sees the full history) overlaid with
     // the capture cache's not-yet-flushed rows. The cache ALONE would hand a

@@ -112,15 +112,19 @@ export interface GraphStore {
   lastCompactionLedger: UsageLedger | null;
   /** coversUpToId of the latest replayed observation delta; null when none. */
   observerFrontier: string | null;
-  /** Every observation's covered range in arrival order (the heal's
-   *  coverage anchor: which entries an existing observation already
-   *  covers, independent of the branch's entry shapes). */
+  /** The newest observations' covered ranges (the heal's coverage anchor:
+   *  which entries an existing observation already covers, independent of
+   *  the branch's entry shapes). Bounded to a rolling window — the anchor
+   *  only ever needs the newest covering observations. */
   observationCoverages: Array<{ coversFromId: string | null; coversUpToId: string; sourceEntryIds: string[] }>;
   /** Resolves source-entry ids to session entries for verbatim-source details
    *  re-rendering. `null` outside an active session (set at activate, refreshed
    *  on session_start, cleared on session_shutdown). */
   resolveEntries: EntryResolver | null;
 }
+
+/** The coverage list window (newest kept). */
+const COVERAGE_WINDOW = 32;
 
 let store: GraphStore | null = null;
 
@@ -231,11 +235,15 @@ export function appendObservation(ctx: StoreContext, entry: ObservationEntry): v
   // persists do.
   const branch = ctx.getBranch(ctx.getLeafId());
   advanceFrontierForward(getGraphStore(), entry.coversUpToId, (id) => entryPosition(branch, id));
-  getGraphStore().observationCoverages.push({
+  const storeState = getGraphStore();
+  storeState.observationCoverages.push({
     coversFromId: entry.coversFromId,
     coversUpToId: entry.coversUpToId,
     sourceEntryIds: entry.records.flatMap((r) => r.sourceEntryIds),
   });
+  if (storeState.observationCoverages.length > COVERAGE_WINDOW) {
+    storeState.observationCoverages.splice(0, storeState.observationCoverages.length - COVERAGE_WINDOW);
+  }
 }
 
 /** The entry's position on a branch (-1 = not present). */
@@ -657,6 +665,9 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
           coversUpToId: payload.coversUpToId,
           sourceEntryIds: payload.records.flatMap((r) => r.sourceEntryIds),
         });
+        if (storeState.observationCoverages.length > COVERAGE_WINDOW) {
+          storeState.observationCoverages.splice(0, storeState.observationCoverages.length - COVERAGE_WINDOW);
+        }
       }
       if (!Array.isArray(payload.records)) continue;
       for (const rec of payload.records) {

@@ -31,7 +31,7 @@ import { measureRootViewTokens } from "../../core/src/graph/read-tools.js";
 import { sinceLastCompaction, snapshotAtCompaction } from "../../core/src/status/usage-ledger.js";
 import { cloneLedger, encodeDetails } from "../../core/src/store/codecs.js";
 import type { GraphStore } from "../../core/src/store/graph-store.js";
-import { computeUnobserved, makeMaybeBuilder } from "../../core/src/triggers.js";
+import { makeMaybeBuilder } from "../../core/src/triggers.js";
 import { O_INITIAL_PROMPT } from "../../core/src/types.js";
 import { ModelUnavailableError } from "../runs/seams.js";
 import { normalizeSummaryText, ownSummariesFor } from "../storage/summary-identity.js";
@@ -475,13 +475,18 @@ export function observerCatchUpGap(deps: CompactionHookDeps, firstKeptEntryId: s
     const id = branch[i]?.id;
     if (id !== undefined) summaryIds.add(id);
   }
+  // the back-fill is capped at the cut: the gate's contract is the block
+  // this compaction swallows — a frontier riding the KEPT TAIL (the healthy
+  // on-threshold shape) is outside the block, and the coverage anchor then
+  // resolves the covered segment tail to an empty gap
+  const healBranch = cutIndex === -1 ? branch : branch.slice(0, cutIndex);
   const heal = healedUnobserved({
-    fullBranch: branch,
+    fullBranch: healBranch,
     segment: scoped,
     frontier: deps.getObserverFrontier(),
     coverages: deps.getObservationCoverages?.() ?? null,
     ownSummaryIds: summaryIds,
-    segmentStartsAtBranchHead: floor === -1 && cutIndex === -1,
+    segmentStartsAtBranchHead: floor === -1,
   });
   if (heal.note !== null) (deps.log ?? ((m: string) => console.log(m)))(`compaction: ${heal.note}`);
   return heal.unobserved.filter(isRenderableEntry);

@@ -827,6 +827,25 @@ describe("observerCatchUpGap — the ceiling invariant (never past the live/rewo
     return { type: "message", id, message: { role: "user", content: text } } as unknown as SessionEntry;
   }
 
+  test("a frontier riding the KEPT TAIL past a real cut keeps the gap empty (no observer call over kept rows)", () => {
+    resetForNewSession();
+    const branch = [
+      row("u1", "swallowed one"),
+      row("u2", "swallowed two"),
+      row("cut-row", "the kept tail starts here"),
+      row("k1", "kept one"),
+      row("k2", "kept two"),
+    ];
+    // the frontier sits in the kept tail: everything the cut swallows is
+    // already observed — the heal must not widen the gap past the cut
+    const deps = {
+      ...gapDeps(branch, "k1"),
+      getObservationCoverages: () => [{ coversFromId: "u1", coversUpToId: "u2", sourceEntryIds: ["u1", "u2"] }],
+    } as unknown as CompactionHookDeps;
+    const gap = observerCatchUpGap(deps, "cut-row");
+    expect(gap).toEqual([]);
+  });
+
   test("a frontier stranded behind the block's floor back-fills the span after it (the catch-up heal)", () => {
     resetForNewSession();
     const summaryText = "# Memory \n catch-up heal";
