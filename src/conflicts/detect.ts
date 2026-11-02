@@ -178,7 +178,8 @@ function readPackages(settingsFile: string): string[] {
  */
 export function detectConflicts(options: { projectDir?: string; selfRoot?: string } | null): ConflictHit[] {
   const home = conflictsHomeOverride ?? homedir();
-  const projectDir = options?.projectDir ?? process.cwd();
+  const projectDir =
+    options?.projectDir ?? (globalThis as { process?: { cwd?: () => string } }).process?.cwd?.() ?? ".";
   const selfRoot = options?.selfRoot ?? defaultSelfRoot();
 
   const entries = [

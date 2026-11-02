@@ -59,7 +59,8 @@ export function _setDumpHomeForTest(home: string | null): void {
 /** The default dump dir for THIS project: ~/.pi/session-owl/dumps/<sanitized-cwd>/. */
 function defaultProjectDumpDir(): string {
   const home = dumpHomeOverride ?? os.homedir();
-  return path.join(home, ".pi", "session-owl", "dumps", sanitizeForPath(process.cwd()));
+  const cwd = (globalThis as { process?: { cwd?: () => string } }).process?.cwd?.() ?? ".";
+  return path.join(home, ".pi", "session-owl", "dumps", sanitizeForPath(cwd));
 }
 
 /**

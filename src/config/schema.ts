@@ -748,7 +748,10 @@ export function initSessionOwlSettings(
  *  lives here, next to the schema it reads). Idempotent with the legacy spawn-side
  *  rewrite (old subagent + new owl rewrite the blob AND self-apply — same result). */
 function applySubagentPolicy(config: SessionOwlConfig): SessionOwlConfig {
-  if (process.env.PI_SUBAGENT_PARENT_PID === undefined) return config;
+  // pi runs under Node (`process` exists); the Claude hooks sandbox may not
+  // expose it — the read degrades to the root-session no-op there
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  if (env?.PI_SUBAGENT_PARENT_PID === undefined) return config;
   if (config.subagentMode === "disabled") return { ...config, enabled: false };
   if (config.subagentMode === "on-compaction") return { ...config, observerMode: "on-compaction" };
   return config;

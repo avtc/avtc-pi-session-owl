@@ -13,7 +13,7 @@
  * move fixes). The scenarios map 1:1 onto the config seam.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG, _resetGetSessionOwlSettings, _setGetSessionOwlSettings, getSessionOwlSettings } from "../../src/config/schema.js";
 
 const MARKER = "PI_SUBAGENT_PARENT_PID";
@@ -44,6 +44,23 @@ describe("subagent policy self-application (getSessionOwlSettings)", () => {
         expect(cfg.observerMode).toBe("on-threshold");
         expect(cfg.subagentMode).toBe(subagentMode);
       });
+    }
+  });
+
+  it("no `process` global (the Claude hooks sandbox): the policy reads as a root session, never throws", () => {
+    // The sandbox may not expose Node's `process`; the read must degrade to
+    // the root-session no-op instead of a ReferenceError that kills the
+    // settings bootstrap for the whole session.
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, subagentMode: "on-compaction", enabled: true }));
+    const prevProcess = globalThis.process;
+    vi.stubGlobal("process", undefined);
+    try {
+      const cfg = getSessionOwlSettings();
+      expect(cfg.enabled).toBe(true);
+      expect(cfg.observerMode).toBe(DEFAULT_CONFIG.observerMode);
+    } finally {
+      vi.unstubAllGlobals();
+      if (prevProcess !== undefined) globalThis.process = prevProcess;
     }
   });
 
