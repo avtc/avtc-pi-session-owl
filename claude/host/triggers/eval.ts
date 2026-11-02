@@ -26,7 +26,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
 import { isRenderableEntry } from "../../core/src/format/chunk.js";
-import { OBSERVATION_TYPE } from "../../core/src/store/codecs.js";
 import {
   computeUnobserved,
   evaluateBuilderTrigger,
@@ -35,7 +34,7 @@ import {
   makeMaybeBuilder,
   type TriggerInput,
 } from "../../core/src/triggers.js";
-import { ownCompactionFloorIndex, ownSummaryFloorIndex } from "../compaction/floor.js";
+import { ownCompactionFloorIndex, ownSummaryFloorIndex, ownSummaryIndices } from "../compaction/floor.js";
 import { runsLog } from "../runs/seams.js";
 import { contextTokensFor, makeTriggerCtx } from "./context.js";
 import { acquireOrSkip, armRearmOnRelease, type RunHandle, type StageName } from "./run-locks.js";
@@ -83,6 +82,9 @@ export interface TriggerHostDeps {
   /** The conversation's observer frontier (resolved through its core handle
    *  by the wiring — the stateful store singleton stays untouched here). */
   getObserverFrontier: () => string | null;
+  /** the store's observation coverage list (the heal's coverage anchor;
+   *  absent on hosts that cannot serve it) */
+  getObservationCoverages?: () => readonly ObservationCoverage[] | null;
   /** The conversation's recorded own-summary texts (the observation floor's
    *  identity source, resolved through the core handle like the frontier). */
   getOwnSummaries: () => ReadonlySet<string>;
@@ -130,40 +132,87 @@ function isSubagentKey(key: string): boolean {
 /** Evaluate the matrix and run the firing stages as one chained background
  *  run (pi's onTurnEnd body). Resolves when the chain settles — the
  *  boundary handlers fire-and-forget this; tests may await it directly. */
-/** The effective observer anchor over the scoped segment. A frontier the
- *  segment no longer carries predates the summary floor: the segment
- *  re-anchored under fresh ids (the compaction re-send). The effective
- *  anchor is then the LAST scoped entry a record-bearing observation
- *  covers — a re-sent kept-tail row whose original was already observed
- *  skips re-observation; with nothing covered the whole segment observes. */
-function scopedObserverAnchor(scoped: readonly SessionEntry[], frontier: string | null): string | null {
-  if (frontier === null) return null;
-  if (scoped.some((e) => e.id === frontier)) return frontier;
+/** One observation's covered range (the store's coverage list entry). */
+export interface ObservationCoverage {
+  coversFromId: string | null;
+  coversUpToId: string;
+  sourceEntryIds: readonly string[];
+}
+
+/** The last segment entry an existing observation covers (the coverage
+ *  anchor), or null when nothing in the segment is covered. The store's
+ *  coverage list is the source — the branch's entry shapes never carry
+ *  observation records. */
+function coverageAnchor(
+  segment: readonly SessionEntry[],
+  coverages: readonly ObservationCoverage[] | null,
+): string | null {
+  if (coverages === null || coverages.length === 0) return null;
   const positionById = new Map<string, number>();
-  for (let i = 0; i < scoped.length; i += 1) positionById.set(scoped[i]?.id ?? "", i);
+  for (let i = 0; i < segment.length; i += 1) positionById.set(segment[i]?.id ?? "", i);
   let anchor = -1;
-  for (const entry of scoped) {
-    if ((entry as { type?: string }).type !== "custom") continue;
-    if ((entry as { customType?: string }).customType !== OBSERVATION_TYPE) continue;
-    const payload = (
-      entry as {
-        data?: { coversFromId?: string | null; coversUpToId?: string; records?: Array<{ sourceEntryIds?: string[] }> };
-      }
-    ).data;
-    if (payload === undefined || !Array.isArray(payload.records) || payload.records.length === 0) continue;
-    const coversFrom = payload.coversFromId;
-    const from = coversFrom == null ? undefined : positionById.get(coversFrom);
-    const coversUpTo = payload.coversUpToId;
-    const to = coversUpTo === undefined ? undefined : positionById.get(coversUpTo);
+  for (const cov of coverages) {
+    const from = cov.coversFromId === null ? undefined : positionById.get(cov.coversFromId);
+    const to = positionById.get(cov.coversUpToId);
     if (from !== undefined && to !== undefined && to >= from) anchor = Math.max(anchor, to);
-    for (const record of payload.records) {
-      for (const src of record?.sourceEntryIds ?? []) {
-        const pos = positionById.get(src);
-        if (pos !== undefined) anchor = Math.max(anchor, pos);
-      }
+    for (const src of cov.sourceEntryIds) {
+      const pos = positionById.get(src);
+      if (pos !== undefined) anchor = Math.max(anchor, pos);
     }
   }
-  return anchor === -1 ? null : (scoped[anchor]?.id ?? null);
+  return anchor === -1 ? null : (segment[anchor]?.id ?? null);
+}
+
+/** The effective unobserved span under the stale-frontier heal. A frontier
+ *  the segment no longer carries predates the summary floor: the segment
+ *  re-anchored under fresh ids. Three tiers, in order:
+ *  1. the frontier still rides the FULL branch — back-fill strictly after
+ *     it over the full branch (the floor bounds nothing there; everything
+ *     at/behind the frontier is already observed), with the condensed-
+ *     history rows (own summaries) skipped out of the span;
+ *  2. the frontier is gone from the branch entirely (resume/fork) — the
+ *     coverage anchor: the LAST segment entry an existing observation
+ *     covers skips re-observation;
+ *  3. nothing covered — the whole segment observes; a segment starting at
+ *     the branch head keeps the vendored first-user anchor (the session's
+ *     initial prompt is captured mechanically, never re-observed). */
+export function healedUnobserved(input: {
+  fullBranch: readonly SessionEntry[];
+  segment: readonly SessionEntry[];
+  frontier: string | null;
+  coverages?: readonly ObservationCoverage[] | null;
+  ownSummaryIds?: ReadonlySet<string>;
+  segmentStartsAtBranchHead?: boolean;
+}): { unobserved: SessionEntry[]; note: string | null } {
+  const { fullBranch, segment, frontier } = input;
+  if (frontier !== null && segment.some((e) => e.id === frontier)) {
+    return { unobserved: computeUnobserved(segment, frontier), note: null };
+  }
+  if (frontier !== null && fullBranch.some((e) => e.id === frontier)) {
+    const span = computeUnobserved(fullBranch, frontier).filter((e) => !(input.ownSummaryIds?.has(e.id) ?? false));
+    return { unobserved: span, note: `back-filling the span after ${frontier.slice(0, 8)}` };
+  }
+  if (frontier === null) {
+    return { unobserved: computeUnobserved(segment, null), note: null };
+  }
+  const coverages = input.coverages ?? null;
+  const anchor = coverageAnchor(segment, coverages);
+  if (anchor !== null) {
+    return {
+      unobserved: computeUnobserved(segment, anchor),
+      note: `observing from ${anchor.slice(0, 8)} (the last covered entry)`,
+    };
+  }
+  if (coverages === null) {
+    // no coverage source: what the segment already holds as observed is
+    // unknowable — nothing is invented (an off-branch frontier after a
+    // rewind must not re-observe the surviving line)
+    return { unobserved: [], note: "no coverage source — the gap stays empty" };
+  }
+  if (input.segmentStartsAtBranchHead === true) {
+    return { unobserved: computeUnobserved(segment, null), note: "observing the whole segment (head-anchored)" };
+  }
+  return { unobserved: segment.filter(isRenderableEntry), note: "observing the whole scoped segment" };
 }
 
 /** `fullScope` bypasses the on-file summary floor — the plain-rescan
@@ -202,30 +251,26 @@ export async function evaluateAndLaunch(deps: TriggerHostDeps, fullScope: boolea
   const floor = Math.max(recordedFloor, fileFloor);
   const scoped = floor === -1 ? branch : branch.slice(floor + 1);
   const rawFrontier = deps.getObserverFrontier();
-  const anchor = scopedObserverAnchor(scoped, rawFrontier);
-  const healed = rawFrontier !== null && anchor !== rawFrontier;
-  let unobserved: SessionEntry[];
-  if (healed && branch.some((e) => e.id === rawFrontier)) {
-    // the frontier still rides the full branch behind the floor: the span
-    // strictly after it never got observed (the compaction catch-ups fell
-    // behind). Back-fill from the stuck point over the FULL branch — the
-    // floor bounds nothing here, everything at/behind the frontier is
-    // already observed and skipped by the frontier itself. Self-limiting:
-    // once the frontier passes the floor the ordinary scoped path resumes.
-    unobserved = computeUnobserved(branch, rawFrontier);
-  } else if (healed && anchor === null) {
-    // nothing in the segment was ever observed: the whole segment observes —
-    // a scoped first user row is a regular entry, not the session's initial
-    // prompt, so the vendored null-anchor's first-user skip must not apply
-    unobserved = scoped.filter(isRenderableEntry);
-  } else {
-    unobserved = computeUnobserved(scoped, anchor);
+  const ownTexts = deps.getOwnSummaries();
+  const summaryIds = new Set<string>();
+  for (const i of ownSummaryIndices(branch, ownTexts)) {
+    const id = branch[i]?.id;
+    if (id !== undefined) summaryIds.add(id);
   }
-  if (healed) {
+  const heal = healedUnobserved({
+    fullBranch: branch,
+    segment: scoped,
+    frontier: rawFrontier,
+    coverages: deps.getObservationCoverages?.() ?? null,
+    ownSummaryIds: summaryIds,
+    segmentStartsAtBranchHead: floor === -1,
+  });
+  if (heal.note !== null) {
     runsLog(
-      `trigger: the observer frontier ${rawFrontier === null ? "null" : rawFrontier.slice(0, 8)} left the scoped segment — ${branch.some((e) => e.id === rawFrontier) ? "back-filling the span after it on the full branch" : anchor === null ? "observing the whole scoped segment" : `observing from ${anchor.slice(0, 8)} (the last covered entry)`}`,
+      `trigger: the observer frontier ${rawFrontier === null ? "null" : rawFrontier.slice(0, 8)} left the scoped segment — ${heal.note}`,
     );
   }
+  const unobserved = heal.unobserved;
 
   // read the context fill ONCE, only when a context arm is on (pi's
   // needsContextTokens rule — the default profile never reads it)

@@ -43,16 +43,24 @@ function userTextOf(entry: SessionEntry): string | null {
     .join("");
 }
 
-/** The index of the NEWEST own-summary entry on the block (-1 when none):
- * observation starts strictly AFTER this index. */
-export function ownSummaryFloorIndex(entries: readonly SessionEntry[], ownTexts: ReadonlySet<string>): number {
-  if (ownTexts.size === 0) return -1;
-  let floor = -1;
+/** Every own-summary entry's index on the block (the text witness, any
+ *  position) — the floor is the newest; span filters take the set. */
+export function ownSummaryIndices(entries: readonly SessionEntry[], ownTexts: ReadonlySet<string>): Set<number> {
+  const hits = new Set<number>();
+  if (ownTexts.size === 0) return hits;
   for (let i = 0; i < entries.length; i += 1) {
     const text = userTextOf(entries[i] as SessionEntry);
     if (text === null) continue;
-    if (ownTexts.has(normalizeSummaryText(text))) floor = i;
+    if (ownTexts.has(normalizeSummaryText(text))) hits.add(i);
   }
+  return hits;
+}
+
+/** The index of the NEWEST own-summary entry on the block (-1 when none):
+ * observation starts strictly AFTER this index. */
+export function ownSummaryFloorIndex(entries: readonly SessionEntry[], ownTexts: ReadonlySet<string>): number {
+  let floor = -1;
+  for (const i of ownSummaryIndices(entries, ownTexts)) floor = Math.max(floor, i);
   return floor;
 }
 

@@ -121,17 +121,7 @@ for (const f of files) seq = Math.max(seq, f.seq);
 seq += 1;
 
 function byteLength(text) {
-  let bytes = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff) {
-      bytes += 4;
-      i += 1;
-    } else bytes += 3;
-  }
-  return bytes;
+  return Buffer.byteLength(text, "utf8");
 }
 
 const ROLL = 3 * 1024 * 1024; // the mirror's split budget — stay under the platform cap

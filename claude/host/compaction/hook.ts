@@ -36,10 +36,11 @@ import { O_INITIAL_PROMPT } from "../../core/src/types.js";
 import { ModelUnavailableError } from "../runs/seams.js";
 import { normalizeSummaryText, ownSummariesFor } from "../storage/summary-identity.js";
 import { contextTokensFor, makeTriggerCtx } from "../triggers/context.js";
+import { healedUnobserved } from "../triggers/eval.js";
 import { acquireForCompaction, acquireOrSkip } from "../triggers/run-locks.js";
 import { buildSkip, buildTakeover, estimateTokensAfter, summaryMessage } from "./answer.js";
 import { computeKeptTail } from "./cut.js";
-import { ownCompactionFloorIndex, ownSummaryFloorIndex } from "./floor.js";
+import { ownCompactionFloorIndex, ownSummaryFloorIndex, ownSummaryIndices } from "./floor.js";
 import { collectTailThinking, renderThinkingSection } from "./thinking.js";
 
 /** The compact event slice the takeover reads (the engine's input shape). */
@@ -102,6 +103,11 @@ export interface CompactionHookDeps {
   getLeafId: () => string | null;
   /** The conversation's observer frontier. */
   getObserverFrontier: () => string | null;
+  /** the store's observation coverage list (the stale-frontier heal's
+   *  coverage anchor; absent when the host cannot serve it) */
+  getObservationCoverages?: () =>
+    | readonly { coversFromId: string | null; coversUpToId: string; sourceEntryIds: string[] }[]
+    | null;
   /** Pins the conversation's core before each store-reading cluster. */
   pinCore: () => Promise<void>;
   /** The pinned conversation's graph store (read + the compaction-baseline write). */
@@ -463,7 +469,22 @@ export function observerCatchUpGap(deps: CompactionHookDeps, firstKeptEntryId: s
     );
   }
   const scoped = floor === -1 ? compactedBlock : compactedBlock.slice(floor + 1);
-  return computeUnobserved(scoped, deps.getObserverFrontier()).filter(isRenderableEntry);
+  const ownTexts = ownSummariesFor(deps.getGraphStore());
+  const summaryIds = new Set<string>();
+  for (const i of ownSummaryIndices(branch, ownTexts)) {
+    const id = branch[i]?.id;
+    if (id !== undefined) summaryIds.add(id);
+  }
+  const heal = healedUnobserved({
+    fullBranch: branch,
+    segment: scoped,
+    frontier: deps.getObserverFrontier(),
+    coverages: deps.getObservationCoverages?.() ?? null,
+    ownSummaryIds: summaryIds,
+    segmentStartsAtBranchHead: floor === -1 && cutIndex === -1,
+  });
+  if (heal.note !== null) (deps.log ?? ((m: string) => console.log(m)))(`compaction: ${heal.note}`);
+  return heal.unobserved.filter(isRenderableEntry);
 }
 
 /** Map the message-space cut onto the branch's entry space by TAIL

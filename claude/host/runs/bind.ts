@@ -84,6 +84,13 @@ export interface ConversationBinding {
   graphStore(): GraphStore;
   /** The conversation's observer frontier (post-pin). */
   observerFrontier(): string | null;
+  /** The store's observation coverage list (the stale-frontier heal's
+   *  coverage anchor). */
+  observationCoverages(): ReadonlyArray<{
+    coversFromId: string | null;
+    coversUpToId: string;
+    sourceEntryIds: string[];
+  }>;
   /** The conversation's entry view (the capture grouper over the row cache). */
   branch(): SessionEntry[];
   /** The entry view's leaf id (null when empty). */
@@ -456,6 +463,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
       return pinnedStoreView;
     },
     observerFrontier: () => pinnedStoreView?.observerFrontier ?? null,
+    observationCoverages: () => pinnedStoreView?.observationCoverages ?? [],
     // The branch = the durable mirror (arrival order — the backfill's rows
     // included, so a restarted process sees the full history) overlaid with
     // the capture cache's not-yet-flushed rows. The cache ALONE would hand a
@@ -496,6 +504,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
       launchGuard: () => !state.isBootstrapBlocked(),
       cheapGateClean: () => !checkpointService().tripwires().evaluate(key).suspected,
       getObserverFrontier: () => binding.observerFrontier(),
+      getObservationCoverages: () => binding.observationCoverages(),
       getOwnSummaries: () => ownSummariesFor(binding.graphStore()),
       pinCore: async () => {
         await pinCore();
@@ -577,6 +586,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         getBranch: () => binding.branch(),
         getLeafId: () => binding.leafId(),
         getObserverFrontier: () => binding.observerFrontier(),
+        getObservationCoverages: () => binding.observationCoverages(),
         pinCore: async () => {
           await pinCore();
         },

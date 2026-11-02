@@ -39,15 +39,20 @@ export function installUnhandledRejectionLogging(): void {
         // same stub rule as the rejection arm
       }
     };
-    proc.on("unhandledRejection", onRejection);
     // a module reload in the same worker must not stack handlers: the
-    // previous install's handler rides globalThis (module state resets on
+    // previous install's handlers ride globalThis (module state resets on
     // reload, the global does not)
-    const g = globalThis as { __owlPrevUncaught?: (err: unknown) => void };
-    if (g.__owlPrevUncaught !== undefined && typeof proc.removeListener === "function") {
-      proc.removeListener("uncaughtException", g.__owlPrevUncaught);
+    const g = globalThis as {
+      __owlPrevUncaught?: (err: unknown) => void;
+      __owlPrevRejection?: (reason: unknown) => void;
+    };
+    if (typeof proc.removeListener === "function") {
+      if (g.__owlPrevUncaught !== undefined) proc.removeListener("uncaughtException", g.__owlPrevUncaught);
+      if (g.__owlPrevRejection !== undefined) proc.removeListener("unhandledRejection", g.__owlPrevRejection);
     }
     g.__owlPrevUncaught = onUncaught;
+    g.__owlPrevRejection = onRejection;
+    proc.on("unhandledRejection", onRejection);
     proc.on("uncaughtException", onUncaught);
   } catch {
     // no process object in this sandbox — the per-site guards remain

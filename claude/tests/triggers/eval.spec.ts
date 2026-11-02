@@ -124,30 +124,43 @@ describe("the stale observer frontier vs the summary floor (the compaction re-an
     noteOwnSummary(getGraphStore(), SUMMARY_TEXT);
     const deps = makeDeps({ rows: scopedRows(), getObserverFrontier: () => "e2" });
     await evaluateAndLaunch(deps, false);
-    expect(ids(deps.launches[0]?.unobserved ?? [])).toEqual(["floor", "s1", "s2", "s3", "s4"]);
+    // the span skips the own-summary row itself (condensed history, not content)
+    expect(ids(deps.launches[0]?.unobserved ?? [])).toEqual(["s1", "s2", "s3", "s4"]);
   });
 
   test("a frontier predating the floor observes the WHOLE scoped segment (nothing covered)", async () => {
     noteOwnSummary(getGraphStore(), SUMMARY_TEXT);
-    const deps = makeDeps({ rows: scopedRows(), getObserverFrontier: () => "old-era-frontier" });
+    const deps = makeDeps({
+      rows: scopedRows(),
+      getObserverFrontier: () => "old-era-frontier",
+      getObservationCoverages: () => [],
+    });
     await evaluateAndLaunch(deps, false);
     expect(ids(deps.launches[0]?.unobserved ?? [])).toEqual(["s1", "s2", "s3", "s4"]);
   });
 
-  test("a covered scoped prefix skips re-observation — the anchor is the last covered entry", async () => {
+  test("a covered scoped prefix skips re-observation — the anchor is the last covered entry (the store's coverage list)", async () => {
     noteOwnSummary(getGraphStore(), SUMMARY_TEXT);
-    const obs = {
-      id: "obs-1",
-      timestamp: "obs-ts",
-      type: "custom",
-      customType: "session-owl.observation",
-      data: { coversFromId: "s1", coversUpToId: "s2", records: [{ sourceEntryIds: ["s1", "s2"] }] },
-    } as unknown as SessionEntry;
-    const rows = scopedRows();
-    rows.splice(4, 0, obs); // inside the scoped segment, after s1
-    const deps = makeDeps({ rows, getObserverFrontier: () => "old-era-frontier" });
+    const deps = makeDeps({
+      rows: scopedRows(),
+      getObserverFrontier: () => "old-era-frontier",
+      getObservationCoverages: () => [{ coversFromId: "s1", coversUpToId: "s2", sourceEntryIds: ["s1", "s2"] }],
+    });
     await evaluateAndLaunch(deps, false);
     expect(ids(deps.launches[0]?.unobserved ?? [])).toEqual(["s3", "s4"]);
+  });
+
+  test("a lost frontier with no floor anchors at the session head (the initial prompt is never re-observed)", async () => {
+    const deps = makeDeps({
+      rows: scopedRows(),
+      getObserverFrontier: () => "old-era-frontier",
+      getObservationCoverages: () => [],
+    });
+    await evaluateAndLaunch(deps, false);
+    // no floor: the segment starts at the branch head — the vendored first-user
+    // anchor applies (the first user row is skipped: the initial prompt stays
+    // mechanically captured)
+    expect(ids(deps.launches[0]?.unobserved ?? [])).toEqual(["e2", "floor", "s1", "s2", "s3", "s4"]);
   });
 
   test("a disable window with native compactions continues strictly from the stopped frontier (native summaries are never floors)", async () => {

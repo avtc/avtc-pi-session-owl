@@ -827,6 +827,28 @@ describe("observerCatchUpGap — the ceiling invariant (never past the live/rewo
     return { type: "message", id, message: { role: "user", content: text } } as unknown as SessionEntry;
   }
 
+  test("a frontier stranded behind the block's floor back-fills the span after it (the catch-up heal)", () => {
+    resetForNewSession();
+    const summaryText = "# Memory \n catch-up heal";
+    const store = getGraphStore();
+    noteOwnSummary(store, summaryText);
+    const branch = [
+      row("u0", "the frontier era"),
+      row("summary-1", summaryText),
+      row("s1", "kept one"),
+      row("s2", "kept two"),
+      row("s3", "kept three"),
+    ];
+    const deps = {
+      ...gapDeps(branch, "u0"),
+      getGraphStore: () => store,
+    } as unknown as CompactionHookDeps;
+    const gap = observerCatchUpGap(deps, null);
+    // the stuck span strictly after u0, the summary row skipped (condensed
+    // history) — the observer never goes silent behind the floor
+    expect(gap.map((e) => e.id)).toEqual(["s1", "s2", "s3"]);
+  });
+
   test("a stale off-branch frontier yields an empty gap — never rows past the tip", () => {
     const branch = [row("u1", "first"), row("a1", "answer"), row("u2", "second")];
     // frontier id lives on a dead branch: nothing strictly-after it on the

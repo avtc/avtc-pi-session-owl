@@ -112,6 +112,10 @@ export interface GraphStore {
   lastCompactionLedger: UsageLedger | null;
   /** coversUpToId of the latest replayed observation delta; null when none. */
   observerFrontier: string | null;
+  /** Every observation's covered range in arrival order (the heal's
+   *  coverage anchor: which entries an existing observation already
+   *  covers, independent of the branch's entry shapes). */
+  observationCoverages: Array<{ coversFromId: string | null; coversUpToId: string; sourceEntryIds: string[] }>;
   /** Resolves source-entry ids to session entries for verbatim-source details
    *  re-rendering. `null` outside an active session (set at activate, refreshed
    *  on session_start, cleared on session_shutdown). */
@@ -179,6 +183,7 @@ export function getGraphStore(): GraphStore {
       usageLedger: cloneLedger(EMPTY_LEDGER),
       lastCompactionLedger: null,
       observerFrontier: null,
+      observationCoverages: [],
       resolveEntries: null,
     };
     noteResident(ambientConversationKey(), store);
@@ -226,6 +231,11 @@ export function appendObservation(ctx: StoreContext, entry: ObservationEntry): v
   // persists do.
   const branch = ctx.getBranch(ctx.getLeafId());
   advanceFrontierForward(getGraphStore(), entry.coversUpToId, (id) => entryPosition(branch, id));
+  getGraphStore().observationCoverages.push({
+    coversFromId: entry.coversFromId,
+    coversUpToId: entry.coversUpToId,
+    sourceEntryIds: entry.records.flatMap((r) => r.sourceEntryIds),
+  });
 }
 
 /** The entry's position on a branch (-1 = not present). */
@@ -642,6 +652,11 @@ export async function load(ctx: StoreContext): Promise<LoadResult> {
         // must not poison it — the frontier re-derives from on-branch ids only,
         // so a reload self-heals a stale off-branch pointer
         advanceFrontierForward(storeState, payload.coversUpToId, (id) => positionById.get(id) ?? -1);
+        storeState.observationCoverages.push({
+          coversFromId: typeof payload.coversFromId === "string" ? payload.coversFromId : null,
+          coversUpToId: payload.coversUpToId,
+          sourceEntryIds: payload.records.flatMap((r) => r.sourceEntryIds),
+        });
       }
       if (!Array.isArray(payload.records)) continue;
       for (const rec of payload.records) {
