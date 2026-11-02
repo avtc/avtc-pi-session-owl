@@ -14,7 +14,12 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_CONFIG, _resetGetSessionOwlSettings, _setGetSessionOwlSettings, getSessionOwlSettings } from "../../src/config/schema.js";
+import {
+  _resetGetSessionOwlSettings,
+  _setGetSessionOwlSettings,
+  DEFAULT_CONFIG,
+  getSessionOwlSettings,
+} from "../../src/config/schema.js";
 
 const MARKER = "PI_SUBAGENT_PARENT_PID";
 
@@ -37,7 +42,12 @@ afterEach(() => {
 describe("subagent policy self-application (getSessionOwlSettings)", () => {
   it("root session (no marker): config passes through unchanged in every mode", () => {
     for (const subagentMode of ["inherited", "disabled", "on-compaction"] as const) {
-      _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, subagentMode, enabled: true, observerMode: "on-threshold" }));
+      _setGetSessionOwlSettings(() => ({
+        ...DEFAULT_CONFIG,
+        subagentMode,
+        enabled: true,
+        observerMode: "on-threshold",
+      }));
       withMarker(undefined, () => {
         const cfg = getSessionOwlSettings();
         expect(cfg.enabled).toBe(true);
@@ -100,7 +110,12 @@ describe("subagent policy self-application (getSessionOwlSettings)", () => {
   });
 
   it("child + on-compaction over an already-deferred config: idempotent", () => {
-    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: true, subagentMode: "on-compaction", observerMode: "on-compaction" }));
+    _setGetSessionOwlSettings(() => ({
+      ...DEFAULT_CONFIG,
+      enabled: true,
+      subagentMode: "on-compaction",
+      observerMode: "on-compaction",
+    }));
     withMarker("12345", () => {
       const cfg = getSessionOwlSettings();
       expect(cfg.observerMode).toBe("on-compaction");
@@ -109,7 +124,13 @@ describe("subagent policy self-application (getSessionOwlSettings)", () => {
   });
 
   it("child + subagentMode inherited: the config is returned verbatim", () => {
-    const source = { ...DEFAULT_CONFIG, enabled: true, subagentMode: "inherited", observerMode: "on-threshold", debugLog: true } as const;
+    const source = {
+      ...DEFAULT_CONFIG,
+      enabled: true,
+      subagentMode: "inherited",
+      observerMode: "on-threshold",
+      debugLog: true,
+    } as const;
     _setGetSessionOwlSettings(() => ({ ...source }));
     withMarker("12345", () => {
       const cfg = getSessionOwlSettings();
