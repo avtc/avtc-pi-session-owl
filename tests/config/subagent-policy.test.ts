@@ -8,9 +8,8 @@
  * deferred, inherited → verbatim. In the root session the marker is absent and
  * the config passes through untouched.
  *
- * Ported from avtc-pi-subagent tests/env.test.ts (applySessionOwlSubagentPolicy),
- * where this logic used to live as a spawn-side env-blob rewrite (the leak this
- * move fixes). The scenarios map 1:1 onto the config seam.
+ * The scenarios mirror the subagent env contract end to end: the marker env,
+ * the blob cascade, and the effective-config self-apply.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";

@@ -254,6 +254,18 @@ describe("live chain processor — the absent partition is door-aware", () => {
     expect(h.patched).toEqual([{ uuid: "r1", parent: "t0" }]);
   });
 
+  test("a command-door captured row absent behind a present one IS amputation evidence (command rows persist)", async () => {
+    const h = harness({
+      owlTail: "t0",
+      tail: facts([row("t0", "x"), row("r1", "t0")]),
+    });
+    h.proc.enqueue({ uuid: "cmd1", door: "command", captured: true });
+    h.proc.enqueue(ev("r1", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([{ settle: "r1" }]);
+    expect(h.logs.some((l) => /amputation \(cmd1/.test(l))).toBe(true);
+  });
+
   test("a persisting-door captured row absent behind a present one IS amputation evidence", async () => {
     const h = harness({
       owlTail: "t0",

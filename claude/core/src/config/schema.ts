@@ -743,10 +743,8 @@ export function initSessionOwlSettings(
  *                    compacts (the compaction catch-up owns it)
  *    inherited     → untouched (the child gets the parent's settings verbatim)
  *  Applied to the EFFECTIVE config in-memory: the inherited PI_SETTINGS_SESSION_OWL
- *  env blob cascades verbatim (nobody rewrites it at spawn — the old spawn-side
- *  rewrite in avtc-pi-subagent was this repo's logic leaked there; now the policy
- *  lives here, next to the schema it reads). Idempotent with the legacy spawn-side
- *  rewrite (old subagent + new owl rewrite the blob AND self-apply — same result). */
+ *  env blob cascades verbatim (nobody rewrites it at spawn; the policy
+ *  self-applies here, next to the schema it reads). */
 function applySubagentPolicy(config: SessionOwlConfig): SessionOwlConfig {
   // pi runs under Node (`process` exists); the Claude hooks sandbox may not
   // expose it — the read degrades to the root-session no-op there

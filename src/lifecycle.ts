@@ -215,16 +215,19 @@ function ensureNGoalSeeded(store: StoreContext): void {
 async function gatedLoadAndSeed(pi: ExtensionAPI, ctx: ExtensionContext, widget: WidgetController): Promise<void> {
   const store = toStoreContext(pi, ctx);
   widget.setLoading(true);
-  await load(store);
-  // Fresh-session seed: if the graph is empty (no snapshot/deltas), nGoal must
-  // exist before any observation arrives. Gated on enabled: a disabled session
-  // persists no graph_delta (the seed self-heals on enable via capture).
-  if (getSessionOwlSettings().enabled) {
-    ensureNGoalSeeded(store);
-    captureInitialPromptAndExtract(ctx, pi, widget);
+  try {
+    await load(store);
+    // Fresh-session seed: if the graph is empty (no snapshot/deltas), nGoal must
+    // exist before any observation arrives. Gated on enabled: a disabled session
+    // persists no graph_delta (the seed self-heals on enable via capture).
+    if (getSessionOwlSettings().enabled) {
+      ensureNGoalSeeded(store);
+      captureInitialPromptAndExtract(ctx, pi, widget);
+    }
+  } finally {
+    widget.setLoading(false);
+    widget.render();
   }
-  widget.setLoading(false);
-  widget.render();
 }
 
 /** The startup chain-repair gate: detect broken parent links (a lost append

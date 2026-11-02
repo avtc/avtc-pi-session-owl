@@ -98,6 +98,7 @@ const PERSISTING_DOORS = new Set([
   "attachment",
   "prompt",
   "delivery",
+  "command",
   "note",
   "compaction",
 ]);

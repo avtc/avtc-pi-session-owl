@@ -47,8 +47,11 @@ export function byteLength(text: string): number {
     if (code < 0x80) bytes += 1;
     else if (code < 0x800) bytes += 2;
     else if (code >= 0xd800 && code <= 0xdbff) {
-      bytes += 4;
-      i += 1; // the surrogate pair counts as one code point
+      const low = i + 1 < text.length ? text.charCodeAt(i + 1) : 0;
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        bytes += 4;
+        i += 1; // the surrogate pair counts as one code point
+      } else bytes += 3; // an unpaired surrogate encodes as the replacement char
     } else bytes += 3;
   }
   return bytes;

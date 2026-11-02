@@ -38,6 +38,18 @@ describe("fs-adapter — byte length (the platform's size unit)", () => {
       (globalThis as { Buffer?: unknown }).Buffer = saved;
     }
   });
+
+  test("an unpaired surrogate counts as the replacement char (3) on both paths", async () => {
+    const { byteLength } = await import("../../host/storage/fs-adapter.js");
+    expect(byteLength("\ud83d")).toBe(3);
+    const saved = (globalThis as { Buffer?: unknown }).Buffer;
+    (globalThis as { Buffer?: unknown }).Buffer = undefined;
+    try {
+      expect(byteLength("\ud83d")).toBe(3);
+    } finally {
+      (globalThis as { Buffer?: unknown }).Buffer = saved;
+    }
+  });
 });
 
 describe("fs-adapter — guards", () => {

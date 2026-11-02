@@ -222,17 +222,20 @@ async function swapTo(key: string, forceLoad = false): Promise<void> {
   graphStore.resetForNewSession();
   applyConversationSeams(key);
   const startedWithFactory = Boolean(f?.ctxFactory);
-  if (f?.ctxFactory) {
-    const ctx = f.ctxFactory();
-    // pi's ctxFactory pattern: refresh (re-fold + re-resolve) at EVERY
-    // load — a context prepared earlier holds the fold from its own
-    // construction; records flushed since (capture batches, observer
-    // persists) would stay invisible to the fold and the graph would come
-    // up empty every cross-conversation switch
-    await (ctx as { refresh?: () => Promise<void> }).refresh?.();
-    await graphStore.load(ctx);
+  try {
+    if (f?.ctxFactory) {
+      const ctx = f.ctxFactory();
+      // pi's ctxFactory pattern: refresh (re-fold + re-resolve) at EVERY
+      // load — a context prepared earlier holds the fold from its own
+      // construction; records flushed since (capture batches, observer
+      // persists) would stay invisible to the fold and the graph would come
+      // up empty every cross-conversation switch
+      await (ctx as { refresh?: () => Promise<void> }).refresh?.();
+      await graphStore.load(ctx);
+    }
+  } finally {
+    if (keptDetailsBucket !== null) details.reattachActiveDetailsBucket(keptDetailsBucket);
   }
-  if (keptDetailsBucket !== null) details.reattachActiveDetailsBucket(keptDetailsBucket);
   const g = graphStore.getGraphStore().graph as { nodes: Map<string, unknown>; observations: Map<string, unknown> };
   traceSeq += 1;
   (g as unknown as { owlTrace?: number }).owlTrace = traceSeq; // cross-module identity: which swap installed this graph object

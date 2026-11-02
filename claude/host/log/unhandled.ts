@@ -40,10 +40,14 @@ export function installUnhandledRejectionLogging(): void {
       }
     };
     proc.on("unhandledRejection", onRejection);
-    if (typeof proc.removeListener === "function") {
-      // a module reload in the same worker must not stack handlers
-      proc.removeListener("uncaughtException", onUncaught);
+    // a module reload in the same worker must not stack handlers: the
+    // previous install's handler rides globalThis (module state resets on
+    // reload, the global does not)
+    const g = globalThis as { __owlPrevUncaught?: (err: unknown) => void };
+    if (g.__owlPrevUncaught !== undefined && typeof proc.removeListener === "function") {
+      proc.removeListener("uncaughtException", g.__owlPrevUncaught);
     }
+    g.__owlPrevUncaught = onUncaught;
     proc.on("uncaughtException", onUncaught);
   } catch {
     // no process object in this sandbox — the per-site guards remain
