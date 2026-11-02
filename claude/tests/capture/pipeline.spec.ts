@@ -74,6 +74,21 @@ describe("append-handler — capture", () => {
     expect(cap.pending).toEqual([]);
   });
 
+  test("queue-door rows are NOT captured — task notifications the engine never persists", () => {
+    // Delivered through the append event (the engine's background-task
+    // queue) but never written to the transcript file: capturing them
+    // leaves permanent mirror residue the file can never confirm, and the
+    // live chain reads each one's absence as amputation.
+    const queued = row("q-1", null, {
+      door: "queue",
+      message: { type: "user", content: [{ type: "text", text: "<task-notification>…" }] } as never,
+    });
+    expect(captureAppend("s1", queued, mirrorFor)).toBe(false);
+    const cap = ensureCapture("s1", mirrorFor);
+    expect(cap.rowCache.has("q-1")).toBe(false);
+    expect(cap.pending).toEqual([]);
+  });
+
   test("rows land in the row cache, the pending list, and the mirror buffer", () => {
     const owlLoops = new Set<string>(["owl-agent-1"]);
     const isOwl = (agentId: string | undefined) => agentId !== undefined && owlLoops.has(agentId);

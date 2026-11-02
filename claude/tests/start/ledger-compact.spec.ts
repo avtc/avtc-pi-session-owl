@@ -16,7 +16,7 @@ const run = promisify(execFile);
 const HELPER = join(__dirname, "..", "..", "helpers", "ledger-compact.mjs");
 
 function rec(kind: string, seq: number, ts: number, payload: unknown, producer = "p-a-1"): string {
-  return JSON.stringify({ producerId: producer, seq, ts, marker: "m" + seq, at: "m" + seq, kind, payload });
+  return JSON.stringify({ producerId: producer, seq, ts, marker: `m${seq}`, at: `m${seq}`, kind, payload });
 }
 
 function lineage(
@@ -37,7 +37,7 @@ function damagedDir(): { cfg: string; sessDir: string } {
   mkdirSync(sessDir, { recursive: true });
   writeFileSync(
     join(sessDir, "ledger-0001aaaa.jsonl"),
-    [
+    `${[
       rec("observation", 1, 1000, { text: "first" }),
       lineage(
         [
@@ -48,11 +48,11 @@ function damagedDir(): { cfg: string; sessDir: string } {
         1001,
       ),
       rec("usage", 3, 1002, { tokens: 5 }),
-    ].join("\n") + "\n",
+    ].join("\n")}\n`,
   );
   writeFileSync(
     join(sessDir, "ledger-0002bbbb.jsonl"),
-    [
+    `${[
       // the re-statement record: u1/u2 identical, u3 new
       lineage(
         [
@@ -64,7 +64,7 @@ function damagedDir(): { cfg: string; sessDir: string } {
         1003,
       ),
       rec("observation", 5, 1004, { text: "second" }),
-    ].join("\n") + "\n",
+    ].join("\n")}\n`,
   );
   return { cfg, sessDir };
 }
@@ -137,8 +137,7 @@ describe("helpers/ledger-compact.mjs", () => {
     const tmp = tempDir("owl-ledger-compact-ok");
     const sessDir = join(tmp, "cfg", "session-owl", "sessions", "s3");
     mkdirSync(sessDir, { recursive: true });
-    const original =
-      [rec("observation", 1, 1000, { a: 1 }), lineage([{ uuid: "u1", parent: null }], 2, 1001)].join("\n") + "\n";
+    const original = `${[rec("observation", 1, 1000, { a: 1 }), lineage([{ uuid: "u1", parent: null }], 2, 1001)].join("\n")}\n`;
     writeFileSync(join(sessDir, "ledger-0001dddd.jsonl"), original);
     const before = readdirSync(sessDir);
     const r = await run("node", [HELPER, "--session-dir", sessDir, "--apply"]);
@@ -159,7 +158,7 @@ describe("helpers/ledger-compact.mjs", () => {
     const tmp = tempDir("owl-ledger-compact-abort");
     const sessDir = join(tmp, "cfg", "session-owl", "sessions", "s4");
     mkdirSync(sessDir, { recursive: true });
-    writeFileSync(join(sessDir, "ledger-0001eeee.jsonl"), lineage([{ uuid: "u1", parent: null }], 1, 1000) + "\n");
+    writeFileSync(join(sessDir, "ledger-0001eeee.jsonl"), `${lineage([{ uuid: "u1", parent: null }], 1, 1000)}\n`);
     // an unreadable file in the set (a directory with the ledger name)
     mkdirSync(join(sessDir, "ledger-0002ffff.jsonl"));
     const before = readdirSync(sessDir).sort();
@@ -190,10 +189,10 @@ describe("helpers/ledger-compact.mjs — a mass that cannot fit one record", () 
     for (let i = 0; i < 60_000; i += 1) {
       edges.push({ uuid: `e${i}x${"0".repeat(12)}`, parent: i === 0 ? null : `e${i - 1}x${"0".repeat(12)}` });
     }
-    writeFileSync(join(sessDir, "ledger-0001aaaa.jsonl"), lineage(edges.slice(0, 30_000), 1, 1000) + "\n");
+    writeFileSync(join(sessDir, "ledger-0001aaaa.jsonl"), `${lineage(edges.slice(0, 30_000), 1, 1000)}\n`);
     writeFileSync(
       join(sessDir, "ledger-0002bbbb.jsonl"),
-      lineage(edges.slice(0, 20_000), 2, 1001) + "\n" + lineage(edges.slice(20_000), 3, 1002) + "\n",
+      `${lineage(edges.slice(0, 20_000), 2, 1001)}\n${lineage(edges.slice(20_000), 3, 1002)}\n`,
     );
     const r = await run("node", [HELPER, "--session-dir", sessDir, "--apply"]);
     const report = parseReport(r.stdout);
@@ -228,13 +227,13 @@ describe("helpers/ledger-compact.mjs — a mass that cannot fit one record", () 
     const huge = "z".repeat(3 * 1024 * 1024);
     writeFileSync(
       join(sessDir, "ledger-0001aaaa.jsonl"),
-      [
+      `${[
         rec("observation", 1, 1000, { text: "first" }),
         lineage([{ uuid: "u1", parent: null }], 2, 1001),
         rec("usage", 3, 1002, { blob: huge }),
-      ].join("\n") + "\n",
+      ].join("\n")}\n`,
     );
-    writeFileSync(join(sessDir, "ledger-0002bbbb.jsonl"), lineage([{ uuid: "u1", parent: "x9" }], 4, 1003) + "\n");
+    writeFileSync(join(sessDir, "ledger-0002bbbb.jsonl"), `${lineage([{ uuid: "u1", parent: "x9" }], 4, 1003)}\n`);
     const r = await run("node", [HELPER, "--session-dir", sessDir, "--apply"]);
     const report = parseReport(r.stdout);
     expect(report.done).toBe(true);

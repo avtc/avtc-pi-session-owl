@@ -59,7 +59,7 @@ export interface ClaudeRow {
   remat?: boolean;
 }
 
-const SKIPPED_DOORS = new Set(["attachment", "hook-context", "notice"]);
+const SKIPPED_DOORS = new Set(["attachment", "hook-context", "notice", "queue"]);
 
 /** The content blocks of a row; a non-array content degrades to []. */
 function blocksOf(row: ClaudeRow): ClaudeRow["message"]["content"] {

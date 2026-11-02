@@ -918,8 +918,8 @@ describe("backfill — the restated-lineage heal hook", () => {
         producerId: "p-lh",
         seq,
         ts: 3000 + seq,
-        marker: "m" + seq,
-        at: "m" + seq,
+        marker: `m${seq}`,
+        at: `m${seq}`,
         kind: "lineage",
         payload: { edges },
       });

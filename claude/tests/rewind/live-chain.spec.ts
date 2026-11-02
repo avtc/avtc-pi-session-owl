@@ -197,6 +197,49 @@ describe("live chain processor — the normal tick", () => {
   });
 });
 
+describe("live chain processor — verdict application is single-flight across lanes", () => {
+  test("two parked applications never overlap — the second waits for the first", async () => {
+    let running = 0;
+    let maxRunning = 0;
+    const release: Array<() => void> = [];
+    const h = harness({
+      owlTail: "t0",
+      tail: facts([row("t0", "x"), row("u2", "t0")]),
+      onRewind: () =>
+        new Promise<void>((resolve) => {
+          running += 1;
+          maxRunning = Math.max(maxRunning, running);
+          release.push(() => {
+            running -= 1;
+            resolve();
+          });
+        }),
+    });
+    await h.proc.flush({ deferVerdicts: true }); // arm the defer flag
+    // verdict A: parked, then applied on the timer lane (it hangs)
+    h.proc.enqueue(ev("u1", true));
+    h.proc.enqueue(ev("u2", true));
+    h.fireScheduled(); // the tick parks the verdict
+    h.fireScheduled(); // the timer applies it — onRewind A hangs
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.rewinds.length).toBe(1); // A started
+    // verdict B: parked while A's application is in flight
+    h.setTail(facts([row("t0", "x"), row("u4", "t0")]));
+    h.proc.enqueue(ev("u3", true));
+    h.proc.enqueue(ev("u4", true));
+    h.fireScheduled(); // the tick parks verdict B
+    h.fireScheduled(); // the timer would start B — it must WAIT for A
+    await new Promise((r) => setTimeout(r, 5));
+    expect(h.rewinds.length).toBe(1); // B has not started while A is in flight
+    release[0]?.();
+    await new Promise((r) => setTimeout(r, 5));
+    release[1]?.();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(maxRunning).toBe(1); // never overlapped
+    expect(h.rewinds.length).toBe(2); // both verdicts applied in the end
+  });
+});
+
 describe("live chain processor — bounds, lifecycle and containment", () => {
   test("the queue cap sheds the OLDEST pending rows and detection stays live", async () => {
     const h = harness({ owlTail: "t0", known: ["t0"], tail: facts([row("t0", null)]) });

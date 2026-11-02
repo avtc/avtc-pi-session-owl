@@ -1,0 +1,12 @@
+{
+  "rows": [
+    {
+      "uuid": "q1",
+      "parentUuid": null,
+      "door": "queue",
+      "origin": { "kind": "engine" },
+      "message": { "type": "user", "content": [{ "type": "text", "text": "<task-notification><task-id>abc</task-id></task-notification>" }] },
+      "timestamp": "2026-11-02T07:44:06.000Z"
+    }
+  ]
+}

@@ -78,6 +78,10 @@ export function captureAppend(
   // event but NEVER written to the transcript file. Capturing them would
   // leave permanent mirror residue the file can never confirm.
   if (row.door === "hook-context") return false;
+  // Queue-door rows are the engine's background-task notifications (the
+  // message queue): delivered through the append event, never persisted —
+  // the file can never confirm them.
+  if (row.door === "queue") return false;
   // a hook-answered fold's materialized rows match the verdict's own
   // message list in order — stamped remat (the grouper skips them; the
   // stamp persists in the mirror, so a resume reads it back)

@@ -48,6 +48,11 @@ describe("grouper — the door table", () => {
     expect(shape).toEqual(["user", "assistant", "user", "toolResult", "user", "user"]);
   });
 
+  test("queue-door rows are skipped — task notifications are never observation sources", () => {
+    const entries = groupRows(fixture("queue-notification")) as AnyEntry[];
+    expect(entries).toEqual([]);
+  });
+
   test("user entries carry the row's text content and ids", () => {
     const entries = groupRows(fixture("doors-basics")) as AnyEntry[];
     const prompt = entries[0];

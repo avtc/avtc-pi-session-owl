@@ -51,7 +51,7 @@ const restoreTypes = () => {
 };
 const t0 = Date.now();
 
-const r = await runClaude(["-p", "say ok", "--plugin-dir", pluginDir, "--debug-file", debugFile], {
+const r = await runClaude(["-p", "say ok", "--dangerously-skip-permissions", "--plugin-dir", pluginDir, "--debug-file", debugFile], {
   env: {
     ...process.env,
     CLAUDE_CONFIG_DIR: cfg,
@@ -76,7 +76,7 @@ const seq = await startSequencedMock(RECALL, { take: 0 }, TU);
 const cfg2 = mkdtempSync(join(tmpdir(), "owl-live-smoke-serve-"));
 const debug2 = join(cfg2, "debug.log");
 const t1 = Date.now();
-const r2 = await runClaude(["-p", "use the memory tool", "--plugin-dir", pluginDir, "--debug-file", debug2], {
+const r2 = await runClaude(["-p", "use the memory tool", "--dangerously-skip-permissions", "--plugin-dir", pluginDir, "--debug-file", debug2], {
   env: {
     ...process.env,
     CLAUDE_CONFIG_DIR: cfg2,
