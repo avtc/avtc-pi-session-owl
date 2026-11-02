@@ -35,8 +35,12 @@ export interface FsAdapter {
 }
 
 /** UTF-8 byte length (the platform's size unit — its caps are BYTES, and
- *  CJK/emoji content inflates 3-4x over UTF-16 code units). */
+ *  CJK/emoji content inflates 3-4x over UTF-16 code units). The host's
+ *  Buffer.byteLength when present; environments without the Buffer global
+ *  fall back to the surrogate-aware scan below. */
 export function byteLength(text: string): number {
+  const b = (globalThis as { Buffer?: { byteLength(value: string, encoding: string): number } }).Buffer;
+  if (b !== undefined) return b.byteLength(text, "utf8");
   let bytes = 0;
   for (let i = 0; i < text.length; i += 1) {
     const code = text.charCodeAt(i);

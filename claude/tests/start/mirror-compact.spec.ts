@@ -5,7 +5,7 @@
 // wins), old batches deleted, dry-run by default, idempotent, sweep
 // compatibility after the rewrite.
 import { execFile } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
@@ -61,6 +61,26 @@ function memSweep(dir: string) {
 }
 
 describe("helpers/mirror-compact.mjs", () => {
+  test("a hostile session id never leaves the sessions dir (percent-encoded segment)", async () => {
+    const { cfg } = dupDir();
+    const { stdout } = await run(process.execPath, [
+      HELPER,
+      "--config-dir",
+      cfg,
+      "--session-id",
+      "../../evil",
+      "--apply",
+    ]);
+    const report = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+    expect(report.done).toBe(true);
+    const sessionsDir = join(cfg, "session-owl", "sessions");
+    const names = readdirSync(sessionsDir);
+    expect(names).toContain("..%2f..%2fevil");
+    expect(names.some((n) => n.includes("/") || n.includes("\\"))).toBe(false);
+    expect(names).not.toContain("..");
+    expect(existsSync(join(cfg, "evil"))).toBe(false);
+  }, 30_000);
+
   test("dry-run (default): reports the projection, writes and deletes nothing", async () => {
     const { cfg, sessDir } = dupDir();
     const before = countLines(sessDir);

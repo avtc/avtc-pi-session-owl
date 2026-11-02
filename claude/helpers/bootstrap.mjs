@@ -147,17 +147,7 @@ seq += 1;
  *  platform cap are BYTES; JS string length is UTF-16 code units — CJK
  *  content inflates 3x over the char count). */
 function byteLength(text) {
-  let bytes = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff) {
-      bytes += 4;
-      i += 1;
-    } else bytes += 3;
-  }
-  return bytes;
+  return Buffer.byteLength(text, "utf8");
 }
 
 /** The concatenated text of a meta row's message content (the

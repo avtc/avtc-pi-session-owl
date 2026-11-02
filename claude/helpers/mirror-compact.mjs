@@ -37,12 +37,22 @@ function flag(name) {
 }
 
 const configDir = flag("--config-dir");
-const sessionId = flag("--session-id");
+/** Percent-encode everything outside [a-zA-Z0-9._-]; `.`/`..` collapse to
+ *  `_` — one segment, never a path (kept byte-identical with the copies in
+ *  bootstrap.mjs and host/state.ts; change them together). */
+function sanitizeSegment(segment) {
+  let clean = segment.replace(/[^a-zA-Z0-9._-]/g, (ch) => `%${ch.charCodeAt(0).toString(16).padStart(2, "0")}`);
+  if (clean === "." || clean === "..") clean = "_";
+  return clean.length > 0 ? clean : "_";
+}
+
+const sessionIdRaw = flag("--session-id");
 const apply = process.argv.includes("--apply");
-if (configDir === null || sessionId === null) {
+if (configDir === null || sessionIdRaw === null) {
   fail("usage: node helpers/mirror-compact.mjs --config-dir <dir> --session-id <id> [--apply]", 2);
 }
 
+const sessionId = sanitizeSegment(sessionIdRaw);
 const sessDir = join(configDir, "session-owl", "sessions", sessionId);
 mkdirSync(sessDir, { recursive: true });
 

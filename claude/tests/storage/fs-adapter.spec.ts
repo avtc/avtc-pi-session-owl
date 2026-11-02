@@ -23,6 +23,21 @@ describe("fs-adapter — byte length (the platform's size unit)", () => {
     expect(byteLength("\ud83d\ude00")).toBe(4);
     expect(byteLength("a\u4e2d\ud83d\ude00")).toBe(8);
   });
+
+  test("without the Buffer global the surrogate-aware scan answers the same", async () => {
+    const { byteLength } = await import("../../host/storage/fs-adapter.js");
+    const saved = (globalThis as { Buffer?: unknown }).Buffer;
+    (globalThis as { Buffer?: unknown }).Buffer = undefined;
+    try {
+      expect(byteLength("abcd")).toBe(4);
+      expect(byteLength("\u00e9")).toBe(2);
+      expect(byteLength("\u4e2d")).toBe(3);
+      expect(byteLength("\ud83d\ude00")).toBe(4);
+      expect(byteLength("a\u4e2d\ud83d\ude00")).toBe(8);
+    } finally {
+      (globalThis as { Buffer?: unknown }).Buffer = saved;
+    }
+  });
 });
 
 describe("fs-adapter — guards", () => {
