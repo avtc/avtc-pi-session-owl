@@ -153,12 +153,32 @@ describe("the stale observer frontier vs the summary floor (the compaction re-an
   test("a disable window with native compactions continues strictly from the stopped frontier (native summaries are never floors)", async () => {
     noteOwnSummary(getGraphStore(), SUMMARY_TEXT);
     const mk = (id: string, role: "user" | "assistant"): SessionEntry =>
-      ({ id, timestamp: `${id}-ts`, type: "message", message: { role, content: `${id} ${PAD}` } }) as unknown as SessionEntry;
-    const nativeSummary = { id: "native-c", timestamp: "nc-ts", type: "compaction", summary: "The engine's own condensed history (no owl heading)" } as unknown as SessionEntry;
+      ({
+        id,
+        timestamp: `${id}-ts`,
+        type: "message",
+        message: { role, content: `${id} ${PAD}` },
+      }) as unknown as SessionEntry;
+    const nativeSummary = {
+      id: "native-c",
+      timestamp: "nc-ts",
+      type: "compaction",
+      summary: "The engine's own condensed history (no owl heading)",
+    } as unknown as SessionEntry;
     const rows: SessionEntry[] = [
-      mk("e1", "user"), mk("e2", "assistant"),
-      { id: "floor", timestamp: "floor-ts", type: "message", message: { role: "user", content: SUMMARY_TEXT } } as unknown as SessionEntry,
-      mk("w1", "user"), mk("w2", "assistant"), nativeSummary, mk("w3", "user"), mk("w4", "assistant"),
+      mk("e1", "user"),
+      mk("e2", "assistant"),
+      {
+        id: "floor",
+        timestamp: "floor-ts",
+        type: "message",
+        message: { role: "user", content: SUMMARY_TEXT },
+      } as unknown as SessionEntry,
+      mk("w1", "user"),
+      mk("w2", "assistant"),
+      nativeSummary,
+      mk("w3", "user"),
+      mk("w4", "assistant"),
     ];
     const deps = makeDeps({ rows, getObserverFrontier: () => "w2" });
     await evaluateAndLaunch(deps, false);
