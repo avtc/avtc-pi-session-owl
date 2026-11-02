@@ -4,9 +4,13 @@
 // The resume readiness latch: the widget's owl line draws only when the
 // system is READY to serve — the store read landed AND the details cache
 // warmed. One process-global latch (the band belongs to the main
-// conversation; subagent loops draw no band).
+// conversation; subagent loops draw no band). The latch STARTS pending:
+// the engine fires the start hook only after its own resume work, and the
+// band draws the loading line from its first paint instead of an empty
+// pre-owl gap during that span; the start path then re-arms explicitly and
+// the warm's completion releases.
 
-let warmPending = false;
+let warmPending = true;
 
 /** Mark the warm as in flight (the band hides until it completes). */
 export function markDetailsWarmPending(): void {

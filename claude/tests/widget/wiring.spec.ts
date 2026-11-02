@@ -5,7 +5,8 @@
 // handler answering AbovePrompt asks through the REAL register(on) wiring
 // over the in-memory harness — the survey yield, the empty-store
 // passthrough, and the Box composition with the line-store's current line.
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
+import { markDetailsWarmDone } from "../../host/start/readiness.js";
 import { _resetWidgetLine, setWidgetLine } from "../../host/widget/line-store.js";
 import { createHarness } from "../helpers/harness.js";
 
@@ -16,6 +17,11 @@ async function bandHarness() {
 }
 
 describe("the AbovePrompt band branch (live wiring)", () => {
+  beforeEach(() => {
+    // the tests model a RUNNING conversation (the warm already released the
+    // latch; the module-load default is pending)
+    markDetailsWarmDone();
+  });
   test("no line in the store and no provider: the band carries no owl line (nothing servable yet)", async () => {
     _resetWidgetLine();
     const h = await bandHarness();

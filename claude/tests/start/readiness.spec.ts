@@ -2,13 +2,22 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 // The readiness latch: pending hides the owl line, done releases it.
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { detailsWarmPending, markDetailsWarmDone, markDetailsWarmPending } from "../../host/start/readiness.js";
 
 describe("the details-warm readiness latch", () => {
   beforeEach(() => {
     markDetailsWarmDone();
   });
+  test("starts armed — the band draws the loading line from the engine's first paint", async () => {
+    // the engine fires the start hook only after its own resume work; the
+    // latch is pending from module load so the band never shows a pre-owl
+    // gap (or a stale store line) during that span
+    vi.resetModules();
+    const fresh = await import("../../host/start/readiness.js");
+    expect(fresh.detailsWarmPending()).toBe(true);
+  });
+
   test("pending while the warm is in flight, released on completion", () => {
     expect(detailsWarmPending()).toBe(false);
     markDetailsWarmPending();

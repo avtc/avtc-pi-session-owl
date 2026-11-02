@@ -543,6 +543,13 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
     )} cwd=${e != null && typeof e.cwd === "string" ? e.cwd : "<absent>"}`,
   );
   try {
+    // The module-load arming of the warm latch releases here: a start that
+    // will not run the warm (every early return below — a compact re-fire,
+    // a sessionless envelope, a disabled owl) must not leave the band on
+    // the loading line forever. The active path re-arms below before the
+    // backfill resolves.
+    markDetailsWarmDone();
+    warmGateArmed = false;
     // The {compact} source takes NO action (the union's fifth start
     // source): a native compaction re-fires classic.SessionStart after the
     // summary row — re-running the bootstrap would rebuild the settings
