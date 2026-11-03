@@ -205,6 +205,27 @@ function makeRecordExecutor(
 /** Input to `runObserver`. The run honors `signal` only — the caller owns the
  *  run-lock (the background trigger releases in its IIFE; compaction holds).
  *  `core` is the conversation's handle (getCore resolved BEFORE the lock). */
+/** The Observer's chunk plan options — exported so a multi-run repair
+ *  (re-observe) can pre-compute its cumulative chunk window with the exact
+ *  chunking its runs use. */
+export function observerChunkOptions(settings: SessionOwlConfig): ChunkOptions {
+  return {
+    tokenThreshold: settings.observerThresholdTokens,
+    toolBlockCapTokens: settings.observerToolBlockCapTokens,
+    includeThinking: settings.observerIncludeThinking,
+    includeEntryId: true,
+    // the platform's transcript ids are 36-char uuids — the chunk renders
+    // sequential shorts and the executor resolves them back to stored ids
+    shortEntryIds: true,
+  };
+}
+
+/** The chunk count a run over `unobserved` will produce (own synthetic rows
+ *  excluded) — the repair plan's per-range contribution to the grand total. */
+export function planObserverChunkCount(unobserved: SessionEntry[], settings: SessionOwlConfig): number {
+  return buildChunks(unobserved.filter(notOwnSyntheticRow), observerChunkOptions(settings)).length;
+}
+
 export interface ObserverRunInput {
   core: StageCore;
   store: StoreContext;
@@ -228,6 +249,12 @@ export interface ObserverRunInput {
    *  disk at persist time, the crash-window contract; absent in tests that
    *  assert buffering itself). */
   flushLedger?: () => Promise<void>;
+  /** A caller-owned cumulative batch window: when several runs together cover
+   *  one repair (re-observe over many small ranges), each run reports
+   *  offset+done against the grand total so the widget carries one progress
+   *  counter across the whole repair instead of per-run batches that flash
+   *  1/1. Omitted: the run owns its own 0..totalChunks batch. */
+  batchWindow?: { offset: number; total: number };
   /** Test seam — fake stage runner override. */
   runStageFn?: (input: EngineStageRunInput) => Promise<StageRunResultLike>;
   /** The dump seam (null/undefined = no dump — debugDumpLimit 0 or
@@ -296,15 +323,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   const core = input.core as CoreHandle;
   const model = input.settings.observerModel ?? input.settings.defaultModel;
 
-  const chunkOptions: ChunkOptions = {
-    tokenThreshold: input.settings.observerThresholdTokens,
-    toolBlockCapTokens: input.settings.observerToolBlockCapTokens,
-    includeThinking: input.settings.observerIncludeThinking,
-    includeEntryId: true,
-    // the platform's transcript ids are 36-char uuids — the chunk renders
-    // sequential shorts and the executor resolves them back to stored ids
-    shortEntryIds: true,
-  };
+  const chunkOptions = observerChunkOptions(input.settings);
   // owl's OWN synthetic rows never enter a chunk: the compaction summary is
   // the graph's own render and the attributed-reasoning row copies pre-cut
   // thinking that was observed before the compaction — both are by
@@ -322,6 +341,8 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     ids.map((id) => entryById.get(id)).filter((entry): entry is SessionEntry => entry !== undefined);
 
   const totalChunks = chunks.length;
+  const batchOffset = input.batchWindow?.offset ?? 0;
+  const batchTotal = input.batchWindow?.total ?? totalChunks;
   let stageOpened = false;
   let done = 0;
   let totalRecords = 0;
@@ -345,7 +366,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   enableStageDumpArchive(OBSERVE_STAGE, dumpHandle !== null);
   let headerWritten = false;
   try {
-    input.widget.startStage(WIDGET_STAGE, { batch: { done: 0, total: totalChunks } });
+    input.widget.startStage(WIDGET_STAGE, { batch: { done: batchOffset, total: batchTotal } });
     stageOpened = true;
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
       const chunk = chunks[chunkIndex];
@@ -462,7 +483,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       } finally {
         unbindAgentTools(boundAgent ?? "");
         done += 1;
-        input.widget.setBatch(done, totalChunks);
+        input.widget.setBatch(batchOffset + done, batchTotal);
       }
       // a per-LLM-call timeout or a relay timeout-class abort (stall,
       // max-turns runaway) — pi's StageTimeoutError path.
@@ -513,7 +534,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         if (input.maybeBuild !== undefined) {
           const built = await input.maybeBuild();
           if (input.signal.aborted) return;
-          if (built) input.widget.startStage(WIDGET_STAGE, { batch: { done, total: totalChunks } });
+          if (built) input.widget.startStage(WIDGET_STAGE, { batch: { done: batchOffset + done, total: batchTotal } });
         }
       } else {
         // 0 records — the model's verdict, or the call was aborted mid-flight

@@ -80,10 +80,12 @@ function makeCtx(
 function makeDeps(opts: { recordsPerRange?: number; fail?: boolean } = {}): {
   deps: ReobserveDeps;
   calls: string[][];
+  windows: ({ offset: number; total: number } | undefined)[];
   builderCalls: number;
   launched: Promise<void>[];
 } {
   const calls: string[][] = [];
+  const windows: ({ offset: number; total: number } | undefined)[] = [];
   const launched: Promise<void>[] = [];
   let builderCalls = 0;
   const deps: ReobserveDeps = {
@@ -91,6 +93,7 @@ function makeDeps(opts: { recordsPerRange?: number; fail?: boolean } = {}): {
     widget: NO_OP_WIDGET,
     runObserver: async (input) => {
       calls.push(input.unobserved.map((e) => e.id));
+      windows.push(input.batchWindow);
       if (input.maybeBuild !== undefined) await input.maybeBuild();
       if (opts.fail === true) throw new Error("model down");
       const { graph } = getGraphStore();
@@ -120,6 +123,7 @@ function makeDeps(opts: { recordsPerRange?: number; fail?: boolean } = {}): {
   return {
     deps,
     calls,
+    windows,
     get builderCalls() {
       return builderCalls;
     },
@@ -220,6 +224,33 @@ describe("/owl:reobserve-0-obs-chunks", () => {
     expect(harness.calls).toEqual([["a2"]]); // only the closed hole, not the tail
     // the lock was released (a fresh acquire succeeds)
     expect(acquireOrSkip("observe") !== null).toBe(true);
+  });
+
+  it("drives one cumulative chunk window across the ranges (repair-wide widget progress)", async () => {
+    // two closed holes (a2, a4) between covered points; each range is a
+    // single entry → one chunk per range → the repair window totals 2 and
+    // each run reports its cumulative offset against it
+    getGraphStore().observerFrontier = "a5";
+    const branch = [
+      userEntry("u1"),
+      assistantEntry("a1"),
+      assistantEntry("a2"),
+      assistantEntry("a3"),
+      assistantEntry("a4"),
+      assistantEntry("a5"),
+      obsEntry("o1", "a1", "a1"),
+      obsEntry("o3", "a3", "a3"),
+      obsEntry("o5", "a5", "a5"),
+    ];
+    const harness = makeDeps({ recordsPerRange: 1 });
+    const { ctx } = makeCtx(branch, null);
+    await runOwlReobserve("", ctx, harness.deps);
+    await Promise.all(harness.launched);
+    expect(harness.calls).toEqual([["a2"], ["a4"]]);
+    expect(harness.windows).toEqual([
+      { offset: 0, total: 2 },
+      { offset: 1, total: 2 },
+    ]);
   });
 
   it("reports zero recovered when the holes yield nothing", async () => {

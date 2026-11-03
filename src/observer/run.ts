@@ -240,6 +240,18 @@ function makeRecordObservationsTool(
 
 /** Input to `runObserver`. The run honors `signal` only — the caller owns the
  *  run-lock (the background trigger releases in its IIFE; compaction holds). */
+/** The Observer's chunk plan options — exported so a multi-run repair
+ *  (re-observe) can pre-compute its cumulative chunk window with the exact
+ *  chunking its runs will use. */
+export function observerChunkOptions(settings: SessionOwlConfig): ChunkOptions {
+  return {
+    tokenThreshold: settings.observerThresholdTokens,
+    toolBlockCapTokens: settings.observerToolBlockCapTokens,
+    includeThinking: includeThinkingFor(settings),
+    includeEntryId: true,
+  };
+}
+
 export interface ObserverRunInput {
   ctx: ExtensionContext;
   pi: ExtensionAPI;
@@ -258,6 +270,12 @@ export interface ObserverRunInput {
    *  before the next chunk. Provided by the compaction hook (the ballooning
    *  case — long catch-ups); undefined on the turn_end path (small batches). */
   maybeBuild?: () => Promise<boolean>;
+  /** A caller-owned cumulative batch window: when several runs together cover
+   *  one repair (re-observe over many small ranges), each run reports
+   *  offset+done against the grand total so the widget carries one progress
+   *  counter across the whole repair instead of per-run batches that flash
+   *  1/1. Omitted: the run owns its own 0..totalChunks batch. */
+  batchWindow?: { offset: number; total: number };
 }
 
 /** A wrapper node paired with the observation it wraps, plus the prepared
@@ -299,13 +317,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   // signalled during it (mirrors the Builder/Selector guard).
   if (input.signal.aborted) return;
 
-  const chunkOptions: ChunkOptions = {
-    tokenThreshold: input.settings.observerThresholdTokens,
-    toolBlockCapTokens: input.settings.observerToolBlockCapTokens,
-    includeThinking: includeThinkingFor(input.settings),
-    includeEntryId: true,
-  };
-  const chunks = buildChunks(input.unobserved, chunkOptions);
+  const chunks = buildChunks(input.unobserved, observerChunkOptions(input.settings));
 
   // index entries by id for timestamp lookup (mechanical from source).
   const entryById = new Map<string, SessionEntry>();
@@ -318,6 +330,8 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
     ids.map((id) => entryById.get(id)).filter((entry): entry is SessionEntry => entry !== undefined);
 
   const totalChunks = chunks.length;
+  const batchOffset = input.batchWindow?.offset ?? 0;
+  const batchTotal = input.batchWindow?.total ?? totalChunks;
   let stageOpened = false;
   let done = 0;
   let totalRecords = 0;
@@ -331,7 +345,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
   const dumpPath = openStageDump(OBSERVE_STAGE, input.settings.debugDumpLimit, DEFAULT_DUMP_BASE);
   let dumpHeaderWritten = false;
   try {
-    input.widget.startStage(OBSERVE_STAGE, { batch: { done: 0, total: totalChunks } });
+    input.widget.startStage(OBSERVE_STAGE, { batch: { done: batchOffset, total: batchTotal } });
     stageOpened = true;
     if (dumpPath !== null && chunks.length > 0) {
       appendDump(
@@ -414,7 +428,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         throw cause;
       } finally {
         done += 1;
-        input.widget.setBatch(done, totalChunks);
+        input.widget.setBatch(batchOffset + done, batchTotal);
         appendDump(dumpPath, "</chunk>\n");
       }
       // a per-LLM-call timeout — a stage-stopping error: THROW so the compaction
@@ -448,7 +462,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         if (input.maybeBuild !== undefined) {
           const built = await input.maybeBuild();
           if (input.signal.aborted) return;
-          if (built) input.widget.startStage(OBSERVE_STAGE, { batch: { done, total: totalChunks } });
+          if (built) input.widget.startStage(OBSERVE_STAGE, { batch: { done: batchOffset + done, total: batchTotal } });
         }
       } else {
         // 0 records — either the model's verdict, or the call was ABORTED

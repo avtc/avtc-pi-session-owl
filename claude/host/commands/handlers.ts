@@ -31,6 +31,7 @@ import type { GraphStore } from "../../core/src/store/graph-store.js";
 import { computeUncoveredRanges, makeMaybeBuilder } from "../../core/src/triggers.js";
 import { type NodeId, O_INITIAL_PROMPT, type ObsId } from "../../core/src/types.js";
 import type { ConfirmFn, NotifyFn } from "../notify/adapter.js";
+import { planObserverChunkCount } from "../runs/observer.js";
 import { runsLog } from "../runs/seams.js";
 import { makeTriggerCtx } from "../triggers/context.js";
 import type { RunHandle } from "../triggers/run-locks.js";
@@ -100,6 +101,9 @@ export interface OwlCommandDeps {
     /** Optional per-persist ledger flush (durability seam — same shape as
      *  ObserverRunInput.flushLedger; the wiring passes it per conversation). */
     flushLedger?: () => Promise<void>;
+    /** The repair-wide cumulative batch window (re-observe passes one so the
+     *  widget carries a single done/total across all its ranges). */
+    batchWindow?: { offset: number; total: number };
   }) => Promise<void>;
   /** The Builder stage run (the repair's mid-run folding + the reuse
    *  rebuild's cadence gate — pi's scope:null turn-boundary shape). */
@@ -392,16 +396,30 @@ export async function runOwlReobserve(_args: string, deps: OwlCommandDeps): Prom
     await deps.pinCore();
     return bareMaybeBuild();
   };
+  // One cumulative chunk window across the whole repair: each range's run
+  // reports its chunks against the grand total (pre-computed with the exact
+  // chunking the runs use), so the widget carries a single done/total progress
+  // instead of per-range batches that flash 1/1 on fragmented holes.
+  const chunkCounts = ranges.map((range) => planObserverChunkCount(range.entries, deps.getSettings()));
+  const repairTotal = chunkCounts.reduce((sum, count) => sum + count, 0);
+  let offset = 0;
   const launch = (async () => {
     let recovered = 0;
     try {
-      for (const range of ranges) {
+      for (let index = 0; index < ranges.length; index += 1) {
+        const range = ranges[index];
         if (signal.aborted) break;
         // the previous run's awaits let other conversations' swaps re-point
         // the singletons — re-pin before each range's reads and run
         await deps.pinCore();
         const before = deps.getGraphStore().graph.observations.size;
-        await deps.runObserver({ unobserved: range.entries, signal, maybeBuild });
+        await deps.runObserver({
+          unobserved: range.entries,
+          signal,
+          maybeBuild,
+          batchWindow: { offset, total: repairTotal },
+        });
+        offset += chunkCounts[index] ?? 0;
         // the run's long awaits may have swapped the singleton — re-pin
         // before the recovered-delta read (the count is user-visible)
         await deps.pinCore();

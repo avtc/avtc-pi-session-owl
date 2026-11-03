@@ -728,7 +728,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
           },
         });
       },
-      runObserver: async ({ unobserved, signal, maybeBuild, flushLedger }) => {
+      runObserver: async ({ unobserved, signal, maybeBuild, flushLedger, batchWindow }) => {
         await runObserver({
           core: await pinCore(),
           store: (await preparedCtx()).ctx,
@@ -740,6 +740,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
           isEnabled,
           maybeBuild,
           flushLedger,
+          batchWindow,
           dumps: dumps(),
         });
       },

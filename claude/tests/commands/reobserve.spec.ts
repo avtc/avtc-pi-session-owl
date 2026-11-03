@@ -170,6 +170,27 @@ describe("/owl-reobserve-0-obs-chunks — the repair run", () => {
     expect(done).toEqual({ level: "info", text: "Re-observe done — 0 observation(s) recovered into new roots." });
   });
 
+  test("the repair drives one cumulative chunk window across the ranges", async () => {
+    const healed = await makeReobserveDeps("cmd-reobs-window");
+    // two single-entry holes (rows 3 and 5) between covered points — each
+    // range chunks to one, so the window totals 2 and the second range runs
+    // at offset 1
+    const customs = [
+      cover(healed.rig, "e2", "e2", "oA"),
+      cover(healed.rig, "e4", "e4", "oM"),
+      cover(healed.rig, "e6", "e6", "oB"),
+    ];
+    healed.deps.getBranch = () => mixedBranch(entries(6), customs);
+    await runOwlReobserve("", healed.deps);
+    await Promise.all(healed.launched);
+    expect(healed.runObserver).toHaveBeenCalledTimes(2);
+    const windows = healed.runObserver.mock.calls.map((call) => call[0].batchWindow);
+    expect(windows).toEqual([
+      { offset: 0, total: 2 },
+      { offset: 1, total: 2 },
+    ]);
+  });
+
   test("the per-range observer receives the hole's entries and a mid-repair maybeBuild gate", async () => {
     const { deps, runObserver, runBuilder, launched } = await makeReobserveDeps("cmd-reobs-args");
     await runOwlReobserve("", deps);

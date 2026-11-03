@@ -20,10 +20,11 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getSessionOwlSettings } from "../config/schema.js";
+import { buildChunks } from "../format/chunk.js";
 import { extractionSettled } from "../goal-extract/run.js";
 import { log } from "../log.js";
 import { notify } from "../notify.js";
-import type { ObserverRunInput } from "../observer/run.js";
+import { type ObserverRunInput, observerChunkOptions } from "../observer/run.js";
 import { acquireOrSkip } from "../runtime/run-lock.js";
 import { getGraphStore } from "../store/graph-store.js";
 import { computeUncoveredRanges, makeMaybeBuilder, type RunFn } from "../triggers.js";
@@ -97,10 +98,19 @@ export async function runOwlReobserve(_args: string, ctx: ExtensionCommandContex
         unobserved: null,
       }),
   });
+  // One cumulative chunk window across the whole repair: each range's run
+  // reports its chunks against the grand total (pre-computed with the exact
+  // chunking the runs use), so the widget carries a single done/total progress
+  // instead of per-range batches that flash 1/1 on fragmented holes.
+  const chunkOptions = observerChunkOptions(getSessionOwlSettings());
+  const chunkCounts = ranges.map((range) => buildChunks(range.entries, chunkOptions).length);
+  const repairTotal = chunkCounts.reduce((sum, count) => sum + count, 0);
+  let offset = 0;
   const launch = (async () => {
     let recovered = 0;
     try {
-      for (const range of ranges) {
+      for (let index = 0; index < ranges.length; index += 1) {
+        const range = ranges[index];
         if (signal.aborted) break;
         const before = getGraphStore().graph.observations.size;
         await deps.runObserver({
@@ -111,7 +121,9 @@ export async function runOwlReobserve(_args: string, ctx: ExtensionCommandContex
           signal,
           widget: deps.widget,
           maybeBuild,
+          batchWindow: { offset, total: repairTotal },
         });
+        offset += chunkCounts[index] ?? 0;
         recovered += getGraphStore().graph.observations.size - before;
       }
       notify(ctx, `Re-observe done — ${recovered} observation(s) recovered into new roots.`, "info");

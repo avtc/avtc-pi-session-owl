@@ -136,6 +136,7 @@ function makeArgs(opts: {
   debugDumpLimit?: number;
   widget?: WidgetController;
   maybeBuild?: ObserverRunInput["maybeBuild"];
+  batchWindow?: ObserverRunInput["batchWindow"];
 }): ObserverRunInput {
   // point the fake ctx's branch at the unobserved slice (the frontier advance
   // resolves coversUpToId against it)
@@ -158,6 +159,7 @@ function makeArgs(opts: {
     runStageFn: opts.runStageFn,
     widget: opts.widget ?? NO_OP_WIDGET,
     ...(opts.maybeBuild !== undefined ? { maybeBuild: opts.maybeBuild } : {}),
+    ...(opts.batchWindow !== undefined ? { batchWindow: opts.batchWindow } : {}),
   };
 }
 
@@ -755,6 +757,45 @@ describe("runObserver", () => {
     // frontier advanced ONLY to chunk 1's last entry (u1), NOT the gap tail (a2)
     expect(entry.coversUpToId).toBe("u1");
     expect(getGraphStore().observerFrontier).toBe("u1");
+  });
+
+  it("a batchWindow reports cumulative repair progress against the grand total", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    // two chunks (threshold 1 → each entry its own chunk); the repair window
+    // places this run after 3 already-completed chunks of a 7-chunk repair
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = scriptedRunStage([
+      [{ summary: "Goal.", importance: "high", sourceEntryIds: ["u1"] }],
+      [{ summary: "Decision.", importance: "high", sourceEntryIds: ["a1"] }],
+    ]);
+    const calls: { method: string; args: unknown[] }[] = [];
+    const widget: WidgetController = {
+      ...NO_OP_WIDGET,
+      startStage: (stage, init) => calls.push({ method: "startStage", args: [stage, init] }),
+      setBatch: (done, total) => calls.push({ method: "setBatch", args: [done, total] }),
+      endStage: () => calls.push({ method: "endStage", args: [] }),
+    };
+
+    await runObserver(
+      makeArgs({
+        pi,
+        ctx,
+        unobserved,
+        runStageFn: script.fn,
+        thresholdTokens: 1,
+        widget,
+        batchWindow: { offset: 3, total: 7 },
+      }),
+    );
+
+    const starts = calls.filter((c) => c.method === "startStage");
+    expect(starts[0]?.args[1]).toEqual({ batch: { done: 3, total: 7 } });
+    const batches = calls.filter((c) => c.method === "setBatch").map((c) => c.args);
+    expect(batches).toEqual([
+      [4, 7],
+      [5, 7],
+    ]);
   });
 
   it("opens the observe widget stage, reports batch progress, and closes it", async () => {

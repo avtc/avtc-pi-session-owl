@@ -113,6 +113,34 @@ describe("runObserver — the stage dump", () => {
     expect(allPrompts).toContain("entry 1");
   });
 
+  test("a batchWindow reports cumulative repair progress against the grand total", async () => {
+    // the repair (re-observe) pre-computes one grand chunk total and places
+    // each run after the chunks its predecessor ranges completed — the widget
+    // then carries a single done/total across the whole repair
+    const unobserved = [
+      msgEntry("w1", `one ${PAD}`, "user"),
+      msgEntry("w2", `two ${PAD}`, "assistant"),
+      msgEntry("w3", `three ${PAD}`, "user"),
+      msgEntry("w4", `four ${PAD}`, "assistant"),
+    ];
+    const r = await rigUp("obs-window", unobserved, true);
+    const fx = makeRunner([recordsIds(["w1"]), recordsIds(["w3"])]);
+    const widget = recorderWidget();
+    await runObserver({
+      core: r.core,
+      store: r.store,
+      settings: { ...SETTINGS, observerThresholdTokens: 1 },
+      unobserved,
+      signal: new AbortController().signal,
+      widget,
+      runStageFn: fx.runner,
+      batchWindow: { offset: 3, total: 7 },
+    });
+    const lines = widget.calls.filter((c) => c.startsWith("start:observe:") || c.startsWith("batch:"));
+    expect(lines[0]).toBe('start:observe:{"batch":{"done":3,"total":7}}');
+    expect(lines.slice(1)).toEqual(["batch:4/7", "batch:5/7"]);
+  });
+
   test("short-id mode: the chunk cites sequential shorts; a short citation persists the stored id", async () => {
     const U1 = "583da234-4f1d-4d21-854d-aaaaaaaaaaaa";
     const U2 = "583da234-4f1d-4d21-854d-bbbbbbbbbbbb";
