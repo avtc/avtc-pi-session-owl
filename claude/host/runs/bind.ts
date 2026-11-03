@@ -12,6 +12,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
 import { log } from "../../core/src/log.js";
+import { OBSERVATION_TYPE } from "../../core/src/store/codecs.js";
 import type { GraphStore } from "../../core/src/store/graph-store.js";
 import { makeMaybeBuilder } from "../../core/src/triggers.js";
 import { type SessionOwlGraph as GraphShape, SessionOwlGraph } from "../../core/src/types.js";
@@ -645,7 +646,19 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
       },
       getGraphStore: () => binding.graphStore(),
       getLeafId: () => binding.leafId(),
-      getBranch: () => binding.branch(),
+      // pi's sessionManager.getBranch shape: the grouped messages PLUS
+      // owl's observation coverage customs — the reobserve scan reads
+      // coverage from the customs, so a messages-only view reads every
+      // entry behind the frontier as one giant zero-observation hole
+      getBranch: () => {
+        const messages = binding.branch();
+        if (resolvedCtx === null) return messages;
+        const storeBranch = resolvedCtx.getBranch(binding.leafId());
+        const customs = storeBranch.filter(
+          (e) => e.type === "custom" && (e as { customType?: string }).customType === OBSERVATION_TYPE,
+        );
+        return customs.length === 0 ? messages : ([...messages, ...customs] as never[]);
+      },
       // the reobserve scan's interval fallback: built lazily over the
       // mirror's full arrival order (the served branch may prune rows an
       // observation still names as a coverage endpoint)

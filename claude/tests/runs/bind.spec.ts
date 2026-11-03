@@ -166,6 +166,47 @@ describe("conversation binding — the runtime assembly", () => {
     expect(deps.isEnabled()).toBe(false);
   });
 
+  test("commandDeps.getBranch carries the observation coverage customs (the reobserve scan reads them)", async () => {
+    // A messages-only view makes computeUncoveredRanges read every entry
+    // behind the frontier as one giant zero-observation hole; the command
+    // needs pi's mixed shape — grouped messages PLUS the observation
+    // coverage customs off the store branch.
+    const binding = getBinding("sess-cmd", "sess-cmd", null);
+    const handle = await binding.pinCore();
+    const conv = state.ensureConversation("sess-cmd", null);
+    captureAppend(
+      conv.key,
+      claudeRow("u1", null, "hello") as never,
+      (key, row) => getSessionStorage(key, "sess-cmd", row?.agentId ?? null).mirror,
+    );
+    captureAppend(
+      conv.key,
+      claudeRow("a1", "u1", "hi") as never,
+      (key, row) => getSessionStorage(key, "sess-cmd", row?.agentId ?? null).mirror,
+    );
+    // a record-bearing observation covering u1..a1 lands on the store as a
+    // ledger record (the fold surfaces it as a branch custom)
+    const storage = getSessionStorage(conv.key, "sess-cmd", null);
+    storage.ledger.append(
+      "observation",
+      {
+        coversFromId: "u1",
+        coversUpToId: "a1",
+        records: [{ sourceEntryIds: ["u1", "a1"], text: "seen" }],
+      } as never,
+      "a1",
+    );
+    await flushSessionStorage(conv.key);
+    const deps = binding.commandDeps({
+      confirm: async () => false,
+      checkThenServe: async () => {},
+    });
+    const branch = deps.getBranch(null);
+    const customs = branch.filter((e) => (e as { customType?: string }).customType === "session-owl.observation");
+    expect(customs.length).toBe(1);
+    expect(branch.some((e) => e.type === "message")).toBe(true);
+  });
+
   test("commandDeps.relaunchMaintenance RETURNS the launch promise (the rescan failure path binds)", async () => {
     const binding = getBinding("sess-b", "sess-b", null);
     const deps = binding.commandDeps({
