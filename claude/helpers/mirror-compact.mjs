@@ -18,9 +18,10 @@
 //   { done, noop, kept, removed, lines, unique, filesIn, filesOut, sessionDir }
 // Exit codes: 0 ok (incl. no-op), 1 failure (report carries {error}).
 
-import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
+import { createInterface } from "node:readline";
 
 function fail(error, code) {
   const summary = JSON.stringify({ done: false, error, sessionDir: null });
@@ -48,8 +49,12 @@ function sanitizeSegment(segment) {
 
 const sessionIdRaw = flag("--session-id");
 const apply = process.argv.includes("--apply");
+const transcriptPath = flag("--transcript");
 if (configDir === null || sessionIdRaw === null) {
-  fail("usage: node helpers/mirror-compact.mjs --config-dir <dir> --session-id <id> [--apply]", 2);
+  fail(
+    "usage: node helpers/mirror-compact.mjs --config-dir <dir> --session-id <id> [--apply] [--transcript <file>]",
+    2,
+  );
 }
 
 const sessionId = sanitizeSegment(sessionIdRaw);
@@ -94,6 +99,40 @@ try {
   fail(`batch read failed — nothing written, nothing deleted: ${err?.message ?? err}`, 1);
 }
 
+// the output order: when a transcript is given, its row order — the engine's
+// write chronology — takes precedence (rows the transcript lacks keep their
+// first-occurrence order after them). A store rebuilt after a mirror loss
+// re-imports history in bulk AFTER newer live rows; serving falls back to
+// arrival order when the parent chain breaks, so the rewrite is the offline
+// moment that restores conversation order. A missing/unreadable transcript
+// degrades to first-occurrence order (reported as transcriptOrder:false).
+let transcriptOrder = null;
+if (transcriptPath !== null && order.length > 0) {
+  try {
+    const tpos = new Map();
+    let pos = 0;
+    const lines = createInterface({ input: createReadStream(transcriptPath, "utf8") });
+    for await (const line of lines) {
+      if (line !== "") {
+        try {
+          const u = JSON.parse(line)?.uuid;
+          if (typeof u === "string" && !tpos.has(u)) tpos.set(u, pos);
+        } catch {
+          /* a malformed transcript line still advances the position */
+        }
+        pos += 1;
+      }
+    }
+    const inTranscript = order.filter((u) => tpos.has(u)).sort((a, b) => tpos.get(a) - tpos.get(b));
+    const mirrorOnly = order.filter((u) => !tpos.has(u));
+    order.length = 0;
+    order.push(...inTranscript, ...mirrorOnly);
+    transcriptOrder = true;
+  } catch {
+    transcriptOrder = false;
+  }
+}
+
 const unique = byUuid.size;
 const removed = lines - unique;
 if (removed === 0) {
@@ -107,6 +146,7 @@ if (removed === 0) {
     filesIn: files.length,
     filesOut: 0,
     sessionDir: sessDir,
+    transcriptOrder,
   });
   process.stderr.write(`${summary}\n`);
   process.stdout.write(`${summary}\n`);
@@ -177,6 +217,7 @@ const summary = JSON.stringify({
   unique,
   filesIn: files.length,
   filesOut: written.length,
+  transcriptOrder,
   applied: apply,
   sessionDir: sessDir,
 });

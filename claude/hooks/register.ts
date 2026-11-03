@@ -822,6 +822,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                     pluginRoot: bridge.currentServices().pluginRoot(),
                     configDir,
                     sessionId: e.session_id,
+                    transcriptPath: state.getCurrentTranscriptPath(),
                   },
                 );
                 return result.done;

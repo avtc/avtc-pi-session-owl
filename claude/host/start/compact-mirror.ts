@@ -22,14 +22,24 @@ export function shouldCompactMirror(census: { lines: number; uniqueUuids: number
 
 /** The helper's invocation (the host always runs --apply — the dry-run is
  *  the human-facing default). Pure; mirrors the bootstrap caller's shape. */
-export function planMirrorCompactInvocation(input: { pluginRoot: string; configDir: string; sessionId: string }): {
+export function planMirrorCompactInvocation(input: {
+  pluginRoot: string;
+  configDir: string;
+  sessionId: string;
+  /** The session transcript: when given, the rewrite orders the output by
+   *  the transcript's row order (the engine's write chronology) instead of
+   *  first occurrence. */
+  transcriptPath?: string | null;
+}): {
   script: string;
   args: string[];
 } {
   const clean = input.pluginRoot.replace(/[\\/]+$/, "");
+  const args = ["--config-dir", input.configDir, "--session-id", input.sessionId, "--apply"];
+  if (typeof input.transcriptPath === "string") args.push("--transcript", input.transcriptPath);
   return {
     script: `${clean}/helpers/mirror-compact.mjs`,
-    args: ["--config-dir", input.configDir, "--session-id", input.sessionId, "--apply"],
+    args,
   };
 }
 
@@ -38,6 +48,8 @@ export interface MirrorCompactReport {
   noop?: boolean;
   kept?: number;
   removed?: number;
+  /** true/false when a transcript was given (ordered/not); absent otherwise. */
+  transcriptOrder?: boolean;
   error?: string;
 }
 
@@ -50,7 +62,7 @@ export async function runMirrorCompact(
     runProcess: (argv: string[]) => Promise<{ stdout: string; exitCode: number }>;
     log: (message: string, err?: unknown) => void;
   },
-  input: { pluginRoot: string; configDir: string; sessionId: string },
+  input: { pluginRoot: string; configDir: string; sessionId: string; transcriptPath?: string | null },
   nodeBin = "node",
 ): Promise<MirrorCompactReport> {
   const plan = planMirrorCompactInvocation(input);

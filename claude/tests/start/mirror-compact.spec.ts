@@ -5,7 +5,8 @@
 // wins), old batches deleted, dry-run by default, idempotent, sweep
 // compatibility after the rewrite.
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
@@ -112,6 +113,72 @@ describe("helpers/mirror-compact.mjs", () => {
     const sweepAfter = await memSweep(sessDir);
     expect([...new Set(sweepAfter.rows.map((r) => r.uuid))].sort()).toEqual(uuidsBefore);
     expect(sweepAfter.uniqueUuids).toBe(4);
+  }, 30_000);
+
+  test("--transcript: the rewrite orders the output by the transcript's row order (mirror-only rows after)", async () => {
+    const { cfg, sessDir } = dupDir();
+    // the transcript lists the rows in a DIFFERENT order than the batches'
+    // first occurrence (u3, u1, u2, u4) + noise rows the mirror lacks
+    const tmp = mkdtempSync(join(tmpdir(), "mc-tr-"));
+    const tpath = join(tmp, "transcript.jsonl");
+    const trow = (u: string | null) => JSON.stringify({ uuid: u, type: "user" });
+    writeFileSync(
+      tpath,
+      `${trow("noise-0")}
+${trow("u3")}
+${trow("u1")}
+${trow("noise-1")}
+${trow("u2")}
+${trow("u4")}
+`,
+    );
+    const { stdout } = await run(process.execPath, [
+      HELPER,
+      "--config-dir",
+      cfg,
+      "--session-id",
+      "s1",
+      "--apply",
+      "--transcript",
+      tpath,
+    ]);
+    const report = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+    expect(report.done).toBe(true);
+    expect(report.transcriptOrder).toBe(true);
+    const { files } = countLines(sessDir);
+    expect(files.length).toBeGreaterThan(0);
+    const uuids: string[] = [];
+    for (const f of files) {
+      for (const l of readFileSync(join(sessDir, f), "utf8").split("\n")) {
+        if (l !== "") uuids.push(JSON.parse(l).uuid as string);
+      }
+    }
+    expect(uuids).toEqual(["u3", "u1", "u2", "u4"]);
+  }, 30_000);
+
+  test("--transcript with a missing file degrades to first-occurrence order", async () => {
+    const { cfg, sessDir } = dupDir();
+    const { stdout } = await run(process.execPath, [
+      HELPER,
+      "--config-dir",
+      cfg,
+      "--session-id",
+      "s1",
+      "--apply",
+      "--transcript",
+      join(tmpdir(), "mc-missing-transcript-xyz.jsonl"),
+    ]);
+    const report = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+    expect(report.done).toBe(true);
+    expect(report.transcriptOrder).toBe(false);
+    const { files } = countLines(sessDir);
+    const uuids: string[] = [];
+    for (const f of files) {
+      for (const l of readFileSync(join(sessDir, f), "utf8").split("\n")) {
+        if (l !== "") uuids.push(JSON.parse(l).uuid as string);
+      }
+    }
+    expect(uuids).toEqual(["u1", "u2", "u3", "u4"]);
   }, 30_000);
 
   test("idempotent: a second --apply run is a no-op", async () => {

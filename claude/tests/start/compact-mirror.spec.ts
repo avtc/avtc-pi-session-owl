@@ -85,4 +85,24 @@ describe("runMirrorCompact — degradation", () => {
     );
     expect(report).toMatchObject({ done: true, kept: 24_147, removed: 136_335 });
   });
+  test("a transcript path rides the invocation as --transcript", () => {
+    const plan = planMirrorCompactInvocation({
+      pluginRoot: "E:/x/claude",
+      configDir: "C:/cfg",
+      sessionId: "s1",
+      transcriptPath: "C:/projects/x/tx.jsonl",
+    });
+    expect(plan.args).toContain("--transcript");
+    expect(plan.args[plan.args.indexOf("--transcript") + 1]).toBe("C:/projects/x/tx.jsonl");
+  });
+
+  test("no transcript path keeps the plain invocation", () => {
+    const plan = planMirrorCompactInvocation({
+      pluginRoot: "E:/x/claude",
+      configDir: "C:/cfg",
+      sessionId: "s1",
+      transcriptPath: null,
+    });
+    expect(plan.args).not.toContain("--transcript");
+  });
 });
