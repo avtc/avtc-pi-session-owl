@@ -18,7 +18,7 @@ export const CAP = 4 * 1024 * 1024;
 export const ROLL_MARGIN = 3 * 1024 * 1024;
 export const PART_SLICE = Math.floor(2.5 * 1024 * 1024);
 
-export interface FsStat {
+interface FsStat {
   size: number;
 }
 

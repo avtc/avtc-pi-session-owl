@@ -28,7 +28,7 @@ export const CONFLICT_MARKERS: readonly string[] = [];
  *  that MENTIONS the key wins — an explicit false at a higher precedence
  *  disables). */
 const SOURCES = ["user", "project", "local", "flag", "policy"] as const;
-export type SettingsSource = (typeof SOURCES)[number];
+type SettingsSource = (typeof SOURCES)[number];
 
 /** The io seam (the $-capsule bridge supplies it at runtime). */
 export interface ChannelAIo extends ScanIo {
@@ -61,7 +61,7 @@ export interface ChannelAResult {
 }
 
 /** Normalize the registry into entries; malformed input degrades to []. */
-export function parseInstalledPlugins(parsed: unknown): InstallEntry[] {
+function parseInstalledPlugins(parsed: unknown): InstallEntry[] {
   if (typeof parsed !== "object" || parsed === null) return [];
   const plugins = (parsed as { plugins?: unknown }).plugins;
   if (typeof plugins !== "object" || plugins === null) return [];
@@ -80,7 +80,7 @@ export function parseInstalledPlugins(parsed: unknown): InstallEntry[] {
 /** Resolve the effective enablement per key: the highest-precedence source
  *  that mentions the key wins; unmentioned keys default to enabled (the
  *  install itself implies the engine may load it). */
-export async function effectiveEnabled(
+async function effectiveEnabled(
   readEnabledPlugins: (source: SettingsSource) => Promise<Record<string, boolean> | null>,
 ): Promise<Map<string, boolean>> {
   const decided = new Map<string, boolean>();

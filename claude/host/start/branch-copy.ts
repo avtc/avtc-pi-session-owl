@@ -33,13 +33,7 @@ export interface LineageIo {
   write(path: string, text: string): Promise<unknown>;
 }
 
-export type LineageCopyStatus =
-  | "copied"
-  | "no-source"
-  | "no-forked-from"
-  | "target-populated"
-  | "origin-missing"
-  | "failed";
+type LineageCopyStatus = "copied" | "no-source" | "no-forked-from" | "target-populated" | "origin-missing" | "failed";
 
 export interface LineageCopyResult {
   status: LineageCopyStatus;

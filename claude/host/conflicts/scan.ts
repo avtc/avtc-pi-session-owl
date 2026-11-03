@@ -36,11 +36,11 @@ export interface ConflictHit {
 }
 
 /** Bounded-scan limits: activation must stay fast even with many mods. */
-export const SCAN_MAX_DEPTH = 2;
+const SCAN_MAX_DEPTH = 2;
 /** The depth a fresh scan starts at (explicit at every root call site). */
-export const SCAN_ROOT_DEPTH = 0;
-export const SCAN_MAX_FILES_PER_PACKAGE = 40;
-export const SCAN_MAX_FILE_BYTES = 4 * 1024 * 1024;
+const SCAN_ROOT_DEPTH = 0;
+const SCAN_MAX_FILES_PER_PACKAGE = 40;
+const SCAN_MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 const SCAN_ROOT_BUDGET = (): { files: number } => ({ files: SCAN_MAX_FILES_PER_PACKAGE });
 
@@ -109,7 +109,5 @@ export function joinPath(dir: string, name: string): string {
   const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
   return `${dir.replace(/[\\/]+$/, "")}${sep}${name}`;
 }
-
-export { COMPACT_HOOK_MARKER, COMPACT_OVERRIDE_PATTERN };
 
 import { log } from "../../core/src/log.js";

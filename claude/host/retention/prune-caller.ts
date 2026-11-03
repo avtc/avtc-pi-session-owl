@@ -47,7 +47,7 @@ export interface PrunePlan {
    *  the helper's TEST posture; the startup sweep is the delete pass). */
 }
 
-export const PRUNE_HELPER_RELATIVE = "helpers/prune.mjs";
+const PRUNE_HELPER_RELATIVE = "helpers/prune.mjs";
 
 /** The plugin-closure path join (no node:path — the closure forbids it;
  *  string joins are the sanctioned form, same as the sibling dists). */

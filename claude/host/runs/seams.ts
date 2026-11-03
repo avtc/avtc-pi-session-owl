@@ -19,11 +19,8 @@
 //   counting/classification bodies, differing only in their mutate-name set.
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { StageRunResultLike } from "../../shims/pi-agent-core/index.js";
-import type { NotifyLevel } from "../notify/adapter.js";
-
-export type { NotifyLevel };
-
 import type { CoreHandle } from "../core-instances.js";
+import type { NotifyLevel } from "../notify/adapter.js";
 import { noteAccepted } from "../stage/runs.js";
 import type { StageToolExecutor } from "../stage/tools.js";
 
@@ -75,7 +72,7 @@ export function makeCountedExecutor(
 /** The model-facing text of a pi tool result: its content blocks' text
  *  joined, a bare string as-is, anything else its JSON (never an object —
  *  the engine's default output shape rejects objects). */
-export function toolResultText(result: unknown): string {
+function toolResultText(result: unknown): string {
   if (typeof result === "string") return result;
   const content = (result as { content?: unknown }).content;
   if (typeof content === "string") return content;

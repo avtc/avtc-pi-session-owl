@@ -30,7 +30,7 @@ export interface LaunchHandle {
 }
 
 /** The companion's launch tool spec input (what spawn forwards). */
-export interface LaunchInput {
+interface LaunchInput {
   subagentType: string;
   prompt: string;
   model?: string;

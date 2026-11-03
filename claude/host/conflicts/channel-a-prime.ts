@@ -24,11 +24,6 @@ export function recordBWitness(name: string): void {
   bWitnesses.add(name);
 }
 
-/** The recorded fold snapshot (tests + the A-prime twin read it). */
-export function getFoldList(): string[] | null {
-  return foldList === null ? null : [...foldList];
-}
-
 /** Test seam: clear the per-process snapshot + witnesses. */
 export function resetFoldState(): void {
   foldList = null;

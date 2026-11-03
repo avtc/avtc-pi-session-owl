@@ -18,7 +18,7 @@ import { errDetail, sayError } from "../log/err-detail.js";
 import type { RunProcessFn, StartSurface } from "../retention/prune-caller.js";
 import type { TranscriptPass } from "./verifier.js";
 
-export const VERIFY_HELPER_RELATIVE = "helpers/verify.mjs";
+const VERIFY_HELPER_RELATIVE = "helpers/verify.mjs";
 
 /** The plugin-closure path join (no node:path — the closure forbids it;
  *  string joins are the sanctioned form, same as the prune caller). */

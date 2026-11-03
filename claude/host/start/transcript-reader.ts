@@ -37,7 +37,7 @@ export interface TranscriptRow {
 }
 
 /** The tip marker (last-prompt metadata row): names the live leaf. */
-export interface TipMarker {
+interface TipMarker {
   leafUuid: string | null;
   sessionId?: string;
 }

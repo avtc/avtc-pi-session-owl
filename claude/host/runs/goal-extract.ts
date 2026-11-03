@@ -45,7 +45,7 @@ const EMPTY_SUMMARY = "";
 
 /** The one-shot completer the trigger wiring maps onto `$.model.complete`: one
  *  call, no tools, no history; abortable; the reply text resolves.  */
-export interface GoalCompleterInput {
+interface GoalCompleterInput {
   /** The full prompt: the goal-extract system prompt + the verbatim text. */
   prompt: string;
   /** The extraction's abort signal (its conversation's controller). */

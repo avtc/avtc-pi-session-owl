@@ -10,8 +10,8 @@
 
 /** The duplicate mass worth a rewrite: at least this many duplicate lines
  *  AND at least this share of the total. */
-export const COMPACT_MIN_DUP_LINES = 1000;
-export const COMPACT_MIN_DUP_RATIO = 0.3;
+const COMPACT_MIN_DUP_LINES = 1000;
+const COMPACT_MIN_DUP_RATIO = 0.3;
 
 /** Whether the census crosses the compaction threshold. Pure. */
 export function shouldCompactMirror(census: { lines: number; uniqueUuids: number }): boolean {

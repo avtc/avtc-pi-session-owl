@@ -29,9 +29,6 @@ import { makeReadTools, makeTryFinishTool } from "../../core/src/graph/read-tool
 import type { TodoItem } from "../../core/src/todo/types.js";
 import type { SelectorWorkingCopy } from "./selector-input-view.js";
 
-/** Re-export the Selector's set_meta tool name for callers/tests. */
-export { SELECTOR_SET_META_TOOL };
-
 /** The four Selector mutate tools (no-op detection for the Selector run: a
  *  pass with none of these applied is a no-op pass). Read tools (ls/cat/find) and
  *  try_finish excluded — mirroring the Builder's MUTATE_TOOL_NAMES. */
@@ -72,7 +69,7 @@ export function makeSelectorGraphTools(working: SelectorWorkingCopy, settings: S
 // --- todo_list (conditional on the optional todo bridge) -------
 
 /** The conditional todo_list tool's name (pi-verbatim). */
-export const TODO_LIST_TOOL = "todo_list";
+const TODO_LIST_TOOL = "todo_list";
 
 /** The tool's parameters as a JSON literal (the vendored typebox params
  *  JSON-round-tripped — the host closure carries specs as data). */

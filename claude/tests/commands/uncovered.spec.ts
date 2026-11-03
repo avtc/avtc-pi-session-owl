@@ -54,9 +54,9 @@ function mirrorIndex(offBranch: string[]): (uuid: string) => number | null {
 
 describe("computeUncoveredRangesWithMirrorFallback", () => {
   test("an interval whose endpoints fell off the served branch still covers the span it observed", () => {
-    // served branch: u1 a1 u2 a2, frontier a2
+    // served branch: the four messages, frontier = the last reply
     // an observation covers mirror-span forkL..forkR (BOTH off-branch) which
-    // spans u2..a2 — plain resolution loses the whole interval
+    // spans the second pair — plain resolution loses the whole interval
     const branch: SessionEntry[] = [
       user("u1", "hello"),
       assistant("a1", "hi"),
@@ -64,15 +64,15 @@ describe("computeUncoveredRangesWithMirrorFallback", () => {
       assistant("a2", "yes"),
       observation("o1", { from: "forkL", to: "forkR" }, []),
     ];
-    // the mirror order: forkL sits between a1 and u2, forkR after a2
+    // the mirror order: forkL sits between the first pair and u2, forkR after the last reply
     const ordered = ["m-root", "u1", "a1", "forkL", "u2", "a2", "forkR"];
     const pos = (u: string) => {
       const i = ordered.indexOf(u);
       return i === -1 ? null : i;
     };
     const ranges = computeUncoveredRangesWithMirrorFallback(branch, "a2", pos);
-    // the span u2..a2 is covered through the mirror; a1 sits before forkL
-    // and stays a genuine hole
+    // the second pair is covered through the mirror; the first reply sits
+    // before forkL and stays a genuine hole
     expect(ranges.length).toBe(1);
     expect(ranges[0]?.entries.map((e) => e.id)).toEqual(["a1"]);
     // the plain pi scan leaves the whole span unobserved (the regression shape)

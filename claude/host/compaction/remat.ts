@@ -20,7 +20,7 @@ import type { ClaudeRow } from "../capture/grouper.js";
 
 /** How long a verdict's expectation stays armed (the fold lands in the same
  *  dispatch as the answer — the window only bounds a lost fold). */
-export const REMAT_EXPECTATION_MS = 30_000;
+const REMAT_EXPECTATION_MS = 30_000;
 
 interface Expectation {
   at: number;

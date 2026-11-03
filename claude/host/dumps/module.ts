@@ -28,7 +28,7 @@ import { runsLog } from "../runs/seams.js";
 /** The run-dump buffer the stage call sites fill (host/stage/runs.ts's
  *  StageRunState.dump shape — structural, so this module stays capsule-free
  *  inside the hooks closure). */
-export interface StageDumpBuffer {
+interface StageDumpBuffer {
   outputRows: unknown[];
   handback: { tool: string; result: unknown } | null;
   fabricatedStop: string | null;

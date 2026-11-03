@@ -58,7 +58,7 @@ interface Chunk {
 
 /** The four counts + answering model a real step's resolved value carries
  *  (the engine's TurnUsage: Anthropic spelling, one per request). */
-export interface StepUsage {
+interface StepUsage {
   input_tokens: number;
   output_tokens: number;
   cache_read_input_tokens: number;

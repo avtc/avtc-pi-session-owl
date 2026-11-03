@@ -5,7 +5,11 @@
     "scripts/no-optional-params.cjs",
     "scripts/no-bare-literals.cjs",
     "scripts/test-low-priority.cjs",
-    "claude/hooks/register.ts"
+    "scripts/run-parallel.cjs",
+    "scripts/link-dev.mjs",
+    "claude/hooks/register.ts",
+    "claude/plugin-test/*.test.ts",
+    "claude/core/src/log.ts"
   ],
   "project": [
     "index.ts",
@@ -13,13 +17,18 @@
     "tests/**/*.ts",
     "scripts/**/*.{cjs,mjs,js,ts}",
     "claude/hooks/**/*.{js,ts}",
-    "claude/host/**/*.ts"
+    "claude/host/**/*.ts",
+    "claude/tests/**/*.ts",
+    "claude/plugin-test/**/*.ts"
   ],
   "ignore": [
-    "**/docs/**"
+    "**/docs/**",
+    "src/**",
+    "tests/**"
   ],
   "ignoreDependencies": [
     "avtc-pi-logger",
-    "avtc-pi-settings-ui"
+    "avtc-pi-settings-ui",
+    "claude-code"
   ]
 }

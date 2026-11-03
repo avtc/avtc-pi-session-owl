@@ -40,7 +40,7 @@ export function stageToolName(short: string): string {
 /** The graph tools the Builder owns: the five mutate tools + the three read
  *  views + the try_finish convergence gate (pi's makeBuilderTools — all
  *  nine; the gate's ok-answer is how the run detects convergence). */
-export const BUILDER_GRAPH_TOOLS: readonly string[] = [
+const BUILDER_GRAPH_TOOLS: readonly string[] = [
   "mkdir",
   "mv",
   "merge",
@@ -55,21 +55,12 @@ export const BUILDER_GRAPH_TOOLS: readonly string[] = [
 /** The graph tools the Selector owns: its four-tool mutation subset + the
  *  read views + the try_finish convergence gate (pi's makeSelectorTools'
  *  graph set — all eight). */
-export const SELECTOR_GRAPH_TOOLS: readonly string[] = [
-  "mkdir",
-  "mv",
-  "merge",
-  "set_meta",
-  "ls",
-  "cat",
-  "find",
-  "try_finish",
-];
+const SELECTOR_GRAPH_TOOLS: readonly string[] = ["mkdir", "mv", "merge", "set_meta", "ls", "cat", "find", "try_finish"];
 
 /** The engine built-ins the Selector additionally reads the live project
  *  with (pi's fs_* aliases over its own read/grep/find/ls built-ins — the
  *  Claude counterparts by name). */
-export const SELECTOR_FILE_TOOLS: readonly string[] = ["Read", "Grep", "Glob", "LS"];
+const SELECTOR_FILE_TOOLS: readonly string[] = ["Read", "Grep", "Glob", "LS"];
 
 /** The stage-model settings slice the spec builder reads (structural — the
  *  core's SessionOwlConfig satisfies it; declared locally so no core import

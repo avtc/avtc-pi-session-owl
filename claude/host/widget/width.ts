@@ -109,7 +109,7 @@ function clipGraphemes(text: string, maxWidth: number): string {
 /** The surfaces that raise the AbovePrompt band (its render component is
  *  documented terminal+desktop only — the mobile/vscode clients never ask
  *  for it). */
-export const BAND_SURFACES: readonly RenderSurface[] = ["terminal", "desktop"];
+const BAND_SURFACES: readonly RenderSurface[] = ["terminal", "desktop"];
 
 /** Does this surface list contain a band-raising surface? */
 export function hasBandSurface(surfaces: readonly string[]): boolean {
@@ -117,7 +117,7 @@ export function hasBandSurface(surfaces: readonly string[]): boolean {
 }
 
 /** The fallback surfaces (the status-pin line where no band is raised). */
-export const FALLBACK_SURFACES: readonly RenderSurface[] = ["mobile", "vscode"];
+const FALLBACK_SURFACES: readonly RenderSurface[] = ["mobile", "vscode"];
 
 /** Does this surface list contain a fallback surface? */
 export function hasFallbackSurface(surfaces: readonly string[]): boolean {

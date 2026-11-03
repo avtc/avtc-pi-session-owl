@@ -30,14 +30,14 @@ import { getInstalledSettingsHandle } from "./consumer.js";
 export const SETTINGS_PANE_ID = "owl-settings";
 
 /** The pane's title (pi's modal frame title, carried over). */
-export const SETTINGS_PANE_TITLE = "SessionOwl Settings";
+const SETTINGS_PANE_TITLE = "SessionOwl Settings";
 
 /** The manual-JSON degrade notice (surfaces without field elements). */
-export const SETTINGS_PANE_MANUAL_JSON =
+const SETTINGS_PANE_MANUAL_JSON =
   "session-owl settings need a terminal surface — edit ~/.claude/avtc-session-owl-settings.json (global) or <project>/.claude/avtc-session-owl-settings.json instead.";
 
 /** The not-initialized degrade notice. */
-export const SETTINGS_PANE_NOT_READY = "session-owl settings are not loaded yet — try again in a moment.";
+const SETTINGS_PANE_NOT_READY = "session-owl settings are not loaded yet — try again in a moment.";
 
 /** The capsules the pane needs (authored in register.ts handlers, data here). */
 export interface PaneCapsules {

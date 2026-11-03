@@ -9,7 +9,7 @@
 // recall spec suite pins both byte-identical to the vendored tool; when the
 // core changes them, regenerate this literal (a build-time
 // JSON.parse(JSON.stringify(makeOwlRecallTool().parameters))).
-export const OWL_RECALL_TOOL_NAME = "owl_recall";
+const OWL_RECALL_TOOL_NAME = "owl_recall";
 
 /** The engine-namespaced full name a tool.call matcher keys on. */
 export const OWL_RECALL_FULL_NAME = "mcp__session-owl__owl_recall";

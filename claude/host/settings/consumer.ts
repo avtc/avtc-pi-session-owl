@@ -42,8 +42,8 @@ import { setPaneCwd } from "./pane.js";
 import { withPortDefaults, withPortFields } from "./port-fields.js";
 
 /** The consumer identity (the naming decision: runtime name, session env var). */
-export const OWL_CONSUMER_NAME = "avtc-session-owl";
-export const OWL_SETTINGS_ENV_VAR = "CLAUDE_SETTINGS_SESSION_OWL";
+const OWL_CONSUMER_NAME = "avtc-session-owl";
+const OWL_SETTINGS_ENV_VAR = "CLAUDE_SETTINGS_SESSION_OWL";
 
 /** The owl schema under the Claude path conventions (the pi-named paths of the
  *  vendored SESSION_OWL_SCHEMA belong to its dead-on-this-platform modal
@@ -69,7 +69,7 @@ export const PORT_DEFAULTS_CONFIG: SessionOwlConfig = Object.fromEntries(
 /** The capsules the consumer needs from the wiring (scanner-safe: authored in
  *  the register.ts handlers, passed here as data). `appendTimeline` (optional)
  *  receives the conflict-timeline transitions the settings flips imply. */
-export interface SettingsCapsules {
+interface SettingsCapsules {
   toolRegister: (spec: unknown) => Promise<unknown>;
   uiInvalidate: () => void;
   /** Clears a pinned status line (the fallback surfaces' widget) — the
@@ -255,11 +255,6 @@ export async function initSettingsConsumer(init: SettingsConsumerInit): Promise<
 /** The installed wrapped handle (the pane + tests; null before init). */
 export function getInstalledSettingsHandle(): OwlSettingsHandle | null {
   return installedHandle;
-}
-
-/** The library handle (the pane controller's data source; null before init). */
-export function getLibSettingsHandle(): ReturnType<typeof createSettingsExtension<Record<string, unknown>>> | null {
-  return libHandle;
 }
 
 /** Test seam: full reset (the vendored seams reset separately by the suite). */

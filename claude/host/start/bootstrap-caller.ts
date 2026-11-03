@@ -19,7 +19,7 @@
 import { errDetail } from "../log/err-detail.js";
 import type { StartSurface } from "../retention/prune-caller.js";
 
-export const BOOTSTRAP_HELPER_RELATIVE = "helpers/bootstrap.mjs";
+const BOOTSTRAP_HELPER_RELATIVE = "helpers/bootstrap.mjs";
 
 /** The plugin-closure path join (no node:path — the closure forbids it;
  *  string joins are the sanctioned form, same as the sibling dists). */

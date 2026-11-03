@@ -13,18 +13,18 @@ import { getSessionOwlSettings, reloadSessionOwlConfig } from "../core/src/confi
 import { isConflictPaused } from "./conflicts/pause.js";
 import { getCurrentSession, isOwlEnabled, isOwlIgnoreConflicts } from "./state.js";
 
-export async function reloadConfig(): Promise<Record<string, unknown>> {
+async function reloadConfig(): Promise<Record<string, unknown>> {
   // env-first, then files — refreshes the in-memory cache (the live
   // reconfigure path a bench consumer drives); no-op before init
   reloadSessionOwlConfig();
   return getConfig();
 }
 
-export async function getConfig(): Promise<Record<string, unknown>> {
+async function getConfig(): Promise<Record<string, unknown>> {
   return { ...getSessionOwlSettings() } as unknown as Record<string, unknown>;
 }
 
-export async function getConflictPause(): Promise<boolean> {
+async function getConflictPause(): Promise<boolean> {
   return isConflictPaused(() => ({ enabled: isOwlEnabled(), ignoreConflicts: isOwlIgnoreConflicts() }));
 }
 
@@ -35,9 +35,4 @@ export function sessionOwlNoun(): {
   getConflictPause: () => Promise<boolean>;
 } {
   return { reloadConfig, getConfig, getConflictPause };
-}
-
-/** Which conversation the noun currently serves (diagnostics). */
-export function nounSession(): string | null {
-  return getCurrentSession();
 }

@@ -184,8 +184,8 @@ describe("conversation binding — the runtime assembly", () => {
       claudeRow("a1", "u1", "hi") as never,
       (key, row) => getSessionStorage(key, "sess-cmd", row?.agentId ?? null).mirror,
     );
-    // a record-bearing observation covering u1..a1 lands on the store as a
-    // ledger record (the fold surfaces it as a branch custom)
+    // a record-bearing observation covering both seeded rows lands on the
+    // store as a ledger record (the fold surfaces it as a branch custom)
     const storage = getSessionStorage(conv.key, "sess-cmd", null);
     storage.ledger.append(
       "observation",

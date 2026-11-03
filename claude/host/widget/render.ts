@@ -14,16 +14,16 @@ import { formatTokens } from "../../core/src/format/tokens.js";
 import { truncateToWidth, visibleWidth } from "./width.js";
 
 /** The maintenance stages the widget surfaces (one at a time; run-level). */
-export type WidgetStage = "observe" | "build" | "select";
+type WidgetStage = "observe" | "build" | "select";
 
 /** Observe multi-chunk progress (shown only when total > 1). */
-export interface BatchProgress {
+interface BatchProgress {
   done: number;
   total: number;
 }
 
 /** Per-stage usage accumulation (the vendored StageUsage shape). */
-export interface WidgetUsage {
+interface WidgetUsage {
   input: number;
   output: number;
   cacheRead: number;

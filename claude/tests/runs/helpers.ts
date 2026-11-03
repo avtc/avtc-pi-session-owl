@@ -57,13 +57,7 @@ export type Behavior = (
   agentId: string,
 ) => Promise<Partial<StageRunResultLike>> | Partial<StageRunResultLike>;
 
-export interface FakeRunner {
-  calls: EngineStageRunInput[];
-  agents: StageRunState[];
-  runner: (input: EngineStageRunInput) => Promise<StageRunResultLike>;
-}
-
-export function okResult(): StageRunResultLike {
+function okResult(): StageRunResultLike {
   return {
     messages: [],
     usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 5 },
@@ -72,6 +66,12 @@ export function okResult(): StageRunResultLike {
     timedOut: false,
     abortReason: null,
   };
+}
+
+export interface FakeRunner {
+  calls: EngineStageRunInput[];
+  agents: StageRunState[];
+  runner: (input: EngineStageRunInput) => Promise<StageRunResultLike>;
 }
 
 export function makeRunner(script: Behavior[], endlessOk = true): FakeRunner {

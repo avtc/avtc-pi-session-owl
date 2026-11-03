@@ -91,7 +91,7 @@ import { StageTimeoutError } from "./stage-errors.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
-export const RECORD_OBS_TOOL = "record_observations";
+const RECORD_OBS_TOOL = "record_observations";
 const OBSERVE_STAGE = "observer" as const;
 const WIDGET_STAGE = "observe" as const;
 /** Consecutive no-progress steps (no accepted records) allowed before the
@@ -102,7 +102,7 @@ const EMPTY_GAP = 0;
 const EMPTY_RECORDS = 0;
 
 /** A captured observation (validated; before id/timestamp/wrap assignment). */
-export interface RecordObservation {
+interface RecordObservation {
   readonly summary: string;
   readonly importance: Importance;
   readonly sourceEntryIds: string[];
@@ -208,7 +208,7 @@ function makeRecordExecutor(
 /** The Observer's chunk plan options — exported so a multi-run repair
  *  (re-observe) can pre-compute its cumulative chunk window with the exact
  *  chunking its runs use. */
-export function observerChunkOptions(settings: SessionOwlConfig): ChunkOptions {
+function observerChunkOptions(settings: SessionOwlConfig): ChunkOptions {
   return {
     tokenThreshold: settings.observerThresholdTokens,
     toolBlockCapTokens: settings.observerToolBlockCapTokens,
@@ -289,7 +289,7 @@ const OWL_SYNTHETIC_LEADS: readonly string[] = ["# Memory", THINKING_ROW_LEAD];
 
 /** True when the entry is a REAL conversation row the observer may cite
  *  (owl's own synthetic rows are skipped — never re-observed). */
-export function notOwnSyntheticRow(entry: SessionEntry): boolean {
+function notOwnSyntheticRow(entry: SessionEntry): boolean {
   if (entry.type !== "message") return true; // other kinds are not the synthetic rows
   const message = (entry as { message?: { content?: unknown } }).message;
   const content = message?.content;

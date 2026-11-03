@@ -5,7 +5,6 @@
 // backend the vendored core links against) lives in backend.ts, the
 // sync-rewrite target of log.ts's avtc-pi-logger import.
 
-export type { LogFsSurface } from "./backend.js";
 export {
   _resetLogConsumerForTest,
   initLogConsumer,

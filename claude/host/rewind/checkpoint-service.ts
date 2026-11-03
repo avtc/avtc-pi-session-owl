@@ -18,13 +18,13 @@ import { foldLineage, type LineageEdge, livePathFor } from "./lineage.js";
 import { TruncationTripwires } from "./tripwires.js";
 
 /** The wiring-injected platform seams (no $ literals below this type). */
-export interface PlatformThunks {
+interface PlatformThunks {
   /** The logger sink for reconciliation + skip lines. */
   logLine: (line: string) => void;
 }
 
 /** The deps the live chain (and the refold seam it drives) consumes. */
-export interface CheckpointDeps {
+interface CheckpointDeps {
   /** The conversation key (the main session). */
   key: string;
   /** The previously-known path (tip LAST). */
@@ -62,13 +62,13 @@ export interface CheckpointDeps {
 
 /** One known row: its uuid and stored timestamp (arrival order lives in
  *  the mirror; the dead set is applied before the rows land here). */
-export interface KnownRow {
+interface KnownRow {
   uuid: string;
   ts?: number;
 }
 
 /** The run-lock surface (overridable for tests; defaults to the real locks). */
-export interface RunLockSurface {
+interface RunLockSurface {
   inFlight(key: string): boolean;
   abort(key: string): void;
   /** The release poll interval (ms). */

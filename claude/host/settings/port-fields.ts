@@ -53,7 +53,7 @@ interface SchemaShape {
  *  the pane edits the field the binding already reads). */
 export const PORT_KEEP_RECENT_TOKENS_DEFAULT = 20_000;
 
-export const PORT_ONLY_SETTINGS: readonly {
+const PORT_ONLY_SETTINGS: readonly {
   id: string;
   label: string;
   description?: string;

@@ -42,7 +42,7 @@
 		"lint:bare-literals": "node scripts/no-bare-literals.cjs src/ index.ts",
 		"lint:design-refs": "node scripts/no-design-refs.cjs src/ index.ts claude/ README.md docs/CONFIGURATION.md",
 		"lint:tmpdir": "node scripts/no-raw-tmpdir.cjs tests/ claude/tests/",
-		"knip": "knip --production",
+		"knip": "knip",
 		"typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc.tsbuildinfo && tsc -p tsconfig.claude.json",
 		"test:unit": "node scripts/test-low-priority.cjs vitest run",
 		"test": "node scripts/test-low-priority.cjs \"node scripts/run-parallel.cjs \"npm run lint:optional-params :: npm run lint:bare-literals :: npm run lint:design-refs :: npm run lint:tmpdir :: npm run lint:as-never :: npm run lint:bundled-imports :: npm run lint :: npm run typecheck :: npm run knip :: npm run dupes :: npm run claude:sync-check :: npm run claude:validate :: npm run smokes :: npm run acceptance:checklist\" && npm run claude:test && vitest run\"",
