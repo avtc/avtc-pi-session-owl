@@ -155,6 +155,80 @@ ${trow("u4")}
     expect(uuids).toEqual(["u3", "u1", "u2", "u4"]);
   }, 30_000);
 
+  test("--transcript: parents re-stitched from the normalized edges (raw ?? logical; carried to the nearest mirrored ancestor)", async () => {
+    // a rebuilt store's shape: rows re-imported with broken parents — u2
+    // lost its parent, the boundary row b1 carries only the transcript's
+    // logical link, and g's transcript parent (ghost) never entered the
+    // mirror, so the edge carries to ghost's nearest mirrored ancestor
+    const tmp = tempDir("mc-stitch");
+    const cfg = join(tmp, "cfg");
+    const sessDir = join(cfg, "session-owl", "sessions", "s1");
+    mkdirSync(sessDir, { recursive: true });
+    const l = (uuid: string, parent: string | null, text: string) =>
+      JSON.stringify({ uuid, parentUuid: parent, row: { role: "user", content: text } });
+    writeFileSync(
+      join(sessDir, "m1-cccc3333.jsonl"),
+      `${l("g", "uX", "carried")}
+${l("b1", null, "boundary")}
+${l("u2", null, "lost")}
+${l("u1", null, "root")}
+${l("u5", null, "mirror-only")}
+`,
+    );
+    const tpath = join(tmp, "transcript.jsonl");
+    const trow = (fields: Record<string, string | null>) => JSON.stringify({ type: "user", ...fields });
+    writeFileSync(
+      tpath,
+      `${trow({ uuid: "u1" })}
+${trow({ uuid: "u2", parentUuid: "u1" })}
+${trow({ uuid: "b1", logicalParentUuid: "u2" })}
+${trow({ uuid: "ghost", parentUuid: "b1" })}
+${trow({ uuid: "g", parentUuid: "ghost" })}
+`,
+    );
+    const { stdout } = await run(process.execPath, [
+      HELPER,
+      "--config-dir",
+      cfg,
+      "--session-id",
+      "s1",
+      "--apply",
+      "--transcript",
+      tpath,
+    ]);
+    const report = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+    expect(report.done).toBe(true);
+    expect(report.transcriptOrder).toBe(true);
+    expect(report.parentsRestitched).toBe(3);
+    const rows = new Map<string, { parentUuid: string | null }>();
+    const uuids: string[] = [];
+    for (const f of countLines(sessDir).files) {
+      for (const line of readFileSync(join(sessDir, f), "utf8").split("\n")) {
+        if (line === "") continue;
+        const row = JSON.parse(line) as { uuid: string; parentUuid: string | null };
+        rows.set(row.uuid, row);
+        uuids.push(row.uuid);
+      }
+    }
+    // the order follows the transcript; the mirror-only row rides after
+    expect(uuids).toEqual(["u1", "u2", "b1", "g", "u5"]);
+    // the stitched chain: raw edge, logical edge, carried edge
+    expect(rows.get("u1")?.parentUuid).toBeNull();
+    expect(rows.get("u2")?.parentUuid).toBe("u1");
+    expect(rows.get("b1")?.parentUuid).toBe("u2");
+    expect(rows.get("g")?.parentUuid).toBe("b1");
+    // a mirror-only row is untouched by the stitch
+    expect(rows.get("u5")?.parentUuid).toBeNull();
+    // the walk from the transcript tail reaches the root without gaps
+    let at: string | null = "g";
+    const walked: string[] = [];
+    while (at !== null) {
+      walked.push(at);
+      at = rows.get(at)?.parentUuid ?? null;
+    }
+    expect(walked).toEqual(["g", "b1", "u2", "u1"]);
+  }, 30_000);
+
   test("--transcript with a missing file degrades to first-occurrence order", async () => {
     const { cfg, sessDir } = dupDir();
     const { stdout } = await run(process.execPath, [

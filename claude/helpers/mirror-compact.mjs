@@ -107,16 +107,26 @@ try {
 // moment that restores conversation order. A missing/unreadable transcript
 // degrades to first-occurrence order (reported as transcriptOrder:false).
 let transcriptOrder = null;
+let parentsRestitched = 0;
 if (transcriptPath !== null && order.length > 0) {
   try {
     const tpos = new Map();
+    const tparent = new Map(); // uuid -> normalized parent (raw ?? logical)
     let pos = 0;
     const lines = createInterface({ input: createReadStream(transcriptPath, "utf8") });
     for await (const line of lines) {
       if (line !== "") {
         try {
-          const u = JSON.parse(line)?.uuid;
-          if (typeof u === "string" && !tpos.has(u)) tpos.set(u, pos);
+          const row = JSON.parse(line);
+          const u = row?.uuid;
+          if (typeof u === "string") {
+            if (!tpos.has(u)) tpos.set(u, pos);
+            if (!tparent.has(u)) {
+              const raw = row.parentUuid;
+              const logical = row.logicalParentUuid;
+              tparent.set(u, typeof raw === "string" ? raw : typeof logical === "string" ? logical : null);
+            }
+          }
         } catch {
           /* a malformed transcript line still advances the position */
         }
@@ -128,6 +138,38 @@ if (transcriptPath !== null && order.length > 0) {
     order.length = 0;
     order.push(...inTranscript, ...mirrorOnly);
     transcriptOrder = true;
+    // re-stitch the parents from the transcript's normalized edges: a rebuilt
+    // store re-imports rows with broken parents (arrival-order fallbacks at
+    // compaction boundaries — the boundary rows carry only the logical link).
+    // An edge endpoint missing from the mirror carries to the nearest
+    // mirrored ancestor (fork/re-import rows); mirror-only rows stay as-is.
+    const mirrorSet = new Set(order);
+    const carriedParent = (uuid) => {
+      const seen = new Set();
+      let at = tparent.get(uuid);
+      while (typeof at === "string" && !seen.has(at)) {
+        seen.add(at);
+        if (mirrorSet.has(at)) return at;
+        at = tparent.get(at);
+      }
+      return null;
+    };
+    for (const uuid of inTranscript) {
+      const raw = tparent.get(uuid);
+      const next = raw !== null && mirrorSet.has(raw) ? raw : carriedParent(uuid);
+      let row;
+      try {
+        row = JSON.parse(byUuid.get(uuid));
+      } catch {
+        continue;
+      }
+      const current = typeof row.parentUuid === "string" ? row.parentUuid : null;
+      if (next !== current) {
+        row.parentUuid = next;
+        byUuid.set(uuid, JSON.stringify(row));
+        parentsRestitched += 1;
+      }
+    }
   } catch {
     transcriptOrder = false;
   }
@@ -135,7 +177,7 @@ if (transcriptPath !== null && order.length > 0) {
 
 const unique = byUuid.size;
 const removed = lines - unique;
-if (removed === 0) {
+if (removed === 0 && parentsRestitched === 0) {
   const summary = JSON.stringify({
     done: true,
     noop: true,
@@ -145,6 +187,7 @@ if (removed === 0) {
     unique,
     filesIn: files.length,
     filesOut: 0,
+    parentsRestitched,
     sessionDir: sessDir,
     transcriptOrder,
   });
@@ -217,6 +260,7 @@ const summary = JSON.stringify({
   unique,
   filesIn: files.length,
   filesOut: written.length,
+  parentsRestitched,
   transcriptOrder,
   applied: apply,
   sessionDir: sessDir,
