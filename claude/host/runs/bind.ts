@@ -646,6 +646,17 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
       getGraphStore: () => binding.graphStore(),
       getLeafId: () => binding.leafId(),
       getBranch: () => binding.branch(),
+      // the reobserve scan's interval fallback: built lazily over the
+      // mirror's full arrival order (the served branch may prune rows an
+      // observation still names as a coverage endpoint)
+      mirrorIndexOf: (() => {
+        let index: Map<string, number> | null = null;
+        return (uuid: string): number | null => {
+          index ??= new Map(storage.mirror.arrivalOrder().map((u, i) => [u, i] as const));
+          const pos = index.get(uuid);
+          return pos === undefined ? null : pos;
+        };
+      })(),
       resetGraphForRescan: () => {
         if (resolvedCtx === null || pinnedHandle === null) {
           throw new Error(`binding ${key}: resetGraphForRescan() before the first pin`);

@@ -34,6 +34,7 @@ import type { ConfirmFn, NotifyFn } from "../notify/adapter.js";
 import { runsLog } from "../runs/seams.js";
 import { makeTriggerCtx } from "../triggers/context.js";
 import type { RunHandle } from "../triggers/run-locks.js";
+import { computeUncoveredRangesWithMirrorFallback } from "./uncovered.js";
 import { routeOutput } from "./viewer.js";
 
 // --- shared input types -------------------------------------------------------
@@ -71,6 +72,10 @@ export interface OwlCommandDeps {
    *  sessionManager.getBranch shape; the raw store branch does NOT fit). */
   getLeafId: () => string | null;
   getBranch: (leafId: string | null) => SessionEntry[];
+  /** The mirror's full row index (arrival position by uuid) — the
+   *  reobserve scan's fallback for observation intervals whose endpoints
+   *  fell off the served branch. Absent: the plain shared scan. */
+  mirrorIndexOf?: (uuid: string) => number | null;
   /** Void the graph + observations for a full re-observe (plain rescan). */
   resetGraphForRescan: () => void;
   /** Fire-and-forget the turn-boundary trigger chain (plain rescan's
@@ -348,7 +353,10 @@ export async function runOwlReobserve(_args: string, deps: OwlCommandDeps): Prom
   }
   await deps.pinCore();
   const branch = deps.getBranch(deps.getLeafId());
-  const ranges = computeUncoveredRanges(branch, deps.getGraphStore().observerFrontier);
+  const ranges =
+    deps.mirrorIndexOf !== undefined
+      ? computeUncoveredRangesWithMirrorFallback(branch, deps.getGraphStore().observerFrontier, deps.mirrorIndexOf)
+      : computeUncoveredRanges(branch, deps.getGraphStore().observerFrontier);
   if (ranges.length === 0) {
     deps.notify(REOBSERVE_NOTHING_TO_DO, "info");
     return;

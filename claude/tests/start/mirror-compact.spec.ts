@@ -5,8 +5,7 @@
 // wins), old batches deleted, dry-run by default, idempotent, sweep
 // compatibility after the rewrite.
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
@@ -119,7 +118,7 @@ describe("helpers/mirror-compact.mjs", () => {
     const { cfg, sessDir } = dupDir();
     // the transcript lists the rows in a DIFFERENT order than the batches'
     // first occurrence (u3, u1, u2, u4) + noise rows the mirror lacks
-    const tmp = mkdtempSync(join(tmpdir(), "mc-tr-"));
+    const tmp = tempDir("mc-tr");
     const tpath = join(tmp, "transcript.jsonl");
     const trow = (u: string | null) => JSON.stringify({ uuid: u, type: "user" });
     writeFileSync(
@@ -166,7 +165,7 @@ ${trow("u4")}
       "s1",
       "--apply",
       "--transcript",
-      join(tmpdir(), "mc-missing-transcript-xyz.jsonl"),
+      join(tempDir("mc-missing"), "mc-missing-transcript-xyz.jsonl"),
     ]);
     const report = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
     expect(report.done).toBe(true);
