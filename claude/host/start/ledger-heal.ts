@@ -37,6 +37,31 @@ export async function runLedgerHeal(
   input: { pluginRoot: string; sessionDir: string },
   nodeBin = "node",
 ): Promise<LedgerHealReport> {
+  // One rewrite per session dir at a time, shared across every caller
+  // (the boot backfill and the conversation's prepared context both heal
+  // through this seam): two helper processes rewriting the same directory
+  // concurrently collide mid-rewrite (ENOENT on files the other already
+  // deleted, old and new batches coexisting), so a concurrent caller awaits
+  // the in-flight run and reuses its result instead of spawning its own.
+  const settled = inflight.get(input.sessionDir);
+  if (settled !== undefined) return settled;
+  const run = healOnce(deps, input, nodeBin).finally(() => {
+    inflight.delete(input.sessionDir);
+  });
+  inflight.set(input.sessionDir, run);
+  return run;
+}
+
+const inflight = new Map<string, Promise<LedgerHealReport>>();
+
+async function healOnce(
+  deps: {
+    runProcess: (argv: string[]) => Promise<{ stdout: string; exitCode: number }>;
+    log: (message: string, err?: unknown) => void;
+  },
+  input: { pluginRoot: string; sessionDir: string },
+  nodeBin: string,
+): Promise<LedgerHealReport> {
   const plan = planLedgerHealInvocation(input);
   try {
     // the NODE BINARY leads the argv — a bare .mjs path would shell-open,

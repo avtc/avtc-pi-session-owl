@@ -35,6 +35,40 @@ describe("runLedgerHeal", () => {
     expect(argvs[0]?.slice(2)).toEqual(["--session-dir", "C:/s1", "--apply"]);
   });
 
+  test("concurrent calls on one session dir share the single in-flight run (boot's two heal seams never race a rewrite)", async () => {
+    // the boot path heals from runBackfill while the conversation's own
+    // prepared context heals from bind — two processes rewriting the same
+    // directory at once collide (ENOENT mid-rewrite, old+new coexisting,
+    // folds reading the transition); the second caller must await the
+    // first's run, not spawn its own
+    let spawnCount = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seam = async (): Promise<{ stdout: string; exitCode: number }> => {
+      spawnCount += 1;
+      await gate;
+      return { stdout: JSON.stringify({ done: true, restatedEdges: 5, uniqueEdges: 3 }), exitCode: 0 };
+    };
+    const first = runLedgerHeal(
+      { runProcess: seam, log: () => {} },
+      { pluginRoot: "E:/x/claude", sessionDir: "C:/race" },
+    );
+    const second = runLedgerHeal(
+      { runProcess: seam, log: () => {} },
+      { pluginRoot: "E:/x/claude", sessionDir: "C:/race" },
+    );
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(spawnCount).toBe(1);
+    expect(a).toEqual({ done: true, restatedEdges: 5, uniqueEdges: 3 });
+    expect(b).toEqual(a);
+    // a LATER call (the in-flight run settled) spawns again
+    await runLedgerHeal({ runProcess: seam, log: () => {} }, { pluginRoot: "E:/x/claude", sessionDir: "C:/race" });
+    expect(spawnCount).toBe(2);
+  });
+
   test("a success report passes through", async () => {
     const r = await runLedgerHeal(
       {
