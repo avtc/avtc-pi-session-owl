@@ -29,13 +29,6 @@ export interface LaunchHandle {
   agentId: string;
 }
 
-/** The companion's launch tool spec input (what spawn forwards). */
-interface LaunchInput {
-  subagentType: string;
-  prompt: string;
-  model?: string;
-}
-
 /** The full name of the callback tool this module serves. */
 export const STAGE_LAUNCHED_TOOL = "mcp__session-owl__stage_launched";
 

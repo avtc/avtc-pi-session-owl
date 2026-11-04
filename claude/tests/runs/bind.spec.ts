@@ -172,7 +172,7 @@ describe("conversation binding — the runtime assembly", () => {
     // needs pi's mixed shape — grouped messages PLUS the observation
     // coverage customs off the store branch.
     const binding = getBinding("sess-cmd", "sess-cmd", null);
-    const handle = await binding.pinCore();
+    await binding.pinCore();
     const conv = state.ensureConversation("sess-cmd", null);
     captureAppend(
       conv.key,

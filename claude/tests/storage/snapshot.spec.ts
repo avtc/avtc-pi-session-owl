@@ -9,7 +9,7 @@ import { byteLength, createMemoryFs, ROLL_MARGIN } from "../../host/storage/fs-a
 import { foldLedger, type LedgerRecord, LedgerWriter } from "../../host/storage/ledger.js";
 import {
   persistSnapshotText,
-  resolveConsistentSnapshot,
+  resolveLoadSnapshot,
   resolveNewestSnapshot,
   snapPartName,
 } from "../../host/storage/snapshot.js";
@@ -128,94 +128,7 @@ describe("snapshot — byte-budget parts", () => {
   });
 });
 
-describe("snapshot — consistent resolution over the tolerant replay stream", () => {
-  test("an off-branch (riding) delta's create counts: the newest snapshot stands, no fallback", async () => {
-    // The loader replays EVERY graph_delta the fold keeps — records whose
-    // markers fell off the served branch ride the branch tail and their
-    // creates land. The resolver's static check must simulate that same
-    // stream: a required node passes when ANY post-snapshot delta creates
-    // it (order-free), not only when an on-branch delta does — otherwise a
-    // rebuilt store (off-branch markers everywhere) rejects every candidate
-    // and boots walk the whole snapshot chain every time.
-    const mem = createMemoryFs();
-    const fs = mem.adapter;
-    const dir = "/cfg/snap-ride";
-    const ledger = new LedgerWriter(fs, dir, "ride", () => 1000);
-    await fs.writeText(
-      `${dir}/m1-aaaaaaaa.jsonl`,
-      [
-        JSON.stringify({ uuid: "u1", parentUuid: null, row: { role: "user", content: "one" } }),
-        JSON.stringify({ uuid: "u2", parentUuid: "u1", row: { role: "user", content: "two" } }),
-        JSON.stringify({ uuid: "u3", parentUuid: "u2", row: { role: "user", content: "three" } }),
-      ].join("\n") + "\n",
-    );
-    // the older snapshot carries n1 in its base; the newest carries NOTHING
-    const withNode = (nodes: unknown[], observations: unknown[]) =>
-      JSON.stringify({
-        type: "session-owl",
-        version: "v1",
-        nodes,
-        observations,
-        oInitialPrompt: null,
-        nextObsId: 1,
-        nextNodeId: 1,
-        selectedTree: null,
-        lastCompactionLedger: null,
-        compactionStages: {},
-      });
-    const n1 = {
-      id: "n1",
-      summary: "node one",
-      summaryTokens: 3,
-      state: "active",
-      importance: "med",
-      parentNode: null,
-      observationIds: [],
-      childNodeIds: [],
-      supersededBy: null,
-      timestamps: { createdAt: "t", updatedAt: "t", rangeStart: "t", rangeEnd: "t" },
-    };
-    await persistSnapshotText(fs, dir, ledger, "snapOld", withNode([n1], []), "u1");
-    await persistSnapshotText(fs, dir, ledger, "snapNew", withNode([], []), "u2");
-    // a RIDING delta (marker row off the served branch) creates n1; an
-    // on-branch delta after the newest snapshot requires it
-    ledger.append(
-      "graph_delta",
-      {
-        kind: "graph_delta",
-        delta: {
-          type: "create_node",
-          id: "n1",
-          parentNode: null,
-          summary: "node one",
-          summaryTokens: 3,
-          state: "active",
-          importance: "med",
-          timestamps: { createdAt: "t", updatedAt: "t", rangeStart: "t", rangeEnd: "t" },
-          observationIds: [],
-        },
-      },
-      "fork-row-9",
-    );
-    ledger.append(
-      "graph_delta",
-      {
-        kind: "graph_delta",
-        delta: { type: "set_meta", nodeId: "n1", importance: "high", archived: null, obsolete: null, summary: null },
-      },
-      "u3",
-    );
-    await ledger.flush();
-    const fold = await foldLedger(fs, dir);
-    const resolved = await resolveConsistentSnapshot(fs, dir, fold.records, () => true, ["u1", "u2", "u3"]);
-    // the NEWEST snapshot resolves: the riding create supplies n1
-    expect(resolved?.record.seq).toBe(2);
-    const payload = resolved?.record.payload as { nodes?: unknown[] } | undefined;
-    expect(payload?.nodes).toEqual([]);
-  });
-});
-
-describe("snapshot — observations in the consistency check", () => {
+describe("snapshot — the load anchor (the transcript decides)", () => {
   const graphJson = (nodes: unknown[], observations: unknown[]) =>
     JSON.stringify({
       type: "session-owl",
@@ -241,40 +154,62 @@ describe("snapshot — observations in the consistency check", () => {
     supersededBy: null,
     timestamps: { createdAt: "t", updatedAt: "t", rangeStart: "t", rangeEnd: "t" },
   });
-  const obs = (id: string, parent: string) => ({
-    id,
-    parentNode: parent,
-    summary: `${id} obs`,
-    importance: "med",
-    sourceEntryIds: ["u1"],
-    timestamp: "t",
+  const NL = String.fromCharCode(10);
+  const writeRows = async (fs: ReturnType<typeof createMemoryFs>["adapter"], dir: string, rows: unknown[]) => {
+    await fs.writeText(`${dir}/m1-aaaaaaaa.jsonl`, rows.map((r) => JSON.stringify(r)).join(NL) + NL);
+  };
+  const compactPair = async (
+    ledger: InstanceType<typeof LedgerWriter>,
+    id: string,
+    marker: string,
+    summary: string,
+    nodes: unknown[],
+  ) => {
+    await persistSnapshotText(fs0, dir0, ledger, id, graphJson(nodes, []), marker);
+    ledger.append("summary", { text: summary }, marker);
+  };
+  // shared per-test fs/dir (assigned before each use)
+  let fs0: ReturnType<typeof createMemoryFs>["adapter"];
+  let dir0: string;
+
+  test("the anchor is the newest snapshot whose compaction is present in the transcript", async () => {
+    // A snapshot newer than the transcript's last compaction (a trimmed
+    // session file, or a store record the conversation never referenced)
+    // is never the anchor — the transcript is the source of truth.
+    const mem = createMemoryFs();
+    fs0 = mem.adapter;
+    dir0 = "/cfg/snap-anchor";
+    const ledger = new LedgerWriter(fs0, dir0, "anchor", () => 1000);
+    await writeRows(fs0, dir0, [
+      { uuid: "u1", parentUuid: null, row: { role: "user", content: "one" } },
+      { uuid: "u2", parentUuid: "u1", row: { role: "user", content: "two" } },
+    ]);
+    await compactPair(ledger, "snapOld", "u1", "old summary", [node("n1")]);
+    await compactPair(ledger, "snapNew", "u2", "new summary", []);
+    await ledger.flush();
+    const fold = await foldLedger(fs0, dir0);
+    // the transcript still contains the OLD compaction only
+    const resolved = await resolveLoadSnapshot(fs0, dir0, fold.records, () => true, new Set(["old summary"]));
+    expect(resolved?.record.seq).toBe(1);
+    const payload = resolved?.record.payload as { nodes?: unknown[] } | undefined;
+    expect(payload?.nodes).toEqual([node("n1")]);
   });
 
-  test("an observation carried by the candidate base satisfies a later mv of it", async () => {
+  test("post-anchor damage never moves the anchor (no deeper walk)", async () => {
+    // Deltas after the matched snapshot may reference nodes nobody
+    // carries — the anchor stays; the replay's skipped-delta warnings
+    // carry the damage. A deeper base replays the whole history and
+    // orphans the tree into an unprocessable root view.
     const mem = createMemoryFs();
-    const fs = mem.adapter;
-    const dir = "/cfg/snap-obs-base";
-    const ledger = new LedgerWriter(fs, dir, "obsbase", () => 1000);
-    await fs.writeText(
-      `${dir}/m1-aaaaaaaa.jsonl`,
-      [
-        JSON.stringify({ uuid: "u1", parentUuid: null, row: { role: "user", content: "one" } }),
-        JSON.stringify({ uuid: "u2", parentUuid: "u1", row: { role: "user", content: "two" } }),
-      ].join("\n") + "\n",
-    );
-    const n1 = node("n1");
-    // the newest snapshot is the COLLAPSE SHAPE (its base lost n1, a later
-    // delta needs it, no create exists anywhere) — genuinely damaged; the
-    // older snapshot is healthy EXCEPT the check must count the observation
-    // its own base carries: a later mv moves o1, and o1 lives only in the
-    // base's observations
-    await persistSnapshotText(fs, dir, ledger, "snapOld", graphJson([n1], [obs("o1", "n1")]), "u1");
-    await persistSnapshotText(fs, dir, ledger, "snapNew", graphJson([], []), "u2");
-    ledger.append(
-      "graph_delta",
-      { kind: "graph_delta", delta: { type: "mv", sourceIds: ["o1"], destId: "n1", newSummary: null } },
-      "u2",
-    );
+    fs0 = mem.adapter;
+    dir0 = "/cfg/snap-anchor-dmg";
+    const ledger = new LedgerWriter(fs0, dir0, "anchor", () => 1000);
+    await writeRows(fs0, dir0, [
+      { uuid: "u1", parentUuid: null, row: { role: "user", content: "one" } },
+      { uuid: "u2", parentUuid: "u1", row: { role: "user", content: "two" } },
+    ]);
+    await compactPair(ledger, "snapOld", "u1", "old summary", [node("n1")]);
+    await compactPair(ledger, "snapNew", "u2", "new summary", []);
     ledger.append(
       "graph_delta",
       {
@@ -284,53 +219,51 @@ describe("snapshot — observations in the consistency check", () => {
       "u2",
     );
     await ledger.flush();
-    const fold = await foldLedger(fs, dir);
-    const resolved = await resolveConsistentSnapshot(fs, dir, fold.records, () => true, ["u1", "u2"]);
-    // the older (healthy) snapshot wins — its base observation satisfies the mv
+    const fold = await foldLedger(fs0, dir0);
+    const resolved = await resolveLoadSnapshot(
+      fs0,
+      dir0,
+      fold.records,
+      () => true,
+      new Set(["old summary", "new summary"]),
+    );
+    expect(resolved?.record.seq).toBe(3);
+  });
+
+  test("a snapshot without its summary pair is skipped; the previous compact anchors", async () => {
+    // The crash window between the snapshot and the summary writes (or a
+    // damaged store) leaves an unidentifiable snapshot: the resolver
+    // walks to the previous transcript-backed compaction, all the way to
+    // the session start if needed.
+    const mem = createMemoryFs();
+    fs0 = mem.adapter;
+    dir0 = "/cfg/snap-anchor-nopair";
+    const ledger = new LedgerWriter(fs0, dir0, "anchor", () => 1000);
+    await writeRows(fs0, dir0, [
+      { uuid: "u1", parentUuid: null, row: { role: "user", content: "one" } },
+      { uuid: "u2", parentUuid: "u1", row: { role: "user", content: "two" } },
+    ]);
+    await compactPair(ledger, "snapOld", "u1", "old summary", [node("n1")]);
+    // the newest snapshot with NO summary record beside it
+    await persistSnapshotText(fs0, dir0, ledger, "snapNew", graphJson([], []), "u2");
+    await ledger.flush();
+    const fold = await foldLedger(fs0, dir0);
+    const resolved = await resolveLoadSnapshot(fs0, dir0, fold.records, () => true, new Set(["old summary"]));
     expect(resolved?.record.seq).toBe(1);
   });
 
-  test("a record_observation delta's observation satisfies a later mv of it", async () => {
+  test("no compact-matched snapshot resolves null (deltas-only boot)", async () => {
     const mem = createMemoryFs();
-    const fs = mem.adapter;
-    const dir = "/cfg/snap-obs-delta";
-    const ledger = new LedgerWriter(fs, dir, "obsdelta", () => 1000);
-    await fs.writeText(
-      `${dir}/m1-aaaaaaaa.jsonl`,
-      [
-        JSON.stringify({ uuid: "u1", parentUuid: null, row: { role: "user", content: "one" } }),
-        JSON.stringify({ uuid: "u2", parentUuid: "u1", row: { role: "user", content: "two" } }),
-      ].join("\n") + "\n",
-    );
-    const n1 = node("n1");
-    // the newest is the collapse shape (needs n9, absent everywhere); the
-    // older is healthy except its stream records o2 and then moves it — the
-    // recording delta itself must supply o2 to the existence check
-    await persistSnapshotText(fs, dir, ledger, "snapOld", graphJson([n1], []), "u1");
-    await persistSnapshotText(fs, dir, ledger, "snapNew", graphJson([], []), "u2");
-    ledger.append(
-      "graph_delta",
-      { kind: "graph_delta", delta: { type: "record_observation", obs: obs("o2", "n1") } },
-      "u1",
-    );
-    ledger.append(
-      "graph_delta",
-      { kind: "graph_delta", delta: { type: "mv", sourceIds: ["o2"], destId: "n1", newSummary: null } },
-      "u1",
-    );
-    ledger.append(
-      "graph_delta",
-      {
-        kind: "graph_delta",
-        delta: { type: "set_meta", nodeId: "n1", importance: "high", archived: null, obsolete: null, summary: null },
-      },
-      "u2",
-    );
+    fs0 = mem.adapter;
+    dir0 = "/cfg/snap-anchor-none";
+    const ledger = new LedgerWriter(fs0, dir0, "anchor", () => 1000);
+    await writeRows(fs0, dir0, [{ uuid: "u1", parentUuid: null, row: { role: "user", content: "one" } }]);
+    await compactPair(ledger, "snapOld", "u1", "old summary", [node("n1")]);
     await ledger.flush();
-    const fold = await foldLedger(fs, dir);
-    const resolved = await resolveConsistentSnapshot(fs, dir, fold.records, () => true, ["u1", "u2"]);
-    // the older (healthy) snapshot wins — the recorded observation satisfies the mv
-    expect(resolved?.record.seq).toBe(1);
+    const fold = await foldLedger(fs0, dir0);
+    // the transcript no longer carries the compaction (fully trimmed)
+    const resolved = await resolveLoadSnapshot(fs0, dir0, fold.records, () => true, new Set());
+    expect(resolved).toBeNull();
   });
 });
 

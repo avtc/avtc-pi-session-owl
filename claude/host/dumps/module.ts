@@ -25,17 +25,6 @@ import { runsLog } from "../runs/seams.js";
 // (dumping must not break a stage run). The pure builders below are
 // pi-verbatim host copies (the core debug-dump.ts value-imports node:fs,
 // which the closure refuses — only its format lives on here).
-/** The run-dump buffer the stage call sites fill (host/stage/runs.ts's
- *  StageRunState.dump shape — structural, so this module stays capsule-free
- *  inside the hooks closure). */
-interface StageDumpBuffer {
-  outputRows: unknown[];
-  handback: { tool: string; result: unknown } | null;
-  fabricatedStop: string | null;
-  sections: string[];
-  pendingCloser: string | null;
-}
-
 /** The narrow dump IO surface: the $.fs capsule the wiring injects (the
  *  same data-only-capsule rule as storage's FsAdapter, plus mtime — the
  *  claim tiebreak reads it; listDir of a missing dir yields []). */

@@ -41,6 +41,8 @@ import type {
   StoreCustomEntry,
   StoreEntry,
 } from "../../core/src/store/graph-store.js";
+import { groupRows } from "../capture/grouper.js";
+import { userTextOf } from "../compaction/floor.js";
 import type { FsAdapter } from "./fs-adapter.js";
 import {
   foldLedger,
@@ -51,8 +53,8 @@ import {
   quarantineAfterLastLiveCheck,
 } from "./ledger.js";
 import { type MirroredRow, MirrorWriter, type SweepResult, sweepMirror } from "./mirror.js";
-import { resolveConsistentSnapshot } from "./snapshot.js";
-import { SUMMARY_RECORD_TYPE } from "./summary-identity.js";
+import { resolveLoadSnapshot } from "./snapshot.js";
+import { normalizeSummaryText, SUMMARY_RECORD_TYPE } from "./summary-identity.js";
 
 export type { SessionMarker } from "./session-marker.js";
 export { SESSION_MARKER_FILENAME } from "./session-marker.js";
@@ -329,7 +331,18 @@ export async function prepareStoreContext(
     // row's position — the fold's write-time order diverges from it exactly
     // in the damaged-fold shape the consistent resolution guards against)
     const branch = branchForLeaf(mirror, mirror.tipUuid());
-    snapshot = await resolveConsistentSnapshot(fs, dir, kept, live, branch);
+    const branchRows = branch
+      .map((uuid) => mirror.rowByUuid(uuid)?.row)
+      .filter(
+        (row): row is NonNullable<typeof row> => row !== undefined,
+      ) as unknown as import("../capture/grouper.js").ClaudeRow[];
+    const branchEntries = groupRows(branchRows);
+    const witnesses = new Set<string>();
+    for (const entry of branchEntries) {
+      const text = userTextOf(entry);
+      if (text !== null && text.length > 0) witnesses.add(normalizeSummaryText(text));
+    }
+    snapshot = await resolveLoadSnapshot(fs, dir, kept, live, witnesses);
   };
   // the context-construction fold keeps every record: process start has no
   // transcript, so no liveness predicate exists yet — evaluating the blind

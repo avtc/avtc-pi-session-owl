@@ -17,6 +17,7 @@ import type { FsAdapter } from "./fs-adapter.js";
 import { byteLength, PART_SLICE, ROLL_MARGIN, sliceToByteParts } from "./fs-adapter.js";
 import { randomUUID } from "./id.js";
 import type { LedgerRecord, LedgerWriter, LivePredicate } from "./ledger.js";
+import { normalizeSummaryText } from "./summary-identity.js";
 
 /** The ledger line wraps the payload in an envelope (producerId/seq/ts/
  *  marker/at/kind JSON) whose flush pre-filter re-checks against the roll
@@ -100,6 +101,55 @@ export async function resolveNewestSnapshot(
   return candidates[0] ?? null;
 }
 
+/**
+ * Resolve the load anchor: the newest LIVE snapshot whose compaction the
+ * transcript still carries — the session file is the source of truth, so a
+ * snapshot newer than the transcript's last compaction (a trimmed session
+ * file, a store record the conversation never referenced) is never the
+ * anchor, and a snapshot whose summary pair is missing (the crash window
+ * between the two writes, a damaged store) is skipped in favor of the
+ * previous transcript-backed compaction, all the way to the session start.
+ * Damage past the anchor stays the replay's problem (skipped-delta
+ * warnings): a deeper base would tolerantly replay the whole history and
+ * orphan the tree into an unprocessable root view. Returns null when no
+ * compact-matched snapshot exists (a deltas-only fold).
+ */
+export async function resolveLoadSnapshot(
+  fs: FsAdapter,
+  dir: string,
+  records: readonly LedgerRecord[],
+  isLive: LivePredicate,
+  ownSummaries: ReadonlySet<string>,
+): Promise<ResolvedSnapshot | null> {
+  const candidates = await collectSnapshotCandidates(fs, dir, records, isLive);
+  const summaryByMarker = new Map<string, string>();
+  for (const record of records) {
+    if (String(record.kind) !== "summary") continue;
+    const text = (record.payload as { text?: unknown } | null)?.text;
+    if (typeof text === "string" && text.length > 0) {
+      summaryByMarker.set(String(record.at), normalizeSummaryText(text));
+    }
+  }
+  for (const candidate of candidates) {
+    const marker = String(candidate.record.at);
+    const summary = summaryByMarker.get(marker);
+    if (summary === undefined) {
+      log.warn(
+        `snapshot resolve: snapshot at ${candidate.record.ts} has no summary pair — skipping, trying the previous compaction`,
+      );
+      continue;
+    }
+    if (!ownSummaries.has(summary)) {
+      log.warn(
+        `snapshot resolve: snapshot at ${candidate.record.ts} has no matching compaction in the transcript — skipping, trying the previous compaction`,
+      );
+      continue;
+    }
+    return candidate;
+  }
+  return null;
+}
+
 /** Collect the LIVE snapshot candidates, NEWEST first (single-record and
  *  parts snapshots both; an orphaned/corrupt parts candidate is skipped —
  *  same rules as the newest-only walk). */
@@ -146,181 +196,6 @@ async function collectSnapshotCandidates(
     }
   }
   return out;
-}
-
-/** Node ids a delta REQUIRES to exist for its replay to apply cleanly
- *  (the requireNode family — the invariant errors the tolerant loader
- *  logs as skipped deltas). */
-function requiredNodeIds(delta: Record<string, unknown>): string[] {
-  const out: string[] = [];
-  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
-  switch (delta.type) {
-    case "create_node": {
-      const parent = str(delta.parentNode);
-      if (parent !== null) out.push(parent);
-      break;
-    }
-    case "record_observation": {
-      const parent = str((delta.obs as Record<string, unknown> | undefined)?.parentNode);
-      if (parent !== null && parent !== undefined) out.push(parent);
-      break;
-    }
-    case "mv": {
-      const dest = str(delta.destId);
-      if (dest !== null) out.push(dest);
-      if (Array.isArray(delta.sourceIds))
-        out.push(...delta.sourceIds.filter((s): s is string => typeof s === "string"));
-      break;
-    }
-    case "merge": {
-      const dest = str(delta.destId);
-      if (dest !== null) out.push(dest);
-      if (Array.isArray(delta.sourceIds))
-        out.push(...delta.sourceIds.filter((s): s is string => typeof s === "string"));
-      break;
-    }
-    case "supersede": {
-      const node = str(delta.nodeId);
-      if (node !== null) out.push(node);
-      if (Array.isArray(delta.supersededNodeIds))
-        out.push(...delta.supersededNodeIds.filter((s): s is string => typeof s === "string"));
-      break;
-    }
-    case "set_meta": {
-      const node = str(delta.nodeId);
-      if (node !== null) out.push(node);
-      break;
-    }
-    case "flush_new": {
-      if (Array.isArray(delta.nodeIds)) out.push(...delta.nodeIds.filter((s): s is string => typeof s === "string"));
-      break;
-    }
-    default:
-      break;
-  }
-  return out;
-}
-
-/** Node ids a delta BRINGS INTO EXISTENCE (replay-creatable). */
-function createdNodeIds(delta: Record<string, unknown>): string[] {
-  const out: string[] = [];
-  if (delta.type === "create_node" && typeof delta.id === "string") out.push(delta.id);
-  if (delta.type === "merge" && typeof delta.resolvedDestId === "string") out.push(delta.resolvedDestId);
-  // an observation enters the graph with its own id — a later mv may source it
-  if (delta.type === "record_observation") {
-    const id = (delta.obs as Record<string, unknown> | undefined)?.id;
-    if (typeof id === "string") out.push(id);
-  }
-  return out;
-}
-
-/** The graph_delta records the loader would replay AFTER a candidate
- *  snapshot — on the BRANCH axis (a record lands at its `at` row's branch
- *  position, tie-broken by fold order; records whose markers fell off the
- *  served branch RIDE the branch tail and replay too — the fold keeps them
- *  and the loader applies them, so the simulation must count their creates).
- *  The fold's write-time order and the branch's replay order diverge
- *  exactly in the damaged-fold shape this check exists for. */
-function deltasAfterOnBranch(
-  records: readonly LedgerRecord[],
-  from: LedgerRecord,
-  branch: readonly string[],
-): Record<string, unknown>[] {
-  const branchIndex = new Map(branch.map((uuid, i) => [uuid, i] as const));
-  const posOf = (r: LedgerRecord): number => {
-    if (r.at === "seed") return -1;
-    const at = branchIndex.get(r.at);
-    return at === undefined ? Number.NaN : at; // NaN = riding: replays at the tail
-  };
-  const fromFold = records.indexOf(from);
-  const fromPos = posOf(from);
-  const out: Record<string, unknown>[] = [];
-  for (let i = 0; i < records.length; i += 1) {
-    const r = records[i];
-    if (r === undefined || r.kind !== "graph_delta") continue;
-    // riding records (their `at` row off the served branch) replay at the
-    // tail: they sit AFTER every positioned record, and only fold order
-    // decides among themselves — the loader's exact placement
-    const pos = posOf(r);
-    // a riding candidate base sits in the branch TAIL: positioned records
-    // replay before it, and only riding records after it in fold order replay
-    const after = Number.isNaN(fromPos)
-      ? Number.isNaN(pos) && i > fromFold
-      : Number.isNaN(pos) || pos > fromPos || (pos === fromPos && i > fromFold);
-    if (!after) continue;
-    const payload = r.payload as { kind?: unknown; delta?: unknown; deltas?: unknown } | null;
-    if (payload === null || payload.kind !== "graph_delta") continue;
-    const batch = Array.isArray(payload.deltas)
-      ? (payload.deltas as Record<string, unknown>[])
-      : payload.delta !== undefined
-        ? [payload.delta as Record<string, unknown>]
-        : [];
-    for (const delta of batch) {
-      if (delta !== null && typeof delta === "object") out.push(delta);
-    }
-  }
-  return out;
-}
-
-/** Resolve the snapshot to fold from: the NEWEST live candidate whose
- *  post-snapshot delta stream can produce every node a delta requires. The
- *  simulation mirrors the loader's tolerant replay: records whose markers
- *  fell off the served branch ride the branch tail and their creates land
- *  (a rebuilt store carries them in bulk), and existence is ORDER-FREE — a
- *  required node passes when the base or ANY post-snapshot delta creates
- *  it. A snapshot persisted over a DAMAGED fold (the collapse shape: a
- *  refold re-based the graph, later deltas reference nodes NO delta or base
- *  carries) fails the check and the resolution walks to the next-older
- *  candidate — the ops are never pruned, so the older base plus the full
- *  delta stream rebuilds the true state. When NO candidate is consistent
- *  the NEWEST stands (the tolerant behavior — damage stays visible in the
- *  loader's skipped-delta warn). */
-export async function resolveConsistentSnapshot(
-  fs: FsAdapter,
-  dir: string,
-  records: readonly LedgerRecord[],
-  isLive: LivePredicate,
-  branch: readonly string[] = [],
-): Promise<ResolvedSnapshot | null> {
-  const candidates = await collectSnapshotCandidates(fs, dir, records, isLive);
-  for (const candidate of candidates) {
-    const knownIds = new Set<string>();
-    const payload = candidate.details as { nodes?: unknown; observations?: unknown } | null;
-    if (payload !== null) {
-      if (Array.isArray(payload.nodes)) {
-        for (const node of payload.nodes) {
-          if (node !== null && typeof node === "object" && typeof (node as { id?: unknown }).id === "string")
-            knownIds.add((node as { id: string }).id);
-        }
-      }
-      // the base's observations exist at replay — a later mv may source them
-      if (Array.isArray(payload.observations)) {
-        for (const o of payload.observations) {
-          if (o !== null && typeof o === "object" && typeof (o as { id?: unknown }).id === "string")
-            knownIds.add((o as { id: string }).id);
-        }
-      }
-    }
-    const stream = deltasAfterOnBranch(records, candidate.record, branch);
-    for (const delta of stream) {
-      for (const id of createdNodeIds(delta)) knownIds.add(id);
-    }
-    let consistent = true;
-    for (const delta of stream) {
-      for (const id of requiredNodeIds(delta)) {
-        if (!knownIds.has(id)) {
-          consistent = false;
-          log.warn(
-            `snapshot resolve: candidate at ${candidate.record.ts} inconsistent (delta needs node ${id}) — trying the next-older snapshot`,
-          );
-          break;
-        }
-      }
-      if (!consistent) break;
-    }
-    if (consistent) return candidate;
-  }
-  return candidates[0] ?? null;
 }
 
 /** A fresh snapshot id (one per compaction). */

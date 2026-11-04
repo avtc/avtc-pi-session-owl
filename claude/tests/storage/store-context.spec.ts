@@ -37,6 +37,19 @@ function row(uuid: string, parentUuid: string | null): MirroredRow {
   return { uuid, parentUuid, row: { role: "user", content: `row ${uuid}` } };
 }
 
+function summaryWitnessRow(uuid: string, parentUuid: string | null, text: string): MirroredRow {
+  // the engine re-serves an owl compaction's summary as a plain user row
+  return {
+    uuid,
+    parentUuid,
+    row: {
+      door: "prompt",
+      origin: { kind: "user" },
+      message: { type: "user", role: "user", content: [{ type: "text", text }] },
+    },
+  };
+}
+
 function obsEntry(from: string, to: string, obsIds: string[]): ObservationEntry {
   return {
     coversFromId: from,
@@ -216,13 +229,16 @@ describe("store-context — snapshots", () => {
       JSON.stringify({ type: "session-owl", version: "v1", nodes: [] }),
       "u2",
     );
+    ledger.append("summary", { text: "the compaction summary" }, "u2");
+    mirror.bufferRow(summaryWitnessRow("u3", "u2", "the compaction summary"));
     await ledger.flush();
+    await mirror.flush();
     const prepared = await prepareStoreContext(fs, DIR, new LedgerWriter(fs, DIR, "live"), mirror);
     const branch = prepared.ctx.getBranch("u2");
     const compaction = branch.find((e) => e.type === "compaction");
     expect(compaction).toBeDefined();
     expect((compaction as { details?: unknown }).details).toEqual({ type: "session-owl", version: "v1", nodes: [] });
-    expect(branch[branch.length - 1]).toBe(compaction); // after its marker row u2
+    expect(branch[branch.length - 2]).toBe(compaction); // after its marker row u2, its summary record follows
   });
 });
 
@@ -340,13 +356,13 @@ describe("store-context — THE INTEGRATION (graph-store load on this adapter)",
     expect(result).toBeDefined();
   });
 
-  test("a snapshot whose delta replay is inconsistent falls back to the next-older snapshot (the load never cements a damaged base)", async () => {
-    // THE COLLAPSE SHAPE: a compaction persisted
-    // a snapshot over an already-collapsed fold; the deltas that follow
-    // reference nodes only the OLDER snapshot carries. The newest snapshot
-    // wins by rule — its replay hits inapplicable deltas — so the load must
-    // RETRY on the next-older snapshot and replay ALL deltas after it (the
-    // ops are never pruned; the full stream rebuilds the true state).
+  test("the newest transcript-witnessed snapshot is the anchor — a damaged base never retries older", async () => {
+    // THE COLLAPSE SHAPE: a compaction persisted a snapshot over an
+    // already-collapsed fold; the deltas that follow reference nodes only
+    // the OLDER snapshot carries. Both compactions are witnessed in the
+    // transcript, so the anchor is the NEWEST — its replay hits an
+    // inapplicable delta and says so; the load never retries older (a
+    // deeper base replays the whole history and orphans the tree).
     const ledger1 = new LedgerWriter(fs, DIR, "proc-fb", () => 1000);
     const mirror1 = new MirrorWriter(fs, DIR, "proc-fb");
     const p1 = await prepareStoreContext(fs, DIR, ledger1, mirror1);
@@ -395,16 +411,21 @@ describe("store-context — THE INTEGRATION (graph-store load on this adapter)",
       observations: [obsA],
     };
     await persistSnapshotText(fs, DIR, ledger1, "snapA", JSON.stringify(detailsA), "u2");
+    ledger1.append("summary", { text: "summary a" }, "u2");
     // snapshot B (the damaged base): NO nodes — a collapsed fold
     const detailsB = { ...detailsA, nodes: [], observations: [] };
     await persistSnapshotText(fs, DIR, ledger1, "snapB", JSON.stringify(detailsB), "u2");
+    ledger1.append("summary", { text: "summary b" }, "u2");
     // a delta AFTER B that references n1 (merge n1 into itself — applicable
     // only over a base that HAS n1)
     p1.ctx.appendEntry(GRAPH_DELTA_TYPE, {
       kind: "graph_delta",
       delta: { type: "set_meta", nodeId: "n1", importance: "high", archived: null, obsolete: null, summary: null },
     });
+    mirror1.bufferRow(summaryWitnessRow("u3", "u2", "summary a"));
+    mirror1.bufferRow(summaryWitnessRow("u4", "u3", "summary b"));
     await ledger1.flush();
+    await mirror1.flush();
     // restart: sweep + load
     const sweep = await (await import("../../host/storage/store-context.js")).sweepSession(fs, DIR);
     const mirror2 = new MirrorWriter(fs, DIR, "proc-fb2");
@@ -413,10 +434,11 @@ describe("store-context — THE INTEGRATION (graph-store load on this adapter)",
     const graphStore = await import("../../core/src/store/graph-store.js");
     const result = await graphStore.load(p2.ctx);
     const store = graphStore.getGraphStore();
-    // the fallback base (A) + the replay: n1 SURVIVES with the applied delta
-    expect([...store.graph.nodes.keys()]).toContain("n1");
-    expect(store.graph.nodes.get("n1")?.importance).toBe("high");
-    expect(result.skippedDeltas).toBe(0);
+    // the newest base (B, empty) anchors: n1 never materializes and the
+    // incompatible delta says so — the damage stays visible, never healed
+    // by an older base
+    expect([...store.graph.nodes.keys()]).not.toContain("n1");
+    expect(result.skippedDeltas).toBe(1);
   });
 
   test("a restart KEEPS a snapshot persisted past the last CHECK", async () => {
@@ -477,6 +499,9 @@ describe("store-context — THE INTEGRATION (graph-store load on this adapter)",
       observations: [obsA],
     };
     await persistSnapshotText(fs, DIR, ledger1, "snapResume", JSON.stringify(details), "u2");
+    ledger1.append("summary", { text: "resume summary" }, "u2");
+    mirror1.bufferRow(summaryWitnessRow("u3", "u2", "resume summary"));
+    await mirror1.flush();
     p1.ctx.appendEntry(GRAPH_DELTA_TYPE, {
       kind: "graph_delta",
       delta: { type: "set_meta", nodeId: "n1", importance: "high", archived: null, obsolete: null, summary: null },
@@ -665,6 +690,10 @@ describe("store-context — resolvedSnapshot (the compaction counter's restore s
     // persist one snapshot on the live branch, re-fold, resolve
     const ledger = new LedgerWriter(fs, DIR, "snap-p");
     await persistSnapshotText(fs, DIR, ledger, "snap1", JSON.stringify({ compactionsAfter: 4 }), "u1");
+    ledger.append("summary", { text: "the summary" }, "u1");
+    mirror.bufferRow(summaryWitnessRow("u2", "u1", "the summary"));
+    await ledger.flush();
+    await mirror.flush();
     const p2 = await prepareStoreContext(fs, DIR, new LedgerWriter(fs, DIR, "x"), mirror);
     const resolved = p2.resolvedSnapshot();
     expect((resolved?.details as { compactionsAfter?: unknown })?.compactionsAfter).toBe(4);
@@ -677,8 +706,8 @@ describe("prepareStoreContext — the restated-lineage heal seam", () => {
       producerId: "p-heal",
       seq,
       ts: 2000 + seq,
-      marker: "m" + seq,
-      at: "m" + seq,
+      marker: `m${seq}`,
+      at: `m${seq}`,
       kind: "lineage",
       payload: { edges },
     });

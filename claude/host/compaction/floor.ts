@@ -23,7 +23,9 @@ function isMessageEntry(entry: SessionEntry): boolean {
 }
 
 /** A message entry's user-role text (string content or joined text blocks). */
-function userTextOf(entry: SessionEntry): string | null {
+/** The text a summary-matching witness reads: a user message's content
+ *  or a compaction entry's summary. */
+export function userTextOf(entry: SessionEntry): string | null {
   if (!isMessageEntry(entry)) {
     const compaction = entry as { type?: string; summary?: unknown };
     if (compaction.type === "compaction" && typeof compaction.summary === "string") {

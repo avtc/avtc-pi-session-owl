@@ -11,7 +11,7 @@
 // the pause predicate is the conflicts module's.
 import { getSessionOwlSettings, reloadSessionOwlConfig } from "../core/src/config/schema.js";
 import { isConflictPaused } from "./conflicts/pause.js";
-import { getCurrentSession, isOwlEnabled, isOwlIgnoreConflicts } from "./state.js";
+import { isOwlEnabled, isOwlIgnoreConflicts } from "./state.js";
 
 async function reloadConfig(): Promise<Record<string, unknown>> {
   // env-first, then files — refreshes the in-memory cache (the live

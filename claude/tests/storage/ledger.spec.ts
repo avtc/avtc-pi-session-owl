@@ -339,8 +339,8 @@ describe("ledger — restated lineage uuid detection", () => {
       producerId: "p-detect",
       seq,
       ts,
-      marker: "m" + seq,
-      at: "m" + seq,
+      marker: `m${seq}`,
+      at: `m${seq}`,
       kind: "lineage",
       payload: { edges },
     });

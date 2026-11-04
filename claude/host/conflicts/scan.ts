@@ -44,8 +44,6 @@ const SCAN_MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 const SCAN_ROOT_BUDGET = (): { files: number } => ({ files: SCAN_MAX_FILES_PER_PACKAGE });
 
-const COMPACT_HOOK_MARKER = "session.compact";
-
 /**
  * Override-shaped return near a compaction-hook registration: `return
  * { messages… }` / `return { skip… }` / the arrow-object `=> ({ … })` form,
