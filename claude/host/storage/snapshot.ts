@@ -206,6 +206,11 @@ function createdNodeIds(delta: Record<string, unknown>): string[] {
   const out: string[] = [];
   if (delta.type === "create_node" && typeof delta.id === "string") out.push(delta.id);
   if (delta.type === "merge" && typeof delta.resolvedDestId === "string") out.push(delta.resolvedDestId);
+  // an observation enters the graph with its own id — a later mv may source it
+  if (delta.type === "record_observation") {
+    const id = (delta.obs as Record<string, unknown> | undefined)?.id;
+    if (typeof id === "string") out.push(id);
+  }
   return out;
 }
 
@@ -237,11 +242,11 @@ function deltasAfterOnBranch(
     // tail: they sit AFTER every positioned record, and only fold order
     // decides among themselves — the loader's exact placement
     const pos = posOf(r);
-    const after =
-      Number.isNaN(pos) ||
-      Number.isNaN(fromPos) || // a riding candidate base: everything after it in fold order
-      pos > fromPos ||
-      (pos === fromPos && i > fromFold);
+    // a riding candidate base sits in the branch TAIL: positioned records
+    // replay before it, and only riding records after it in fold order replay
+    const after = Number.isNaN(fromPos)
+      ? Number.isNaN(pos) && i > fromFold
+      : Number.isNaN(pos) || pos > fromPos || (pos === fromPos && i > fromFold);
     if (!after) continue;
     const payload = r.payload as { kind?: unknown; delta?: unknown; deltas?: unknown } | null;
     if (payload === null || payload.kind !== "graph_delta") continue;
@@ -280,11 +285,20 @@ export async function resolveConsistentSnapshot(
   const candidates = await collectSnapshotCandidates(fs, dir, records, isLive);
   for (const candidate of candidates) {
     const knownIds = new Set<string>();
-    const payload = candidate.details as { nodes?: unknown } | null;
-    if (payload !== null && Array.isArray(payload.nodes)) {
-      for (const node of payload.nodes) {
-        if (node !== null && typeof node === "object" && typeof (node as { id?: unknown }).id === "string")
-          knownIds.add((node as { id: string }).id);
+    const payload = candidate.details as { nodes?: unknown; observations?: unknown } | null;
+    if (payload !== null) {
+      if (Array.isArray(payload.nodes)) {
+        for (const node of payload.nodes) {
+          if (node !== null && typeof node === "object" && typeof (node as { id?: unknown }).id === "string")
+            knownIds.add((node as { id: string }).id);
+        }
+      }
+      // the base's observations exist at replay — a later mv may source them
+      if (Array.isArray(payload.observations)) {
+        for (const o of payload.observations) {
+          if (o !== null && typeof o === "object" && typeof (o as { id?: unknown }).id === "string")
+            knownIds.add((o as { id: string }).id);
+        }
       }
     }
     const stream = deltasAfterOnBranch(records, candidate.record, branch);
