@@ -35,6 +35,35 @@ const TIMESTAMP_KEY_WIDTH = 16;
 const SEQ_KEY_WIDTH = 8;
 const NO_BATCH_SEQ = 0;
 
+/** The load path's row-order key: the conversation's total order
+ *  (timestamp, producer, seq). File enumeration is producer-hash order,
+ *  not conversation order — every lane that adopts swept rows must
+ *  re-sequence its mirror index with this key before any consumer reads
+ *  it, or the two lanes serve two different histories off the same files.
+ *  File-less rows (re-mirrored, not yet flushed) key on their timestamp
+ *  with empty producer/seq; a missing timestamp sorts last. */
+export function conversationOrderKeyOf(
+  mirror: MirrorWriter,
+  uuidFile: ReadonlyMap<string, string>,
+): (uuid: string) => string {
+  const keyCache = new Map<string, string>();
+  return (uuid: string): string => {
+    const hit = keyCache.get(uuid);
+    if (hit !== undefined) return hit;
+    const row = mirror.rowByUuid(uuid)?.row as { timestamp?: unknown } | undefined;
+    const tsRaw = row?.timestamp;
+    const parsed = typeof tsRaw === "string" ? Date.parse(tsRaw) : Number.NaN;
+    const tsKey = Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
+    const file = uuidFile.get(uuid);
+    const parts = file === undefined ? null : batchNameParts(file);
+    const key = `${String(tsKey).padStart(TIMESTAMP_KEY_WIDTH, "0")}|${parts?.producer ?? ""}|${String(
+      parts?.seq ?? NO_BATCH_SEQ,
+    ).padStart(SEQ_KEY_WIDTH, "0")}`;
+    keyCache.set(uuid, key);
+    return key;
+  };
+}
+
 export interface BackfillOptions {
   /** The conversation key (state.conversationKey derivation). */
   key: string;
@@ -217,25 +246,7 @@ export async function runBackfill(
   //     shape-aware call site; storage stays opaque to the row shape.
   //     File-less rows (re-mirrored, not yet flushed) key on their
   //     timestamp with empty producer/seq; a missing timestamp sorts last.
-  {
-    const keyCache = new Map<string, string>();
-    const keyOf = (uuid: string): string => {
-      const hit = keyCache.get(uuid);
-      if (hit !== undefined) return hit;
-      const row = mirror.rowByUuid(uuid)?.row as { timestamp?: unknown } | undefined;
-      const tsRaw = row?.timestamp;
-      const parsed = typeof tsRaw === "string" ? Date.parse(tsRaw) : Number.NaN;
-      const tsKey = Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
-      const file = sweep.uuidFile.get(uuid);
-      const parts = file === undefined ? null : batchNameParts(file);
-      const key = `${String(tsKey).padStart(TIMESTAMP_KEY_WIDTH, "0")}|${parts?.producer ?? ""}|${String(
-        parts?.seq ?? NO_BATCH_SEQ,
-      ).padStart(SEQ_KEY_WIDTH, "0")}`;
-      keyCache.set(uuid, key);
-      return key;
-    };
-    mirror.reorderBy(keyOf);
-  }
+  mirror.reorderBy(conversationOrderKeyOf(mirror, sweep.uuidFile));
 
   // 3. reconstruct through the core multiplexer: fold + load + frontier
   // prepareStoreContext folds + resolves as its last construction step —

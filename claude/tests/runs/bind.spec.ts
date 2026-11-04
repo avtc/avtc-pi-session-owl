@@ -40,6 +40,7 @@ describe("conversation binding — the runtime assembly", () => {
   let modelCalls: Record<string, unknown>[];
   let invalidations: number[];
   let widgetLogs: string[];
+  let files: Map<string, string>;
 
   beforeEach(async () => {
     state._resetForTest();
@@ -50,7 +51,7 @@ describe("conversation binding — the runtime assembly", () => {
     modelCalls = [];
     invalidations = [];
     widgetLogs = [];
-    const files = new Map<string, string>();
+    files = new Map<string, string>();
     bridge.arm({
       envGetConfigDir: async () => "/cfg",
       envGetSessionOwlSettings: async () => null,
@@ -245,6 +246,38 @@ describe("conversation binding — the runtime assembly", () => {
     await binding.pinCore();
     const branch = binding.branch();
     expect(branch.length).toBe(3); // durable r1+r2 adopted back + live r3
+  });
+
+  test("a resumed binding serves the conversation order, not the file order (multi-producer batches)", async () => {
+    // Two writers' batches on disk: the OLD lineage (seq 9) holds the
+    // conversation's first rows, a LATER writer's seq-2 batch holds newer
+    // rows. File order (seq) serves the newer rows first, the adopted tip
+    // becomes an old row, and the chain walk stumps the branch. The
+    // binding must re-sequence by the conversation order (timestamp)
+    // before serving — the same order the boot backfill applies.
+    const dir = "/cfg/session-owl/sessions/sess-order";
+    const row = (uuid: string, parentUuid: string | null, ts: string, text: string) =>
+      JSON.stringify({
+        uuid,
+        parentUuid,
+        row: {
+          uuid,
+          parentUuid,
+          door: "prompt",
+          origin: { kind: "composer" },
+          message: { type: "user", content: [{ type: "text", text }] },
+          timestamp: ts,
+        },
+      });
+    files.set(
+      `${dir}/m9-aaaaaaaa.jsonl`,
+      `${row("o1", null, "2026-11-01T10:00:00.000Z", "first")}\n${row("o2", "o1", "2026-11-01T10:01:00.000Z", "second")}\n`,
+    );
+    files.set(`${dir}/m2-bbbbbbbb.jsonl`, `${row("n1", "o2", "2026-11-02T09:00:00.000Z", "newest")}\n`);
+    const binding = getBinding("sess-order", "sess-order", null);
+    await binding.pinCore();
+    const branch = binding.branch();
+    expect(branch.map((e) => e.id)).toEqual(["o1", "o2", "n1"]);
   });
 
   test("pinCore resolves the conversation's handle; branch/leafId read the capture cache", async () => {

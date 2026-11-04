@@ -34,6 +34,7 @@ import { type ConfirmFn, makeNotifyAdapter } from "../notify/adapter.js";
 import { checkpointService } from "../rewind/checkpoint-service.js";
 import { getInstalledSettingsHandle, PORT_DEFAULTS_CONFIG } from "../settings/consumer.js";
 import { PORT_KEEP_RECENT_TOKENS_DEFAULT } from "../settings/port-fields.js";
+import { conversationOrderKeyOf } from "../start/backfill.js";
 import { runMirrorCompact, sweepWithStitch } from "../start/compact-mirror.js";
 import { captureInitialPrompt } from "../start/initial-prompt.js";
 import { runLedgerHeal } from "../start/ledger-heal.js";
@@ -203,6 +204,11 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         (m) => log.info(m),
       );
       storage.mirror.adoptRows(sweep.rows);
+      // the same conversation order the boot backfill re-sequences into:
+      // file enumeration is producer-hash order, and a consumer reading the
+      // raw adoption order off a multi-producer store serves a different
+      // history than the boot lane — one order, both lanes
+      storage.mirror.reorderBy(conversationOrderKeyOf(storage.mirror, sweep.uuidFile));
       return prepareStoreContext(storage.fs, storage.dir, storage.ledger, storage.mirror, {
         // restated lineage storage heals through the process seam mid-load:
         // detect, rewrite, re-read (never throws — a missing seam loads the
