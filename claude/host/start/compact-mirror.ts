@@ -47,6 +47,35 @@ export function shouldStitchMirrorParents(
   return false;
 }
 
+/** The load-time heal lane over a sweep: when the duplicate census or the
+ *  artifact-parent signature says the mirror is in a wrong state, run the
+ *  rewrite (the caller's heal seam) and serve the RE-SWEPT rows so the
+ *  load proceeds from the healed state. A heal that reports failure keeps
+ *  the original rows — a later load retries. */
+export async function sweepWithStitch<
+  S extends {
+    rows: readonly { uuid: string; parentUuid: string | null; row: unknown }[];
+    lines: number;
+    uniqueUuids: number;
+  },
+>(
+  sweep: S,
+  heal: () => Promise<boolean>,
+  resweep: () => Promise<S>,
+  log: (message: string) => void,
+): Promise<{ sweep: S; compacted: boolean }> {
+  if (!shouldCompactMirror(sweep) && !shouldStitchMirrorParents(sweep.rows)) {
+    return { sweep, compacted: false };
+  }
+  const ok = await heal();
+  if (!ok) return { sweep, compacted: false };
+  const fresh = await resweep();
+  log(
+    `mirror compacted: ${String(sweep.lines)} line(s) -> ${String(fresh.lines)} (${String(fresh.uniqueUuids)} unique)`,
+  );
+  return { sweep: fresh, compacted: true };
+}
+
 /** Whether the census crosses the compaction threshold. Pure. */
 export function shouldCompactMirror(census: { lines: number; uniqueUuids: number }): boolean {
   const dup = census.lines - census.uniqueUuids;
@@ -98,6 +127,31 @@ export async function runMirrorCompact(
   },
   input: { pluginRoot: string; configDir: string; sessionId: string; transcriptPath?: string | null },
   nodeBin = "node",
+): Promise<MirrorCompactReport> {
+  // One rewrite per session at a time, shared across every caller (the boot
+  // backfill and the conversation's prepared context both heal through this
+  // seam): two helper processes rewriting the same directory concurrently
+  // collide mid-rewrite exactly like the ledger heal race, so a concurrent
+  // caller awaits the in-flight run and reuses its result.
+  const key = `${input.configDir}|${input.sessionId}`;
+  const settled = inflight.get(key);
+  if (settled !== undefined) return settled;
+  const run = compactOnce(deps, input, nodeBin).finally(() => {
+    inflight.delete(key);
+  });
+  inflight.set(key, run);
+  return run;
+}
+
+const inflight = new Map<string, Promise<MirrorCompactReport>>();
+
+async function compactOnce(
+  deps: {
+    runProcess: (argv: string[]) => Promise<{ stdout: string; exitCode: number }>;
+    log: (message: string, err?: unknown) => void;
+  },
+  input: { pluginRoot: string; configDir: string; sessionId: string; transcriptPath?: string | null },
+  nodeBin: string,
 ): Promise<MirrorCompactReport> {
   const plan = planMirrorCompactInvocation(input);
   try {

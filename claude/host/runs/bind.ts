@@ -34,6 +34,7 @@ import { type ConfirmFn, makeNotifyAdapter } from "../notify/adapter.js";
 import { checkpointService } from "../rewind/checkpoint-service.js";
 import { getInstalledSettingsHandle, PORT_DEFAULTS_CONFIG } from "../settings/consumer.js";
 import { PORT_KEEP_RECENT_TOKENS_DEFAULT } from "../settings/port-fields.js";
+import { runMirrorCompact, sweepWithStitch } from "../start/compact-mirror.js";
 import { captureInitialPrompt } from "../start/initial-prompt.js";
 import { runLedgerHeal } from "../start/ledger-heal.js";
 import * as state from "../state.js";
@@ -168,7 +169,39 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
     // to a no-op), and pi is structurally immune (each subagent runs its own
     // process, whose boot backfill adopts from disk at start).
     prepared ??= (async () => {
-      const sweep = await sweepMirror(storage.fs, storage.dir);
+      // the same load-time heal the boot backfill drives: an artifact
+      // compaction parent (the walker would skip its whole span) runs the
+      // transcript-armed rewrite — serialized per session with every other
+      // caller — and the conversation adopts the RE-SWEPT rows, so a
+      // conversation that prepared before the boot heal still serves the
+      // healed chain (its own mirror instance never sees the stale edges)
+      const { sweep } = await sweepWithStitch(
+        await sweepMirror(storage.fs, storage.dir),
+        async () => {
+          try {
+            const svcs = services();
+            const configDir = state.getCachedConfigDir();
+            const transcriptPath = state.getCurrentTranscriptPath();
+            if (configDir === null || transcriptPath === null) return false;
+            const report = await runMirrorCompact(
+              {
+                runProcess: (argv: string[]) => svcs.processRun(argv) as Promise<{ stdout: string; exitCode: number }>,
+                log: (message: string, err?: unknown) =>
+                  log.warn(
+                    message + (err === undefined ? "" : `: ${err instanceof Error ? err.message : String(err)}`),
+                  ),
+              },
+              { pluginRoot: svcs.pluginRoot() as string, configDir, sessionId, transcriptPath },
+            );
+            return report.done;
+          } catch (err) {
+            log.warn(`mirror heal seam failed: ${err instanceof Error ? err.message : String(err)}`);
+            return false;
+          }
+        },
+        async () => await sweepMirror(storage.fs, storage.dir),
+        (m) => log.info(m),
+      );
       storage.mirror.adoptRows(sweep.rows);
       return prepareStoreContext(storage.fs, storage.dir, storage.ledger, storage.mirror, {
         // restated lineage storage heals through the process seam mid-load:

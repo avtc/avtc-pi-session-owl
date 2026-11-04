@@ -22,7 +22,7 @@ import type { LedgerWriter } from "../storage/ledger.js";
 import { batchNameParts, type MirrorWriter, sweepMirror } from "../storage/mirror.js";
 import { SESSION_MARKER_FILENAME } from "../storage/session-marker.js";
 import { prepareStoreContext, ROW_TYPE } from "../storage/store-context.js";
-import { shouldCompactMirror, shouldStitchMirrorParents } from "./compact-mirror.js";
+import { sweepWithStitch } from "./compact-mirror.js";
 import { captureInitialPrompt, ensureNGoalSeeded } from "./initial-prompt.js";
 import type { PendingEvaluator } from "./pending.js";
 import { carriedAncestor, livePath, readTranscript, rowFromTranscript } from "./transcript-reader.js";
@@ -174,24 +174,17 @@ export async function runBackfill(
   // sweep the mirror + adopt its rows into the live writer's index (the
   // ladder case still reconstructs from the segments — rung 4 observes the
   // readable backlog; only the transcript re-mirror waits for the ladder)
-  const sweep = await sweepMirror(fs, dir);
+  // the duplicate census or an artifact compaction parent (the walker would
+  // skip its whole span) runs one rewrite — with a transcript it also
+  // restitches every parent from the file's own edges — and the FRESH sweep
+  // re-adopts so this process's uuid->file refs name the surviving batches
+  const { sweep } = await sweepWithStitch(
+    await sweepMirror(fs, dir),
+    async () => (opts.compactMirror !== undefined ? await opts.compactMirror() : false),
+    async () => await sweepMirror(fs, dir),
+    (m) => log.info(m),
+  );
   mirror.adoptRows(sweep.rows);
-
-  // the duplicate census crossed, or a compaction custom carries an
-  // artifact parent (the walker would skip its whole span): one compaction
-  // rewrite — with a transcript it also restitches every parent from the
-  // file's own edges — then a FRESH sweep re-adopts so this process's
-  // uuid->file refs name the surviving batches
-  if ((shouldCompactMirror(sweep) || shouldStitchMirrorParents(sweep.rows)) && opts.compactMirror !== undefined) {
-    const compacted = await opts.compactMirror();
-    if (compacted) {
-      const reswept = await sweepMirror(fs, dir);
-      mirror.adoptRows(reswept.rows);
-      log.info(
-        `mirror compacted: ${String(sweep.lines)} line(s) -> ${String(reswept.lines)} (${String(reswept.uniqueUuids)} unique)`,
-      );
-    }
-  }
 
   let remirrored = 0;
   if (!transcript.tooLarge) {
