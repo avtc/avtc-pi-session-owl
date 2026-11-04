@@ -76,7 +76,26 @@ interface SettingsCapsules {
    *  disable transition must withdraw it, not just the band. */
   uiStatus?: (text: string | undefined) => void;
   appendTimeline?: (t: "enable" | "disable" | "pause" | "resume") => void;
+  /** Re-registers the stage agent TYPES over the resolved settings — the
+   *  per-stage model/effort knobs ride the type registration, so every
+   *  settings resolution and every change of a stage-affecting key must
+   *  re-register or the spawn keeps inheriting the session's model and
+   *  effort (the type registration is the only place they reach the
+   *  engine — a spawn itself carries neither). */
+  restageAgents?: () => void;
 }
+
+/** The settings whose change alters a stage agent type's registration. */
+const STAGE_SETTINGS_KEYS: ReadonlySet<string> = new Set([
+  "defaultModel",
+  "defaultThinkingLevel",
+  "observerModel",
+  "observerThinkingLevel",
+  "builderModel",
+  "builderThinkingLevel",
+  "selectorModel",
+  "selectorThinkingLevel",
+]);
 
 /** What initSettingsConsumer takes. */
 export interface SettingsConsumerInit {
@@ -174,6 +193,7 @@ function claudeRegisterSettingsCommand(
     updateSetting(key, value, opts) {
       lib.updateSetting(key, value, opts);
       fireAfterChange(key, lib.getSettings()[key], init.capsules);
+      if (STAGE_SETTINGS_KEYS.has(key)) init.capsules.restageAgents?.();
       afterChange?.(key, value);
     },
     storageLevels: lib.storageLevels,
@@ -234,6 +254,9 @@ export async function initSettingsConsumer(init: SettingsConsumerInit): Promise<
     setOwlIgnoreConflicts(getSessionOwlSettings().ignoreConflicts);
     setOwlSubagentMode(getSessionOwlSettings().subagentMode);
     setPaneCwd(init.cwd);
+    // the reloaded files may carry new stage model/effort values — the
+    // stage agent TYPES must re-register over them
+    init.capsules.restageAgents?.();
     logSettingsLoad("reload", init.cwd);
     return installedHandle;
   }
@@ -248,6 +271,10 @@ export async function initSettingsConsumer(init: SettingsConsumerInit): Promise<
   setOwlIgnoreConflicts(getSessionOwlSettings().ignoreConflicts);
   setOwlSubagentMode(getSessionOwlSettings().subagentMode);
   setPaneCwd(init.cwd);
+  // the resolved settings decide the stage agent TYPES' model/effort: the
+  // boot registered them with the empty slice, and the first real
+  // resolution re-registers over it
+  init.capsules.restageAgents?.();
   logSettingsLoad("first-load", init.cwd);
   return installedHandle;
 }

@@ -357,6 +357,22 @@ function describeSpawnAnswer(handle: unknown): string {
   }
 }
 
+/** The resolved per-stage model/effort slice (null handle = all unset). */
+function pickStageSettings(handle: ReturnType<typeof getInstalledSettingsHandle>): Record<string, string | null> {
+  if (handle === null) return {};
+  const cfg = handle.getSettings();
+  return {
+    defaultModel: cfg.defaultModel ?? null,
+    defaultThinkingLevel: cfg.defaultThinkingLevel ?? null,
+    observerModel: cfg.observerModel ?? null,
+    observerThinkingLevel: cfg.observerThinkingLevel ?? null,
+    builderModel: cfg.builderModel ?? null,
+    builderThinkingLevel: cfg.builderThinkingLevel ?? null,
+    selectorModel: cfg.selectorModel ?? null,
+    selectorThinkingLevel: cfg.selectorThinkingLevel ?? null,
+  };
+}
+
 function armAll(dollar: any) {
   // the launch broker's capsules (re-armed with the fresh dollar, the same
   // replace-on-arm rule as the bridge table below)
@@ -698,6 +714,39 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
           uiInvalidate: () => bridge.currentServices().uiInvalidate(),
           uiStatus: (text) => bridge.currentServices().uiStatus(text),
           appendTimeline: (t) => guarded(appendTimelineEvent({ t, at: Date.now() }), "timeline append"),
+          // the stage agent TYPES re-register over the resolved per-stage
+          // model/effort: the type registration is the only surface those
+          // knobs reach the engine on, and a boot-time registration with
+          // the empty slice would otherwise leave every spawn inheriting
+          // the session's model and effort forever
+          restageAgents: () => {
+            void serveQueue(
+              "stage agents (settings)",
+              () =>
+                state.pendingAgentSpecs(
+                  stageAgentSpecs({
+                    ...getStagePrompts(),
+                    settings: {
+                      defaultModel: null,
+                      defaultThinkingLevel: null,
+                      observerModel: null,
+                      observerThinkingLevel: null,
+                      builderModel: null,
+                      builderThinkingLevel: null,
+                      selectorModel: null,
+                      selectorThinkingLevel: null,
+                      ...pickStageSettings(getInstalledSettingsHandle()),
+                    },
+                  }),
+                ),
+              (spec) => bridge.currentServices().agentRegister(spec),
+              state.reopenAgentRegistrationGate,
+            ).catch((err: unknown) => {
+              log.warn(
+                `stage re-registration failed (the previous types stand): ${err instanceof Error ? err.message : String(err)}`,
+              );
+            });
+          },
         },
       });
       await registerSurfaces($);

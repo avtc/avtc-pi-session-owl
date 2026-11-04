@@ -56,6 +56,7 @@ function makeCapsules() {
     toolRegister: async (spec: unknown) => void registered.push(spec),
     uiInvalidate: () => void invalidates.push(1),
     uiStatus: (_text: string | undefined) => {},
+    restageAgents: () => {},
     fsStat: async () => null,
     appendTimeline: (t: string) => void timeline.push(t),
   };
@@ -114,6 +115,20 @@ afterEach(() => {
   _resetRecallRegistration();
   _resetConflictStateForTest(); // own the conflict premise — hits/ignore leaks from other suites never mask the timeline assertions
   setOwlEnabled(true);
+});
+
+describe("the settings consumer — stage agent re-registration", () => {
+  test("init and every stage-affecting change re-register the agent types; unrelated changes do not", async () => {
+    const restage = vi.fn();
+    const { handle } = await makeConsumer({ capsules: { restageAgents: restage } });
+    expect(restage).toHaveBeenCalledTimes(1); // the first resolution
+    handle.updateSetting("observerThinkingLevel", "medium");
+    expect(restage).toHaveBeenCalledTimes(2);
+    handle.updateSetting("defaultModel", "Qwen3.8-27B");
+    expect(restage).toHaveBeenCalledTimes(3);
+    handle.updateSetting("renderMode", "selected-root"); // not a stage knob
+    expect(restage).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("the settings consumer — paths + ladder", () => {
