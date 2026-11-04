@@ -129,21 +129,29 @@ export async function runMirrorCompact(
   nodeBin = "node",
 ): Promise<MirrorCompactReport> {
   // One rewrite per session at a time, shared across every caller (the boot
-  // backfill and the conversation's prepared context both heal through this
-  // seam): two helper processes rewriting the same directory concurrently
-  // collide mid-rewrite exactly like the ledger heal race, so a concurrent
-  // caller awaits the in-flight run and reuses its result.
-  const key = `${input.configDir}|${input.sessionId}`;
-  const settled = inflight.get(key);
-  if (settled !== undefined) return settled;
-  const run = compactOnce(deps, input, nodeBin).finally(() => {
-    inflight.delete(key);
-  });
-  inflight.set(key, run);
-  return run;
+  // backfill, the conversation's prepared context, the timer-armed bootstrap
+  // ladder — every store-rewriting helper rides the same lane): two helper
+  // processes rewriting the same directory concurrently collide mid-rewrite
+  // exactly like the ledger heal race, so a concurrent caller awaits the
+  // in-flight run and reuses its result.
+  return onePerSession(input.configDir, input.sessionId, () => compactOnce(deps, input, nodeBin));
 }
 
-const inflight = new Map<string, Promise<MirrorCompactReport>>();
+/** The per-session store-rewrite lane: one run at a time under
+ *  `<configDir>|<sessionId>`, shared by every rewriting helper. A caller
+ *  that arrives while a run is in flight awaits IT and reuses its result —
+ *  the lane never queues a second rewrite of the same directory. */
+const sessionLane = new Map<string, Promise<unknown>>();
+export function onePerSession<T>(configDir: string, sessionId: string, run: () => Promise<T>): Promise<T> {
+  const key = `${configDir}|${sessionId}`;
+  const settled = sessionLane.get(key) as Promise<T> | undefined;
+  if (settled !== undefined) return settled;
+  const started = run().finally(() => {
+    sessionLane.delete(key);
+  });
+  sessionLane.set(key, started);
+  return started;
+}
 
 async function compactOnce(
   deps: {

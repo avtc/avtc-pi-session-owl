@@ -20,6 +20,38 @@ import { entriesForCache, getCapture } from "../capture/append-handler.js";
 import { makeEntryResolver } from "../capture/details-bridge.js";
 import { type ClaudeRow, groupRows } from "../capture/grouper.js";
 import type { OwlCommandDeps } from "../commands/handlers.js";
+import { conversationOrderKeyOf, loadStoreState } from "../start/backfill.js";
+
+/** The pin's load budget: the answer must land under the host's ~10s
+ *  tool-call cut, so the pin gives up waiting at the same margin the
+ *  search uses — the surface then denies with a temporary-unavailable
+ *  text instead of dying with the worker. */
+const STORE_LOAD_BUDGET_MS = 8_000;
+
+/** The pin expired its load budget: the store is still loading. Served
+ *  surfaces map this to a temporary-unavailable denial (the model retries
+ *  later); the load itself keeps running in the background. */
+export class StoreLoadingError extends Error {
+  constructor() {
+    super("the session-owl store is still loading");
+    this.name = "StoreLoadingError";
+  }
+}
+
+export async function raceLoadBudget<T>(load: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      load,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new StoreLoadingError()), STORE_LOAD_BUDGET_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 import {
   type CompactionHookDeps,
   type CompactionRuns,
@@ -34,8 +66,7 @@ import { type ConfirmFn, makeNotifyAdapter } from "../notify/adapter.js";
 import { checkpointService } from "../rewind/checkpoint-service.js";
 import { getInstalledSettingsHandle, PORT_DEFAULTS_CONFIG } from "../settings/consumer.js";
 import { PORT_KEEP_RECENT_TOKENS_DEFAULT } from "../settings/port-fields.js";
-import { conversationOrderKeyOf } from "../start/backfill.js";
-import { runMirrorCompact, sweepWithStitch } from "../start/compact-mirror.js";
+import { runMirrorCompact } from "../start/compact-mirror.js";
 import { captureInitialPrompt } from "../start/initial-prompt.js";
 import { runLedgerHeal } from "../start/ledger-heal.js";
 import * as state from "../state.js";
@@ -80,6 +111,12 @@ export interface ConversationBinding {
   isPaused(): boolean;
   /** Pins the conversation's core through the multiplexer's serialized swap. */
   pinCore(): Promise<CoreHandle>;
+  /** Re-derive the prepared state over the durable files: the timer-lane
+   *  bootstrap ladder's follow-up (its batches are on disk and the live
+   *  binding must serve them, not its pre-ladder stump) and the explicit
+   *  invalidation for any later re-load. In-flight pins keep their own
+   *  promise; the next pin sees the fresh state. */
+  reprepareStore(): void;
   /** The pinned conversation's graph (the last pin's reference; the empty
    *  graph before the first pin — the widget renders zeros, never throws). */
   graph(): GraphShape;
@@ -170,15 +207,21 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
     // to a no-op), and pi is structurally immune (each subagent runs its own
     // process, whose boot backfill adopts from disk at start).
     prepared ??= (async () => {
-      // the same load-time heal the boot backfill drives: an artifact
-      // compaction parent (the walker would skip its whole span) runs the
-      // transcript-armed rewrite — serialized per session with every other
-      // caller — and the conversation adopts the RE-SWEPT rows, so a
-      // conversation that prepared before the boot heal still serves the
-      // healed chain (its own mirror instance never sees the stale edges)
-      const { sweep } = await sweepWithStitch(
-        await sweepMirror(storage.fs, storage.dir),
-        async () => {
+      // the cross-lane lock + re-check: if the OTHER lane (the boot
+      // backfill) already derived this session's prepared state and
+      // nothing invalidated it, this lane reuses it — a fast exit, no
+      // second sweep/fold. Parallel callers share this very promise (the
+      // memo IS the lock); sequential callers re-enter here after a reset
+      // and re-check the stamp first.
+      const parked = storage.sharedPrepared;
+      if (parked !== null && parked !== undefined && parked.sessionId === sessionId) {
+        return parked.context;
+      }
+      const loaded = await loadStoreState(storage.mirror, storage.ledger, {
+        sessionId,
+        fs: storage.fs,
+        transcriptPath: state.getCurrentTranscriptPath(),
+        compactMirror: async () => {
           try {
             const svcs = services();
             const configDir = state.getCachedConfigDir();
@@ -200,16 +243,6 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
             return false;
           }
         },
-        async () => await sweepMirror(storage.fs, storage.dir),
-        (m) => log.info(m),
-      );
-      storage.mirror.adoptRows(sweep.rows);
-      // the same conversation order the boot backfill re-sequences into:
-      // file enumeration is producer-hash order, and a consumer reading the
-      // raw adoption order off a multi-producer store serves a different
-      // history than the boot lane — one order, both lanes
-      storage.mirror.reorderBy(conversationOrderKeyOf(storage.mirror, sweep.uuidFile));
-      return prepareStoreContext(storage.fs, storage.dir, storage.ledger, storage.mirror, {
         // restated lineage storage heals through the process seam mid-load:
         // detect, rewrite, re-read (never throws — a missing seam loads the
         // redundant stream and a later load retries)
@@ -231,9 +264,30 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
             return { done: false };
           }
         },
+        // the over-cap ladder cannot run inside a hook budget (the ~10s
+        // tool-call cut): arm it on the timer lane — the SAME per-session
+        // lane the boot's inline run uses — and answer "not run inline" so
+        // this load reports the honest degraded backlog while the ladder
+        // recovers the rest out-of-band
+        ...(services().armBootstrap !== undefined
+          ? {
+              bootstrapOverCap: (transcriptPath: string) => {
+                services().armBootstrap(transcriptPath);
+                return Promise.resolve(false);
+              },
+            }
+          : {}),
       });
+      storage.sharedPrepared = { context: loaded.prepared, sessionId };
+      return loaded.prepared;
     })();
     return prepared;
+  };
+
+  const reprepareStore = (): void => {
+    prepared = null;
+    pinnedHandle = null;
+    storage.sharedPrepared = null;
   };
 
   const settings = (): SessionOwlConfig => {
@@ -281,7 +335,14 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
   let pinnedHandle: CoreHandle | null = null;
 
   const pinCore = async (): Promise<CoreHandle> => {
-    const prepared = await preparedCtx();
+    // The budget: a tool.call surface runs under the host's ~10s cut, and a
+    // first pin on a huge store (transcript read + sweep + fold) can
+    // outlive it — the worker would be replaced and every armed state
+    // would die with it. The pin therefore races the load against the same
+    // under-the-cut margin the search uses: on expiry the surface answers
+    // a temporary-unavailable denial (the model retries later) while the
+    // load keeps running in the background and the NEXT pin reuses it.
+    const prepared = await raceLoadBudget(preparedCtx());
     const ctx = prepared.ctx;
     resolvedCtx = ctx;
     const handle = await getCore(key, {
@@ -479,6 +540,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
     isEnabled,
     isPaused,
     pinCore,
+    reprepareStore,
     /** The mid-session initial-prompt capture (pi's every-turn-end gate):
      *  a live session's first prompt arrives AFTER the session-start
      *  backfill, so the turn boundary is where oInitialPrompt lands and

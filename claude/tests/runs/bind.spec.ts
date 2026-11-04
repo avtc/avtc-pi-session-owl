@@ -15,13 +15,14 @@ import { DEFAULT_CONFIG } from "../../core/src/config/schema.js";
 import { captureAppend, releaseCapture } from "../../host/capture/append-handler.js";
 import * as bridge from "../../host/engine-bridge.js";
 import { checkpointService } from "../../host/rewind/checkpoint-service.js";
-import { _resetBindings, getBinding, releaseBinding } from "../../host/runs/bind.js";
+import { _resetBindings, getBinding, raceLoadBudget, releaseBinding, StoreLoadingError } from "../../host/runs/bind.js";
 import {
   _resetSettingsConsumerForTest,
   getInstalledSettingsHandle,
   initSettingsConsumer,
   PORT_DEFAULTS_CONFIG,
 } from "../../host/settings/consumer.js";
+import { loadStoreState } from "../../host/start/backfill.js";
 import * as state from "../../host/state.js";
 import { flushSessionStorage, getSessionStorage, releaseSessionStorage } from "../../host/storage/session-storage.js";
 import { _resetWidgetLine, widgetLine } from "../../host/widget/line-store.js";
@@ -246,6 +247,81 @@ describe("conversation binding — the runtime assembly", () => {
     await binding.pinCore();
     const branch = binding.branch();
     expect(branch.length).toBe(3); // durable r1+r2 adopted back + live r3
+  });
+
+  test("a binding pins against the transcript's truth: rows the mirror lacks are re-mirrored before serving", async () => {
+    // The conversation binding is the SECOND entry into the same load: it
+    // must do the FULL work — read the transcript, re-mirror the rows the
+    // mirror lacks, and only then serve. A shortened path that only sweeps
+    // the mirror serves an amputated branch whenever it wins the load
+    // (a fast pin before the boot backfill, a failed boot read).
+    const dir = "/cfg/session-owl/sessions/sess-gap";
+    const trow = (uuid: string, parentUuid: string | null, ts: string, text: string) =>
+      JSON.stringify({
+        uuid,
+        parentUuid,
+        type: "user",
+        timestamp: ts,
+        message: { role: "user", content: [{ type: "text", text }] },
+      });
+    files.set(
+      "/cfg/t-gap.jsonl",
+      `${trow("g1", null, "2026-11-01T10:00:00.000Z", "one")}${"\n"}${trow(
+        "g2",
+        "g1",
+        "2026-11-01T10:01:00.000Z",
+        "two",
+      )}${"\n"}${trow("g3", "g2", "2026-11-01T10:02:00.000Z", "three")}${"\n"}`,
+    );
+    files.set(`${dir}/.session.json`, JSON.stringify({ sessionId: "sess-gap", transcriptPath: "/cfg/t-gap.jsonl" }));
+    state.setCurrentTranscriptPath("/cfg/t-gap.jsonl");
+    const binding = getBinding("sess-gap", "sess-gap", null);
+    await binding.pinCore();
+    const branch = binding.branch();
+    expect(branch.map((e) => e.id)).toEqual(["g1", "g2", "g3"]);
+  });
+
+  test("a load that outruns the budget rejects with StoreLoadingError and never cancels the load", async () => {
+    let resolveLoad: () => void = () => {};
+    const load = new Promise<string>((resolve) => {
+      resolveLoad = () => resolve("loaded");
+    });
+    const pin = raceLoadBudget(load);
+    await expect(pin).rejects.toBeInstanceOf(StoreLoadingError);
+    resolveLoad();
+    await expect(load).resolves.toBe("loaded"); // the load ran to completion
+  });
+
+  test("a boot-stamped prepared state is the binding's fast exit (no second derivation)", async () => {
+    const dir = "/cfg/session-owl/sessions/sess-stamp";
+    const trow = (uuid: string, parentUuid: string | null, ts: string, text: string) =>
+      JSON.stringify({
+        uuid,
+        parentUuid,
+        type: "user",
+        timestamp: ts,
+        message: { role: "user", content: [{ type: "text", text }] },
+      });
+    files.set("/cfg/t-stamp.jsonl", `${trow("s1", null, "2026-11-01T10:00:00.000Z", "one")}${"\n"}`);
+    state.setCurrentTranscriptPath("/cfg/t-stamp.jsonl");
+    const storage = getSessionStorage("sess-stamp", "sess-stamp", null);
+    // the boot lane's derivation (as register.ts parks it after runBackfill)
+    const bootLoaded = await loadStoreState(storage.mirror, storage.ledger, {
+      sessionId: "sess-stamp",
+      fs: storage.fs,
+      transcriptPath: "/cfg/t-stamp.jsonl",
+    });
+    storage.sharedPrepared = { context: bootLoaded.prepared, sessionId: "sess-stamp" };
+    const binding = getBinding("sess-stamp", "sess-stamp", null);
+    await binding.pinCore();
+    expect(binding.branch().map((e) => e.id)).toEqual(["s1"]);
+    // the fast exit returned the BOOT's context object — no re-derivation
+    expect(storage.sharedPrepared?.context).toBe(bootLoaded.prepared);
+    // and a session mismatch invalidates: a different id must re-derive, not reuse
+    storage.sharedPrepared = { context: bootLoaded.prepared, sessionId: "other-session" };
+    binding.reprepareStore();
+    await binding.pinCore();
+    expect(binding.branch().map((e) => e.id)).toEqual(["s1"]);
   });
 
   test("a resumed binding serves the conversation order, not the file order (multi-producer batches)", async () => {

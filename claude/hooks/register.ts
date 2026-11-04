@@ -67,7 +67,7 @@ import { checkpointService } from "../host/rewind/checkpoint-service.js";
 import { LiveChainProcessor } from "../host/rewind/live-chain.js";
 import { applyLiveRewind } from "../host/rewind/live-rewind.js";
 import { readTail } from "../host/rewind/tail-read.js";
-import { getBinding, releaseAllBindings, releaseBinding, setSessionCwd } from "../host/runs/bind.js";
+import { getBinding, releaseAllBindings, releaseBinding, StoreLoadingError, setSessionCwd } from "../host/runs/bind.js";
 import { installRunsLogSink } from "../host/runs/seams.js";
 import { getInstalledSettingsHandle, initSettingsConsumer } from "../host/settings/consumer.js";
 import {
@@ -89,7 +89,7 @@ import { completionUsageOf } from "../host/stage/usage.js";
 import { runBackfill } from "../host/start/backfill.js";
 import { manualBootstrapCommand, runBootstrapHelper } from "../host/start/bootstrap-caller.js";
 import { copyBranchLineageStore } from "../host/start/branch-copy.js";
-import { runMirrorCompact } from "../host/start/compact-mirror.js";
+import { onePerSession, runMirrorCompact } from "../host/start/compact-mirror.js";
 import { launchGoalExtract, registerGoalExtractLauncher } from "../host/start/goal-extract.js";
 import { runLedgerHeal } from "../host/start/ledger-heal.js";
 import { corePendingEvaluator } from "../host/start/pending.js";
@@ -397,6 +397,53 @@ function armAll(dollar: any) {
     // missing callback degrades to this direct spawn — the broker's
     // capsules are re-armed per surface arm like every service here)
     agentSpawn: (input: unknown) => stageLaunchBroker.spawn(input as Record<string, unknown>),
+    // The over-cap bootstrap ladder for lanes that run inside a hook
+    // budget (the conversation binding): the ladder itself runs on the
+    // timer lane — off every hook budget — through the SAME per-session
+    // rewrite lane the boot's inline run uses, and the conversation
+    // re-prepares over the ladder's batches once it lands
+    armBootstrap: (transcriptPath: string) => {
+      const configDir = state.getCachedConfigDir();
+      const sessionId = state.getCurrentSession();
+      if (configDir === null || sessionId === null) return;
+      try {
+        dollar.clock.after(0, () => {
+          void (async () => {
+            try {
+              const result = await onePerSession(configDir, sessionId, () =>
+                runBootstrapHelper(
+                  {
+                    runProcess: (argv) => bridge.currentServices().processRun(argv),
+                    log: (m, err) =>
+                      log.warn(
+                        `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
+                      ),
+                  },
+                  {
+                    surface: lastStartSurface,
+                    transcriptPath,
+                    configDir,
+                    sessionId,
+                    pluginRoot: bridge.currentServices().pluginRoot(),
+                  },
+                ),
+              );
+              if (result.ok) {
+                // the ladder's batches are on disk — the live binding must
+                // re-derive over them (sweep + adopt + re-prepare), or the
+                // main conversation serves its pre-ladder stump until the
+                // next process start
+                getBinding(sessionId, sessionId, null).reprepareStore();
+              }
+            } catch (err) {
+              log.warn(`bootstrap ladder (timer lane) failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          })();
+        });
+      } catch (err) {
+        log.warn(`bootstrap ladder arm failed — the rung waits for the next start: ${errText(err)}`);
+      }
+    },
     sessionSurfaces: () => dollar.session.surfaces(),
     agentList: () => dollar.agent.list(),
     configList: () => dollar.config.list(),
@@ -768,7 +815,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
         markDetailsWarmPending();
         warmGateArmed = true;
       }
-      await runBackfill(storage.mirror, storage.ledger, {
+      const bootResult = await runBackfill(storage.mirror, storage.ledger, {
         key: convKey,
         sessionId: e.session_id,
         agentId: null,
@@ -784,22 +831,28 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                 // the ladder's automatic rung: CLI surfaces stream the
                 // over-cap transcript through the node helper before the
                 // sweep; anything else defers and /owl-status documents
-                // the manual command
-                const result = await runBootstrapHelper(
-                  {
-                    runProcess: (argv) => bridge.currentServices().processRun(argv),
-                    log: (m, err) =>
-                      log.warn(
-                        `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
-                      ),
-                  },
-                  {
-                    surface: lastStartSurface,
-                    transcriptPath,
-                    configDir,
-                    sessionId: e.session_id,
-                    pluginRoot: bridge.currentServices().pluginRoot(),
-                  },
+                // the manual command. The run rides the per-session lane —
+                // the same lane the mirror compact and every other
+                // store-rewriting helper uses — so an inline boot run and a
+                // timer-armed run can never rewrite the directory in
+                // parallel
+                const result = await onePerSession(configDir, e.session_id, () =>
+                  runBootstrapHelper(
+                    {
+                      runProcess: (argv) => bridge.currentServices().processRun(argv),
+                      log: (m, err) =>
+                        log.warn(
+                          `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
+                        ),
+                    },
+                    {
+                      surface: lastStartSurface,
+                      transcriptPath,
+                      configDir,
+                      sessionId: e.session_id,
+                      pluginRoot: bridge.currentServices().pluginRoot(),
+                    },
+                  ),
                 );
                 return result.ok;
               }
@@ -898,6 +951,12 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                             $.clock.after(0, () => resolve());
                           }),
                       });
+                      // the cross-lane stamp: the boot lane's derivation is THE state for
+                      // this session in this process — the conversation binding re-checks
+                      // it under its lock and fast-exits instead of re-deriving (the boot
+                      // re-runs on every session start, so a resume/switch re-stamps)
+                      storage.sharedPrepared = { context: bootResult.prepared, sessionId: e.session_id };
+
                       log.info(
                         `owl ready — details cache warmed: ${report.warmed} observation(s) (${report.failed} failed) in ${report.ms}ms`,
                       );
@@ -1946,6 +2005,14 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
       });
     } catch (err) {
       report("owl_recall serve failed", err);
+      if (err instanceof StoreLoadingError) {
+        // the store's first load outran the tool-call budget: deny with a
+        // retryable text instead of dying with the worker — the load keeps
+        // running in the background and the next call serves
+        return {
+          deny: "session-owl is still loading this session's memory — the store is being reconstructed. Try again in a moment.",
+        };
+      }
       return { deny: `Error: session-owl recall failed: ${err instanceof Error ? err.message : String(err)}` };
     }
   }

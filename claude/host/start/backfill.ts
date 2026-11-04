@@ -19,13 +19,19 @@ import { getCore } from "../core-instances.js";
 import { sanitize } from "../state.js";
 import type { FsAdapter } from "../storage/fs-adapter.js";
 import type { LedgerWriter } from "../storage/ledger.js";
-import { batchNameParts, type MirrorWriter, sweepMirror } from "../storage/mirror.js";
+import { batchNameParts, type MirrorWriter, type SweepResult, sweepMirror } from "../storage/mirror.js";
 import { SESSION_MARKER_FILENAME } from "../storage/session-marker.js";
-import { prepareStoreContext, ROW_TYPE } from "../storage/store-context.js";
+import { type PreparedContext, prepareStoreContext, ROW_TYPE } from "../storage/store-context.js";
 import { sweepWithStitch } from "./compact-mirror.js";
 import { captureInitialPrompt, ensureNGoalSeeded } from "./initial-prompt.js";
 import type { PendingEvaluator } from "./pending.js";
-import { carriedAncestor, livePath, readTranscript, rowFromTranscript } from "./transcript-reader.js";
+import {
+  carriedAncestor,
+  livePath,
+  type ReadTranscriptResult,
+  readTranscript,
+  rowFromTranscript,
+} from "./transcript-reader.js";
 
 // --- named constants (no bare literals at call sites) ----------------------
 
@@ -155,58 +161,73 @@ async function adoptParentSegments(fs: FsAdapter, parentDir: string, childDir: s
   return copied;
 }
 
-/**
- * The start sequence. `mirror`/`ledger` are the conversation's live writers
- * (the storage assembly's instances — appends after this start flow into
- * the same writers).
- */
-export async function runBackfill(
+/** Inputs of the unified store load — the ONE derivation both load lanes
+ *  run (the boot backfill eagerly at process start, the conversation
+ *  binding lazily at its pin). Identical inputs derive identical state; a
+ *  lane that cannot run a piece passes nothing and gets the same
+ *  degradation the other lane would get (an over-cap transcript skips the
+ *  re-mirror in both; the bootstrap ladder stays the boot's deferred rung). */
+export interface LoadStoreOptions {
+  sessionId: string;
+  fs: FsAdapter;
+  /** The transcript path — the fidelity source; null = fresh session. */
+  transcriptPath: string | null;
+  /** A cold fork's parent session id (adoption source); null otherwise. */
+  forkParentSessionId?: string | null;
+  /** The over-cap transcript bootstrap (the boot's deferred rung; a lane
+   *  inside a hook budget passes nothing — the backlog stays pending). */
+  bootstrapOverCap?: (path: string) => Promise<boolean>;
+  /** The artifact-compaction heal (the stitch rewrite seam). */
+  compactMirror?: () => Promise<boolean>;
+  /** The restated-lineage ledger heal seam. */
+  healLedger?: () => Promise<{ done: boolean; restatedEdges?: number; uniqueEdges?: number }>;
+}
+
+/** The unified store load's outcome. */
+export interface LoadStoreResult {
+  prepared: PreparedContext;
+  transcript: ReadTranscriptResult;
+  sweep: SweepResult;
+  remirrored: number;
+  forkAdopted: boolean;
+  bootstrapBlocked: boolean;
+}
+
+/** The ONE store-state derivation: read the transcript, adopt a fork
+ *  parent's segments, sweep the mirror (with the stitch heal), re-mirror
+ *  every live row the mirror lacks, re-sequence into the conversation
+ *  order, and prepare the serving context. Every load lane calls this —
+ *  there is no shortened path: a lane that skips work here serves a
+ *  different history than the other lane off the same files. */
+export async function loadStoreState(
   mirror: MirrorWriter,
   ledger: LedgerWriter,
-  opts: BackfillOptions,
-): Promise<BackfillResult> {
+  opts: LoadStoreOptions,
+): Promise<LoadStoreResult> {
   const fs = opts.fs;
   const dir = mirror.directory;
 
-  // 1. transcript read (the fidelity source; null/absent = fresh session)
   const transcript = await readTranscript(fs, opts.transcriptPath ?? "/nonexistent.jsonl");
 
-  // 2. fork adoption: a copied transcript's tip still names the PARENT
-  //    session — when it differs from this session's id, adopt the parent's
-  //    segments (explicit option wins; the evidence rule otherwise)
   const forkParent =
     opts.forkParentSessionId !== null && opts.forkParentSessionId !== undefined
       ? opts.forkParentSessionId
       : transcript.tooLarge
         ? null
         : tipParentOf(transcript.tip, opts.sessionId);
-  let adopted = false;
+  let forkAdopted = false;
   if (forkParent !== null) {
-    // the tip-derived parent id is transcript-controlled: percent-encode the
-    // unsafe chars (the same rule the session-dir layout sanitizes with)
     const parentDir = `${dirRootOf(dir)}/${sanitize(forkParent)}`;
     const copied = await adoptParentSegments(fs, parentDir, dir);
-    adopted = copied > 0;
+    forkAdopted = copied > 0;
   }
 
-  // 1b. the over-cap bootstrap (the ladder's automatic rung): the helper
-  //     streams the transcript and writes mirror batches BEFORE the sweep
-  //     picks them up; a failure defers (the readable backlog still observes,
-  //     the rest stays pending — rung 4 semantics, /owl-status documents
-  //     the manual command)
   let bootstrapBlocked = false;
   if (transcript.tooLarge && opts.transcriptPath !== null) {
     const ran = opts.bootstrapOverCap !== undefined ? await opts.bootstrapOverCap(opts.transcriptPath) : false;
     bootstrapBlocked = !ran;
   }
 
-  // sweep the mirror + adopt its rows into the live writer's index (the
-  // ladder case still reconstructs from the segments — rung 4 observes the
-  // readable backlog; only the transcript re-mirror waits for the ladder)
-  // the duplicate census or an artifact compaction parent (the walker would
-  // skip its whole span) runs one rewrite — with a transcript it also
-  // restitches every parent from the file's own edges — and the FRESH sweep
-  // re-adopts so this process's uuid->file refs name the surviving batches
   const { sweep } = await sweepWithStitch(
     await sweepMirror(fs, dir),
     async () => (opts.compactMirror !== undefined ? await opts.compactMirror() : false),
@@ -218,17 +239,9 @@ export async function runBackfill(
   let remirrored = 0;
   if (!transcript.tooLarge) {
     const live = livePath(transcript.rows, transcript.tip?.leafUuid ?? null, transcript.parentByUuid);
-    // the parent resolver walks a live row's file parent THROUGH the rows
-    // the mirror never carries (system/attachment chrome, compaction
-    // boundaries via their logical edges, dead forks) onto the nearest
-    // carried ancestor; a raw file parent would chain into a row the
-    // mirror lacks and every chain walk would truncate exactly there
     const liveSet = new Set(live.map((r) => r.uuid));
     const resolveParent = (uuid: string): string | null =>
       liveSet.has(uuid) ? uuid : carriedAncestor(transcript.rows, transcript.parentByUuid, uuid);
-    // re-mirror by the absent-check (the crash-window rule): every live
-    // row whose uuid is absent from the mirror is written NOW — regardless
-    // of where the frontier sits
     for (const tr of live) {
       if (mirror.rowByUuid(tr.uuid) !== undefined) continue;
       const parentUuid = tr.parentUuid === null ? null : resolveParent(tr.parentUuid);
@@ -238,22 +251,34 @@ export async function runBackfill(
     if (remirrored > 0) await mirror.flush();
   }
 
-  // 2b. the load-path row order: file enumeration is producer-hash order,
-  //     not conversation order (same-seq batches from different processes
-  //     tie and the directory listing decides) — re-sequence the index by
-  //     the fold's own total order (timestamp, producer, seq) before any
-  //     consumer reads it. The key comes from the row content at this
-  //     shape-aware call site; storage stays opaque to the row shape.
-  //     File-less rows (re-mirrored, not yet flushed) key on their
-  //     timestamp with empty producer/seq; a missing timestamp sorts last.
   mirror.reorderBy(conversationOrderKeyOf(mirror, sweep.uuidFile));
-
-  // 3. reconstruct through the core multiplexer: fold + load + frontier
-  // prepareStoreContext folds + resolves as its last construction step —
-  // no redundant second fold here
   const prepared = await prepareStoreContext(fs, dir, ledger, mirror, {
     ...(opts.healLedger !== undefined ? { healLedger: opts.healLedger } : {}),
   });
+  return { prepared, transcript, sweep, remirrored, forkAdopted, bootstrapBlocked };
+}
+
+/**
+ * The start sequence. `mirror`/`ledger` are the conversation's live writers
+ * (the storage assembly's instances — appends after this start flow into
+ * the same writers).
+ */
+export async function runBackfill(
+  mirror: MirrorWriter,
+  ledger: LedgerWriter,
+  opts: BackfillOptions,
+): Promise<BackfillResult> {
+  const loaded = await loadStoreState(mirror, ledger, {
+    sessionId: opts.sessionId,
+    fs: opts.fs,
+    transcriptPath: opts.transcriptPath,
+    ...(opts.forkParentSessionId !== undefined ? { forkParentSessionId: opts.forkParentSessionId } : {}),
+    ...(opts.bootstrapOverCap !== undefined ? { bootstrapOverCap: opts.bootstrapOverCap } : {}),
+    ...(opts.compactMirror !== undefined ? { compactMirror: opts.compactMirror } : {}),
+    ...(opts.healLedger !== undefined ? { healLedger: opts.healLedger } : {}),
+  });
+  const { prepared, transcript, remirrored, bootstrapBlocked } = loaded;
+  const fs = opts.fs;
   const handle = await getCore(opts.key, {
     ctxFactory: () => prepared.ctx,
     resolverFactory: () => makeEntryResolver({ rows: () => mirrorRowsOf(mirror), version: () => mirror.rowVersion() }),
@@ -286,7 +311,7 @@ export async function runBackfill(
     tooLarge: transcript.tooLarge,
     bootstrapBlocked,
     initialPromptCaptured,
-    adoptedFromParent: adopted,
+    adoptedFromParent: loaded.forkAdopted,
     prepared,
   };
 }

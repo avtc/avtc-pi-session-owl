@@ -12,6 +12,7 @@ import * as state from "../state.js";
 import type { FsAdapter } from "./fs-adapter.js";
 import { LedgerWriter } from "./ledger.js";
 import { MirrorWriter } from "./mirror.js";
+import type { PreparedContext } from "./store-context.js";
 
 export interface SessionStorage {
   /** The conversation key (sessionId or sessionId|agentId). */
@@ -23,6 +24,15 @@ export interface SessionStorage {
   ledger: LedgerWriter;
   /** Process-unique producer id (batch naming + fold ordering). */
   producerId: string;
+  /** The cross-lane prepared-state stamp: whichever load lane finished
+   *  last (the boot backfill eagerly, the conversation binding lazily)
+   *  parks its PreparedContext here, and the other lane — under its own
+   * in-flight lock — re-checks the stamp before re-deriving and fast-exits
+   * with the parked context when the session matches. `null` (or a
+   * session mismatch) means "re-derive". A process-local session id is
+   * the stamp key: a session switch or resume gets a NEW storage set, so
+   * the stamp never outlives its conversation. */
+  sharedPrepared?: { context: PreparedContext; sessionId: string } | null;
 }
 
 const instances = new Map<string, SessionStorage>();
@@ -97,6 +107,7 @@ export function getSessionStorage(key: string, sessionId: string, agentId: strin
     mirror: new MirrorWriter(bridgeFs(), dir, producer),
     ledger: new LedgerWriter(bridgeFs(), dir, producer),
     producerId: producer,
+    sharedPrepared: null,
   };
   instances.set(key, set);
   return set;
