@@ -59,7 +59,7 @@
 		"acceptance:checklist": "node scripts/acceptance-checklist.cjs"
 	},
 	"dependencies": {
-		"avtc-pi-logger": "^1.0.3",
+		"avtc-pi-logger": "^1.0.4",
 		"avtc-pi-settings-ui": "^1.0.14"
 	},
 	"devDependencies": {
