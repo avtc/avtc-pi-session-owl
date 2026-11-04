@@ -228,20 +228,21 @@ function deltasAfterOnBranch(
     return at === undefined ? Number.NaN : at; // NaN = riding: replays at the tail
   };
   const fromFold = records.indexOf(from);
-  const afterCandidate = (r: LedgerRecord): boolean => {
-    // riding records (their `at` row off the served branch) replay at the
-    // tail: they sit AFTER every positioned record, and only fold order
-    // decides among themselves — the loader's exact placement
-    if (Number.isNaN(posOf(r))) return true;
-    const pos = posOf(r);
-    if (Number.isNaN(posOf(from))) return true; // a riding candidate base: everything after it in fold order
-    return pos > posOf(from) || (pos === posOf(from) && records.indexOf(r) > fromFold);
-  };
+  const fromPos = posOf(from);
   const out: Record<string, unknown>[] = [];
   for (let i = 0; i < records.length; i += 1) {
     const r = records[i];
     if (r === undefined || r.kind !== "graph_delta") continue;
-    if (!afterCandidate(r)) continue;
+    // riding records (their `at` row off the served branch) replay at the
+    // tail: they sit AFTER every positioned record, and only fold order
+    // decides among themselves — the loader's exact placement
+    const pos = posOf(r);
+    const after =
+      Number.isNaN(pos) ||
+      Number.isNaN(fromPos) || // a riding candidate base: everything after it in fold order
+      pos > fromPos ||
+      (pos === fromPos && i > fromFold);
+    if (!after) continue;
     const payload = r.payload as { kind?: unknown; delta?: unknown; deltas?: unknown } | null;
     if (payload === null || payload.kind !== "graph_delta") continue;
     const batch = Array.isArray(payload.deltas)
