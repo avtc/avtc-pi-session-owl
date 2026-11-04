@@ -36,6 +36,19 @@ describe("tail-read — capsule tail parsing", () => {
     expect(facts.rows.map((r) => r.boundary)).toEqual([false, false]);
   });
 
+  test("a chain-id row written without a uuid keeps its slot via messageId", () => {
+    const text = [
+      JSON.stringify({ type: "queue-operation", x: 1 }), // no chain id — skipped
+      JSON.stringify({ type: "file-history-snapshot", messageId: "m1a", snapshot: {} }),
+      JSON.stringify({ uuid: "u2", parentUuid: "u1", type: "user" }),
+      "",
+    ].join("\n");
+    const facts = parseCapsuleTail(text, 10);
+    expect(facts.torn).toBe(false);
+    expect(facts.rows.map((r) => r.uuid)).toEqual(["m1a", "u2"]);
+    expect(facts.rows[0]?.parentUuid).toBeNull();
+  });
+
   test("flags compaction-boundary rows", () => {
     const text = [
       JSON.stringify({ uuid: "b1", parentUuid: null, type: "system", subtype: "compact_boundary" }),

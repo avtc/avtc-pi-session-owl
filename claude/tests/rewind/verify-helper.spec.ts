@@ -138,6 +138,25 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     ]);
   });
 
+  test("a chain-id row written without a uuid counts in the tail via messageId", async () => {
+    const file = tempTranscript(
+      [
+        '{"type":"cost-state","x":1}', // no chain id — skipped
+        '{"type":"file-history-snapshot","messageId":"m1a","snapshot":{}}',
+        '{"uuid":"u1","parentUuid":null,"type":"user"}',
+        '{"uuid":"u2","parentUuid":"u1","type":"user"}',
+        "",
+      ].join("\n"),
+    );
+    const report = await verify(file, "--tail", "3");
+    expect(report.ok).toBe(true);
+    expect(report.tail).toEqual([
+      ["m1a", null, 0, 0],
+      ["u1", null, 0, 0],
+      ["u2", "u1", 0, 0],
+    ]);
+  });
+
   test("the window counts UUID rows, not raw lines — dense metadata cannot push queued rows out of the tail", async () => {
     // a busy turn's file: every uuid row is surrounded by several metadata
     // lines (api-request, queue-operation, ...). A raw-line window would

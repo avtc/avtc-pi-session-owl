@@ -525,10 +525,10 @@ export class LiveChainProcessor {
       // all is a parallel line's continuation — both quiet rebases. An
       // anchor deeper than one step proves the chain moved back: the
       // rewind verdict, and the anchor slot is the cut boundary the
-      // engine amputated at. An expectation outside the read window (the
-      // file no longer holds owl's tail) keeps the verdict — the anchor
-      // at a known older row is then amputation evidence on its own.
-      const depth = this.chainDepthTo(tail.rows, indexOfUuid, expected, anchor.uuid);
+      // engine amputated at. An expectation outside the read window is
+      // the file no longer holding owl's tail — the anchor at a known
+      // older row is amputation evidence on its own.
+      const depth = this.chainDepthTo(tail.rows, indexOfUuid, capturedByUuid, expected, anchor.uuid);
       if (depth === 1 || depth === null) {
         edges.push(anchorEdge);
         expected = row.uuid;
@@ -596,6 +596,7 @@ export class LiveChainProcessor {
   private chainDepthTo(
     rows: readonly TailRow[],
     indexOfUuid: ReadonlyMap<string, number>,
+    capturedByUuid: ReadonlyMap<string, boolean>,
     from: string | null,
     target: string | null,
   ): number | null | undefined {
@@ -609,8 +610,13 @@ export class LiveChainProcessor {
       walked.add(cursor);
       const r: TailRow | undefined = rows[indexOfUuid.get(cursor) ?? -1];
       if (r === undefined) break;
+      // only observable steps count — the chrome rows the anchor walk
+      // crosses as transparent must not stretch the measured distance;
+      // the expectation itself is owl's own tail, observable by construction
+      const observable =
+        cursor === from || capturedByUuid.get(cursor) === true || this.deps.isKnownRow(cursor) || r.boundary;
       cursor = r.parentUuid;
-      depth += 1;
+      if (observable) depth += 1;
     }
     return null;
   }

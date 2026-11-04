@@ -70,13 +70,19 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
     if (parsed === null || typeof parsed !== "object") continue;
     const row = parsed as {
       uuid?: unknown;
+      messageId?: unknown;
       parentUuid?: unknown;
       logicalParentUuid?: unknown;
       type?: unknown;
       subtype?: unknown;
       message?: unknown;
     };
-    if (typeof row.uuid !== "string") continue; // metadata without a chain slot
+    // every chain slot the capture can name: the engine writes some rows
+    // (command rows, file-history snapshots) with no uuid at all — their
+    // messageId is the id the capture mirrors them under, and a window
+    // that drops them makes the expected tail look amputated
+    const id = typeof row.uuid === "string" ? row.uuid : typeof row.messageId === "string" ? row.messageId : undefined;
+    if (id === undefined) continue; // metadata without a chain slot
     const parent =
       typeof row.parentUuid === "string"
         ? row.parentUuid
@@ -91,7 +97,7 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
       Array.isArray(content) &&
       content.some((b) => b !== null && typeof b === "object" && (b as { type?: unknown }).type === "tool_result");
     rows.push({
-      uuid: row.uuid,
+      uuid: id,
       parentUuid: parent,
       boundary: row.type === "system" && row.subtype === "compact_boundary",
       ...(toolResult ? { toolResult: true } : {}),

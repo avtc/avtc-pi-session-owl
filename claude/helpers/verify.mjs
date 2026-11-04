@@ -87,7 +87,11 @@ if (tailN !== null) {
         return; // middle junk — skipped as content, never torn evidence
       }
       if (row === null || typeof row !== "object") return;
-      if (typeof row.uuid !== "string") return; // metadata — never a tail row
+      // every chain slot the capture can name: rows written with no uuid
+      // (command rows, file-history snapshots) are mirrored under their
+      // messageId, so the tail window must count them too
+      const id = typeof row.uuid === "string" ? row.uuid : typeof row.messageId === "string" ? row.messageId : null;
+      if (id === null) return; // metadata — never a tail row
       const parent =
         typeof row.parentUuid === "string"
           ? row.parentUuid
@@ -100,7 +104,7 @@ if (tailN !== null) {
         Array.isArray(content) && content.some((b) => b !== null && typeof b === "object" && b.type === "tool_result")
           ? 1
           : 0;
-      newest.push([row.uuid, parent, boundary, toolResult]);
+      newest.push([id, parent, boundary, toolResult]);
     };
     // the ring fills with UUID rows only: a raw-line window lets dense
     // metadata (api requests, queue operations, attachments) crowd the

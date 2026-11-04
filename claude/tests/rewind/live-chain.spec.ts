@@ -195,6 +195,45 @@ describe("live chain processor — the normal tick", () => {
       { uuid: "u1", parent: "b1" },
     ]);
   });
+
+  test("a fresh row over an unmirrored chrome row rebases when the expectation is its chrome sibling", async () => {
+    // each retry prompt chains onto the SAME system row: the previous
+    // attempt sits as a chrome sibling of the new row, so the anchor walk
+    // lands on the mirrored row before it and the depth counts only
+    // observable steps (the chrome row is transparent)
+    const h = harness({
+      owlTail: "f1",
+      known: ["b0"],
+      tail: facts([row("b0", "x"), row("sys", "b0"), row("f1", "sys"), row("f2", "sys")]),
+    });
+    h.proc.enqueue(ev("sys", false));
+    h.proc.enqueue(ev("f2", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    expect(h.patched).toEqual([
+      { uuid: "sys", parent: "b0" },
+      { uuid: "f2", parent: "b0" },
+    ]);
+  });
+
+  test("an expectation on a chain-id row with no deeper ancestry rebases quietly", async () => {
+    // the tail names a row the engine wrote without a parent (command /
+    // file-history chrome): its ancestry reaches nothing, so no jump is
+    // provable and the rebase stands
+    const h = harness({
+      owlTail: "ct",
+      known: ["b0"],
+      tail: facts([row("b0", "x"), row("ct", null), row("sys", "b0"), row("n1", "sys")]),
+    });
+    h.proc.enqueue(ev("sys", false));
+    h.proc.enqueue(ev("n1", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    expect(h.patched).toEqual([
+      { uuid: "sys", parent: "b0" },
+      { uuid: "n1", parent: "b0" },
+    ]);
+  });
 });
 
 describe("live chain processor — verdict application is single-flight across lanes", () => {
