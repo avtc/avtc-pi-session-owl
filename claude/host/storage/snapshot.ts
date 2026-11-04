@@ -211,7 +211,9 @@ function createdNodeIds(delta: Record<string, unknown>): string[] {
 
 /** The graph_delta records the loader would replay AFTER a candidate
  *  snapshot — on the BRANCH axis (a record lands at its `at` row's branch
- *  position, tie-broken by fold order; dead-marker records never replay).
+ *  position, tie-broken by fold order; records whose markers fell off the
+ *  served branch RIDE the branch tail and replay too — the fold keeps them
+ *  and the loader applies them, so the simulation must count their creates).
  *  The fold's write-time order and the branch's replay order diverge
  *  exactly in the damaged-fold shape this check exists for. */
 function deltasAfterOnBranch(
@@ -223,20 +225,23 @@ function deltasAfterOnBranch(
   const posOf = (r: LedgerRecord): number => {
     if (r.at === "seed") return -1;
     const at = branchIndex.get(r.at);
-    return at === undefined ? Number.NaN : at; // NaN = off-branch, never replays
+    return at === undefined ? Number.NaN : at; // NaN = riding: replays at the tail
   };
-  const markerOnBranch = (r: LedgerRecord): boolean => r.marker === "seed" || branchIndex.has(r.marker);
-  const fromPos = posOf(from);
   const fromFold = records.indexOf(from);
+  const afterCandidate = (r: LedgerRecord): boolean => {
+    // riding records (their `at` row off the served branch) replay at the
+    // tail: they sit AFTER every positioned record, and only fold order
+    // decides among themselves — the loader's exact placement
+    if (Number.isNaN(posOf(r))) return true;
+    const pos = posOf(r);
+    if (Number.isNaN(posOf(from))) return true; // a riding candidate base: everything after it in fold order
+    return pos > posOf(from) || (pos === posOf(from) && records.indexOf(r) > fromFold);
+  };
   const out: Record<string, unknown>[] = [];
   for (let i = 0; i < records.length; i += 1) {
     const r = records[i];
     if (r === undefined || r.kind !== "graph_delta") continue;
-    if (!markerOnBranch(r)) continue;
-    const pos = posOf(r);
-    if (Number.isNaN(pos) || Number.isNaN(fromPos)) continue;
-    const after = pos > fromPos || (pos === fromPos && i > fromFold);
-    if (!after) continue;
+    if (!afterCandidate(r)) continue;
     const payload = r.payload as { kind?: unknown; delta?: unknown; deltas?: unknown } | null;
     if (payload === null || payload.kind !== "graph_delta") continue;
     const batch = Array.isArray(payload.deltas)
@@ -252,15 +257,18 @@ function deltasAfterOnBranch(
 }
 
 /** Resolve the snapshot to fold from: the NEWEST live candidate whose
- *  post-snapshot delta stream applies cleanly over its base (every required
- *  node exists at its replay point — a static replay of the requireNode
- *  invariants). A snapshot persisted over a DAMAGED fold (the collapse
- *  shape: a refold re-based the graph, later deltas reference nodes only
- *  the older snapshot carries) fails the check and the resolution walks to
- *  the next-older candidate — the ops are never pruned, so the older base
- *  plus the full delta stream rebuilds the true state. When NO candidate
- *  is consistent the NEWEST stands (the tolerant behavior — damage stays
- *  visible in the loader's skipped-delta warn). */
+ *  post-snapshot delta stream can produce every node a delta requires. The
+ *  simulation mirrors the loader's tolerant replay: records whose markers
+ *  fell off the served branch ride the branch tail and their creates land
+ *  (a rebuilt store carries them in bulk), and existence is ORDER-FREE — a
+ *  required node passes when the base or ANY post-snapshot delta creates
+ *  it. A snapshot persisted over a DAMAGED fold (the collapse shape: a
+ *  refold re-based the graph, later deltas reference nodes NO delta or base
+ *  carries) fails the check and the resolution walks to the next-older
+ *  candidate — the ops are never pruned, so the older base plus the full
+ *  delta stream rebuilds the true state. When NO candidate is consistent
+ *  the NEWEST stands (the tolerant behavior — damage stays visible in the
+ *  loader's skipped-delta warn). */
 export async function resolveConsistentSnapshot(
   fs: FsAdapter,
   dir: string,
@@ -270,19 +278,22 @@ export async function resolveConsistentSnapshot(
 ): Promise<ResolvedSnapshot | null> {
   const candidates = await collectSnapshotCandidates(fs, dir, records, isLive);
   for (const candidate of candidates) {
-    const baseIds = new Set<string>();
+    const knownIds = new Set<string>();
     const payload = candidate.details as { nodes?: unknown } | null;
     if (payload !== null && Array.isArray(payload.nodes)) {
       for (const node of payload.nodes) {
         if (node !== null && typeof node === "object" && typeof (node as { id?: unknown }).id === "string")
-          baseIds.add((node as { id: string }).id);
+          knownIds.add((node as { id: string }).id);
       }
     }
+    const stream = deltasAfterOnBranch(records, candidate.record, branch);
+    for (const delta of stream) {
+      for (const id of createdNodeIds(delta)) knownIds.add(id);
+    }
     let consistent = true;
-    for (const delta of deltasAfterOnBranch(records, candidate.record, branch)) {
-      for (const id of createdNodeIds(delta)) baseIds.add(id);
+    for (const delta of stream) {
       for (const id of requiredNodeIds(delta)) {
-        if (!baseIds.has(id)) {
+        if (!knownIds.has(id)) {
           consistent = false;
           log.warn(
             `snapshot resolve: candidate at ${candidate.record.ts} inconsistent (delta needs node ${id}) — trying the next-older snapshot`,

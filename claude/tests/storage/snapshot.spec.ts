@@ -7,7 +7,12 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { byteLength, createMemoryFs, ROLL_MARGIN } from "../../host/storage/fs-adapter.js";
 import { foldLedger, type LedgerRecord, LedgerWriter } from "../../host/storage/ledger.js";
-import { persistSnapshotText, resolveNewestSnapshot, snapPartName } from "../../host/storage/snapshot.js";
+import {
+  persistSnapshotText,
+  resolveConsistentSnapshot,
+  resolveNewestSnapshot,
+  snapPartName,
+} from "../../host/storage/snapshot.js";
 
 const mem = createMemoryFs();
 const fs = mem.adapter;
@@ -120,6 +125,93 @@ describe("snapshot — byte-budget parts", () => {
     }
     const resolved = await resolveNewestSnapshot(fs, DIR, fold.records, () => true);
     expect(JSON.stringify(resolved?.details)).toBe(text);
+  });
+});
+
+describe("snapshot — consistent resolution over the tolerant replay stream", () => {
+  test("an off-branch (riding) delta's create counts: the newest snapshot stands, no fallback", async () => {
+    // The loader replays EVERY graph_delta the fold keeps — records whose
+    // markers fell off the served branch ride the branch tail and their
+    // creates land. The resolver's static check must simulate that same
+    // stream: a required node passes when ANY post-snapshot delta creates
+    // it (order-free), not only when an on-branch delta does — otherwise a
+    // rebuilt store (off-branch markers everywhere) rejects every candidate
+    // and boots walk the whole snapshot chain every time.
+    const mem = createMemoryFs();
+    const fs = mem.adapter;
+    const dir = "/cfg/snap-ride";
+    const ledger = new LedgerWriter(fs, dir, "ride", () => 1000);
+    await fs.writeText(
+      `${dir}/m1-aaaaaaaa.jsonl`,
+      [
+        JSON.stringify({ uuid: "u1", parentUuid: null, row: { role: "user", content: "one" } }),
+        JSON.stringify({ uuid: "u2", parentUuid: "u1", row: { role: "user", content: "two" } }),
+        JSON.stringify({ uuid: "u3", parentUuid: "u2", row: { role: "user", content: "three" } }),
+      ].join("\n") + "\n",
+    );
+    // the older snapshot carries n1 in its base; the newest carries NOTHING
+    const withNode = (nodes: unknown[], observations: unknown[]) =>
+      JSON.stringify({
+        type: "session-owl",
+        version: "v1",
+        nodes,
+        observations,
+        oInitialPrompt: null,
+        nextObsId: 1,
+        nextNodeId: 1,
+        selectedTree: null,
+        lastCompactionLedger: null,
+        compactionStages: {},
+      });
+    const n1 = {
+      id: "n1",
+      summary: "node one",
+      summaryTokens: 3,
+      state: "active",
+      importance: "med",
+      parentNode: null,
+      observationIds: [],
+      childNodeIds: [],
+      supersededBy: null,
+      timestamps: { createdAt: "t", updatedAt: "t", rangeStart: "t", rangeEnd: "t" },
+    };
+    await persistSnapshotText(fs, dir, ledger, "snapOld", withNode([n1], []), "u1");
+    await persistSnapshotText(fs, dir, ledger, "snapNew", withNode([], []), "u2");
+    // a RIDING delta (marker row off the served branch) creates n1; an
+    // on-branch delta after the newest snapshot requires it
+    ledger.append(
+      "graph_delta",
+      {
+        kind: "graph_delta",
+        delta: {
+          type: "create_node",
+          id: "n1",
+          parentNode: null,
+          summary: "node one",
+          summaryTokens: 3,
+          state: "active",
+          importance: "med",
+          timestamps: { createdAt: "t", updatedAt: "t", rangeStart: "t", rangeEnd: "t" },
+          observationIds: [],
+        },
+      },
+      "fork-row-9",
+    );
+    ledger.append(
+      "graph_delta",
+      {
+        kind: "graph_delta",
+        delta: { type: "set_meta", nodeId: "n1", importance: "high", archived: null, obsolete: null, summary: null },
+      },
+      "u3",
+    );
+    await ledger.flush();
+    const fold = await foldLedger(fs, dir);
+    const resolved = await resolveConsistentSnapshot(fs, dir, fold.records, () => true, ["u1", "u2", "u3"]);
+    // the NEWEST snapshot resolves: the riding create supplies n1
+    expect(resolved?.record.seq).toBe(2);
+    const payload = resolved?.record.payload as { nodes?: unknown[] } | undefined;
+    expect(payload?.nodes).toEqual([]);
   });
 });
 
