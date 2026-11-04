@@ -22,7 +22,7 @@ import type { LedgerWriter } from "../storage/ledger.js";
 import { batchNameParts, type MirrorWriter, sweepMirror } from "../storage/mirror.js";
 import { SESSION_MARKER_FILENAME } from "../storage/session-marker.js";
 import { prepareStoreContext, ROW_TYPE } from "../storage/store-context.js";
-import { shouldCompactMirror } from "./compact-mirror.js";
+import { shouldCompactMirror, shouldStitchMirrorParents } from "./compact-mirror.js";
 import { captureInitialPrompt, ensureNGoalSeeded } from "./initial-prompt.js";
 import type { PendingEvaluator } from "./pending.js";
 import { carriedAncestor, livePath, readTranscript, rowFromTranscript } from "./transcript-reader.js";
@@ -177,10 +177,12 @@ export async function runBackfill(
   const sweep = await sweepMirror(fs, dir);
   mirror.adoptRows(sweep.rows);
 
-  // the duplicate census crossed: one compaction rewrite (write-new
-  // batches, then unlink the superseded ones), then a FRESH sweep re-adopts
-  // so this process's uuid->file refs name the surviving batches
-  if (shouldCompactMirror(sweep) && opts.compactMirror !== undefined) {
+  // the duplicate census crossed, or a compaction custom carries an
+  // artifact parent (the walker would skip its whole span): one compaction
+  // rewrite — with a transcript it also restitches every parent from the
+  // file's own edges — then a FRESH sweep re-adopts so this process's
+  // uuid->file refs name the surviving batches
+  if ((shouldCompactMirror(sweep) || shouldStitchMirrorParents(sweep.rows)) && opts.compactMirror !== undefined) {
     const compacted = await opts.compactMirror();
     if (compacted) {
       const reswept = await sweepMirror(fs, dir);

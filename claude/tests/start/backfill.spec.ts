@@ -129,6 +129,79 @@ describe("backfill — the resume-time mirror compaction hook", () => {
     expect(reswept.lines).toBe(reswept.uniqueUuids);
   });
 
+  test("an artifact compaction parent fires the hook under a quiet census, and the re-sweep adopts the stitched rows", async () => {
+    // the census is healthy (one line per uuid) but ONE compaction custom
+    // carries a rewrite-era parent hundreds of rows back — the walker would
+    // skip the whole span between them, so the stitch rewrite must fire
+    const NL = String.fromCharCode(10);
+    const rows: { uuid: string; parentUuid: string | null; row: unknown }[] = [];
+    for (let i = 1; i <= 400; i += 1) {
+      rows.push({
+        uuid: `s${String(i)}`,
+        parentUuid: i === 1 ? null : `s${String(i - 1)}`,
+        row: { role: "user", content: `row ${String(i)}` },
+      });
+    }
+    // the artifact: the custom's parent points 395 rows back, past the span
+    rows.push({ uuid: "custom-1", parentUuid: "s5", row: { door: "compaction" } });
+    const dir = "/cfg/session-owl/sessions/sess-stitch";
+    {
+      const mirror = new MirrorWriter(mem.adapter, dir, "seed-a");
+      for (const r of rows) mirror.bufferRow(r);
+      await mirror.flush();
+    }
+    const transcript = rows
+      .filter((r) => (r.row as { door?: string }).door !== "compaction")
+      .map((r) =>
+        JSON.stringify({
+          uuid: r.uuid,
+          parentUuid: r.parentUuid,
+          type: "user",
+          message: { role: "user", content: "x" },
+        }),
+      )
+      .join(NL);
+    await mem.adapter.writeText("/t/s-stitch.jsonl", `${transcript}${NL}`);
+    const storage = makeStorage("sess-stitch");
+    let called = 0;
+    await runBackfill(storage.mirror, storage.ledger, {
+      key: "sess-stitch",
+      sessionId: "sess-stitch",
+      agentId: null,
+      fs: mem.adapter,
+      transcriptPath: "/t/s-stitch.jsonl",
+      enabled: true,
+      fireGoalExtract: () => {},
+      compactMirror: async () => {
+        called += 1;
+        // simulate the helper's stitch: the custom re-parents at its true
+        // in-span ancestor (the row just before it)
+        const sweep = await sweepMirror(mem.adapter, dir);
+        void sweep;
+        for (const name of await mem.adapter.listDir(dir)) {
+          if (!/^m\d+-[0-9a-f]+(?:\.k\d+)?\.jsonl$/.test(name)) continue;
+          const text = await mem.adapter.readText(`${dir}/${name}`);
+          const patched = text
+            .split(NL)
+            .map((line) => {
+              if (line === "") return line;
+              const parsed = JSON.parse(line) as { uuid?: string; parentUuid?: string | null };
+              if (parsed.uuid === "custom-1") parsed.parentUuid = "s400";
+              return JSON.stringify(parsed);
+            })
+            .join(NL);
+          await mem.adapter.writeText(`${dir}/${name}`, `${patched}${NL}`);
+        }
+        return true;
+      },
+    });
+    expect(called).toBe(1); // the artifact parent alone fired the rewrite
+    // the re-swept index carries the healed parent
+    const reswept = await sweepMirror(mem.adapter, dir);
+    const custom = reswept.rows.find((r) => r.uuid === "custom-1");
+    expect(custom?.parentUuid).toBe("s400");
+  });
+
   test("a healthy census never fires the hook (absent hook is fine too)", async () => {
     await mem.adapter.writeText("/t/s-clean.jsonl", jsonl("main-simple"));
     const dir = "/cfg/session-owl/sessions/sess-clean";

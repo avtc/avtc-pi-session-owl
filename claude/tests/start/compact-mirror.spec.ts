@@ -5,7 +5,48 @@
 // healthy stores, the runner degrades to {done:false} on any seam failure,
 // and the backfill hook fires only when the sweep's census crosses.
 import { describe, expect, test } from "vitest";
-import { planMirrorCompactInvocation, runMirrorCompact, shouldCompactMirror } from "../../host/start/compact-mirror.js";
+import {
+  planMirrorCompactInvocation,
+  runMirrorCompact,
+  shouldCompactMirror,
+  shouldStitchMirrorParents,
+} from "../../host/start/compact-mirror.js";
+
+describe("shouldStitchMirrorParents — the artifact-edge signature", () => {
+  const row = (uuid: string, parent: string | null, door?: string) => ({
+    uuid,
+    parentUuid: parent,
+    row: door === undefined ? { role: "user" } : { door },
+  });
+
+  test("a compaction custom parented hundreds of rows back fires (the rewrite-era artifact)", () => {
+    const rows = [];
+    for (let i = 0; i < 800; i += 1) rows.push(row(`r${String(i)}`, i === 0 ? null : `r${String(i - 1)}`));
+    rows.push(row("custom", "r5", "compaction")); // 795 rows back — the walker skips the whole span
+    expect(shouldStitchMirrorParents(rows)).toBe(true);
+  });
+
+  test("a null-parent custom (the engine boundary row is never delivered) stays quiet", () => {
+    const rows = [row("a", null), row("custom", null, "compaction")];
+    expect(shouldStitchMirrorParents(rows)).toBe(false);
+  });
+
+  test("the live capture's near inference parent stays quiet", () => {
+    const rows = [row("a", null), row("b", "a"), row("custom", "b", "compaction")];
+    expect(shouldStitchMirrorParents(rows)).toBe(false);
+  });
+
+  test("a far-back parent on an ordinary door is the engine's own edge — quiet", () => {
+    const rows = [];
+    for (let i = 0; i < 800; i += 1) rows.push(row(`r${String(i)}`, i === 0 ? null : `r${String(i - 1)}`));
+    rows.push(row("resume-prompt", "r5", "prompt"));
+    expect(shouldStitchMirrorParents(rows)).toBe(false);
+  });
+
+  test("an empty sweep stays quiet", () => {
+    expect(shouldStitchMirrorParents([])).toBe(false);
+  });
+});
 
 describe("shouldCompactMirror — the census threshold", () => {
   test("healthy stores never cross", () => {

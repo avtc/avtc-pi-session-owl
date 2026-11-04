@@ -13,6 +13,40 @@
 const COMPACT_MIN_DUP_LINES = 1000;
 const COMPACT_MIN_DUP_RATIO = 0.3;
 
+/** The widest parent gap a live-captured compaction custom can legitimately
+ *  show: the append envelope carries no parentUuid, so the capture infers
+ *  the custom's parent at the write tip (a handful of rows back at most,
+ *  interleaved side content included). */
+const STITCH_MAX_PARENT_GAP = 32;
+
+/** Whether a compaction custom's parent is an artifact worth restitching
+ *  from the transcript: the capture infers a custom's parent at the write
+ *  tip or leaves it null (the engine's boundary row never arrives through
+ *  the append envelope) — a custom parented hundreds of rows back is a
+ *  rewrite-era residue, and the branch walker skips the whole span between
+ *  the custom and its parent (the summarized segment leaves the served
+ *  branch). Pure. */
+export function shouldStitchMirrorParents(
+  rows: readonly { uuid: string; parentUuid: string | null; row: unknown }[],
+): boolean {
+  const pos = new Map<string, number>();
+  for (let i = 0; i < rows.length; i += 1) {
+    const r = rows[i];
+    if (r !== undefined && !pos.has(r.uuid)) pos.set(r.uuid, i);
+  }
+  for (let i = 0; i < rows.length; i += 1) {
+    const r = rows[i];
+    if (r === undefined) continue;
+    const inner = r.row as { door?: unknown } | null;
+    if (inner === null || typeof inner !== "object" || inner.door !== "compaction") continue;
+    if (r.parentUuid === null) continue;
+    const at = pos.get(r.parentUuid);
+    if (at === undefined) continue;
+    if (i - at > STITCH_MAX_PARENT_GAP) return true;
+  }
+  return false;
+}
+
 /** Whether the census crosses the compaction threshold. Pure. */
 export function shouldCompactMirror(census: { lines: number; uniqueUuids: number }): boolean {
   const dup = census.lines - census.uniqueUuids;
