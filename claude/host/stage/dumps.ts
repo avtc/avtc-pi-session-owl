@@ -13,10 +13,16 @@ import { noteStageFatalModelError, type StageRunState } from "./runs.js";
 
 /** One captured row of the run's `<output>` (response rows, tool calls,
  *  tool results — routed here by the capture layer's stage-agent branch). */
-export function recordDumpOutputRow(run: StageRunState, row: unknown): void {
+export function recordDumpOutputRow(run: StageRunState, row: unknown, onFatal?: (detail: string) => void): void {
   run.dump.outputRows.push(row);
   const detail = fatalModelRowDetail(row);
-  if (detail !== null) noteStageFatalModelError(run.stage, detail);
+  if (detail !== null) {
+    // the caller's seam carries the model-side error text the moment it
+    // is seen: the run's own UI surface may never render it (a canceled
+    // compaction shows a notice, not the cause), and without a log line
+    // the failure is invisible everywhere but the engine's own debug
+    if (noteStageFatalModelError(run.stage, detail)) onFatal?.(detail);
+  }
 }
 
 /** An engine `api_error` system row in the run's stream: the model side

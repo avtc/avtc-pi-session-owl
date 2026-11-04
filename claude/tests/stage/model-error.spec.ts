@@ -17,14 +17,19 @@ describe("fatal model-error detection in the captured stage rows", () => {
     clearAllStageRuns();
   });
 
-  test("an engine api_error system row marks the stage fatal (first detail sticks)", () => {
+  test("an engine api_error system row marks the stage fatal (first detail sticks) and reports through the seam", () => {
+    const seen: string[] = [];
+    const onFatal = (detail: string): void => {
+      seen.push(detail);
+    };
     const run = createStageRun("ag-x", "observer", CFG);
-    recordDumpOutputRow(run, { message: { type: "assistant", text: "hi" }, door: "note" });
+    recordDumpOutputRow(run, { message: { type: "assistant", text: "hi" }, door: "note" }, onFatal);
+    expect(seen).toEqual([]);
     expect(takeStageFatalModelError("observer")).toBeNull();
-    recordDumpOutputRow(run, { message: { type: "system", name: "api_error", content: [] }, door: "notice" });
-    recordDumpOutputRow(run, { message: { type: "system", name: "api_error", status: 503 }, door: "notice" });
+    recordDumpOutputRow(run, { message: { type: "system", name: "api_error", content: [] }, door: "notice" }, onFatal);
+    recordDumpOutputRow(run, { message: { type: "system", name: "api_error", status: 503 }, door: "notice" }, onFatal);
+    expect(seen.length).toBe(1); // only the FIRST fatal row reports
     expect(takeStageFatalModelError("observer")).toBe("api_error");
-    expect(takeStageFatalModelError("observer")).toBeNull(); // taken
   });
 
   test("status-carrying rows surface the status; other shapes never match", () => {

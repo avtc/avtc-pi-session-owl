@@ -78,9 +78,13 @@ const runs = new Map<string, StageRunState>();
  *  First note sticks; the stage runner takes it after the run. */
 const fatalModelErrors = new Map<StageName, string>();
 
-/** Record a fatal model error observed in a stage's captured rows. */
-export function noteStageFatalModelError(stage: StageName, detail: string): void {
-  if (!fatalModelErrors.has(stage)) fatalModelErrors.set(stage, detail);
+/** Record a fatal model error observed in a stage's captured rows.
+ *  Returns whether THIS detail stuck (the first one wins; later rows of
+ *  the same failure do not re-report). */
+export function noteStageFatalModelError(stage: StageName, detail: string): boolean {
+  if (fatalModelErrors.has(stage)) return false;
+  fatalModelErrors.set(stage, detail);
+  return true;
 }
 
 /** Take (and clear) a stage's pending fatal model error, if any. */

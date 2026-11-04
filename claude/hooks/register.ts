@@ -1221,7 +1221,10 @@ async function onSessionAppend($: any, e: AnyEvent, next: Next) {
         // A stage run's rows are its dump's <output>, never the mirror
         // (the stage dump is their record).
         const run = getStageRun(agentId);
-        if (run !== undefined) recordDumpOutputRow(run, e);
+        if (run !== undefined)
+          recordDumpOutputRow(run, e, (detail) => {
+            log.warn(`stage ${run.stage}: model-side error — ${detail}`);
+          });
       } else if (agentId !== null && (await isPluginSpawnedLoop(agentId))) {
         // Machinery (any mod's roster-attributed spawn): no conversation is
         // ensured, no rows mirror, no store dir is ever created. The roster
