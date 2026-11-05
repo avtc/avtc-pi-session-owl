@@ -24,6 +24,10 @@ export interface SessionStorage {
   ledger: LedgerWriter;
   /** Process-unique producer id (batch naming + fold ordering). */
   producerId: string;
+  /** The compaction run anchor holder shared by every prepared context of
+   *  this conversation (both load lanes) — set for a compaction run's
+   *  duration by the takeover, read by the append path. */
+  runAnchor: { current: string | null };
   /** The cross-lane prepared-state stamp: whichever load lane finished
    *  last (the boot backfill eagerly, the conversation binding lazily)
    *  parks its PreparedContext here, and the other lane — under its own
@@ -107,6 +111,7 @@ export function getSessionStorage(key: string, sessionId: string, agentId: strin
     mirror: new MirrorWriter(bridgeFs(), dir, producer),
     ledger: new LedgerWriter(bridgeFs(), dir, producer),
     producerId: producer,
+    runAnchor: { current: null },
     sharedPrepared: null,
   };
   instances.set(key, set);

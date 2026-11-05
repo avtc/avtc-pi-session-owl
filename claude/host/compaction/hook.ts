@@ -127,6 +127,15 @@ export interface CompactionHookDeps {
   log?: (message: string) => void;
   /** One compaction id per takeover (the snapshot record's id). */
   newCompactionId: () => string;
+  /** Pins the compaction run's record anchor: computes the last content row
+   *  before the command zone (the fork base — the row the engine re-bases a
+   *  canceled command's successor at, present on every branch variant) and
+   *  makes every non-observation record appended during the run anchor at it
+   *  (marker AND order). Returns the chosen row for the log (null: no
+   *  content row yet — records anchor at "seed"). */
+  beginRunAnchor: () => string | null;
+  /** Clears the run anchor (the takeover's finally — every gate exit). */
+  endRunAnchor: () => void;
   /** The budget-free wait: when present,
    *  the ensure-ready phases (catch-up + builder + selector) run INSIDE
    *  this wrapper — the wiring rides a $.tool.call so the engine's 10s
@@ -192,12 +201,18 @@ export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDe
     // (5) the compaction-exclusive acquire: abort in-flight runs, await them
     const handle = await acquireForCompaction(deps.key);
     const signal = handle.abortController.signal;
+    // every record the run appends anchors at the fork base — the command
+    // row itself is engine-volatile (a canceled /compact gets side-branched
+    // when re-issued); set before the first phase, cleared on every exit
+    const runAnchor = deps.beginRunAnchor();
+    if (runAnchor !== null) log(`compaction run anchor: ${runAnchor}`);
     try {
       // a prior owl summary row never rides the tail — the fresh summary
       // re-renders the same graph, so exactly one summary row exists at a time
       const keptTail = cut.kept.filter((m) => !isPriorSummaryRow(m, ownSummariesFor(deps.getGraphStore())));
       return await runGate(deps, log, { kept: keptTail, scope, handle, signal });
     } finally {
+      deps.endRunAnchor();
       handle.release();
     }
   } catch (cause) {

@@ -39,7 +39,15 @@ describe.skipIf(!existsSync(STORE_DIR))("gap replay — the verdict's adjudicati
     const fs = nodeAdapter();
     const mirror = new MirrorWriter(fs, STORE_DIR, "replay");
     const ledger = new LedgerWriter(fs, STORE_DIR, "replay");
-    const storage = { key: "replay", dir: STORE_DIR, fs, mirror, ledger, producerId: "replay" };
+    const storage = {
+      key: "replay",
+      dir: STORE_DIR,
+      fs,
+      mirror,
+      ledger,
+      producerId: "replay",
+      runAnchor: { current: null },
+    };
 
     // sweep the mirror to load rows into the writer's index
     const swept = await import("../../host/storage/mirror.js").then((m) => m.sweepMirror(fs, STORE_DIR));

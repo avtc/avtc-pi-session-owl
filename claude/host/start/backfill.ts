@@ -97,6 +97,9 @@ export interface BackfillOptions {
    *   collapses the duplicate mass; healthy stores never cross. Absent =
    *   the duplicates stay (disk cost only, never correctness). */
   compactMirror?: () => Promise<boolean>;
+  /** The conversation's shared compaction run anchor holder (both load
+   *  lanes append under it during a compaction run). */
+  runAnchor?: { current: string | null };
   /** Heal restated lineage storage through the process seam (see
    *  ledger-heal.ts); the fold inside this backfill detects and re-reads. */
   healLedger?: () => Promise<{ done: boolean; restatedEdges?: number; uniqueEdges?: number }>;
@@ -178,6 +181,9 @@ export interface LoadStoreOptions {
   compactMirror?: () => Promise<boolean>;
   /** The restated-lineage ledger heal seam. */
   healLedger?: () => Promise<{ done: boolean; restatedEdges?: number; uniqueEdges?: number }>;
+  /** The conversation's shared compaction run anchor holder (see
+   *  store-context's RunAnchorHolder). */
+  runAnchor?: { current: string | null };
 }
 
 /** The unified store load's outcome. */
@@ -251,6 +257,7 @@ export async function loadStoreState(
   mirror.reorderBy(conversationOrderKeyOf(mirror, sweep.uuidFile));
   const prepared = await prepareStoreContext(fs, dir, ledger, mirror, {
     ...(opts.healLedger !== undefined ? { healLedger: opts.healLedger } : {}),
+    ...(opts.runAnchor !== undefined ? { runAnchor: opts.runAnchor } : {}),
   });
   return { prepared, transcript, sweep, remirrored, forkAdopted, bootstrapBlocked };
 }
@@ -273,6 +280,7 @@ export async function runBackfill(
     ...(opts.bootstrapOverCap !== undefined ? { bootstrapOverCap: opts.bootstrapOverCap } : {}),
     ...(opts.compactMirror !== undefined ? { compactMirror: opts.compactMirror } : {}),
     ...(opts.healLedger !== undefined ? { healLedger: opts.healLedger } : {}),
+    ...(opts.runAnchor !== undefined ? { runAnchor: opts.runAnchor } : {}),
   });
   const { prepared, transcript, remirrored, bootstrapBlocked } = loaded;
   const handle = await getCore(opts.key, {

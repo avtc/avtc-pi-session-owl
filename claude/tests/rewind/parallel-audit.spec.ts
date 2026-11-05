@@ -55,7 +55,10 @@ describe("resolveLiveSet — parallel tool batches", () => {
       resultRow("r2", "a1", "pt2"), // the chain's result
       row("u2", "r2"),
     ]);
-    const live = await resolveLiveSet({ key: "main", dir: DIR, fs, mirror, ledger, producerId: "p1" }, "u2");
+    const live = await resolveLiveSet(
+      { key: "main", dir: DIR, fs, mirror, ledger, producerId: "p1", runAnchor: { current: null } },
+      "u2",
+    );
     expect(live).toContain("r1");
     expect(live).toContain("r2");
     expect(live).toContain("a1");
@@ -67,7 +70,10 @@ describe("resolveLiveSet — parallel tool batches", () => {
       resultRow("rDead", "u1", "ptX"), // passed by — the chain continued through u1
       row("u2", "u1"),
     ]);
-    const live = await resolveLiveSet({ key: "main", dir: DIR, fs, mirror, ledger, producerId: "p1" }, "u2");
+    const live = await resolveLiveSet(
+      { key: "main", dir: DIR, fs, mirror, ledger, producerId: "p1", runAnchor: { current: null } },
+      "u2",
+    );
     expect(live).not.toContain("rDead");
     expect(live).toContain("u2");
   });

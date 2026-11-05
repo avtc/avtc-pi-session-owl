@@ -869,6 +869,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
         warmGateArmed = true;
       }
       const bootResult = await runBackfill(storage.mirror, storage.ledger, {
+        runAnchor: storage.runAnchor,
         key: convKey,
         sessionId: e.session_id,
         agentId: null,

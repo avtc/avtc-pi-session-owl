@@ -23,7 +23,7 @@ function row(uuid: string, parentUuid: string | null, content: unknown[] = []): 
 async function makeStorage(key: string) {
   const ledger = new LedgerWriter(mem.adapter, DIR, "p1", () => 1);
   const mirror = new MirrorWriter(mem.adapter, DIR, "p1");
-  return { key, dir: DIR, fs: mem.adapter, mirror, ledger, producerId: "p1" };
+  return { key, dir: DIR, fs: mem.adapter, mirror, ledger, producerId: "p1", runAnchor: { current: null } };
 }
 
 beforeEach(() => {

@@ -74,6 +74,7 @@ import { serveStatusReport } from "../status/report.js";
 import { getSessionStorage } from "../storage/session-storage.js";
 import { newSnapshotId, persistSnapshotText } from "../storage/snapshot.js";
 import type { PreparedContext } from "../storage/store-context.js";
+import { compactionRunAnchorFrom } from "../storage/store-context.js";
 import {
   collectOwnSummariesFromBranch,
   normalizeSummaryText,
@@ -218,6 +219,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
       }
       const loaded = await loadStoreState(storage.mirror, storage.ledger, {
         sessionId,
+        runAnchor: storage.runAnchor,
         fs: storage.fs,
         transcriptPath: state.getCurrentTranscriptPath(),
         compactMirror: async () => {
@@ -696,6 +698,18 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         getSettings: settings,
         isPaused,
         rewindCheck: extras.rewindCheck,
+        // the run anchor: the fork base (the last content row before the
+        // command zone) — records appended during the gate anchor there, so
+        // a canceled + re-issued /compact (which side-branches the command
+        // row) never orphans the run's records
+        beginRunAnchor: () => {
+          const anchor = compactionRunAnchorFrom(storage.mirror.arrivalOrder(), (u) => storage.mirror.rowByUuid(u));
+          storage.runAnchor.current = anchor;
+          return anchor;
+        },
+        endRunAnchor: () => {
+          storage.runAnchor.current = null;
+        },
         // the ported kept-tail budget: a settings field, the port default until
         // the live read carries it
         keepRecentTokens:

@@ -137,6 +137,8 @@ function makeHarness(over: Partial<CompactionHookDeps> = {}): Harness {
     notify: (message2, level) => notifications.push({ message: message2, level }),
     log: (m) => logs.push(m),
     newCompactionId: () => "c-1",
+    beginRunAnchor: () => null,
+    endRunAnchor: () => {},
     ...over,
   };
   return {
@@ -176,6 +178,38 @@ beforeEach(() => {
 // --- the gate ----------------------------------------------------------------
 
 describe("compaction takeover — success path", () => {
+  test("the run anchor is set before the phases and cleared on every gate exit", async () => {
+    const anchorCalls: Array<string | null> = [];
+    const h = makeHarness({
+      beginRunAnchor: () => {
+        anchorCalls.push("begin");
+        return "row-before-compact";
+      },
+      endRunAnchor: () => anchorCalls.push("end"),
+    });
+    await compactionTakeover({ ...EVENT }, h.deps);
+    expect(anchorCalls[0]).toBe("begin");
+    expect(anchorCalls[anchorCalls.length - 1]).toBe("end");
+    expect(h.logs.some((l) => l.includes("compaction run anchor: row-before-compact"))).toBe(true);
+  });
+
+  test("a gate that throws still clears the run anchor (the finally)", async () => {
+    const anchorCalls: Array<string | null> = [];
+    const h = makeHarness({
+      beginRunAnchor: () => {
+        anchorCalls.push("begin");
+        return null;
+      },
+      endRunAnchor: () => anchorCalls.push("end"),
+    });
+    h.deps.runs.runObserver = async () => {
+      throw new Error("phase exploded");
+    };
+    const outcome = await compactionTakeover({ ...EVENT }, h.deps);
+    expect(outcome.kind).toBe("skip"); // the failure degraded to a skip, never a throw
+    expect(anchorCalls[anchorCalls.length - 1]).toBe("end");
+  });
+
   test("kept-tail thinking folds INTO the '# Memory' summary row (the only model-visible channel); the display echo shows the summary WITHOUT the section", async () => {
     recordMeasure("sess-c", { tokens: 50_000, window: 200_000 });
     const h = makeHarness();
@@ -934,6 +968,8 @@ describe("observerCatchUpGap — the on-file summary floor (walk from the tip)",
       getBranch: () => branch,
       getObserverFrontier: () => frontier,
       getGraphStore: () => store as never,
+      beginRunAnchor: () => null,
+      endRunAnchor: () => {},
     } as unknown as CompactionHookDeps;
   }
 

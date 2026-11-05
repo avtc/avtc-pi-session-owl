@@ -62,6 +62,61 @@ export { SESSION_MARKER_FILENAME } from "./session-marker.js";
 /** The row custom type the port's branch entries carry (inert to the fold). */
 export const ROW_TYPE = "session-owl.row";
 
+/** The compaction run's record anchor holder. Set for the duration of a
+ *  compaction run (the hook's begin/end seam): every non-observation record
+ *  appended while `current` is set anchors — liveness AND order — at that
+ *  row instead of the live tip. Shared across re-derived prepared contexts
+ *  (both load lanes construct their context over the SAME holder), so a
+ *  mid-run re-fold never drops the anchor. */
+export interface RunAnchorHolder {
+  current: string | null;
+}
+
+/** Whether a mirrored row belongs to the COMMAND ZONE: rows the engine
+ *  side-branches when a command is canceled and re-issued (the slash-command
+ *  echo, its caveat wrapper, the command-name/stdout wrappers) plus rows
+ *  with no recognizable message shape. A record anchored at one of these
+ *  dies with the command. Unrecognized shapes count as command zone — the
+ *  anchor walk then errs BACKWARD (an older, stable row), never forward. */
+export function isCommandZoneRow(m: MirroredRow): boolean {
+  const r = m.row as { message?: { isMeta?: unknown; content?: unknown }; door?: unknown } | null | undefined;
+  if (typeof r?.message !== "object" || r.message === null) return true;
+  if (r.message.isMeta === true) return true;
+  if (r.door === "command") return true;
+  const content = r.message.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? String(
+            (
+              content.find((p) => typeof p === "object" && p !== null && (p as { type?: unknown }).type === "text") as
+                | { text?: unknown }
+                | undefined
+            )?.text ?? "",
+          )
+        : "";
+  return text.startsWith("/") || text.startsWith("<command-") || text.startsWith("<local-command");
+}
+
+/** The run anchor for a mirror: the last NON-command-zone row in arrival
+ *  order — the fork base the engine re-bases the next command at, present on
+ *  every branch variant through it. Null when the mirror holds only
+ *  command-zone rows (degenerate) or is empty. */
+export function compactionRunAnchorFrom(
+  arrival: readonly string[],
+  rowOf: (uuid: string) => MirroredRow | undefined,
+): string | null {
+  for (let i = arrival.length - 1; i >= 0; i -= 1) {
+    const uuid = arrival[i];
+    if (uuid === undefined) continue;
+    const m = rowOf(uuid);
+    if (m === undefined) continue;
+    if (!isCommandZoneRow(m)) return uuid;
+  }
+  return null;
+}
+
 const KIND_TO_TYPE: Record<string, string> = {
   observation: OBSERVATION_TYPE,
   graph_delta: GRAPH_DELTA_TYPE,
@@ -206,6 +261,9 @@ export interface PreparedContext {
    *  counter) — liveness-resolved, so a rewind serves the older snapshot's
    *  value together with its graph. */
   resolvedSnapshot(): { details: unknown } | null;
+  /** The compaction run anchor holder this context appends under (shared
+   *  across re-derivations when the wiring passes one storage-level holder). */
+  runAnchor: RunAnchorHolder;
 }
 
 /**
@@ -227,9 +285,16 @@ export async function prepareStoreContext(
      *  files and a later load retries). Absent: restatements are tolerated
      *  in memory (the fold is last-wins either way) and only logged. */
     healLedger?: () => Promise<{ done: boolean; restatedEdges?: number; uniqueEdges?: number }>;
+    /** The compaction run anchor holder (marker + order for non-observation
+     *  appends while a run is in flight). Shared when the wiring passes the
+     *  storage-level holder — every re-derived context of the conversation
+     *  appends under the same anchor. Absent: this context anchors at the
+     *  live tip (the non-run behavior). */
+    runAnchor?: RunAnchorHolder;
   } = {},
 ): Promise<PreparedContext> {
   const isLive = opts.isLive ?? (() => true);
+  const runAnchor: RunAnchorHolder = opts.runAnchor ?? { current: null };
   let snapshot: { details: unknown; record: LedgerRecord } | null = null;
   let flushed: LedgerRecord[] = [];
   let droppedCount = 0;
@@ -403,8 +468,12 @@ export async function prepareStoreContext(
         const p = payloadOf(data);
         log.info(`append Δ store=${dir.slice(-14)} ops=${p}`);
       }
-      // every other record rides the position it was written at: the live tip
-      ledger.append(kind as LedgerRecord["kind"], data, mirror.tipUuid() ?? "seed");
+      // every other record anchors at the compaction run's anchor while a
+      // run is in flight (the fork base — the last content row before the
+      // command zone, immune to command cancel/re-issue side-branching),
+      // else at the live tip
+      const anchor = runAnchor.current ?? mirror.tipUuid() ?? "seed";
+      ledger.append(kind as LedgerRecord["kind"], data, anchor);
     },
     getLeafId(): string | null {
       return mirror.tipUuid();
@@ -448,6 +517,7 @@ export async function prepareStoreContext(
       },
     },
     isMarkerLive: (uuid: string) => lastBranchSet.has(uuid),
+    runAnchor,
     lastBranch: () => lastBranch,
     setLiveBranch: (uuids: readonly string[] | null, dead?: ReadonlySet<string>) => {
       liveBranchOverride = uuids === null ? null : [...uuids];
