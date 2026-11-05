@@ -468,12 +468,18 @@ export async function prepareStoreContext(
         const p = payloadOf(data);
         log.info(`append Δ store=${dir.slice(-14)} ops=${p}`);
       }
-      // every other record anchors at the compaction run's anchor while a
-      // run is in flight (the fork base — the last content row before the
-      // command zone, immune to command cancel/re-issue side-branching),
-      // else at the live tip
-      const anchor = runAnchor.current ?? mirror.tipUuid() ?? "seed";
-      ledger.append(kind as LedgerRecord["kind"], data, anchor);
+      // every other record's LIVENESS rides the compaction run's anchor
+      // while a run is in flight (the fork base — the last content row
+      // before the command zone, immune to command cancel/re-issue
+      // side-branching); its ORDER keeps the write tip — the run's records
+      // then interleave at their true write position, and when the tip row
+      // goes off-branch they RIDE the fold's tail in write order (ts,
+      // producer, seq), after everything they could depend on. Anchoring
+      // order at the fork base instead would apply run records BEFORE the
+      // late-riding records their mutations target.
+      const marker = runAnchor.current ?? mirror.tipUuid() ?? "seed";
+      const at = mirror.tipUuid() ?? marker;
+      ledger.append(kind as LedgerRecord["kind"], data, marker, at);
     },
     getLeafId(): string | null {
       return mirror.tipUuid();

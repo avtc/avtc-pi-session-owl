@@ -594,21 +594,20 @@ describe("observation batch refs (the ids-drill shortcut)", () => {
 // a command is canceled and re-issued, and a record anchored at one dies
 // with it. Observation records keep their covered-range anchor.
 describe("store-context — the compaction run anchor", () => {
-  test("with the anchor set, non-observation records carry it as BOTH marker and order row", async () => {
-    const { ledger, mirror, prepared } = await setup();
+  test("with the anchor set, non-observation records carry it as marker; ORDER keeps the write tip", async () => {
+    const { ledger, mirror } = await setup();
     const content = row("u-content", "the last real message");
     const echo = row("u-compact", "/compact");
     mirror.bufferRow(content);
     mirror.bufferRow(echo);
     await ledger.flush();
-    mirror.bufferRow(echo); // keep the tip at the command echo
     const runAnchor = { current: "u-content" as string | null };
     const anchored = await prepareStoreContext(fs, DIR, ledger, mirror, { runAnchor });
     anchored.ctx.appendEntry(GRAPH_DELTA_TYPE, { op: "create_node", id: "n1" });
     await ledger.flush();
     const delta = ledger.liveRecords().find((r) => r.kind === "graph_delta");
-    expect(delta?.marker).toBe("u-content");
-    expect(delta?.at).toBe("u-content");
+    expect(delta?.marker).toBe("u-content"); // liveness — the fork base
+    expect(delta?.at).toBe("u-compact"); // order — the write tip (rides when off-branch)
   });
 
   test("observation records keep the covered-range marker under the run anchor", async () => {
@@ -643,6 +642,7 @@ describe("store-context — the compaction run anchor", () => {
   test("the holder is shared: a re-derived context over the same holder honors the anchor", async () => {
     const { ledger, mirror } = await setup();
     mirror.bufferRow(row("u1", "one"));
+    mirror.bufferRow(row("u2", "two"));
     await ledger.flush();
     const runAnchor = { current: "u1" as string | null };
     const first = await prepareStoreContext(fs, DIR, ledger, mirror, { runAnchor });
@@ -651,7 +651,7 @@ describe("store-context — the compaction run anchor", () => {
     await ledger.flush();
     const delta = ledger.liveRecords().find((r) => r.kind === "graph_delta");
     expect(delta?.marker).toBe("u1");
-    expect(delta?.at).toBe("u1");
+    expect(delta?.at).toBe("u2");
     void first;
   });
 });
