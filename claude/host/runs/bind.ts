@@ -479,7 +479,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         // idle line for the whole session: the memoized load settles later,
         // and the re-prime lands with the loaded counts
         if (err instanceof StoreLoadingError) {
-          void preparedCtx()
+          void pinCore()
             .then(() => {
               requestIdleRefresh();
               try {
