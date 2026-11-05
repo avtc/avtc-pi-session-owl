@@ -304,7 +304,20 @@ async function registerSurfaces($: any): Promise<void> {
   );
   await serveQueue(
     "stage agents",
-    () => state.pendingAgentSpecs(stageAgentSpecs({ ...getStagePrompts(), settings: noStageModelSettings() })),
+    () =>
+      state.pendingAgentSpecs(
+        stageAgentSpecs({
+          ...getStagePrompts(),
+          // The settings consumer may already be installed by the time this
+          // queue serves (the classic start resolves settings before the
+          // surfaces register) — then the resolved model/effort slice is
+          // what registers, never the empty fallback over it.
+          settings: {
+            ...noStageModelSettings(),
+            ...pickStageSettings(getInstalledSettingsHandle()),
+          },
+        }),
+      ),
     (spec) => $.agent.register(spec),
     state.reopenAgentRegistrationGate,
   );
