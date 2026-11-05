@@ -1854,6 +1854,28 @@ async function onSessionCompact(_$: any, e: AnyEvent, next: Next) {
     rewindCheck: compactAgentId === null ? () => liveChainFlush(_$, compactSessionId) : async () => {},
   });
   const compactSignal = next && typeof next.signal === "object" && next.signal !== null ? next.signal : undefined;
+  // The dispatch's own signal is the user-cancel wire: the engine aborts
+  // it when the person interrupts the compaction. The listener unwinds the
+  // conversation's stages directly at the signal, idempotent with the
+  // race's cancel wire below — whichever sees the abort first kills the
+  // stages, the second is a no-op.
+  log.info(
+    `compact dispatch signal: ${compactSignal === undefined ? "absent" : compactSignal.aborted ? "pre-aborted" : "live"}`,
+  );
+  if (compactSignal !== undefined && !compactSignal.aborted) {
+    compactSignal.addEventListener(
+      "abort",
+      () => {
+        log.info("compact dispatch signal ABORTED — unwinding the conversation's stages");
+        try {
+          abortActiveFor(gateDeps.key);
+        } catch (err) {
+          log.warn(`compact signal unwind failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      },
+      { once: true },
+    );
+  }
   const outcome = await raceTakeoverWithSignal(
     compactionTakeover(
       e as unknown as CompactEvent,
