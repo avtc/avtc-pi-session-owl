@@ -7,8 +7,14 @@
 import { describe, expect, test } from "vitest";
 import { estimateContentTokens } from "../../core/src/types.js";
 import * as bridge from "../../host/engine-bridge.js";
-import { StageModelError, StageRunError } from "../../host/runs/stage-errors.js";
-import { clearAllStageRuns, enableStageDumpArchive, getStageRun, takeStageDump } from "../../host/stage/runs.js";
+import { StageContextLimitError, StageModelError, StageRunError } from "../../host/runs/stage-errors.js";
+import {
+  clearAllStageRuns,
+  enableStageDumpArchive,
+  getStageRun,
+  markContextBudgetHit,
+  takeStageDump,
+} from "../../host/stage/runs.js";
 import { completionUsageOf } from "../../host/stage/usage.js";
 import {
   type EngineStageRunInput,
@@ -462,6 +468,25 @@ describe("runStage — failure surfaces", () => {
     await expect(p).rejects.toThrow("stage engine failure (error)");
     await expect(p).rejects.toBeInstanceOf(StageModelError); // typed so callers classify skip-and-notify
     expect(getStageRun("ag-err")).toBeUndefined(); // torn down despite the throw
+  });
+
+  test("an error completion on a context-budget-marked run throws the boundary class (the marker rides the error — the run state is torn down before the caller classifies)", async () => {
+    clearAllStageRuns();
+    bridge.clearRouting();
+    arm(async () => ({ model: "m", agentId: "ag-ctx" }));
+    const p = runStage(baseInput());
+    await settle();
+    markContextBudgetHit("ag-ctx");
+    bridge.routeAgentCompletion({
+      answer: "Context limit reached · /compact or /clear to continue",
+      isAborted: false,
+      agentId: "ag-ctx",
+      usage: null,
+      reason: "error",
+    });
+    await expect(p).rejects.toBeInstanceOf(StageContextLimitError);
+    await expect(p).rejects.toBeInstanceOf(StageModelError); // still a model-error shape for the fatal lanes
+    expect(getStageRun("ag-ctx")).toBeUndefined(); // torn down despite the throw
   });
 
   test("session.end resolves a still-awaiting gate as aborted (no hang)", async () => {

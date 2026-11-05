@@ -43,3 +43,16 @@ export class StageModelError extends Error {
     this.modelErrorMessage = detail || null;
   }
 }
+
+/** A model-side terminal that is the conversation's context-budget boundary:
+ * the run's auto-compact was vetoed and the engine refused the next request
+ * for length. The marker rides the error object because the run state is
+ * torn down before the pass loops classify the throw — this class IS the
+ * boundary verdict (partial work kept, the next pass spawns fresh); it
+ * stays a StageModelError so the fatal lanes' instanceof checks hold. */
+export class StageContextLimitError extends StageModelError {
+  constructor(modelErrorMessage: string | null) {
+    super(modelErrorMessage);
+    this.name = "StageContextLimitError";
+  }
+}

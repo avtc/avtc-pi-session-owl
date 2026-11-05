@@ -13,7 +13,8 @@ import { noteCompactionCount } from "../../host/compaction/hook.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { runBuilder } from "../../host/runs/builder.js";
 import { NO_OP_WIDGET } from "../../host/runs/seams.js";
-import { clearAllStageRuns } from "../../host/stage/runs.js";
+import { StageContextLimitError, StageModelError } from "../../host/runs/stage-errors.js";
+import { clearAllStageRuns, markContextBudgetHit } from "../../host/stage/runs.js";
 import {
   branchCustoms,
   entries,
@@ -26,8 +27,6 @@ import {
   seedNode,
   useTool,
 } from "./helpers.js";
-import { StageModelError } from "../../host/runs/stage-errors.js";
-import { markContextBudgetHit } from "../../host/stage/runs.js";
 
 const B_SETTINGS: SessionOwlConfig = {
   ...SETTINGS,
@@ -175,7 +174,7 @@ describe("runBuilder — the machinery context-limit pass boundary", () => {
     const fx = await run(rig, B_SETTINGS, [
       async (_i: unknown, ag: string) => {
         await useTool(ag, "mkdir", { summary: "ctx-shape node", importance: "med" });
-        throw new StageModelError("Conversation too long. Press esc twice to go up a few messages and try again.");
+        throw new StageModelError("Context limit reached. Press esc twice to go up a few messages and try again.");
       },
       finish,
     ]);
@@ -183,6 +182,21 @@ describe("runBuilder — the machinery context-limit pass boundary", () => {
     const graph = rig.core.store.getGraphStore().graph;
     const summaries = [...graph.nodes.values()].map((n) => String((n as { summary?: unknown }).summary ?? ""));
     expect(summaries.some((summary) => summary.includes("ctx-shape node"))).toBe(true);
+  });
+
+  test("a pass that throws the boundary CLASS (the marker riding the error object) is a pass boundary", async () => {
+    const rig = await rigUp("b-ctx-6", entries(4));
+    const fx = await run(rig, B_SETTINGS, [
+      async (_i: unknown, ag: string) => {
+        await useTool(ag, "mkdir", { summary: "ctx-class node", importance: "med" });
+        throw new StageContextLimitError("stage engine failure (error): Context limit reached");
+      },
+      finish,
+    ]);
+    expect(fx.calls.length).toBe(2);
+    const graph = rig.core.store.getGraphStore().graph;
+    const summaries = [...graph.nodes.values()].map((n) => String((n as { summary?: unknown }).summary ?? ""));
+    expect(summaries.some((summary) => summary.includes("ctx-class node"))).toBe(true);
   });
 
   test("any OTHER model-error throw stays fatal (the run rejects)", async () => {

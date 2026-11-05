@@ -22,9 +22,9 @@ import { log } from "../../core/src/log.js";
 import type { StageRunResultLike } from "../../shims/pi-agent-core/index.js";
 import type { CoreHandle } from "../core-instances.js";
 import type { NotifyLevel } from "../notify/adapter.js";
-import { noteAccepted, getStageRun } from "../stage/runs.js";
-import { StageModelError } from "./stage-errors.js";
+import { getStageRun, noteAccepted } from "../stage/runs.js";
 import type { StageToolExecutor } from "../stage/tools.js";
+import { StageContextLimitError, StageModelError } from "./stage-errors.js";
 
 const TRY_FINISH_TOOL = "try_finish";
 
@@ -224,13 +224,14 @@ export function isTimeoutClass(result: StageRunResultLike, signal: AbortSignal):
  * terminal whose text names the conversation/context limit). Such a pass
  * keeps its collected work; the loop continues with a fresh conversation. */
 export function isContextLimitClass(err: unknown, agentId: string | null | undefined): boolean {
+  if (err instanceof StageContextLimitError) return true;
   if (typeof agentId === "string") {
     const run = getStageRun(agentId);
     if (run !== undefined && run.abortReason === "context-limit") return true;
   }
   if (err instanceof StageModelError) {
     const detail = (err.modelErrorMessage ?? "").toLowerCase();
-    return /(conversation too long|context length|context window|maximum context|context_length_exceeded|too long)/.test(
+    return /(conversation too long|context limit|context length|context window|maximum context|context_length_exceeded|too long)/.test(
       detail,
     );
   }

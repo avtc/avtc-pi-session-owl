@@ -361,7 +361,13 @@ export async function runStage(input: EngineStageRunInput): Promise<StageRunResu
       // An engine-side failure (API error, a refused turn): the pi
       // StageModelError path — propagate (typed) so the run module's caller
       // classifies skip-and-notify (the finally still tears the run down).
-      throw new StageModelError(`stage engine failure (${completion.reason}): ${completion.answer.slice(0, 200)}`);
+      // A context-budget-marked run (its auto-compact was vetoed) throws the
+      // boundary class: the marker must ride the error because the finally
+      // below tears the run state down before the caller classifies.
+      const ctxBudget = getStageRun(agentId)?.abortReason === "context-limit";
+      throw new (ctxBudget ? StageContextLimitError : StageModelError)(
+        `stage engine failure (${completion.reason}): ${completion.answer.slice(0, 200)}`,
+      );
     }
     const rates = input.modelRates?.(completion.usage?.model ?? "") ?? null;
     usageAccum = {
@@ -409,6 +415,6 @@ export async function runStage(input: EngineStageRunInput): Promise<StageRunResu
 // Relative, closure-clean collaborators (the bridge + the run-state home +
 // the dump call-sites — all import-free host modules).
 import * as bridgeModule from "../../host/engine-bridge.js";
-import { StageModelError, StageRunError } from "../../host/runs/stage-errors.js";
+import { StageContextLimitError, StageModelError, StageRunError } from "../../host/runs/stage-errors.js";
 import { markFabricatedStop } from "../../host/stage/dumps.js";
 import { abortRun, completeStageRun, createStageRun, getStageRun } from "../../host/stage/runs.js";
