@@ -722,25 +722,27 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
           // the session's model and effort forever
           restageAgents: () => {
             log.info("stage agents: re-registering over the resolved settings (model/effort knobs)");
+            // The deliberate re-registration bypasses the one-shot init gate:
+            // the init consumed it at boot, and serveQueue on an empty gate
+            // would silently register nothing — the flip's values must
+            // always reach the engine's agent types.
             void serveQueue(
               "stage agents (settings)",
               () =>
-                state.pendingAgentSpecs(
-                  stageAgentSpecs({
-                    ...getStagePrompts(),
-                    settings: {
-                      defaultModel: null,
-                      defaultThinkingLevel: null,
-                      observerModel: null,
-                      observerThinkingLevel: null,
-                      builderModel: null,
-                      builderThinkingLevel: null,
-                      selectorModel: null,
-                      selectorThinkingLevel: null,
-                      ...pickStageSettings(getInstalledSettingsHandle()),
-                    },
-                  }),
-                ),
+                stageAgentSpecs({
+                  ...getStagePrompts(),
+                  settings: {
+                    defaultModel: null,
+                    defaultThinkingLevel: null,
+                    observerModel: null,
+                    observerThinkingLevel: null,
+                    builderModel: null,
+                    builderThinkingLevel: null,
+                    selectorModel: null,
+                    selectorThinkingLevel: null,
+                    ...pickStageSettings(getInstalledSettingsHandle()),
+                  },
+                }),
               (spec) => bridge.currentServices().agentRegister(spec),
               state.reopenAgentRegistrationGate,
             ).catch((err: unknown) => {

@@ -29,7 +29,10 @@ describe("stage wiring — registration + hooks", () => {
       expect(names).toContain(short);
     }
     const agents = h.agents.registered.map((a: any) => String(a.name));
-    expect(agents).toEqual(["observer", "builder", "selector"]);
+    // boot registration + the settings consumer's init re-registration over
+    // the resolved settings (the per-stage model/effort knobs reach the
+    // types only through it)
+    expect(agents).toEqual(["observer", "builder", "selector", "observer", "builder", "selector"]);
     const observer = h.agents.registered.find((a: any) => a.name === "observer") as Record<string, unknown>;
     expect("maxTurns" in observer).toBe(false); // pi parity — no turn cap on any stage agent
     expect(observer.omitClaudeMd).toBe(true);
@@ -51,7 +54,7 @@ describe("stage wiring — registration + hooks", () => {
     });
     await h.dispatch("session.start", { cwd: "/w", surface: null, isInteractive: false });
     expect(h.tools.registered).toHaveLength(14); // owl_recall + stage_launched + await_stage + 11 stage tools (incl. the conditional todo_list), no doubles
-    expect(h.agents.registered).toHaveLength(3);
+    expect(h.agents.registered).toHaveLength(6); // the first start's boot + settings re-registration; the second start adds none
   });
 
   test("agent.offer hides the three namespaced stage types only", async () => {
