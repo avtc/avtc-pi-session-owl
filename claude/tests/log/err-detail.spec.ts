@@ -66,18 +66,17 @@ describe("sayError — the one error transport (file log + user-visible ui.log, 
     expect(warned).toEqual(["session-owl: pane keybindings: Error: boom"]); // the file log keeps its own prefix
   });
 
-  test("with NO bridge armed the console is the last resort", () => {
+  test("with NO bridge armed the file log is the carrier", () => {
     bridge.clearRouting();
     bridge._disarmForTest(); // services = null: the module-load/pre-arm window
-    const consoled: string[] = [];
-    const orig = console.error;
-    console.error = (...a: unknown[]) => consoled.push(String(a[0]));
+    const warned: string[] = [];
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation((t: string) => warned.push(t));
     try {
       sayError("early-boot boom");
     } finally {
-      console.error = orig;
+      warnSpy.mockRestore();
     }
-    expect(consoled).toEqual(["early-boot boom"]);
+    expect(warned).toEqual(["early-boot boom"]);
   });
 });
 

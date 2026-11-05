@@ -124,6 +124,34 @@ describe("runBuilder — unit-commit flush", () => {
   });
 });
 
+describe("runBuilder — the machinery context-limit pass boundary", () => {
+  test("a pass ended by the relay's context-limit abort keeps its mutates; the loop runs the next pass", async () => {
+    const rig = await rigUp("b-ctx-1", entries(4));
+    const fx = await run(rig, B_SETTINGS, [
+      async (_i: unknown, ag: string) => {
+        await useTool(ag, "mkdir", { summary: "ctx-limit node", importance: "med" });
+        return { aborted: true, abortReason: "context-limit" } as never;
+      },
+      finish,
+    ]);
+    // pass 1 ended at its context budget (not converged, not a timeout, with
+    // a mutate) -> the loop advanced; pass 2 converged and ended the run
+    expect(fx.calls.length).toBe(2);
+    const graph = rig.core.store.getGraphStore().graph;
+    const summaries = [...graph.nodes.values()].map((n) => String((n as { summary?: unknown }).summary ?? ""));
+    expect(summaries.some((summary) => summary.includes("ctx-limit node"))).toBe(true);
+  });
+
+  test("a context-limit abort with ZERO mutates stops the run (the no-op rule)", async () => {
+    const rig = await rigUp("b-ctx-2", entries(4));
+    const fx = await run(rig, B_SETTINGS, [
+      async () => ({ aborted: true, abortReason: "context-limit" }) as never,
+      finish,
+    ]);
+    expect(fx.calls.length).toBe(1); // no-op pass -> the loop broke before pass 2
+  });
+});
+
 describe("runBuilder — fast-path (compaction scope only)", () => {
   test("the footer count is owl's compaction generation on the store view (never the branch rows)", async () => {
     const rig = await rigUp("b-ccount", entries(2));

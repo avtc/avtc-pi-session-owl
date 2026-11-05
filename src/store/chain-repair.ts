@@ -164,8 +164,9 @@ function metaFor(line: string, lineStart: number): LineMeta {
         meta.parentIdValueLength = Buffer.byteLength(entry.parentId, "utf8");
       }
     }
-  } catch {
+  } catch (err) {
     // malformed lines contribute nothing (same tolerance as the host loader)
+    log.info(`chain repair: malformed transcript line skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
   return meta;
 }

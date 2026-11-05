@@ -55,7 +55,7 @@ export function makeGoalCompleter(opts: {
   getModel: () => string | null;
   log?: (message: string) => void;
 }): (input: GoalCompleterInput) => Promise<string> {
-  const log = opts.log ?? ((message: string) => console.error(message));
+  const log = opts.log ?? ((message: string) => fileLog.warn(message));
   return async (input) => {
     const model = opts.getModel();
     if (model === null) {

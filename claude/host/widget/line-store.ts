@@ -44,11 +44,19 @@ export function setIdleProvider(fn: (() => readonly StoredSegment[] | null) | nu
   idleProvider = fn;
 }
 
+/** Where the idle line's provider failure is said (set by the composer —
+ *  this module imports nothing by design). */
+let idleLineErrorSink: ((err: unknown) => void) | null = null;
+export function setIdleLineErrorSink(sink: ((err: unknown) => void) | null): void {
+  idleLineErrorSink = sink;
+}
+
 /** The idle line's painted spans (null when no bridge registered). */
 export function idleSegments(): readonly StoredSegment[] | null {
   try {
     return idleProvider?.() ?? null;
-  } catch {
+  } catch (err) {
+    if (idleLineErrorSink !== null) idleLineErrorSink(err);
     return null;
   }
 }

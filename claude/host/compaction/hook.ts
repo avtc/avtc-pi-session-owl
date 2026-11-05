@@ -28,6 +28,7 @@ import type { SessionOwlConfig } from "../../core/src/config/schema.js";
 import { isRenderableEntry } from "../../core/src/format/chunk.js";
 import { assertGraphStructure } from "../../core/src/graph/mutations.js";
 import { measureRootViewTokens } from "../../core/src/graph/read-tools.js";
+import { log as fileLog } from "../../core/src/log.js";
 import { sinceLastCompaction, snapshotAtCompaction } from "../../core/src/status/usage-ledger.js";
 import { cloneLedger, encodeDetails } from "../../core/src/store/codecs.js";
 import type { GraphStore } from "../../core/src/store/graph-store.js";
@@ -148,7 +149,7 @@ const COMPACT_EVENT_ENTRY_TYPES = new Set(["message", "custom_message"]);
 /** The run hook: the session.compact takeover. Never throws. */
 export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDeps): Promise<TakeoverOutcome> {
   // the default is the informational channel — the wiring supplies the real log seam
-  const log = deps.log ?? ((message: string) => console.log(message));
+  const log = deps.log ?? ((message: string) => fileLog.info(message));
   try {
     // (1) the live pause predicate gates at entry (conflict self-restraint)
     if (deps.isPaused()) return { kind: "pass" };
@@ -205,7 +206,7 @@ export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDe
       // the session stays uncompacted (a skip answer never falls back to the
       // engine's own compaction); the reason is surfaced as the skip notice
       const notice = `session-owl: model unavailable during compaction capture (${reason}) — compaction skipped; fix the model and run /compact again`;
-      (deps.log ?? ((m: string) => console.log(m)))(notice);
+      (deps.log ?? ((m: string) => fileLog.info(m)))(notice);
       return { kind: "skip", result: { skip: notice } };
     }
     return skipFailed(deps, reason);
@@ -464,7 +465,7 @@ export function observerCatchUpGap(deps: CompactionHookDeps, firstKeptEntryId: s
   const fileFloor = ownCompactionFloorIndex(compactedBlock);
   const floor = Math.max(recordedFloor, fileFloor);
   if (floor > recordedFloor) {
-    (deps.log ?? ((m: string) => console.log(m)))(
+    (deps.log ?? ((m: string) => fileLog.info(m)))(
       `catch-up floor: on-file own summary at index ${String(floor)} bounds the scope (no recorded match)`,
     );
   }
@@ -488,7 +489,7 @@ export function observerCatchUpGap(deps: CompactionHookDeps, firstKeptEntryId: s
     ownSummaryIds: summaryIds,
     segmentStartsAtBranchHead: floor === -1,
   });
-  if (heal.note !== null) (deps.log ?? ((m: string) => console.log(m)))(`compaction: ${heal.note}`);
+  if (heal.note !== null) (deps.log ?? ((m: string) => fileLog.info(m)))(`compaction: ${heal.note}`);
   return heal.unobserved.filter(isRenderableEntry);
 }
 

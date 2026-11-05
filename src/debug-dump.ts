@@ -22,6 +22,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { log } from "./log.js";
 
 /** "Dumps disabled" sentinel — the null dump path (every append no-ops). */
 export const NO_DUMP: string | null = null;
@@ -102,8 +103,9 @@ function pruneStageDumps(dir: string, stage: string, limit: number): void {
     if (!oldest) break;
     try {
       fs.unlinkSync(oldest);
-    } catch {
-      /* best-effort */
+    } catch (err) {
+      /* best-effort prune */
+      log.info(`dump prune failed (${oldest}): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }
@@ -122,8 +124,9 @@ export function appendDump(dumpPath: string | null, content: string): void {
       pruneStageDumps(pending.dir, pending.stage, pending.limit);
     }
     fs.appendFileSync(dumpPath, content);
-  } catch {
+  } catch (err) {
     // best-effort — dumping must not break the stage run
+    log.info(`dump append failed (${dumpPath}): ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

@@ -465,15 +465,33 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         requestIdleRefresh();
         try {
           services().uiInvalidate();
-        } catch {
+        } catch (err) {
           /* the bridge un-armed or the call is out of frame — the pending
            *  flag rides the next in-frame render dispatch instead */
+          log.info(`widget invalidate skipped (bridge un-armed / out of frame): ${errText(err)}`);
         }
       })
       .catch((err: unknown) => {
         // the fold's own failure reporting covers the storage side; this
         // names the priming loss where it was seen (the bare mark staying)
         log.warn(`widget: idle priming failed: ${errText(err)}`);
+        // a priming that raced the still-loading store must not lose the
+        // idle line for the whole session: the memoized load settles later,
+        // and the re-prime lands with the loaded counts
+        if (err instanceof StoreLoadingError) {
+          void preparedCtx()
+            .then(() => {
+              requestIdleRefresh();
+              try {
+                services().uiInvalidate();
+              } catch {
+                /* the next in-frame render dispatch carries the flag */
+              }
+            })
+            .catch((retryErr: unknown) => {
+              log.warn(`widget: idle re-priming failed: ${errText(retryErr)}`);
+            });
+        }
       });
   }
 

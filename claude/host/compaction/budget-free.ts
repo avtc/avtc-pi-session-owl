@@ -16,6 +16,7 @@
 // for sdk-type servers; the plugin $.tool.call schema carries no timeout
 // parameter at all). A failed dispatch falls back to running the work
 // inline — the budget risk returns, but the takeover is never broken.
+import { log } from "../../core/src/log.js";
 import type { CompactionHookDeps } from "./hook.js";
 
 /** The engine-facing tool name (the server prefix the dispatcher adds). */
@@ -166,8 +167,9 @@ export async function raceTakeoverWithSignal<T extends { kind: string }>(
       settled = true;
       try {
         onCancel(key);
-      } catch {
+      } catch (err) {
         // the cancel wire is best-effort — the hook MUST return regardless
+        log.warn(`compaction cancel wire failed for ${key}: ${err instanceof Error ? err.message : String(err)}`);
       }
       resolve({ kind: "pass" });
     };

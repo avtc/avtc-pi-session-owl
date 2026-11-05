@@ -236,8 +236,8 @@ function logSettingsLoad(kind: "first-load" | "reload", cwd: string): void {
     // said: sayError retries both transports, console only when both refuse
     try {
       sayError(`session-owl: settings-load diagnostics failed: ${errDetail(err)}`);
-    } catch {
-      // nothing exists to say it with
+    } catch (sayErr) {
+      log.info(`settings diagnostics failed AND the error transport refused: ${errDetail(sayErr)}`);
     }
   }
 }

@@ -12,6 +12,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { DEFAULT_CONFIG, type SessionOwlConfig } from "../../core/src/config/schema.js";
 import { clearDetailsCache } from "../../core/src/format/details.js";
+import { log } from "../../core/src/log.js";
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { resetRunsLogSink } from "../../host/runs/seams.js";
@@ -97,7 +98,7 @@ describe("settle-rearm — a skip no longer drops its evaluation", () => {
   });
 
   test("the re-entry re-reads the launch guard — a declined guard never launches", async () => {
-    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
     const deps = makeDeps({ launchGuard: () => false });
     const held = acquireOrSkip(deps.key, "observe");
     await evaluateAndLaunch(deps, false);
@@ -112,7 +113,7 @@ describe("settle-rearm — a skip no longer drops its evaluation", () => {
   });
 
   test("an ABORTED run's release drops the pending rearm (the takeover owns the next evaluation)", async () => {
-    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
     const deps = makeDeps();
     const held = acquireOrSkip(deps.key, "observe");
     await evaluateAndLaunch(deps, false);

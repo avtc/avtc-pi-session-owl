@@ -192,7 +192,7 @@ describe("the settings consumer — gate flips", () => {
 
   test("a failing toolRegister never becomes an unhandled rejection (logged degrade)", async () => {
     resetState(); // fresh-process semantics (the beforeEach already cleared the recall once-flag)
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
     try {
       const c = await makeConsumer({
         files: { [GLOBAL_PATH]: JSON.stringify({ enabled: false }) },

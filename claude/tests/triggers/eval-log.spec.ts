@@ -7,8 +7,9 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 // stage that never fires (or a starved chain) is diagnosable from the
 // production log — runsLog routes through the installed sink (the register
 // installs the file logger; the default stays console.error).
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { DEFAULT_CONFIG, type SessionOwlConfig } from "../../core/src/config/schema.js";
+import { log } from "../../core/src/log.js";
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { installRunsLogSink, resetRunsLogSink, runsLog } from "../../host/runs/seams.js";
@@ -108,18 +109,17 @@ describe("evaluateAndLaunch — the decision line", () => {
 });
 
 describe("the runsLog sink contract", () => {
-  test("reset under the default console.error sink (no register swap leaked)", () => {
+  test("reset under the default logger sink (no register swap leaked)", () => {
     resetRunsLogSink();
-    const orig = console.error;
-    const captured: unknown[][] = [];
-    console.error = (...a: unknown[]) => captured.push(a);
+    const warned: string[] = [];
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation((t: string) => warned.push(t));
     try {
       runsLog("default-sink-line");
     } finally {
-      console.error = orig;
+      warnSpy.mockRestore();
     }
-    expect(captured.length).toBe(1);
-    expect(String(captured[0][0])).toContain("default-sink-line");
+    expect(warned.length).toBe(1);
+    expect(warned[0]).toContain("default-sink-line");
     installRunsLogSink(pushSink); // leave a known sink for the next file
   });
 });

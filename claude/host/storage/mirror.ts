@@ -371,7 +371,7 @@ export class MirrorWriter {
           // the rare boundary case: part-files + a reassembly line. A failure
           // after part-writes orphans them (inert garbage until the prune —
           // the retry re-encodes under a NEW seq, never colliding).
-          console.warn(`session-owl: mirror row ${row.uuid} exceeds the split budget — stored as part files`);
+          log.warn(`session-owl: mirror row ${row.uuid} exceeds the split budget — stored as part files`);
           this.oversizedRows += 1;
           const prefix = `m${this.seq}-${p8}.r${rowIdx}`;
           const parts = sliceToByteParts(plain, ROLL_MARGIN);

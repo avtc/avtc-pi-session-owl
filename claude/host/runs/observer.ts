@@ -314,7 +314,7 @@ function notOwnSyntheticRow(entry: SessionEntry): boolean {
 }
 
 export async function runObserver(input: ObserverRunInput): Promise<void> {
-  const notify = input.notify ?? loggerNotify(console.error);
+  const notify = input.notify ?? loggerNotify(log.warn);
   const isEnabled = input.isEnabled ?? (() => true);
   if (input.signal.aborted) return;
   if (input.unobserved.length === EMPTY_GAP) return;
@@ -419,8 +419,8 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
                 // when both refuse), message + stack
                 try {
                   sayError(`session-owl: diagnostics failed: ${errDetail(err)}`);
-                } catch {
-                  // nothing exists to say it with
+                } catch (sayErr) {
+                  log.info(`observer diagnostics failed AND the error transport refused: ${errDetail(sayErr)}`);
                 }
               }
               return answer;
@@ -515,8 +515,8 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         // said: sayError retries both transports, console only when both refuse
         try {
           sayError(`session-owl: diagnostics failed: ${errDetail(err)}`);
-        } catch {
-          // nothing exists to say it with
+        } catch (sayErr) {
+          log.info(`observer diagnostics failed AND the error transport refused: ${errDetail(sayErr)}`);
         }
       }
       if (records.length > EMPTY_RECORDS) {

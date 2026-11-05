@@ -142,6 +142,7 @@ export class LedgerWriter {
    *  pass). The buffer is consumed per written part, so a mid-flush write
    *  failure retries without duplicating the already-written prefix. */
   flush(): Promise<string[]> {
+    if (this.buffer.length > 0) log.info(`ledger flush: releasing ${this.buffer.length} buffered record(s)`);
     if (this.queuedFlush !== null) return this.queuedFlush;
     if (this.activeFlush !== null) {
       const queued = this.activeFlush.then(
@@ -174,7 +175,7 @@ export class LedgerWriter {
     const pending: string[] = [];
     for (const line of this.buffer) {
       if (byteLength(line) + 1 > ROLL_MARGIN) {
-        console.warn(`session-owl: ledger record exceeds the split budget (${byteLength(line)} bytes) — skipped`);
+        log.warn(`session-owl: ledger record exceeds the split budget (${byteLength(line)} bytes) — skipped`);
         this.skippedOversized += 1;
         continue;
       }

@@ -203,6 +203,42 @@ describe("runObserver — the stage dump", () => {
   });
 });
 
+describe("runObserver — the machinery context-limit chunk boundary", () => {
+  test("a chunk whose agent hit its context budget ends THAT pass; the run continues and the chunk's records persist", async () => {
+    const unobserved = entries(9);
+    const r = await rigUp("s-ctx-1", unobserved, true);
+    const perChunk = chunkFirstIds(unobserved);
+    expect(perChunk.length).toBeGreaterThanOrEqual(3);
+    const fx2 = makeRunner([
+      recordsIds([perChunk[0][0]]),
+      async (input: never, agentId: string) => {
+        await recordViaTool(agentId, [
+          { summary: `obs of ${perChunk[1][0]}`, importance: "med", sourceEntryIds: [perChunk[1][0]] },
+        ]);
+        return { aborted: true, abortReason: "context-limit" } as never;
+      },
+      recordsIds([perChunk[2][0]]),
+    ]);
+    await runObserver({
+      core: r.core,
+      store: r.store,
+      settings: SETTINGS,
+      unobserved,
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      runStageFn: fx2.runner,
+    });
+    // the run did NOT stop at the budget: all three chunks ran
+    expect(fx2.calls.length).toBeGreaterThanOrEqual(3);
+    const graph = r.core.store.getGraphStore().graph;
+    // chunk 2's records persisted (the boundary keeps collected work)
+    const records = [...graph.nodes.values()].filter((n) =>
+      String((n as { summary?: unknown }).summary ?? "").includes(`obs of ${perChunk[1][0]}`),
+    );
+    expect(records.length).toBeGreaterThan(0);
+  });
+});
+
 describe("runObserver — per-chunk persistence (Defect-A)", () => {
   test("a 3-chunk run persists after chunks 1 and 2; chunk 3 aborts with ZERO records (no verdict for it)", async () => {
     const unobserved = entries(9);

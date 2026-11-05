@@ -32,7 +32,7 @@ import type {
   WidgetAgentEvent,
   WidgetStage,
 } from "../runs/seams.js";
-import { type StoredSegment, setIdleProvider, setWidgetLine } from "./line-store.js";
+import { type StoredSegment, setIdleLineErrorSink, setIdleProvider, setWidgetLine } from "./line-store.js";
 import {
   formatConflictLine,
   formatIdleSegments,
@@ -145,6 +145,9 @@ export function createWidgetBridge(deps: TrackerBridgeDeps): WidgetBridge {
   // seat — the newest binding would otherwise serve the subagent's counts
   if (deps.scope === "main") {
     setIdleProvider(() => formatIdleSegments(snapshot()));
+    setIdleLineErrorSink((err) =>
+      deps.log(`widget idle line failed — the segment is skipped: ${err instanceof Error ? err.message : String(err)}`),
+    );
   }
   let agentModelId: string | null = null;
   let selectedBaseline: { count: number; viewTokens: number } | null = null;

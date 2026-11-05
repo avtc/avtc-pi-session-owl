@@ -18,6 +18,7 @@
 //   runtime/convergence.ts: the Builder and Selector runs consume the same
 //   counting/classification bodies, differing only in their mutate-name set.
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { log } from "../../core/src/log.js";
 import type { StageRunResultLike } from "../../shims/pi-agent-core/index.js";
 import type { CoreHandle } from "../core-instances.js";
 import type { NotifyLevel } from "../notify/adapter.js";
@@ -169,7 +170,8 @@ export type StageCore = CoreHandle;
 let runsLogSink: ((message: string, cause?: unknown) => void) | null = null;
 
 const DEFAULT_RUNS_LOG_SINK = (message: string, cause?: unknown): void => {
-  console.error(message, ...(cause === undefined ? [] : [cause]));
+  if (cause === undefined) log.warn(message);
+  else log.warn(`${message}: ${cause instanceof Error ? cause.message : String(cause)}`);
 };
 
 /** Swap runsLog's sink (called once by the hooks module at load). */

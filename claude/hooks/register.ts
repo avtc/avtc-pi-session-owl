@@ -83,7 +83,7 @@ import { recordDumpOutputRow } from "../host/stage/dumps.js";
 import { createLaunchBroker, STAGE_LAUNCHED_TOOL } from "../host/stage/launch.js";
 import { getStagePrompts } from "../host/stage/prompts.js";
 import { relayTurnStep } from "../host/stage/relay.js";
-import { clearAllStageRuns, getStageRun } from "../host/stage/runs.js";
+import { abortRun, clearAllStageRuns, getStageRun } from "../host/stage/runs.js";
 import { handleStageToolCall, resetStageToolExecutors, stageToolShortName } from "../host/stage/tools.js";
 import { completionUsageOf } from "../host/stage/usage.js";
 import { runBackfill } from "../host/start/backfill.js";
@@ -159,8 +159,8 @@ function diag(message: string): void {
     // retries the transports, console only when both refuse
     try {
       sayError(`session-owl: file log failed: ${errDetail(err)}`);
-    } catch {
-      // nothing exists to say it with
+    } catch (terminalErr) {
+      diag(`file-log diagnostics exhausted every transport: ${errDetail(terminalErr)}`);
     }
   }
   try {
@@ -171,8 +171,8 @@ function diag(message: string): void {
     // sayError retries both transports and consoles only when both refuse
     try {
       sayError(`session-owl: diagnostics failed: ${errDetail(err)}`);
-    } catch {
-      // nothing exists to say it with
+    } catch (terminalErr) {
+      diag(`diagnostics exhausted every transport: ${errDetail(terminalErr)}`);
     }
   }
 }
@@ -353,6 +353,7 @@ function describeSpawnAnswer(handle: unknown): string {
   try {
     return JSON.stringify(handle) ?? String(handle);
   } catch {
+    diag("spawn answer was not JSON-serializable (circular?) — String() form used");
     return String(handle);
   }
 }
@@ -720,6 +721,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
           // the empty slice would otherwise leave every spawn inheriting
           // the session's model and effort forever
           restageAgents: () => {
+            log.info("stage agents: re-registering over the resolved settings (model/effort knobs)");
             void serveQueue(
               "stage agents (settings)",
               () =>
@@ -1020,8 +1022,9 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                     markDetailsWarmDone();
                     try {
                       $.ui.invalidate("ui.render");
-                    } catch {
+                    } catch (err) {
                       // the pane may not exist yet — the next engine render picks the line up
+                      diag(`band render invalidate failed (pane absent?): ${errText(err)}`);
                     }
                   }
                 })();
@@ -1804,6 +1807,22 @@ async function onSessionCompact(_$: any, e: AnyEvent, next: Next) {
   if (compactAgentId !== null && state.subagentsFullyDisabled()) {
     return next(e);
   }
+  // A machinery agent's own conversation crossed its auto-compact window
+  // mid-pass (the engine checks while preparing the agent's next request).
+  // pi ends a stage pass at its context limit and the run's loop starts the
+  // next pass over a fresh conversation; the translation here: end THIS
+  // agent's pass via the relay abort (the fabricated end_turn — work already
+  // collected stands, the in-flight call completes) and veto the engine's
+  // compaction of the retiring agent's conversation. The run loops treat the
+  // returned pass as a normal boundary: the next chunk/pass spawns a fresh
+  // agent, so the window is never approached again from this conversation.
+  if (compactAgentId !== null && (await isPluginSpawnedLoop(compactAgentId))) {
+    abortRun(compactAgentId, "context-limit");
+    log.info(
+      `stage pass ended at its context budget: agent=${compactAgentId} — compaction vetoed, the next pass spawns fresh`,
+    );
+    return { skip: "session-owl" };
+  }
   // No live session ⇒ no conversation to gate on: claim recorded, native
   // compaction proceeds (the pass-through path).
   if (compactSessionId === null) return next(e);
@@ -2293,9 +2312,10 @@ async function onUiRender($: any, e: AnyEvent, next: Next) {
   if (consumeIdleRefresh()) {
     try {
       $.ui.invalidate("ui.render");
-    } catch {
+    } catch (err) {
       /* an engine that refuses mid-render invalidation draws the line at
        * its next natural frame — the counts are already servable */
+      diag(`widget invalidate refused (next natural frame serves): ${errText(err)}`);
     }
   }
   // The settings pane (the family library's tree over the pane controller —

@@ -11,9 +11,10 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 // The vendored evaluation functions are reused verbatim; the run-lock is
 // the keyed host port (a colliding trigger on the same conversation SKIPS
 // — the mapping arms the settle-rearm, the gap re-enters on release).
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { DEFAULT_CONFIG, type SessionOwlConfig } from "../../core/src/config/schema.js";
 import { clearDetailsCache } from "../../core/src/format/details.js";
+import { log } from "../../core/src/log.js";
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { makeNode, nowStoredTimestamp } from "../../core/src/types.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
@@ -551,14 +552,13 @@ describe("error containment — a thrown stage releases and never rejects the bo
     deps.cheapGateClean = () => {
       throw new Error("tripwire read failed");
     };
-    const original = console.error;
-    const logs: unknown[][] = [];
-    console.error = (...a: unknown[]) => logs.push(a);
+    const logs: string[] = [];
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation((t: string) => logs.push(t));
     try {
       onStepBoundary(deps, {});
       await new Promise<void>((r) => setImmediate(r));
     } finally {
-      console.error = original;
+      warnSpy.mockRestore();
     }
     expect(deps.launches).toEqual([]); // fail-closed defer — nothing evaluated
     expect(logs.length).toBeGreaterThan(0); // logged, not thrown
@@ -569,12 +569,11 @@ describe("error containment — a thrown stage releases and never rejects the bo
     deps.runs.runObserver = async () => {
       throw new Error("observer exploded");
     };
-    const original = console.error;
-    console.error = (...a: unknown[]) => logs.push(a);
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation((t: string) => logs.push(t));
     try {
       await evaluateAndLaunch(deps, false); // must NOT reject
     } finally {
-      console.error = original;
+      warnSpy.mockRestore();
     }
     expect(deps.launches).toEqual([]);
     expect(inFlight("sess-t")).toBe(false);
@@ -586,14 +585,13 @@ describe("error containment — a thrown stage releases and never rejects the bo
     deps.getBranch = () => {
       throw new Error("row cache read failed");
     };
-    const original = console.error;
-    const logs: unknown[][] = [];
-    console.error = (...a: unknown[]) => logs.push(a);
+    const logs: string[] = [];
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation((t: string) => logs.push(t));
     try {
       onTurnCompleteBoundary(deps, {});
       await new Promise<void>((r) => setImmediate(r));
     } finally {
-      console.error = original;
+      warnSpy.mockRestore();
     }
     expect(logs.length).toBeGreaterThan(0); // logged, not an unhandled rejection
     expect(inFlight("sess-t")).toBe(false); // nothing was acquired

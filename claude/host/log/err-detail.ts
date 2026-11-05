@@ -70,9 +70,4 @@ export function sayError(text: string, opts?: { uiText?: string }): void {
   } catch {
     // no armed bridge (module-load / pre-arm window)
   }
-  try {
-    console.error(uiText);
-  } catch {
-    // no console in this sandbox — nothing exists to say it with
-  }
 }

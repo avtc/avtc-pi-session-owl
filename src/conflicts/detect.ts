@@ -12,6 +12,7 @@ import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "no
 import { homedir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { log } from "../log.js";
 
 /** One installed package that conflicts with session-owl's compaction role. */
 export interface ConflictHit {
@@ -110,7 +111,8 @@ function dirRegistersCompactHook(dir: string, depth: number, budget: { files: nu
   let entries: Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    log.info(`conflict scan: dir read failed (${dir}): ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
   for (const ent of entries) {
@@ -124,8 +126,9 @@ function dirRegistersCompactHook(dir: string, depth: number, budget: { files: nu
     try {
       if (statSync(full).size > SCAN_MAX_FILE_BYTES) continue;
       if (COMPACT_OVERRIDE_PATTERN.test(readFileSync(full, "utf8"))) return true;
-    } catch {
+    } catch (err) {
       // unreadable file — skip, never crash activation over a scan
+      log.info(`conflict scan: file read failed (${full}): ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       budget.files -= 1;
     }
@@ -151,8 +154,11 @@ function resolvePackageDir(entry: string, home: string): string | null {
   const resolved = path.resolve(entry);
   try {
     return statSync(resolved).isDirectory() ? resolved : null;
-  } catch {
-    return null;
+  } catch (err) {
+    const code = (err as { code?: unknown }).code;
+    if (code !== "ENOENT")
+      log.info(`conflict scan: install stat failed (${resolved}): ${err instanceof Error ? err.message : String(err)}`);
+    return null; // not installed (or not a dir) — absent, not an error
   }
 }
 
@@ -163,8 +169,12 @@ function readPackages(settingsFile: string): string[] {
     const parsed = JSON.parse(readFileSync(settingsFile, "utf8")) as { packages?: unknown };
     if (!Array.isArray(parsed.packages)) return [];
     return parsed.packages.filter((entry): entry is string => typeof entry === "string");
-  } catch {
-    return []; // malformed JSON — treat as no packages rather than crashing activation
+  } catch (err) {
+    // malformed JSON — treat as no packages rather than crashing activation
+    log.info(
+      `conflict scan: settings unreadable (${settingsFile}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
   }
 }
 
