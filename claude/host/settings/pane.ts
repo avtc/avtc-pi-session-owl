@@ -20,6 +20,7 @@
 import {
   captureCtx,
   createPaneController,
+  modelPairsFromSettings,
   type PaneController,
   type PresetPair,
 } from "../../node_modules/avtc-claude-settings-ui/dist/index.js";
@@ -68,8 +69,9 @@ const CORE_MODEL_PAIRS: PresetPair[] = [
 ];
 
 /** Model values the engine reserves that are NOT stage-spawnable ids — an
- *  availableModels entry only ever becomes a picker row when it names
- *  something a spawn could actually run (aliases are already core rows). */
+ *  availableModels or modelPicker entry only ever becomes a picker row when
+ *  it names something a spawn could actually run (aliases are already core
+ *  rows). */
 const RESERVED_MODEL_VALUES = new Set([
   "haiku",
   "sonnet",
@@ -82,44 +84,12 @@ const RESERVED_MODEL_VALUES = new Set([
   "opusplan",
 ]);
 
-/** Rows for the user's own models: each availableModels entry appended as a
- *  `[label, value]` pair — the value verbatim (an id the spawn accepts; the
- *  `provider/<id>` serialization the model-preset path would produce is NOT a
- *  spawnable form here), labeled from modelPicker when the user named the row.
- *  Never throws: anything malformed (non-array, non-string, bad options)
- *  collapses to zero rows, so an odd settings shape degrades to the core
- *  aliases. */
+/** Rows for the user's own models, parsed by the library's
+ *  `modelPairsFromSettings` (availableModels entries + modelPicker-only
+ *  options, labeled from the lineup) over owl's reserved set — the spawn
+ *  semantics stay here, the settings-shape knowledge stays in the library. */
 function enrichmentModelPairs(settings: unknown): PresetPair[] {
-  if (settings === null || typeof settings !== "object") return [];
-  const root = settings as Record<string, unknown>;
-  const raw = root.availableModels;
-  if (!Array.isArray(raw)) return [];
-  const labels = new Map<string, string>();
-  const picker = root.modelPicker;
-  if (picker !== null && typeof picker === "object") {
-    const options = (picker as Record<string, unknown>).options;
-    if (Array.isArray(options)) {
-      for (const option of options) {
-        if (option === null || typeof option !== "object") continue;
-        const model = (option as Record<string, unknown>).model;
-        const label = (option as Record<string, unknown>).label;
-        if (typeof model === "string" && typeof label === "string" && label.length > 0) {
-          labels.set(model, label);
-        }
-      }
-    }
-  }
-  const pairs: PresetPair[] = [];
-  const seen = new Set<string>();
-  for (const entry of raw) {
-    if (typeof entry !== "string") continue;
-    const value = entry.trim();
-    if (value.length === 0 || seen.has(value)) continue;
-    if (RESERVED_MODEL_VALUES.has(value.toLowerCase())) continue;
-    seen.add(value);
-    pairs.push([labels.get(value) ?? value, value]);
-  }
-  return pairs;
+  return modelPairsFromSettings(settings, RESERVED_MODEL_VALUES);
 }
 
 let paneController: PaneController | null = null;

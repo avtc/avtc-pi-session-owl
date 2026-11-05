@@ -205,6 +205,45 @@ describe("the settings pane's model-row enrichment (user availableModels)", () =
       { label: "glm-5.3", displayValue: "glm-5.3", rawValue: "glm-5.3" },
     ]);
   });
+
+  test("modelPicker-only rows append after availableModels rows (no allowlist needed)", async () => {
+    const made = await makePaneWith(async () => ({
+      modelPicker: {
+        options: [
+          { model: "glm-5.3", label: "GLM 5.3 (zai)", description: "via sampling-proxy" },
+          { model: "mimo-v2.6-flash" },
+          { model: "sonnet", label: "Sonnet relabeled" },
+          { model: 7, label: "malformed" },
+          { label: "no model" },
+        ],
+      },
+    }));
+    const controller = made.controller;
+    if (controller === null) throw new Error("pane controller unexpectedly null");
+    await controller.prepare();
+    // labeled rows keep their label, unlabeled fall back to the id; alias
+    // values stay core rows (a modelPicker relabel never duplicates them)
+    expect(findRow(controller, "defaultModel")?.presets).toEqual([
+      ...CORE_PRESETS,
+      { label: "GLM 5.3 (zai)", displayValue: "glm-5.3", rawValue: "glm-5.3" },
+      { label: "mimo-v2.6-flash", displayValue: "mimo-v2.6-flash", rawValue: "mimo-v2.6-flash" },
+    ]);
+  });
+
+  test("a model both in availableModels and modelPicker yields one labeled row", async () => {
+    const made = await makePaneWith(async () => ({
+      availableModels: ["glm-5.3", "qwen"],
+      modelPicker: { options: [{ model: "qwen", label: "Qwen (local)" }] },
+    }));
+    const controller = made.controller;
+    if (controller === null) throw new Error("pane controller unexpectedly null");
+    await controller.prepare();
+    expect(findRow(controller, "defaultModel")?.presets).toEqual([
+      ...CORE_PRESETS,
+      { label: "glm-5.3", displayValue: "glm-5.3", rawValue: "glm-5.3" },
+      { label: "Qwen (local)", displayValue: "qwen", rawValue: "qwen" },
+    ]);
+  });
 });
 
 function findRow(
