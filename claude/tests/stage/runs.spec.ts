@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import {
   abortRun,
+  applyContextBudgetVeto,
   clearAllStageRuns,
   completeStageRun,
   completeStep,
@@ -153,5 +154,33 @@ describe("stage run-state", () => {
     expect(merged?.fabricatedStop).toBe("timeout"); // the first sticks
     expect(takeStageDump("selector")).toBeNull(); // take clears
     expect(takeStageDump("builder")).toBeNull(); // other stages untouched
+  });
+});
+
+describe("the context-budget veto (the machinery auto-compact answer)", () => {
+  beforeEach(() => {
+    clearAllStageRuns();
+  });
+
+  test("the FIRST hit marks the budget without aborting — the pass keeps running to the model's limit", () => {
+    const run = createStageRun("ag-v1", "builder", CFG);
+    const outcome = applyContextBudgetVeto("ag-v1");
+    expect(outcome).toBe("marked");
+    expect(run.abortReason).toBe("context-limit");
+    expect(run.abortFlag).toBe(false); // no fabricated stop — the pass continues
+  });
+
+  test("a REPEATED hit (the engine re-asking at the limit) aborts — the relay ends the turn via its fabricated end_turn", () => {
+    createStageRun("ag-v2", "builder", CFG);
+    expect(applyContextBudgetVeto("ag-v2")).toBe("marked");
+    const outcome = applyContextBudgetVeto("ag-v2");
+    expect(outcome).toBe("aborted");
+    const run = getStageRun("ag-v2");
+    expect(run?.abortFlag).toBe(true);
+    expect(run?.abortReason).toBe("context-limit");
+  });
+
+  test("an unknown agent (no run state) answers marked — the skip still vetoes", () => {
+    expect(applyContextBudgetVeto("ag-unknown")).toBe("marked");
   });
 });

@@ -149,6 +149,24 @@ export function markContextBudgetHit(agentId: string): void {
   run.abortReason = "context-limit";
 }
 
+/** The machinery veto's per-hit decision on a plugin-spawned loop's
+ * auto-compact. The FIRST hit only marks the budget hit — the vetoed
+ * compaction lets the pass keep running to the model's own limit. A
+ * REPEATED hit means the engine is re-asking at that limit: aborting makes
+ * the relay answer every further re-ask with its fabricated end_turn, so
+ * the agent's turn completes immediately instead of spinning the
+ * re-ask ladder. */
+export function applyContextBudgetVeto(agentId: string): "marked" | "aborted" {
+  const run = runs.get(agentId);
+  if (run === undefined) return "marked";
+  if (run.abortReason === "context-limit" && !run.abortFlag) {
+    abortRun(agentId, "context-limit");
+    return "aborted";
+  }
+  markContextBudgetHit(agentId);
+  return "marked";
+}
+
 /** Mark the run as timed out (also aborts it — a timeout is an error stop). */
 export function timeoutRun(agentId: string): void {
   const run = runs.get(agentId);

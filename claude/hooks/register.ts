@@ -83,7 +83,7 @@ import { recordDumpOutputRow } from "../host/stage/dumps.js";
 import { createLaunchBroker, STAGE_LAUNCHED_TOOL } from "../host/stage/launch.js";
 import { getStagePrompts } from "../host/stage/prompts.js";
 import { relayTurnStep } from "../host/stage/relay.js";
-import { clearAllStageRuns, getStageRun, markContextBudgetHit } from "../host/stage/runs.js";
+import { applyContextBudgetVeto, clearAllStageRuns, getStageRun } from "../host/stage/runs.js";
 import { handleStageToolCall, resetStageToolExecutors, stageToolShortName } from "../host/stage/tools.js";
 import { completionUsageOf } from "../host/stage/usage.js";
 import { runBackfill } from "../host/start/backfill.js";
@@ -1813,15 +1813,20 @@ async function onSessionCompact(_$: any, e: AnyEvent, next: Next) {
   // (the engine checks while preparing the agent's next request). pi ends a
   // stage pass at its context limit and the run's loop starts the next pass
   // over a fresh conversation; the translation here: veto the engine's
-  // compaction of the agent's conversation and mark the budget hit WITHOUT
-  // aborting — the in-flight pass keeps running to the model's own limit,
-  // where its request is refused for length and the run loops treat that
-  // terminal as a normal pass boundary (partial work kept, the next pass
-  // spawns fresh over a new conversation).
+  // compaction of the agent's conversation. The FIRST hit only marks the
+  // budget hit — the pass keeps running to the model's own limit, where its
+  // request is refused for length and the run loops treat that terminal as
+  // a normal pass boundary (partial work kept, the next pass spawns fresh
+  // over a new conversation). A REPEATED hit means the engine is re-asking
+  // at that limit: the veto aborts the run, and the relay answers every
+  // further re-ask with its fabricated end_turn so the turn completes
+  // immediately instead of spinning.
   if (compactAgentId !== null && (await isPluginSpawnedLoop(compactAgentId))) {
-    markContextBudgetHit(compactAgentId);
+    const veto = applyContextBudgetVeto(compactAgentId);
     log.info(
-      `stage auto-compact vetoed: agent=${compactAgentId} — the pass runs to the model's limit, the next pass spawns fresh`,
+      veto === "aborted"
+        ? `stage auto-compact vetoed at the model's limit: agent=${compactAgentId} — the pass ends, the next pass spawns fresh`
+        : `stage auto-compact vetoed: agent=${compactAgentId} — the pass runs to the model's limit, the next pass spawns fresh`,
     );
     return { skip: "session-owl" };
   }
