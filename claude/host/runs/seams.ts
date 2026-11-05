@@ -22,7 +22,8 @@ import { log } from "../../core/src/log.js";
 import type { StageRunResultLike } from "../../shims/pi-agent-core/index.js";
 import type { CoreHandle } from "../core-instances.js";
 import type { NotifyLevel } from "../notify/adapter.js";
-import { noteAccepted } from "../stage/runs.js";
+import { noteAccepted, getStageRun } from "../stage/runs.js";
+import { StageModelError } from "./stage-errors.js";
 import type { StageToolExecutor } from "../stage/tools.js";
 
 const TRY_FINISH_TOOL = "try_finish";
@@ -215,6 +216,25 @@ export class ModelUnavailableError extends Error {
 export function isTimeoutClass(result: StageRunResultLike, signal: AbortSignal): boolean {
   if (!result.aborted || signal.aborted) return false;
   return result.abortReason === "timeout";
+}
+
+/** True when a thrown/returned pass failure is the context-budget boundary:
+ * the run carries the machinery veto's marker, or the model side refused the
+ * request for length (the engine encodes the refusal as a stopReason-error
+ * terminal whose text names the conversation/context limit). Such a pass
+ * keeps its collected work; the loop continues with a fresh conversation. */
+export function isContextLimitClass(err: unknown, agentId: string | null | undefined): boolean {
+  if (typeof agentId === "string") {
+    const run = getStageRun(agentId);
+    if (run !== undefined && run.abortReason === "context-limit") return true;
+  }
+  if (err instanceof StageModelError) {
+    const detail = (err.modelErrorMessage ?? "").toLowerCase();
+    return /(conversation too long|context length|context window|maximum context|context_length_exceeded|too long)/.test(
+      detail,
+    );
+  }
+  return false;
 }
 
 /** The session's birth from the ACTIVE BRANCH's first entry timestamp —

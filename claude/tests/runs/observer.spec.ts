@@ -14,7 +14,8 @@ import { resetForNewSession } from "../../core/src/store/graph-store.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { runObserver } from "../../host/runs/observer.js";
 import { NO_OP_WIDGET, type StageWidget } from "../../host/runs/seams.js";
-import { clearAllStageRuns } from "../../host/stage/runs.js";
+import { clearAllStageRuns, markContextBudgetHit } from "../../host/stage/runs.js";
+import { StageModelError } from "../../host/runs/stage-errors.js";
 import { handleStageToolCall } from "../../host/stage/tools.js";
 import type { EngineStageRunInput } from "../../shims/pi-agent-core/index.js";
 import {
@@ -232,6 +233,39 @@ describe("runObserver — the machinery context-limit chunk boundary", () => {
     expect(fx2.calls.length).toBeGreaterThanOrEqual(3);
     const graph = r.core.store.getGraphStore().graph;
     // chunk 2's records persisted (the boundary keeps collected work)
+    const records = [...graph.nodes.values()].filter((n) =>
+      String((n as { summary?: unknown }).summary ?? "").includes(`obs of ${perChunk[1][0]}`),
+    );
+    expect(records.length).toBeGreaterThan(0);
+  });
+
+  test("a chunk whose run THROWS after the context-budget marker is a boundary, not a run failure (the engine encodes the vetoed request as stopReason error)", async () => {
+    const unobserved = entries(9);
+    const r = await rigUp("s-ctx-2", unobserved, true);
+    const perChunk = chunkFirstIds(unobserved);
+    expect(perChunk.length).toBeGreaterThanOrEqual(3);
+    const fx3 = makeRunner([
+      recordsIds([perChunk[0][0]]),
+      async (_input: never, agentId: string) => {
+        await recordViaTool(agentId, [
+          { summary: `obs of ${perChunk[1][0]}`, importance: "med", sourceEntryIds: [perChunk[1][0]] },
+        ]);
+        markContextBudgetHit(agentId);
+        throw new StageModelError("stage engine failure (error):");
+      },
+      recordsIds([perChunk[2][0]]),
+    ]);
+    await runObserver({
+      core: r.core,
+      store: r.store,
+      settings: SETTINGS,
+      unobserved,
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      runStageFn: fx3.runner,
+    });
+    expect(fx3.calls.length).toBeGreaterThanOrEqual(3);
+    const graph = r.core.store.getGraphStore().graph;
     const records = [...graph.nodes.values()].filter((n) =>
       String((n as { summary?: unknown }).summary ?? "").includes(`obs of ${perChunk[1][0]}`),
     );

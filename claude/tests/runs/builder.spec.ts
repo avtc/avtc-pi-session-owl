@@ -26,6 +26,8 @@ import {
   seedNode,
   useTool,
 } from "./helpers.js";
+import { StageModelError } from "../../host/runs/stage-errors.js";
+import { markContextBudgetHit } from "../../host/stage/runs.js";
 
 const B_SETTINGS: SessionOwlConfig = {
   ...SETTINGS,
@@ -149,6 +151,50 @@ describe("runBuilder — the machinery context-limit pass boundary", () => {
       finish,
     ]);
     expect(fx.calls.length).toBe(1); // no-op pass -> the loop broke before pass 2
+  });
+
+  test("a pass whose run THROWS after the context-budget marker is a pass boundary, not a run failure (the engine encodes the vetoed request as stopReason error)", async () => {
+    const rig = await rigUp("b-ctx-3", entries(4));
+    const fx = await run(rig, B_SETTINGS, [
+      async (_i: unknown, ag: string) => {
+        await useTool(ag, "mkdir", { summary: "ctx-throw node", importance: "med" });
+        markContextBudgetHit(ag);
+        throw new StageModelError("stage engine failure (error):");
+      },
+      finish,
+    ]);
+    // the marked pass kept its mutate and the loop ran the next pass
+    expect(fx.calls.length).toBe(2);
+    const graph = rig.core.store.getGraphStore().graph;
+    const summaries = [...graph.nodes.values()].map((n) => String((n as { summary?: unknown }).summary ?? ""));
+    expect(summaries.some((summary) => summary.includes("ctx-throw node"))).toBe(true);
+  });
+
+  test("a pass that throws the length-refusal shape WITHOUT the marker is also a pass boundary", async () => {
+    const rig = await rigUp("b-ctx-4", entries(4));
+    const fx = await run(rig, B_SETTINGS, [
+      async (_i: unknown, ag: string) => {
+        await useTool(ag, "mkdir", { summary: "ctx-shape node", importance: "med" });
+        throw new StageModelError("Conversation too long. Press esc twice to go up a few messages and try again.");
+      },
+      finish,
+    ]);
+    expect(fx.calls.length).toBe(2);
+    const graph = rig.core.store.getGraphStore().graph;
+    const summaries = [...graph.nodes.values()].map((n) => String((n as { summary?: unknown }).summary ?? ""));
+    expect(summaries.some((summary) => summary.includes("ctx-shape node"))).toBe(true);
+  });
+
+  test("any OTHER model-error throw stays fatal (the run rejects)", async () => {
+    const rig = await rigUp("b-ctx-5", entries(4));
+    await expect(
+      run(rig, B_SETTINGS, [
+        async () => {
+          throw new StageModelError("500 Internal Error");
+        },
+        finish,
+      ]),
+    ).rejects.toThrow(/agent model call failed/);
   });
 });
 

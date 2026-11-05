@@ -43,6 +43,7 @@ import { enableStageDumpArchive, getStageRun, takeStageDump, takeStageFatalModel
 import { bindAgentTools, type StageToolExecutor, unbindAgentTools } from "../stage/tools.js";
 import { lookupModelRates } from "../usage/inputs.js";
 import {
+  isContextLimitClass,
   isTimeoutClass,
   ModelUnavailableError,
   makeCountedExecutor,
@@ -239,6 +240,14 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
         }
         result = await run(passInput);
         if (result.timedOut) outcome.timedOut = true;
+      } catch (passErr) {
+        // the context-budget boundary: the machinery veto marked the pass
+        // (or the model side refused the request for length) — the work
+        // already collected stands and the next pass spawns fresh; any
+        // other failure propagates
+        if (!isContextLimitClass(passErr, agentRef.id)) throw passErr;
+        runsLog("selector pass ended at the model's context limit", passErr);
+        result = { abortReason: "context-limit" } as StageRunResultLike;
       } finally {
         // unbind only — the pass's dump section closes at completion
         // (completeStageRun flushes the opener's pendingCloser)

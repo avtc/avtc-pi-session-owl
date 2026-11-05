@@ -136,6 +136,19 @@ export function abortRun(agentId: string, reason: string): void {
   run.abortReason = reason;
 }
 
+/** Mark a run's conversation as over its auto-compact budget WITHOUT
+ * aborting it: the machinery veto answered the engine's auto-compact with a
+ * skip so the pass keeps running to the model's own limit. The marker
+ * classifies the pass's eventual terminal failure (the engine encodes the
+ * length-refused request as stopReason "error") as a context-budget
+ * boundary instead of a model failure. */
+export function markContextBudgetHit(agentId: string): void {
+  const run = runs.get(agentId);
+  if (run === undefined) return;
+  if (run.abortReason !== null) return;
+  run.abortReason = "context-limit";
+}
+
 /** Mark the run as timed out (also aborts it — a timeout is an error stop). */
 export function timeoutRun(agentId: string): void {
   const run = runs.get(agentId);

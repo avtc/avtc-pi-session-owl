@@ -79,6 +79,7 @@ import {
 import { bindAgentTools, STAGE_TOOL_SPECS, unbindAgentTools } from "../stage/tools.js";
 import { lookupModelRates } from "../usage/inputs.js";
 import {
+  isContextLimitClass,
   isTimeoutClass,
   loggerNotify,
   ModelUnavailableError,
@@ -479,7 +480,15 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         // Propagate (timeout / engine failure / server down) so the caller
         // cancels + surfaces. An abort is not an error — return cleanly.
         if (input.signal.aborted) return;
-        throw cause;
+        // the context-budget boundary: the machinery veto marked the chunk
+        // (or the model side refused the request for length) — the records
+        // already collected persist and the next chunk spawns fresh
+        if (isContextLimitClass(cause, boundAgent)) {
+          runsLog("observer chunk ended at the model's context limit", cause);
+          result = { abortReason: "context-limit" } as StageRunResultLike;
+        } else {
+          throw cause;
+        }
       } finally {
         unbindAgentTools(boundAgent ?? "");
         done += 1;

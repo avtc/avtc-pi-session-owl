@@ -15,7 +15,8 @@ import { estimateContentTokens, makeNode, nowStoredTimestamp } from "../../core/
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { NO_OP_WIDGET } from "../../host/runs/seams.js";
 import { runSelector } from "../../host/runs/selector.js";
-import { clearAllStageRuns } from "../../host/stage/runs.js";
+import { clearAllStageRuns, markContextBudgetHit } from "../../host/stage/runs.js";
+import { StageModelError } from "../../host/runs/stage-errors.js";
 import {
   branchCustoms,
   entries,
@@ -47,6 +48,33 @@ const finish = async (_i: unknown, ag: string) => {
   return {};
 };
 const noop = async () => ({});
+
+describe("runSelector — the machinery context-limit pass boundary", () => {
+  test("a pass whose run THROWS after the context-budget marker keeps its selection; the loop runs the next pass", async () => {
+    const rig = await selectorRig("sel-ctx-1");
+    const fx = await run(rig, [
+      async (_i: unknown, ag: string) => {
+        await useTool(ag, "mv", { sourceIds: ["n9"], destId: "nIrrelevant" });
+        markContextBudgetHit(ag);
+        throw new StageModelError("stage engine failure (error):");
+      },
+      finish,
+    ]);
+    expect(fx.calls.length).toBe(2);
+  });
+
+  test("any OTHER model-error throw stays fatal (the run rejects)", async () => {
+    const rig = await selectorRig("sel-ctx-2");
+    await expect(
+      run(rig, [
+        async () => {
+          throw new StageModelError("500 Internal Error");
+        },
+        finish,
+      ]),
+    ).rejects.toThrow(/agent model call failed/);
+  });
+});
 
 interface SelectorRig extends Rig {
   unobservedTail: SessionEntry[];
