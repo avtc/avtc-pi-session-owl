@@ -310,8 +310,8 @@ describe("core multiplexer — serialized swap", () => {
     if (run === null) throw new Error("lock unexpectedly busy");
     const switched = getCore("sB", { ctxFactory: () => makeFakeCtx(), mode: "takeover" });
     await Promise.resolve();
-    await new Promise((r) => setTimeout(r, 5));
-    expect(run.abortController.signal.aborted).toBe(true);
+    // the abort lands on the switch pump — wait for it, don't race it
+    await vi.waitFor(() => expect(run.abortController.signal.aborted).toBe(true));
     run.release();
     await switched;
     expect(currentCoreKey()).toBe("sB");

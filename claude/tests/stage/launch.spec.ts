@@ -11,7 +11,7 @@
 // the spawn handle. Every failure degrades to the direct spawn — a
 // stage run must never die on the launcher.
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   createLaunchBroker,
   type LaunchHandle,
@@ -50,8 +50,8 @@ describe("stage launch broker", () => {
       warn: () => {},
     });
     const pending = broker.spawn({ subagentType: "session-owl:observe", prompt: "go" });
-    await new Promise((r) => setTimeout(r, 5));
-    expect(launched.length).toBe(1);
+    // the spawn lands on the broker's async path — wait for it, don't race it
+    await vi.waitFor(() => expect(launched.length).toBe(1));
     expect(launched[0].subagentType).toBe("session-owl:observe");
     expect(typeof launched[0].launchId).toBe("string");
     expect(broker.pendingLaunchIds().length).toBe(1);

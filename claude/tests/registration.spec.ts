@@ -415,6 +415,11 @@ describe("host binding skeleton — registration", () => {
       transcript_path: "/t.jsonl",
       cwd: "/w",
     });
+    // the start pipeline registers the conversation on a flush timer: settle
+    // it BEFORE session.end, or a loaded event loop delivers the registration
+    // after sessionEndBody's registry.clear() and the teardown assertion races
+    // (full-suite-only flake — the entry reappears after the clear)
+    await vi.waitFor(() => expect(h.registryKeys()).toContain("s4"));
     let tornDown = 0;
     h.onTeardown(() => {
       tornDown += 1;
@@ -568,7 +573,9 @@ describe("host binding skeleton — registration", () => {
     await h.dispatch("turn.complete", { answer: "machinery answer", isAborted: false, agentId: "mx9" });
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(h.spawned.calls).toHaveLength(0);
-    expect(h.registryKeys()).toEqual(["sess-mach"]);
+    // the machinery turn's teardown settles on a timer — wait for the exact
+    // registry shape instead of racing it
+    await vi.waitFor(() => expect(h.registryKeys()).toEqual(["sess-mach"]));
   });
 });
 
@@ -662,8 +669,8 @@ describe("turn-boundary trigger arms — the loop goes live", () => {
     });
     h.sessionApi.set([]);
     await h.dispatch("turn.complete", { answer: "", isAborted: false });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(h.spawned.calls.length).toBe(fired);
+    // the observe spawn (when it fires) lands on a timer — wait for the count
+    await vi.waitFor(() => expect(h.spawned.calls.length).toBe(fired));
   });
 
   test("turn.complete launches the observer once the threshold is crossed (spawn recorded)", async () => {
@@ -843,9 +850,13 @@ describe("startup backfill wiring — the classic.SessionStart start sequence", 
       transcript_path: "/cfg/projects/p/sess-bf.jsonl",
       cwd: "/w",
     });
-    // the re-mirror wrote at least one mirror batch into the session dir
-    const mirrorBatches = h.fsPaths().filter((p: string) => /session-owl\/sessions\/sess-bf\/m\d+-/.test(p));
-    expect(mirrorBatches.length).toBeGreaterThan(0);
+    // the re-mirror runs on the start pipeline's flush timer — wait for the
+    // first batch instead of racing it (a loaded event loop writes it late)
+    const mirrorBatches = await vi.waitFor(() => {
+      const found = h.fsPaths().filter((p: string) => /session-owl\/sessions\/sess-bf\/m\d+-/.test(p));
+      expect(found.length).toBeGreaterThan(0);
+      return found;
+    });
     // the batches carry the transcript's live rows verbatim (uuid-keyed)
     let allBatchText = "";
     for (const p of mirrorBatches) {
@@ -865,11 +876,16 @@ describe("startup backfill wiring — the classic.SessionStart start sequence", 
       cwd: "/w",
     });
     // nGoal seeded + the initial prompt captured: at least one ledger
-    // record file exists beyond the mirror batches and the marker
-    const ledgerFiles = h
-      .fsPaths()
-      .filter((p: string) => /session-owl\/sessions\/sess-bf2\//.test(p))
-      .filter((p: string) => !/\/m\d+-/.test(p) && !/\.session\.json$/.test(p) && !/timeline-/.test(p));
+    // record file exists beyond the mirror batches and the marker —
+    // on the flush timer, so wait for it rather than race it
+    const ledgerFiles = await vi.waitFor(() => {
+      const found = h
+        .fsPaths()
+        .filter((p: string) => /session-owl\/sessions\/sess-bf2\//.test(p))
+        .filter((p: string) => !/\/m\d+-/.test(p) && !/\.session\.json$/.test(p) && !/timeline-/.test(p));
+      expect(found.length).toBeGreaterThan(0);
+      return found;
+    });
     expect(ledgerFiles.length).toBeGreaterThan(0);
   });
 });

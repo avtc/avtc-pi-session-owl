@@ -509,9 +509,10 @@ describe("the remaining protocol paths", () => {
       }) as never,
     );
     bridge.invalidateRoots();
-    await new Promise((r) => setTimeout(r, 230)); // the throttled trailing render
+    // the throttled trailing render fires on its window — wait for the
+    // increment instead of racing a fixed 230ms
+    await vi.waitFor(() => expect(widgetLine()).toContain("(+1)"));
     expect(widgetLine()).not.toBe(before);
-    expect(widgetLine()).toContain("(+1)");
   });
 
   test("the primary streaming tier wins while larger (the max rule)", async () => {

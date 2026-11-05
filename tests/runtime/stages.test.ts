@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG } from "../../src/config/schema.js";
 import { makeObserverRun, makeSelectorRun } from "../../src/runtime/stages.js";
 import type { SelectorRunInput } from "../../src/selector/run.js";
@@ -63,9 +63,8 @@ describe("makeObserverRun (Observer stage wiring)", () => {
       },
     });
 
-    // the fire-and-forget run resolves asynchronously; wait a tick
-    await new Promise((r) => setTimeout(r, 20));
-    expect(calledWithUnobserved).toEqual(["a1"]);
+    // the fire-and-forget run resolves asynchronously — wait for it, don't race it
+    await vi.waitFor(() => expect(calledWithUnobserved).toEqual(["a1"]));
 
     // restore no-op stage runs so other tests aren't affected
     setStageRuns({ runObserver: async () => {}, runBuilder: async () => {}, runSelector: async () => {} });

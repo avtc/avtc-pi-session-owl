@@ -3,7 +3,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../src/config/schema.js";
 import { _resetRunLock, acquireOrSkip, inFlight as runLockInFlight } from "../src/runtime/run-lock.js";
 import { getGraphStore, resetForNewSession } from "../src/store/graph-store.js";
@@ -777,8 +777,8 @@ describe("onTurnEnd chained launch", () => {
         },
       }),
     );
-    await new Promise((r) => setTimeout(r, 10));
-    expect(order).toEqual(["observe", "build", "select"]);
+    // the chain settles asynchronously — wait for its final order, don't race it
+    await vi.waitFor(() => expect(order).toEqual(["observe", "build", "select"]));
     expect(runLockInFlight()).toBe(false); // released by the chain's finally
   });
 
@@ -818,10 +818,10 @@ describe("onTurnEnd chained launch", () => {
         },
       }),
     );
-    await new Promise((r) => setTimeout(r, 10));
-    // The Builder ran ONLY because the re-eval saw the Observer's new nodes —
-    // the pre-eval (0 new nodes) would have skipped it (the starvation this guards).
-    expect(builderRan).toBe(true);
+    // the re-eval settles asynchronously — wait for the Builder, don't race it
+    // (it ran ONLY because the re-eval saw the Observer's new nodes; the
+    // pre-eval with 0 new nodes would have skipped it — the starvation guard)
+    await vi.waitFor(() => expect(builderRan).toBe(true));
     expect(runLockInFlight()).toBe(false);
   });
 
@@ -845,8 +845,7 @@ describe("onTurnEnd chained launch", () => {
     } as unknown as ExtensionContext;
     // default profile: Observer on-threshold (fires), Builder + Selector on-compaction (skip).
     onTurnEnd(makeInput({ ctx, settings: { ...DEFAULT_CONFIG, observerThresholdTokens: 1 } }));
-    await new Promise((r) => setTimeout(r, 10));
-    expect(order).toEqual(["observe"]);
+    await vi.waitFor(() => expect(order).toEqual(["observe"]));
     expect(runLockInFlight()).toBe(false);
   });
 

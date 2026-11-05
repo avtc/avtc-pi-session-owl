@@ -7,7 +7,7 @@
 // first — the module does not exist.
 
 import { createLogger, getDefaultBackend } from "avtc-claude-logger";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { _resetLogConsumerForTest, initLogConsumer, logConsumerReady, testBackend } from "../../host/log/consumer.js";
 
 function memFiles() {
@@ -55,14 +55,19 @@ describe("the translating backend", () => {
     initLogConsumer({ configDir: "/cfg", fs });
     const logger = createLogger("ring-probe", { baseDir: testBackend().baseDir, backend: testBackend().adapter });
     logger.error("hello ring", null);
-    await new Promise((r) => setTimeout(r, 50));
-    const paths = [...files.keys()];
-    expect(paths.length).toBeGreaterThan(0);
-    for (const p of paths) {
+    // the consumer flushes on a timer — wait for this logger's file instead
+    // of racing a fixed sleep (a loaded event loop writes it late; and a
+    // late flush from a prior test's logger must not fail this one's paths)
+    const ringPaths = await vi.waitFor(() => {
+      const ring = [...files.keys()].filter((p) => p.startsWith("/cfg/logs/ring-probe"));
+      expect(ring.length).toBeGreaterThan(0);
+      return ring;
+    });
+    for (const p of ringPaths) {
       expect(p.startsWith("/cfg/logs/ring-probe")).toBe(true);
       expect(p.includes("test-logs")).toBe(false);
     }
-    expect(files.get(paths[0] as string)).toContain("hello ring");
+    expect(files.get(ringPaths[0] as string)).toContain("hello ring");
   });
 
   test("the vendored core's logger name is preserved (avtc-pi-session-owl ring)", async () => {

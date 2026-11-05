@@ -5,7 +5,7 @@
 // handler answering AbovePrompt asks through the REAL register(on) wiring
 // over the in-memory harness — the survey yield, the empty-store
 // passthrough, and the Box composition with the line-store's current line.
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { markDetailsWarmDone } from "../../host/start/readiness.js";
 import { _resetWidgetLine, setWidgetLine } from "../../host/widget/line-store.js";
 import { createHarness } from "../helpers/harness.js";
@@ -100,9 +100,8 @@ describe("the AbovePrompt band branch (live wiring)", () => {
       transcript_path: "/t/prime-1.jsonl",
     });
     expect(hasBinding("prime-1")).toBe(true); // created at start, not at first turn
-    // the fold+pin runs on microtasks; give it a beat
-    await new Promise((r) => setTimeout(r, 50));
-    expect(idleSegments()).not.toBeNull(); // the provider is registered and serving
+    // the fold+pin settles asynchronously — wait for the provider, don't race it
+    await vi.waitFor(() => expect(idleSegments()).not.toBeNull()); // the provider is registered and serving
   });
 
   test("a pending idle refresh consumes the NEXT render dispatch - invalidated in frame, once", async () => {

@@ -69,8 +69,8 @@ describe("the conflict pause wiring — hit→pause and reload recovery", () => 
       door: "compaction",
       timestamp: Date.now(),
     });
-    await new Promise((r) => setTimeout(r, 20));
-    expect(pausedNow()).toBe(true); // the C hit recorded + the set recomputed
+    // the pause lands on the reload wave's timer — wait for it, don't race it
+    await vi.waitFor(() => expect(pausedNow()).toBe(true)); // the C hit recorded + the set recomputed
   });
 
   test("a reload wave without the conflicting mod lifts the pause (auto-recovery)", async () => {

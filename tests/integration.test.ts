@@ -504,10 +504,10 @@ describe("sessionOwlExtension end-to-end (default profile)", () => {
     await pi.emit("turn_end", {}, ctx); // capture (the extraction holds the lock → trigger SKIPs)
     await new Promise((r) => setTimeout(r, 20)); // the one-shot settles
     await pi.emit("turn_end", {}, ctx); // observe → new wrapper nodes at root
-    await new Promise((r) => setTimeout(r, 20));
-    // sanity: there is at least one `new` node from the catch-up before compaction.
-    const hadNew = [...getGraphStore().graph.nodes.values()].some((n) => n.state === "new");
-    expect(hadNew).toBe(true);
+    // sanity: there is at least one `new` node from the catch-up before
+    // compaction — the capture/observe lanes settle on timers, so wait for
+    // the node instead of racing a fixed sleep
+    await vi.waitFor(() => expect([...getGraphStore().graph.nodes.values()].some((n) => n.state === "new")).toBe(true));
 
     const compactEvt: SessionBeforeCompactEvent = {
       type: "session_before_compact",

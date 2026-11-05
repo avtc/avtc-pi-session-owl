@@ -10,7 +10,7 @@
 // hands rewinds to the refold seam with the whole new world proven. All
 // seams injected; the engine wiring spells the $ calls literally.
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { LiveChainProcessor } from "../../host/rewind/live-chain.js";
 import type { TailFacts, TailRow } from "../../host/rewind/tail-read.js";
 
@@ -273,9 +273,8 @@ describe("live chain processor — verdict application is single-flight across l
     release[0]?.();
     await new Promise((r) => setTimeout(r, 5));
     release[1]?.();
-    await new Promise((r) => setTimeout(r, 5));
+    await vi.waitFor(() => expect(h.rewinds.length).toBe(2)); // both verdicts applied in the end
     expect(maxRunning).toBe(1); // never overlapped
-    expect(h.rewinds.length).toBe(2); // both verdicts applied in the end
   });
 });
 

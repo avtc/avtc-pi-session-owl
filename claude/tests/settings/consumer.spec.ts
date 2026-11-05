@@ -186,8 +186,8 @@ describe("the settings consumer — gate flips", () => {
     await new Promise((r) => setTimeout(r, 10));
     first.handle.updateSetting("enabled", false);
     first.handle.updateSetting("enabled", true);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(first.capsules.registered).toHaveLength(1);
+    // the registration-once flag settles async — wait for it, don't race it
+    await vi.waitFor(() => expect(first.capsules.registered).toHaveLength(1));
   });
 
   test("a failing toolRegister never becomes an unhandled rejection (logged degrade)", async () => {
@@ -203,8 +203,10 @@ describe("the settings consumer — gate flips", () => {
         },
       });
       c.handle.updateSetting("enabled", true);
-      await new Promise((r) => setTimeout(r, 10));
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("owl_recall registration failed"));
+      // the failed registration reports async — wait for it, don't race it
+      await vi.waitFor(() =>
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("owl_recall registration failed")),
+      );
     } finally {
       errSpy.mockRestore();
     }
@@ -235,8 +237,8 @@ describe("the settings consumer — reload", () => {
     expect(getSessionOwlSettings().enabled).toBe(true);
     first.env.set(ENV_VAR, JSON.stringify({ ...getSessionOwlSettings(), enabled: false }));
     reloadSessionOwlConfig();
-    await new Promise((r) => setTimeout(r, 20));
-    expect(getSessionOwlSettings().enabled).toBe(false);
+    // the reload reads the env asynchronously — wait for it, don't race it
+    await vi.waitFor(() => expect(getSessionOwlSettings().enabled).toBe(false));
   });
 });
 

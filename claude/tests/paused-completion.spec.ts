@@ -5,7 +5,7 @@
 // an in-flight stage run whose pause flipped mid-run (Channel B/C) must
 // still complete at turn.complete, or the awaiting orchestration hangs
 // holding the run-lock.
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { getCapture } from "../host/capture/append-handler.js";
 import { _resetConflictStateForTest, setConflictHits } from "../host/conflicts/pause.js";
 import { awaitAgentCompletion } from "../host/engine-bridge.js";
@@ -52,10 +52,13 @@ describe("turn.complete while conflict-paused still routes agent completions", (
     st.ledger.append("CHECK", {}, "marker-1"); // a record still buffered at teardown
     st.mirror.bufferRow({ uuid: "mr-1", parentUuid: null, row: { tail: true } }); // a row still buffered at teardown
     await h.dispatch("session.end", {});
-    await new Promise((r) => setTimeout(r, 20));
-    // the record became a ledger part file (durable), not dropped
-    const parts = h.fsPaths().filter((p: string) => /sessions\/s-pause-1\/ledger-.*\.jsonl$/.test(p));
-    expect(parts.length).toBeGreaterThanOrEqual(1);
+    // the teardown's durability flush lands on a timer — wait for the ledger
+    // part instead of racing it (the record became durable, not dropped)
+    const parts = await vi.waitFor(() => {
+      const found = h.fsPaths().filter((p: string) => /sessions\/s-pause-1\/ledger-.*\.jsonl$/.test(p));
+      expect(found.length).toBeGreaterThanOrEqual(1);
+      return found;
+    });
     const text = (await h.fsRead(parts[0] as string)) as unknown as string;
     expect(text).toContain('"kind":"CHECK"');
     // the row became a mirror batch file too — its turn never flushed, so
