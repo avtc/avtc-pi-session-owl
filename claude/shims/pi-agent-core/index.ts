@@ -283,10 +283,13 @@ export async function runStage(input: EngineStageRunInput): Promise<StageRunResu
   // prompt — not removable).
   const prompt = translateStageClosings(flattenStagePrompt(input.messages));
 
+  // The stage's model/effort live on the registered agent type (the
+  // settings wiring re-registers it on every change); the spawn itself
+  // carries only the type and the prompt — the spawn surface's own model
+  // field takes aliases only and would reject a custom id.
   const spawned = await svcs.agentSpawn({
     subagentType: `session-owl:${input.stage}`,
     prompt,
-    ...(input.model !== null ? { model: input.model } : {}),
   });
   const agentId = spawned.agentId;
   if (agentId === undefined) {

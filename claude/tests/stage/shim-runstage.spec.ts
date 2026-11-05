@@ -104,7 +104,7 @@ describe("runStage — spawn + registry", () => {
     bridge.forgetSpawn("ag-1");
   });
 
-  test("a model string rides the spawn (per-run resolution)", async () => {
+  test("the model never rides the spawn — the registered type carries it", async () => {
     clearAllStageRuns();
     bridge.clearRouting();
     const spawns: unknown[] = [];
@@ -116,7 +116,22 @@ describe("runStage — spawn + registry", () => {
     await settle();
     bridge.routeAgentCompletion({ answer: "", isAborted: false, agentId: "ag-m", usage: null });
     await p;
-    expect(spawns[0]).toMatchObject({ model: "haiku" });
+    expect(spawns[0]).not.toHaveProperty("model");
+  });
+
+  test("a custom model id does not ride the spawn either", async () => {
+    clearAllStageRuns();
+    bridge.clearRouting();
+    const spawns: unknown[] = [];
+    arm(async (input) => {
+      spawns.push(input);
+      return { model: "Qwen3.8-27B", agentId: "ag-c" };
+    });
+    const p = runStage(baseInput({ model: "Qwen3.8-27B" }));
+    await settle();
+    bridge.routeAgentCompletion({ answer: "", isAborted: false, agentId: "ag-c", usage: null });
+    await p;
+    expect(spawns[0]).not.toHaveProperty("model");
   });
 });
 
