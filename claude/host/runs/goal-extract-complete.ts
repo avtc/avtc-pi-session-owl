@@ -12,6 +12,8 @@
 // skip-and-log). Never throws — the run layer's never-throws contract
 // starts here.
 
+import { log as fileLog } from "../../core/src/log.js";
+
 /** The engine `$.model.complete` capsule's structural shape (the subset the
  *  mapping reads; the real capsule is authored in the register's handler). */
 export type ModelCompleteCapsule = (

@@ -20,7 +20,7 @@ import { entriesForCache, getCapture } from "../capture/append-handler.js";
 import { makeEntryResolver } from "../capture/details-bridge.js";
 import { type ClaudeRow, groupRows } from "../capture/grouper.js";
 import type { OwlCommandDeps } from "../commands/handlers.js";
-import { conversationOrderKeyOf, loadStoreState } from "../start/backfill.js";
+import { loadStoreState } from "../start/backfill.js";
 
 /** The pin's load budget: the answer must land under the host's ~10s
  *  tool-call cut, so the pin gives up waiting at the same margin the
@@ -71,10 +71,9 @@ import { captureInitialPrompt } from "../start/initial-prompt.js";
 import { runLedgerHeal } from "../start/ledger-heal.js";
 import * as state from "../state.js";
 import { serveStatusReport } from "../status/report.js";
-import { sweepMirror } from "../storage/mirror.js";
 import { getSessionStorage } from "../storage/session-storage.js";
 import { newSnapshotId, persistSnapshotText } from "../storage/snapshot.js";
-import { type PreparedContext, prepareStoreContext } from "../storage/store-context.js";
+import type { PreparedContext } from "../storage/store-context.js";
 import {
   collectOwnSummariesFromBranch,
   normalizeSummaryText,

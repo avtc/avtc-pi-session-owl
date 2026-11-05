@@ -14,8 +14,8 @@ import { resetForNewSession } from "../../core/src/store/graph-store.js";
 import { _resetCoreInstances } from "../../host/core-instances.js";
 import { runObserver } from "../../host/runs/observer.js";
 import { NO_OP_WIDGET, type StageWidget } from "../../host/runs/seams.js";
-import { clearAllStageRuns, markContextBudgetHit } from "../../host/stage/runs.js";
 import { StageModelError } from "../../host/runs/stage-errors.js";
+import { clearAllStageRuns, markContextBudgetHit } from "../../host/stage/runs.js";
 import { handleStageToolCall } from "../../host/stage/tools.js";
 import type { EngineStageRunInput } from "../../shims/pi-agent-core/index.js";
 import {
@@ -212,7 +212,7 @@ describe("runObserver — the machinery context-limit chunk boundary", () => {
     expect(perChunk.length).toBeGreaterThanOrEqual(3);
     const fx2 = makeRunner([
       recordsIds([perChunk[0][0]]),
-      async (input: never, agentId: string) => {
+      async (_input, agentId: string) => {
         await recordViaTool(agentId, [
           { summary: `obs of ${perChunk[1][0]}`, importance: "med", sourceEntryIds: [perChunk[1][0]] },
         ]);
@@ -246,7 +246,7 @@ describe("runObserver — the machinery context-limit chunk boundary", () => {
     expect(perChunk.length).toBeGreaterThanOrEqual(3);
     const fx3 = makeRunner([
       recordsIds([perChunk[0][0]]),
-      async (_input: never, agentId: string) => {
+      async (_input, agentId: string) => {
         await recordViaTool(agentId, [
           { summary: `obs of ${perChunk[1][0]}`, importance: "med", sourceEntryIds: [perChunk[1][0]] },
         ]);

@@ -564,7 +564,7 @@ describe("error containment — a thrown stage releases and never rejects the bo
     expect(logs.length).toBeGreaterThan(0); // logged, not thrown
   });
   test("a throwing runObserver: the chain resolves, the error is logged, the lock releases", async () => {
-    const logs: unknown[][] = [];
+    const logs: string[] = [];
     const deps = makeDeps();
     deps.runs.runObserver = async () => {
       throw new Error("observer exploded");

@@ -293,7 +293,6 @@ describe("conversation binding — the runtime assembly", () => {
   });
 
   test("a boot-stamped prepared state is the binding's fast exit (no second derivation)", async () => {
-    const dir = "/cfg/session-owl/sessions/sess-stamp";
     const trow = (uuid: string, parentUuid: string | null, ts: string, text: string) =>
       JSON.stringify({
         uuid,

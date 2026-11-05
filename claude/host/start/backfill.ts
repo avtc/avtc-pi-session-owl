@@ -48,10 +48,7 @@ const NO_BATCH_SEQ = 0;
  *  it, or the two lanes serve two different histories off the same files.
  *  File-less rows (re-mirrored, not yet flushed) key on their timestamp
  *  with empty producer/seq; a missing timestamp sorts last. */
-export function conversationOrderKeyOf(
-  mirror: MirrorWriter,
-  uuidFile: ReadonlyMap<string, string>,
-): (uuid: string) => string {
+function conversationOrderKeyOf(mirror: MirrorWriter, uuidFile: ReadonlyMap<string, string>): (uuid: string) => string {
   const keyCache = new Map<string, string>();
   return (uuid: string): string => {
     const hit = keyCache.get(uuid);
@@ -278,7 +275,6 @@ export async function runBackfill(
     ...(opts.healLedger !== undefined ? { healLedger: opts.healLedger } : {}),
   });
   const { prepared, transcript, remirrored, bootstrapBlocked } = loaded;
-  const fs = opts.fs;
   const handle = await getCore(opts.key, {
     ctxFactory: () => prepared.ctx,
     resolverFactory: () => makeEntryResolver({ rows: () => mirrorRowsOf(mirror), version: () => mirror.rowVersion() }),
