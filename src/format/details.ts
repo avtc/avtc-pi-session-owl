@@ -48,16 +48,25 @@ export type EntryResolver = (ids: readonly string[]) => readonly unknown[];
 // legitimately collide on `o<N>` — one key's render must never serve another
 // (pi never activates a key ⇒ its map holds exactly one bucket, today's
 // behavior).
-const detailsCaches = new Map<string, Map<string, DetailsRender>>();
+//
+// A null slot is a cached source_unavailable: the resolver answered nothing
+// renderable for that observation, and it answers the same until the bucket is
+// cleared (every resolver change clears it) — so a search over the whole graph
+// never re-resolves the same unavailable sources on every query.
+export type DetailsBucket = Map<string, DetailsRender | null>;
+const detailsCaches = new Map<string, DetailsBucket>();
 
-function cacheForActiveConversation(): Map<string, DetailsRender> {
-  const key = currentConversationKey();
+function bucketFor(key: string): DetailsBucket {
   let cache = detailsCaches.get(key);
   if (cache === undefined) {
-    cache = new Map<string, DetailsRender>();
+    cache = new Map<string, DetailsRender | null>();
     detailsCaches.set(key, cache);
   }
   return cache;
+}
+
+function cacheForActiveConversation(): DetailsBucket {
+  return bucketFor(currentConversationKey());
 }
 
 /** Render options for the verbatim-source details render: full, no entryId=id.
@@ -105,9 +114,8 @@ export function computeDetailsAndCache(
   resolveEntries: EntryResolver,
 ): { lines: number; tokens: number } | null {
   const render = renderDetailsText(sourceEntryIds, resolveEntries);
-  if (render === null) return null;
   cacheForActiveConversation().set(cacheKey(obsId), render);
-  return { lines: render.lines, tokens: render.tokens };
+  return render === null ? null : { lines: render.lines, tokens: render.tokens };
 }
 
 /** Compute the verbatim-source counts AND cache the rendered text keyed by
@@ -121,22 +129,17 @@ export function computeDetailsAndCacheFor(
   resolveEntries: EntryResolver,
 ): { lines: number; tokens: number } | null {
   const render = renderDetailsText(sourceEntryIds, resolveEntries);
-  if (render === null) return null;
-  let bucket = detailsCaches.get(key);
-  if (bucket === undefined) {
-    bucket = new Map<string, DetailsRender>();
-    detailsCaches.set(key, bucket);
-  }
-  bucket.set(cacheKey(obsId), render);
-  return { lines: render.lines, tokens: render.tokens };
+  bucketFor(key).set(cacheKey(obsId), render);
+  return render === null ? null : { lines: render.lines, tokens: render.tokens };
 }
 
 /**
  * Re-render an observation's verbatim source from its sourceEntryIds (full
  * text). Cached per observation id: a second call with the same obs id returns
- * the cached render without re-resolving or re-rendering. Returns null when the
- * source is unavailable (source_unavailable — the one-line summary still
- * renders; only the verbatim source is gone).
+ * the cached render without re-resolving or re-rendering — a source_unavailable
+ * answer included. Returns null when the source is unavailable
+ * (source_unavailable — the one-line summary still renders; only the verbatim
+ * source is gone).
  */
 export function renderDetails(
   obsId: string,
@@ -148,7 +151,6 @@ export function renderDetails(
   const cached = cache.get(key);
   if (cached !== undefined) return cached;
   const render = renderDetailsText(sourceEntryIds, resolveEntries);
-  if (render === null) return null;
   cache.set(key, render);
   return render;
 }
@@ -166,7 +168,7 @@ export function clearDetailsCache(): void {
  *  the load clears, then re-attaches: renders are stable per observation id
  *  (no bust logic), so the surviving rows' entries stay valid and the next
  *  recall stays warm. Returns null when there is no bucket yet. */
-export function detachActiveDetailsBucket(): Map<string, DetailsRender> | null {
+export function detachActiveDetailsBucket(): DetailsBucket | null {
   const key = currentConversationKey();
   const bucket = detailsCaches.get(key);
   if (bucket === undefined) return null;
@@ -177,13 +179,19 @@ export function detachActiveDetailsBucket(): Map<string, DetailsRender> | null {
 /** Re-install a detached bucket as the ACTIVE conversation's cache, merging
  *  any entries rendered while it was detached (renders are deterministic, so
  *  the pairs agree by construction). */
-export function reattachActiveDetailsBucket(bucket: Map<string, DetailsRender>): void {
+export function reattachActiveDetailsBucket(bucket: DetailsBucket): void {
   const key = currentConversationKey();
   const existing = detailsCaches.get(key);
   if (existing !== undefined) {
     for (const [entryKey, render] of existing) bucket.set(entryKey, render);
   }
   detailsCaches.set(key, bucket);
+}
+
+/** Drop ONE conversation's bucket (the conversation ended — its renders can
+ *  never be served again). A no-op for a key with no bucket. */
+export function dropDetailsBucket(key: string): void {
+  detailsCaches.delete(key);
 }
 
 /** Drop every conversation's bucket — the process-wide reset (test/teardown

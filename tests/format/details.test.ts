@@ -4,7 +4,13 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
-import { clearDetailsCache, computeDetailsAndCache, renderDetails } from "../../src/format/details.js";
+import {
+  clearDetailsCache,
+  computeDetailsAndCache,
+  computeDetailsAndCacheFor,
+  dropDetailsBucket,
+  renderDetails,
+} from "../../src/format/details.js";
 import { activateConversation, resetConversationStates } from "../../src/store/graph-store.js";
 import { estimateContentTokens } from "../../src/types.js";
 
@@ -121,6 +127,24 @@ describe("renderDetails", () => {
     };
     const second = renderDetails("o6", ["u1"], throwingResolve);
     expect(second).toEqual(first); // same rendered value
+  });
+
+  it("caches a source_unavailable answer too (a whole-graph search never re-resolves it)", () => {
+    let calls = 0;
+    const countingEmpty = (): readonly unknown[] => {
+      calls += 1;
+      return [];
+    };
+    expect(renderDetails("oNull", ["gone"], countingEmpty)).toBeNull();
+    expect(renderDetails("oNull", ["gone"], countingEmpty)).toBeNull();
+    expect(calls).toBe(1); // the second call is a cache hit
+    // the capture/warm paths record the same answer for the recall path
+    expect(computeDetailsAndCache("oNull2", ["gone"], countingEmpty)).toBeNull();
+    expect(renderDetails("oNull2", ["gone"], countingEmpty)).toBeNull();
+    expect(calls).toBe(2);
+    // a clear (every resolver change clears) lets the source resolve again
+    clearDetailsCache();
+    expect(renderDetails("oNull", ["u1"], resolverFor([userEntry("u1", "back")]))?.text).toBe("<USER>back</USER>");
   });
 
   it("clearDetailsCache forces a re-render on the next call", () => {
@@ -277,5 +301,23 @@ describe("renderDetails — the hideThinking gate", () => {
     const hidden = renderDetails("oh3", ["t1"], resolverFor([e]));
     expect(hidden?.text).not.toContain("cache flip reasoning");
     expect(hidden?.text).toContain("<ASSISTANT>the answer</ASSISTANT>");
+  });
+});
+
+describe("dropDetailsBucket (a conversation's teardown)", () => {
+  afterEach(() => resetConversationStates());
+
+  it("drops exactly the named conversation's renders", () => {
+    const resolve = resolverFor([userEntry("u1", "kept text")]);
+    expect(computeDetailsAndCacheFor("convA", "o1", ["u1"], resolve)).not.toBeNull();
+    expect(computeDetailsAndCacheFor("convB", "o1", ["u1"], resolve)).not.toBeNull();
+    dropDetailsBucket("convA");
+    const throwing = (): readonly unknown[] => {
+      throw new Error("resolver must not run on a cache hit");
+    };
+    activateConversation("convB");
+    expect(renderDetails("o1", ["u1"], throwing)?.text).toBe("<USER>kept text</USER>"); // B untouched
+    activateConversation("convA");
+    expect(() => renderDetails("o1", ["u1"], throwing)).toThrow(); // A's bucket is gone
   });
 });

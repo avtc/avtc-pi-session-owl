@@ -233,12 +233,12 @@ describe("core multiplexer — serialized swap", () => {
     expect(unobserved.map((e) => e.id)).toEqual(["e1", "e3", "e4"]); // the observer sees work again
   });
 
-  test("a same-key refold reload keeps the warmed details cache; a conversation switch clears it", async () => {
+  test("the warmed details cache survives a refold reload and a switch away and back; teardown drops it", async () => {
     // Renders are stable per observation id (the details cache has no bust
-    // logic), so a rewind refold's forced reload must not freeze the whole
+    // logic) and bucketed per conversation key, so neither a rewind refold's
+    // forced reload nor a subagent's turn on the shared core may freeze the
     // bucket — the next recall would re-render every observation verbatim
-    // and wedge the worker. A real conversation switch still clears (entry
-    // ids are per-conversation).
+    // and wedge the worker. Only the conversation's teardown drops it.
     const ctx = makeFakeCtx();
     await getCore("sA", { ctxFactory: () => ctx });
     let resolverCalls = 0;
@@ -264,10 +264,19 @@ describe("core multiplexer — serialized swap", () => {
     expect(renderDetails("o1", ["e0"], countingResolver)).not.toBeNull();
     expect(resolverCalls).toBe(1); // PRESERVED — the refold reload must not clear
 
-    await getCore("sB", { ctxFactory: () => makeFakeCtx() });
-    await getCore("sA", { ctxFactory: () => ctx }); // cold reload of sA
+    await getCore("sA|agent1", { ctxFactory: () => makeFakeCtx() }); // a subagent's turn
     expect(renderDetails("o1", ["e0"], countingResolver)).not.toBeNull();
-    expect(resolverCalls).toBe(2); // re-rendered — the switch-away cleared the bucket
+    expect(resolverCalls).toBe(2); // the subagent's own (empty) bucket — never sA's
+    await getCore("sA"); // the resident flip back
+    expect(renderDetails("o1", ["e0"], countingResolver)).not.toBeNull();
+    expect(resolverCalls).toBe(2); // PRESERVED — sA's bucket is still warm
+
+    for (const conv of state.registry.values()) {
+      for (const d of conv.dispose) await d(); // session.end teardown
+    }
+    await getCore("sA", { ctxFactory: () => ctx }); // the next arrival cold-loads
+    expect(renderDetails("o1", ["e0"], countingResolver)).not.toBeNull();
+    expect(resolverCalls).toBe(3); // re-rendered — the teardown dropped the bucket
   });
 
   test("reloadCoreFor is a no-op for a key that is not live (the next swap loads fresh)", async () => {

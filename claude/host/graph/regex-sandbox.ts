@@ -29,6 +29,18 @@ const CHUNK_SIZE = 256;
  *  least this long, so a slow-but-fine batch is not spuriously cut short. */
 const MIN_TIMEOUT_MS = 1000;
 
+/** The ceiling on any search deadline here: the host cuts a plugin's
+ *  tool.call hook at ~10s, and the graceful stop (partial results + the
+ *  refine hint) must land under that cut — a longer configured timeout would
+ *  let the hook die first and the model would see no answer at all. */
+const SEARCH_TIMEOUT_CAP_MS = 8_000;
+
+/** The search deadline this host can honor for `timeoutMs`: the configured
+ *  value, capped under the tool.call hook cut. */
+export function boundSearchTimeout(timeoutMs: number): number {
+  return Math.min(timeoutMs, SEARCH_TIMEOUT_CAP_MS);
+}
+
 const UNAVAILABLE_MESSAGE =
   "Regex search is unavailable in this runtime (worker threads could not start). Try a simpler pattern or browse with ls.";
 
@@ -36,7 +48,7 @@ const WORKER_SHUTDOWN_MESSAGE = "Regex search was stopped (the session shut down
 
 /** Test `regex` against each string in `strings`, returning a boolean[] in
  *  the same order. Inline chunked execution with a deadline: a batch that
- *  exceeds the timeout (floored) returns the PARTIAL matches found so far —
+ *  exceeds the timeout (floored, and capped by `boundSearchTimeout`) returns the PARTIAL matches found so far —
  *  callers report those partials plus a "search was stopped" note. */
 export async function runRegexTests(
   regex: RegExp,
@@ -44,7 +56,7 @@ export async function runRegexTests(
   timeoutMs: number,
 ): Promise<RegexTestOutcome> {
   if (strings.length === 0) return { results: [] };
-  const effectiveTimeout = Math.max(Number(timeoutMs) || MIN_TIMEOUT_MS, MIN_TIMEOUT_MS);
+  const effectiveTimeout = boundSearchTimeout(Math.max(Number(timeoutMs) || MIN_TIMEOUT_MS, MIN_TIMEOUT_MS));
   const deadline = Date.now() + effectiveTimeout;
   const results: boolean[] = new Array(strings.length).fill(false);
   let tested = 0;
@@ -84,6 +96,24 @@ export async function runRegexTests(
 export function terminateRegexWorker(): void {
   void WORKER_SHUTDOWN_MESSAGE;
   void UNAVAILABLE_MESSAGE;
+}
+
+/** The installed event-loop yield (null until the hooks module arms one).
+ *  The closure has no setImmediate: the engine's own timer is the sanctioned
+ *  macrotask yield, and only an armed `$` can reach it. */
+let yieldLane: (() => Promise<void>) | null = null;
+
+/** Install the macrotask yield the search callers use between chunks (the
+ *  hooks module arms it with the engine timer on every surface arm). */
+export function installYieldLane(lane: (() => Promise<void>) | null): void {
+  yieldLane = lane;
+}
+
+/** Return control to the event loop for one macrotask turn — through the
+ *  installed engine-timer lane; before one is installed, a microtask turn
+ *  (the chunking and the deadline still bound the run). */
+export function yieldToEventLoop(): Promise<void> {
+  return yieldLane !== null ? yieldLane() : Promise.resolve();
 }
 
 function compileErrorMessage(detail: string): string {

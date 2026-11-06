@@ -62,6 +62,12 @@ describe("the port's default-model override", () => {
         expect(after.defaultValue).toBe("high");
       } else if (row.id === "findTimeoutMs") {
         expect(after.defaultValue).toBe(8_000); // under the host's ~10s hook cut
+        // only values the sandbox's 8s cap lets through are offered
+        expect((after as { presets?: unknown }).presets).toEqual([
+          ["3s", 3_000],
+          ["5s", 5_000],
+          ["8s", 8_000],
+        ]);
       } else if (row.id === "hideThinking") {
         expect(after.defaultValue).toBe(true); // the host reviews model-facing content
       } else {

@@ -286,6 +286,26 @@ describe("append-handler — dedupe and release", () => {
 });
 
 describe("details-bridge — invalidation", () => {
+  test("with a version, rows() is materialized only when the version moves (never per resolve)", () => {
+    const live: ClaudeRow[] = [row("u1", null)];
+    let ver = 1;
+    let rowsCalls = 0;
+    const resolver = makeEntryResolver({
+      rows: () => {
+        rowsCalls += 1;
+        return live;
+      },
+      version: () => ver,
+    });
+    for (let i = 0; i < 50; i += 1) resolver(["u1"]); // a whole-graph pass on one generation
+    expect(rowsCalls).toBe(1);
+    live.push(row("u2", "u1"));
+    ver += 1; // a live append
+    expect((resolver(["u2"]) as Array<{ id: string }>).map((e) => e.id)).toEqual(["u2"]);
+    resolver(["u1"]);
+    expect(rowsCalls).toBe(2);
+  });
+
   test("makeEntryResolver self-invalidates when the index grows (generation check)", () => {
     const live: ClaudeRow[] = [row("u1", null)];
     const resolver = makeEntryResolver({ rows: () => live });

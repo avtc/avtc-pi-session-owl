@@ -702,13 +702,17 @@ async function buildCatGrepItemsWithMatches(
       }
     }
   }
-  const texts = [
-    ...summaryNodes.map((n) => n.summary),
-    ...obsList.map((o) => searchableText(o.summary, detailsTextFor(o))),
-  ];
-  // Reuse the shared regex-batch helper (worker-bounded, findTimeoutMs) so the
+  // texts on demand: the details renders run under the search deadline
+  const textAt = (index: number): string =>
+    index < summaryNodes.length
+      ? (summaryNodes[index] as Node).summary
+      : searchableText(
+          (obsList[index - summaryNodes.length] as Observation).summary,
+          detailsTextFor(obsList[index - summaryNodes.length] as Observation),
+        );
+  // Reuse the shared regex-batch helper (bounded by findTimeoutMs) so the
   // timeout note matches find/owl_recall exactly instead of a hand-rolled variant.
-  const result = await intersectRegexFilters(texts, [grep.pattern]);
+  const result = await intersectRegexFilters(summaryNodes.length + obsList.length, textAt, [grep.pattern]);
   if ("error" in result) return { error: result.error };
   const summaryMatch = new Set<string>();
   for (let i = 0; i < summaryNodes.length; i += 1) {
@@ -805,14 +809,17 @@ export async function collectFindMatches(
   }
   // observations match over summary + DETAILS (verbatim source) so a
   // query/contentPattern finds obs whose verbatim source hits; nodes match over
-  // summary only.
-  const texts: string[] = [
-    ...nodeJobs.map((j) => j.text),
-    ...obsJobs.map((j) => searchableText(j.obs.summary, detailsTextFor(j.obs))),
-  ];
+  // summary only. The texts are produced on demand, so the details renders run
+  // under the search deadline in chunks.
   const nodeCount = nodeJobs.length;
-  // an item passes the intersection only if it matches EVERY regex (worker-bounded).
-  const filtered = await intersectRegexFilters(texts, regexes);
+  const textAt = (index: number): string => {
+    if (index < nodeCount) return (nodeJobs[index] as { text: string }).text;
+    const { obs } = obsJobs[index - nodeCount] as { obs: Observation };
+    return searchableText(obs.summary, detailsTextFor(obs));
+  };
+  // an item passes the intersection only if it matches EVERY regex (bounded by
+  // findTimeoutMs).
+  const filtered = await intersectRegexFilters(nodeCount + obsJobs.length, textAt, regexes);
   if ("error" in filtered) return { error: filtered.error };
   const passes = filtered.passes;
 

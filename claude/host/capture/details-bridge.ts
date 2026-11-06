@@ -13,12 +13,15 @@ import { type ClaudeRow, groupRows } from "./grouper.js";
 
 /** The sync entry index the resolver reads. */
 export interface EntryIndex {
-  /** Rows in arrival order (cache + adopted mirror). */
+  /** Rows in arrival order (cache + adopted mirror). Materializing them walks
+   *  the whole index, so the resolver calls this only when the generation
+   *  moved. */
   rows(): readonly ClaudeRow[];
-  /** Monotonic index version — bumped by EVERY mutation, including the
-   *  same-length in-place refresh of a re-delivered uuid. When present it
-   * replaces the length check as the cache generation (the capture side
-   * DOES refresh rows in place — a length key would serve stale entries). */
+  /** Monotonic index version — bumped by EVERY mutation: a live append, a
+   *  restart's adoption, the load's re-sequencing, an in-place row refresh.
+   *  When present it is the cache generation and `rows()` runs only when it
+   *  moves; without it the generation is the row count (an append-only
+   *  index), which needs `rows()` on every call. */
   version?(): number;
 }
 
@@ -26,19 +29,27 @@ export interface EntryIndex {
  * Build the EntryResolver over an index: resolves entry ids -> the pi-shaped
  * entries the details renderer consumes. Ids not in the index return nothing
  * for that slot (graceful drop).
+ *
+ * The grouped entry map is built once per index generation. A details render
+ * resolves per observation, so a whole-graph pass (the resume warm, a cold
+ * search) calls this thousands of times against one generation — each call
+ * must cost a map lookup, not a walk of every row.
  */
 export function makeEntryResolver(index: EntryIndex): (ids: readonly string[]) => readonly unknown[] {
   let cache: Map<string, SessionEntry> | null = null;
   let cachedGen: number | null = null;
   const rebuild = (): Map<string, SessionEntry> => {
-    // generation: the index's version when it exposes one (catches the
-    // same-length in-place refresh of a re-delivered uuid), else the row
-    // count (an append-only index)
-    const rows = [...index.rows()];
-    const gen = index.version !== undefined ? index.version() : rows.length;
+    let rows: readonly ClaudeRow[] | null = null;
+    let gen: number;
+    if (index.version !== undefined) {
+      gen = index.version();
+    } else {
+      rows = index.rows();
+      gen = rows.length;
+    }
     if (cache !== null && gen === cachedGen) return cache;
     const map = new Map<string, SessionEntry>();
-    for (const entry of groupRows(rows)) {
+    for (const entry of groupRows(rows ?? index.rows())) {
       map.set(entry.id, entry);
     }
     cache = map;

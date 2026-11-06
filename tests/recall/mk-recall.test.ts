@@ -453,6 +453,40 @@ describe("owl_recall", () => {
       expect(text(await recall(tool(), { from: "2026-07-17 14:30" }))).toContain("o5");
     });
 
+    it("an out-of-range observation's verbatim source is never rendered for the text gate", async () => {
+      resetForNewSession();
+      setClock(() => T0);
+      const g = new SessionOwlGraph({ nodes: new Map(), observations: new Map(), nextObsId: 1, nextNodeId: 1 });
+      applyCreateNode(g, { id: "n1", summary: "work", importance: "high", parentNode: null, state: "active" });
+      for (const [id, ts, src] of [
+        ["oOld", T0, "eOld"],
+        ["oNew", T1, "eNew"],
+      ] as const) {
+        applyRecordObservation(g, {
+          obs: makeObservation({
+            id: id as ObsId,
+            summary: `step ${id}`,
+            importance: "high",
+            sourceEntryIds: [src],
+            timestamp: ts,
+            parentNode: "n1",
+          }),
+        });
+      }
+      setClock(null);
+      getGraphStore().graph = g;
+      const requested: string[] = [];
+      setEntryResolver((ids) => {
+        requested.push(...ids);
+        return ids.map((id) => userTextEntry(id, `verbatim ${id}`));
+      });
+      const out = text(await recall(tool(), { query: "verbatim", from: "2026-07-17 12:00" }));
+      expect(out).toContain("oNew");
+      expect(out).not.toContain("oOld");
+      expect(requested).toContain("eNew");
+      expect(requested).not.toContain("eOld"); // the bound filtered it before the render
+    });
+
     it("invalid `from` datetime → error string", async () => {
       seedSource();
       const out = text(await recall(tool(), { from: "not-a-date" }));

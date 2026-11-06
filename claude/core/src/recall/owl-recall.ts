@@ -531,25 +531,32 @@ async function buildSearchCandidates(
     const parent = obs.parentNode === null ? null : (target.nodes.get(obs.parentNode) ?? null);
     // parent-state gate: an obs under an obsolete node is hidden unless includeSuperseded
     if (parent !== null && !isVisible(parent.state, includeSuperseded)) continue;
+    // time range applies to observations only (nodes are never time-filtered);
+    // checked before the text gate so an out-of-range observation never has
+    // its verbatim source rendered or searched
+    if (bounds.from !== null && obs.timestamp < bounds.from) continue;
+    if (bounds.to !== null && obs.timestamp >= bounds.to) continue;
     obsJobs.push({ obs, parent });
   }
 
   const nodeCount = nodeJobs.length;
   // every job passes the text gate until a filter marks it false (intersection —
-  // worker-bounded). An empty filter list is the time-range browse (all pass).
+  // bounded by findTimeoutMs). An empty filter list is the time-range browse
+  // (all pass).
   let passes = new Array<boolean>(nodeCount + obsJobs.length).fill(true);
   let note: string | undefined;
   if (filters.length > 0) {
     // nodes match over summary only; observations match over summary + details
-    // (the verbatim source) so a query/contentPattern finds obs whose details hit.
-    const texts = [
-      ...nodeJobs.map((j) => j.node.summary),
-      ...obsJobs.map((j) => {
-        const d = details(j.obs.id);
-        return d === null ? j.obs.summary : searchableText(j.obs.summary, d);
-      }),
-    ];
-    const filtered = await intersectRegexFilters(texts, filters);
+    // (the verbatim source) so a query/contentPattern finds obs whose details
+    // hit. The texts are produced on demand, so the details renders run under
+    // the search deadline in chunks.
+    const textAt = (index: number): string => {
+      if (index < nodeCount) return (nodeJobs[index] as { node: RenderableNode }).node.summary;
+      const { obs } = obsJobs[index - nodeCount] as { obs: RecallObservation };
+      const d = details(obs.id);
+      return d === null ? obs.summary : searchableText(obs.summary, d);
+    };
+    const filtered = await intersectRegexFilters(nodeCount + obsJobs.length, textAt, filters);
     if ("error" in filtered) return { error: filtered.error };
     passes = filtered.passes;
     note = filtered.note;
@@ -572,9 +579,6 @@ async function buildSearchCandidates(
   for (let i = 0; i < obsJobs.length; i += 1) {
     if (!passes[nodeCount + i]) continue;
     const { obs, parent } = obsJobs[i];
-    // time range applies to observations only (nodes are never time-filtered)
-    if (bounds.from !== null && obs.timestamp < bounds.from) continue;
-    if (bounds.to !== null && obs.timestamp >= bounds.to) continue;
     candidates.push({
       id: obs.id,
       key: { importanceRank: observationImportanceRank(obs, parent), recency: obs.timestamp },

@@ -54,6 +54,7 @@ import type { TimelineEvent } from "../host/conflicts/timeline.js";
 import { parseTimelines } from "../host/conflicts/timeline.js";
 import { evictResidentConversation, getCore, reloadCoreFor } from "../host/core-instances.js";
 import * as bridge from "../host/engine-bridge.js";
+import { installYieldLane } from "../host/graph/regex-sandbox.js";
 import { mergePaneKeybindings } from "../host/keys/pane-bindings.js";
 import { initLogConsumer } from "../host/log/consumer.js";
 import { errDetail, guarded, sayError } from "../host/log/err-detail.js";
@@ -388,6 +389,15 @@ function pickStageSettings(handle: ReturnType<typeof getInstalledSettingsHandle>
 }
 
 function armAll(dollar: any) {
+  // the search's between-chunk yield: the closure has no setImmediate, and a
+  // microtask turn never reaches the event loop — the engine timer does, so a
+  // long find/owl_recall search lets the host's heartbeat through
+  installYieldLane(
+    () =>
+      new Promise<void>((resolve) => {
+        dollar.clock.after(0, () => resolve());
+      }),
+  );
   // the launch broker's capsules (re-armed with the fresh dollar, the same
   // replace-on-arm rule as the bridge table below)
   stageLaunchBroker.arm({

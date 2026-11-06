@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 import {
   budgetWindow,
   buildGrepExcerpt,
   grepTimeoutNote,
+  intersectRegexFilters,
   parseLineRange,
   searchableText,
   searchTimeoutNote,
@@ -161,4 +163,55 @@ describe("searchableText", () => {
     // dedup contract is that the summary is NOT doubled.
     expect(searchableText("same line", "same line")).toBe("same line");
   });
+});
+
+describe("intersectRegexFilters — texts produced on demand", () => {
+  afterEach(() => _resetGetSessionOwlSettings());
+
+  it("intersects every filter and prepares each text exactly once", async () => {
+    const texts = Array.from({ length: 600 }, (_, i) => (i % 3 === 0 ? `alpha beta ${i}` : `alpha ${i}`));
+    const prepared: number[] = [];
+    const out = await intersectRegexFilters(
+      texts.length,
+      (i) => {
+        prepared.push(i);
+        return texts[i] as string;
+      },
+      [/alpha/, /beta/],
+    );
+    if ("error" in out) throw new Error(out.error);
+    expect(out.note).toBeUndefined();
+    expect(out.passes).toEqual(texts.map((t) => t.includes("beta")));
+    expect(prepared).toEqual(texts.map((_, i) => i)); // once each, in order (across chunks)
+  });
+
+  it("an empty filter list passes everything without preparing a text", async () => {
+    const out = await intersectRegexFilters(3, () => {
+      throw new Error("no text may be prepared");
+    }, []);
+    expect(out).toEqual({ passes: [true, true, true] });
+  });
+
+  it("a slow preparation is cut at the deadline: partial passes + the timeout note", async () => {
+    _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, findTimeoutMs: 1000 }));
+    const spin = (ms: number) => {
+      const until = Date.now() + ms;
+      while (Date.now() < until) {
+        /* busy-wait: a deterministic slow render */
+      }
+    };
+    const count = 2000;
+    let prepared = 0;
+    const out = await intersectRegexFilters(count, () => {
+      prepared += 1;
+      spin(5);
+      return "hit";
+    }, [/hit/]);
+    if ("error" in out) throw new Error(out.error);
+    expect(prepared).toBeLessThan(count); // stopped preparing, not a full pass
+    expect(out.note).toContain(`of ${count} items`);
+    const passed = out.passes.filter(Boolean).length;
+    expect(passed).toBeGreaterThan(0);
+    expect(passed).toBeLessThanOrEqual(prepared); // undecided items stay false
+  }, 20_000);
 });

@@ -7,6 +7,7 @@
 // singleton behavior under one default key.
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { computeDetailsAndCacheFor, renderDetails } from "../../src/format/details.js";
 import {
   activateConversation,
   currentConversationKey,
@@ -108,5 +109,33 @@ describe("graph-store — resident conversation registry", () => {
     expect(getGraphStore()).not.toBe(seen.get("l3")); // cold miss ⇒ fresh state
     expect(activateConversation("l5").resident).toBe(true); // others untouched
     expect(getGraphStore()).toBe(seen.get("l5"));
+  });
+});
+
+describe("graph-store — eviction drops the conversation's details renders", () => {
+  beforeEach(() => resetConversationStates());
+
+  it("evictConversation drops the evicted key's details bucket, never another's", () => {
+    let calls = 0;
+    const resolver = (ids: readonly string[]): readonly unknown[] => {
+      calls += 1;
+      return ids.map((id) => ({
+        type: "message",
+        id,
+        parentId: null,
+        timestamp: "1970-01-01T00:00:00.000Z",
+        message: { role: "user", content: `text ${id}`, timestamp: 0 },
+      }));
+    };
+    computeDetailsAndCacheFor("A", "o1", ["u1"], resolver);
+    computeDetailsAndCacheFor("B", "o1", ["u1"], resolver);
+    expect(calls).toBe(2);
+    evictConversation("A");
+    activateConversation("B");
+    renderDetails("o1", ["u1"], resolver);
+    expect(calls).toBe(2); // B's render is still cached
+    activateConversation("A");
+    renderDetails("o1", ["u1"], resolver);
+    expect(calls).toBe(3); // A's render left with A
   });
 });

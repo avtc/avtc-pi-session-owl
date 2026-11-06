@@ -10,7 +10,7 @@
 // mutators (apply-then-persist), then call the store to record the delta. The
 // store applies mutations ONLY during load() reconstruction (event-sourcing).
 
-import { clearAllDetailsCaches, clearDetailsCache, type EntryResolver } from "../format/details.js";
+import { clearAllDetailsCaches, clearDetailsCache, dropDetailsBucket, type EntryResolver } from "../format/details.js";
 import {
   childLinksConsistent,
   everyObservationAttached,
@@ -158,9 +158,11 @@ export function activateConversation(key: string): { resident: boolean } {
 }
 
 /** Drop one key's resident state (session.end teardown, subagent handoff,
- *  failed swap). */
+ *  failed swap) — its details renders included: they belong to the evicted
+ *  conversation and would otherwise outlive it for the whole process. */
 export function evictConversation(key: string): void {
   residentStores.delete(key);
+  dropDetailsBucket(key);
   if (ambientConversationKey() === key) store = null;
 }
 

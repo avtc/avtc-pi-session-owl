@@ -17,8 +17,13 @@
 // previous conversation's graph, and resetForNewSession exists exactly for
 // the fresh-session case):
 //
-//   [lock] -> resetForNewSession -> setEntryResolver -> clearDetailsCache ->
+//   [lock] -> resetForNewSession -> setEntryResolver ->
 //   setSessionOwlSessionBase -> load(ctx) -> [unlock]
+//
+// The details cache is bucketed per conversation key, so a switch never has
+// to clear it: renders are stable per observation, a resident flip back finds
+// its own bucket warm, a cold load starts from the bucket resetForNewSession
+// emptied, and a conversation's teardown (evictConversation) drops its bucket.
 //
 // Switch policy: reader-class switches DEFER behind the current
 // conversation's run-lock (wait for the in-flight run — it belongs to ITS
@@ -172,9 +177,10 @@ export function evictResidentConversation(key: string): void {
 // ---- the swap -----------------------------------------------------------------
 
 /** The seams that re-apply on EVERY activation — they are per-process values
- *  the resident state object does not own: the session-entry resolver, the
- *  affinity base, and the process-wide details cache (cleared per flip so
- *  renders never cross a conversation boundary). */
+ *  the resident state object does not own: the session-entry resolver and the
+ *  affinity base. The details cache is NOT one of them — it is bucketed per
+ *  conversation key, and clearing it here would throw a resident key's warm
+ *  renders away on every flip back from a subagent. */
 function applyConversationSeams(key: string): void {
   const f = factories.get(key);
   if (f?.resolverFactory) {
@@ -184,8 +190,6 @@ function applyConversationSeams(key: string): void {
     // shutdown for the same reason: entry ids are per-conversation).
     graphStore.clearEntryResolver();
   }
-  // Explicit belt (resetForNewSession already clears — idempotent).
-  details.clearDetailsCache();
   sessionAffinity.setSessionOwlSessionBase(f?.affinityBase ?? randomBase());
 }
 

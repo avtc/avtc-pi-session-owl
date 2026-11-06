@@ -5,7 +5,13 @@
 // contract-identical to the core's worker runner (same exports, outcome
 // shapes, and message texts) minus the worker (banned in the closure).
 import { describe, expect, test } from "vitest";
-import { runRegexTests, terminateRegexWorker } from "../../host/graph/regex-sandbox.js";
+import {
+  boundSearchTimeout,
+  installYieldLane,
+  runRegexTests,
+  terminateRegexWorker,
+  yieldToEventLoop,
+} from "../../host/graph/regex-sandbox.js";
 
 describe("runRegexTests — the host sandbox", () => {
   test("complete batch: booleans in order, empty batch short-circuits", async () => {
@@ -69,6 +75,44 @@ describe("runRegexTests — the host sandbox", () => {
     expect(out.results).toEqual([false]);
     expect(out.testedCount).toBe(1);
   }, 20_000);
+
+  test("yieldToEventLoop runs through the installed lane (a resolved turn before one is armed)", async () => {
+    await expect(yieldToEventLoop()).resolves.toBeUndefined(); // unarmed
+    let turns = 0;
+    installYieldLane(async () => {
+      turns += 1;
+    });
+    try {
+      await yieldToEventLoop();
+      await yieldToEventLoop();
+      expect(turns).toBe(2);
+    } finally {
+      installYieldLane(null);
+    }
+  });
+
+  test("every search deadline is capped at 8s, under the host's ~10s tool.call hook cut", async () => {
+    expect(boundSearchTimeout(300_000)).toBe(8_000); // a 5m setting
+    expect(boundSearchTimeout(8_000)).toBe(8_000);
+    expect(boundSearchTimeout(3_000)).toBe(3_000); // a shorter setting stands
+    // the runner's own timeout honors the cap: a never-ending batch stops at 8s
+    const slow = {
+      test: () => {
+        const until = Date.now() + 50;
+        while (Date.now() < until) {
+          /* busy-wait: a deterministic slow string */
+        }
+        return true;
+      },
+    } as unknown as RegExp;
+    const out = await runRegexTests(
+      slow,
+      Array.from({ length: 1_000 }, () => "s"),
+      300_000,
+    );
+    if (!("timedOutMs" in out)) throw new Error("expected the timeout shape");
+    expect(out.timedOutMs).toBe(8_000);
+  }, 30_000);
 
   test("terminateRegexWorker is a safe no-op", () => {
     expect(() => terminateRegexWorker()).not.toThrow();

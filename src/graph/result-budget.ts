@@ -11,7 +11,7 @@
 import { getSessionOwlSettings } from "../config/schema.js";
 import { pluralize } from "../format/render.js";
 import { estimateContentTokens } from "../types.js";
-import { runRegexTests } from "./regex-runner.js";
+import { boundSearchTimeout, runRegexTests, yieldToEventLoop } from "./regex-runner.js";
 
 /** Note surfaced when an observation's verbatim source can't be re-rendered
  *  (source entries gone — e.g. cross-branch drill). The one-line summary is
@@ -150,29 +150,88 @@ export function searchTimeoutNote(timedOutMs: number, testedCount: number, total
   return `Search timed out after ${seconds}s — tested ${testedCount} of ${total} items before the kill. These are partial results; refine or narrow the query.`;
 }
 
-/** Intersect multiple regex filters over a batch of texts (worker-bounded by
- *  `findTimeoutMs`). An item passes only if it matches EVERY regex. A timed-out
- *  regex marks untested items false (conservative — partial matches + note).
- *  Used by `find`/`owl_recall` search to intersect `query` + `contentPattern` over
- *  node summaries + observation text. Returns the per-text pass flags + an
- *  optional timeout note, or an error string the caller surfaces verbatim. */
+/** How many items one search chunk prepares and tests between the deadline
+ *  checks and the event-loop yields. */
+const SEARCH_CHUNK_SIZE = 256;
+
+/** The floor the regex runner applies to the configured timeout (a 0 or
+ *  missing setting still bounds the search at this). */
+const MIN_SEARCH_TIMEOUT_MS = 1000;
+
+/** Intersect multiple regex filters over a batch of texts (bounded by
+ *  `findTimeoutMs`). An item passes only if it matches EVERY regex. Used by
+ *  `find`/`owl_recall` search to intersect `query` + `contentPattern` over node
+ *  summaries + observation text. Returns the per-item pass flags + an optional
+ *  timeout note, or an error string the caller surfaces verbatim.
+ *
+ *  The texts are PRODUCED ON DEMAND: `textAt(i)` is called once per item,
+ *  chunk by chunk, so preparing them (an observation's verbatim render) runs
+ *  under the same deadline as the regex tests — one budget for the whole
+ *  search — and the event loop gets a turn between chunks. A later filter only
+ *  tests the items every earlier filter passed (the intersection's verdict is
+ *  the same). On a deadline hit the items not yet decided are false
+ *  (conservative — partial matches + note) and the note counts the decided
+ *  ones. An empty filter list passes everything without preparing a text. */
 export async function intersectRegexFilters(
-  texts: readonly string[],
+  count: number,
+  textAt: (index: number) => string,
   regexes: readonly RegExp[],
 ): Promise<{ passes: boolean[]; note?: string } | { error: string }> {
-  const passes = new Array<boolean>(texts.length).fill(true);
-  let note: string | undefined;
-  for (const re of regexes) {
-    const outcome = await runRegexTests(re, texts, getSessionOwlSettings().findTimeoutMs);
-    if ("error" in outcome) return { error: outcome.error };
-    for (let i = 0; i < texts.length; i += 1) {
-      if (!outcome.results[i]) passes[i] = false;
+  if (regexes.length === 0) return { passes: new Array<boolean>(count).fill(true) };
+  const passes = new Array<boolean>(count).fill(false);
+  const timeoutMs = boundSearchTimeout(
+    Math.max(Number(getSessionOwlSettings().findTimeoutMs) || 0, MIN_SEARCH_TIMEOUT_MS),
+  );
+  const deadline = Date.now() + timeoutMs;
+  const timedOut = (decided: number) => ({ passes, note: searchTimeoutNote(timeoutMs, decided, count) });
+  for (let start = 0; start < count; start += SEARCH_CHUNK_SIZE) {
+    if (start > 0) {
+      await yieldToEventLoop();
+      if (Date.now() >= deadline) return timedOut(start);
     }
-    if ("testedCount" in outcome) {
-      note = searchTimeoutNote(outcome.timedOutMs, outcome.testedCount, texts.length);
+    const end = Math.min(start + SEARCH_CHUNK_SIZE, count);
+    let live: number[] = [];
+    let liveTexts: string[] = [];
+    for (let i = start; i < end; i += 1) {
+      live.push(i);
+      liveTexts.push(textAt(i));
+      // a slow preparation (cold renders) is cut at the deadline too — the
+      // items prepared so far are tested, the rest stay undecided
+      if (Date.now() >= deadline) break;
     }
+    const prepared = start + live.length;
+    for (let r = 0; r < regexes.length; r += 1) {
+      const outcome = await runRegexTests(regexes[r] as RegExp, liveTexts, Math.max(deadline - Date.now(), 0));
+      if ("error" in outcome) return { error: outcome.error };
+      const lastFilter = r === regexes.length - 1;
+      if ("testedCount" in outcome) {
+        // eliminated by an earlier filter = decided; on the last filter the
+        // tested prefix is decided as well
+        let decided = start + (prepared - start - live.length);
+        if (lastFilter) {
+          for (let k = 0; k < outcome.testedCount; k += 1) {
+            if (outcome.results[k]) passes[live[k] as number] = true;
+          }
+          decided += outcome.testedCount;
+        }
+        return timedOut(decided);
+      }
+      const nextLive: number[] = [];
+      const nextTexts: string[] = [];
+      for (let k = 0; k < live.length; k += 1) {
+        if (outcome.results[k]) {
+          nextLive.push(live[k] as number);
+          nextTexts.push(liveTexts[k] as string);
+        }
+      }
+      live = nextLive;
+      liveTexts = nextTexts;
+      if (live.length === 0) break;
+    }
+    for (const index of live) passes[index] = true;
+    if (prepared < end) return timedOut(prepared);
   }
-  return { passes, note };
+  return { passes };
 }
 
 /** The note surfaced when a contentPattern-grep over observation content lines

@@ -191,6 +191,20 @@ async function runInWorker(regex: RegExp, strings: readonly string[], timeoutMs:
   });
 }
 
+/** The search deadline a host can actually honor for `timeoutMs`. The worker
+ *  kills a runaway batch at any length, so the configured value stands. */
+export function boundSearchTimeout(timeoutMs: number): number {
+  return timeoutMs;
+}
+
+/** Return control to the event loop for one macrotask turn. The search
+ *  callers prepare their texts on the main thread in chunks and call this
+ *  between chunks, so a whole-graph search never holds the host for its full
+ *  duration in one synchronous run. */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 function compileErrorMessage(detail: string): string {
   return `Regex failed to run: ${detail}. Retry with a fixed pattern.`;
 }

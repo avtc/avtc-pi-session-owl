@@ -37,7 +37,8 @@
 // (withPortDefaults): the Default-model knob comes pre-set to `haiku` (the
 // background stages run on the latest Haiku out of the box) and the
 // Default-thinking-level knob to `high` (the background stages reason at
-// high by default). Per-component overrides and the chains themselves are
+// high by default). The Find-timeout knob also carries port presets (3s, 5s,
+// 8s — the host caps every search at 8s). Per-component overrides and the chains themselves are
 // unchanged, and picking "Session default" persists an explicit value that
 // falls the stages back to the same semantics as pi's null default, just
 // not the shipped value.
@@ -145,11 +146,28 @@ const PORT_SHARED_DEFAULTS: Readonly<Record<string, unknown>> = {
   hideThinking: true,
 };
 
+/** The port-specific presets for SHARED knobs: the search timeout is capped
+ *  at 8s on this host (the regex sandbox's ceiling, under the tool.call hook
+ *  cut), so the pane offers only values the cap lets through. */
+const PORT_SHARED_PRESETS: Readonly<Record<string, unknown>> = {
+  findTimeoutMs: [
+    ["3s", 3_000],
+    ["5s", 5_000],
+    ["8s", 8_000],
+  ],
+};
+
 export function withPortDefaults<S extends SchemaShape>(base: S): S {
   return {
     ...base,
-    settings: base.settings.map((s) =>
-      s.id in PORT_SHARED_DEFAULTS ? { ...s, defaultValue: PORT_SHARED_DEFAULTS[s.id] } : s,
-    ) as S["settings"],
+    settings: base.settings.map((s) => {
+      if (!(s.id in PORT_SHARED_DEFAULTS)) return s;
+      const presets = PORT_SHARED_PRESETS[s.id];
+      return {
+        ...s,
+        defaultValue: PORT_SHARED_DEFAULTS[s.id],
+        ...(presets !== undefined ? { presets } : {}),
+      };
+    }) as S["settings"],
   };
 }
