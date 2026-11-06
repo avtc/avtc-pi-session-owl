@@ -55,6 +55,12 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
   // scan from the END: only the last maxRows uuid-bearing rows matter, so
   // the prefix is never parsed
   const rows: TailRow[] = [];
+  // ids a real uuid row holds, and the rows named only by messageId: the
+  // engine writes file-history rows under the messageId of the message they
+  // snapshot, so the same id can name a parentless chrome row AND the real
+  // chain row — on either side of it in the file
+  const uuidIds = new Set<string>();
+  const messageIdOnly = new Set<TailRow>();
   for (let i = lines.length - 1; i >= 0 && rows.length < maxRows; i -= 1) {
     const line = lines[i]?.trim() ?? "";
     if (line === "") continue;
@@ -96,14 +102,20 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
     const toolResult =
       Array.isArray(content) &&
       content.some((b) => b !== null && typeof b === "object" && (b as { type?: unknown }).type === "tool_result");
-    rows.push({
+    const tailRow: TailRow = {
       uuid: id,
       parentUuid: parent,
       boundary: row.type === "system" && row.subtype === "compact_boundary",
       ...(toolResult ? { toolResult: true } : {}),
-    });
+    };
+    if (typeof row.uuid === "string") uuidIds.add(id);
+    else messageIdOnly.add(tailRow);
+    rows.push(tailRow);
   }
-  return { rows: rows.reverse(), torn };
+  // the real row owns the shared id: a parentless messageId row standing in
+  // for it would read as a fresh root — a false rewind verdict
+  const kept = rows.filter((r) => !(messageIdOnly.has(r) && uuidIds.has(r.uuid)));
+  return { rows: kept.reverse(), torn };
 }
 
 /** Which tier serves this read: the capsule under the cap, the helper over

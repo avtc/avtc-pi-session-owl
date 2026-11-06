@@ -54,6 +54,11 @@ if (
 // so the scan stops as soon as the ring is full.
 if (tailN !== null) {
   const newest = []; // the newest-first rows (the scan reads backward)
+  // ids a real uuid row holds, and the rows named only by messageId: the
+  // engine writes file-history rows under the messageId of the message they
+  // snapshot, so one id can name a parentless chrome row AND the real row
+  const uuidIds = new Set();
+  const messageIdOnly = new Set();
   let torn = false;
   const fd = openSync(file, "r");
   try {
@@ -112,7 +117,10 @@ if (tailN !== null) {
         Array.isArray(content) && content.some((b) => b !== null && typeof b === "object" && b.type === "tool_result")
           ? 1
           : 0;
-      newest.push([id, parent, boundary, toolResult]);
+      const entry = [id, parent, boundary, toolResult];
+      if (typeof row.uuid === "string") uuidIds.add(id);
+      else messageIdOnly.add(entry);
+      newest.push(entry);
     };
     // the ring fills with UUID rows only: a raw-line window lets dense
     // metadata (api requests, queue operations, attachments) crowd the
@@ -146,8 +154,13 @@ if (tailN !== null) {
     }
     // the file's first line has no newline before it
     if (pos === 0 && pastFinalFragment && pending.length > 0 && newest.length < tailN) emit(Buffer.alloc(0));
-    // `newest` holds only complete uuid rows, newest-first
-    const out = newest.slice(0, tailN).reverse(); // oldest-first
+    // `newest` holds only complete uuid rows, newest-first; the real row
+    // owns a shared id — a parentless messageId row standing in for it
+    // would read as a fresh root (a false rewind verdict)
+    const out = newest
+      .slice(0, tailN)
+      .filter((e) => !(messageIdOnly.has(e) && uuidIds.has(e[0])))
+      .reverse(); // oldest-first
     process.stdout.write(`${JSON.stringify({ ok: true, torn, tail: out })}\n`);
     process.exit(0);
   } catch (err) {

@@ -157,6 +157,29 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     ]);
   });
 
+  test.each([
+    ["after", true],
+    ["before", false],
+  ])("a messageId row sharing a real row's id (written %s it) yields the slot to the real row", async (_label, after) => {
+    const snapshot = '{"type":"file-history-snapshot","messageId":"p1","snapshot":{}}';
+    const prompt = '{"uuid":"p1","parentUuid":"td","type":"user"}';
+    const file = tempTranscript(
+      [
+        '{"uuid":"td","parentUuid":"a1","type":"system","subtype":"turn_duration"}',
+        ...(after ? [prompt, snapshot] : [snapshot, prompt]),
+        '{"type":"file-history-delta","messageId":"m9","snapshotMessageId":"p1"}',
+        "",
+      ].join("\n"),
+    );
+    const report = await verify(file, "--tail", "10");
+    expect(report.ok).toBe(true);
+    expect(report.tail).toEqual([
+      ["td", "a1", 0, 0],
+      ["p1", "td", 0, 0],
+      ["m9", null, 0, 0], // a messageId row with no real twin keeps its slot
+    ]);
+  });
+
   test("the window counts UUID rows, not raw lines — dense metadata cannot push queued rows out of the tail", async () => {
     // a busy turn's file: every uuid row is surrounded by several metadata
     // lines (api-request, queue-operation, ...). A raw-line window would

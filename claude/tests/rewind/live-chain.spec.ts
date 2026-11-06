@@ -12,7 +12,7 @@
 
 import { describe, expect, test, vi } from "vitest";
 import { LiveChainProcessor } from "../../host/rewind/live-chain.js";
-import type { TailFacts, TailRow } from "../../host/rewind/tail-read.js";
+import { parseCapsuleTail, type TailFacts, type TailRow } from "../../host/rewind/tail-read.js";
 
 function row(uuid: string, parent: string | null, boundary = false): TailRow {
   return { uuid, parentUuid: parent, boundary };
@@ -214,6 +214,30 @@ describe("live chain processor — the normal tick", () => {
       { uuid: "sys", parent: "b0" },
       { uuid: "f2", parent: "b0" },
     ]);
+  });
+
+  test.each([
+    ["after", true],
+    ["before", false],
+  ])("a prompt whose file-history snapshot shares its id (written %s it) is no fresh root", async (_label, after) => {
+    // the engine snapshots the prompt under the prompt's own id, with no
+    // uuid and no parent; the real row (chained over a turn_duration
+    // system row) must own the id whichever side the snapshot lands on
+    const snapshot = JSON.stringify({ type: "file-history-snapshot", messageId: "p1", snapshot: {} });
+    const prompt = JSON.stringify({ uuid: "p1", parentUuid: "td", type: "user" });
+    const text = [
+      JSON.stringify({ uuid: "a1", parentUuid: "x", type: "assistant" }),
+      JSON.stringify({ uuid: "td", parentUuid: "a1", type: "system", subtype: "turn_duration" }),
+      ...(after ? [prompt, snapshot] : [snapshot, prompt]),
+      "",
+    ].join("\n");
+    const h = harness({ owlTail: "a1", known: ["a1"], tail: parseCapsuleTail(text, 10) });
+    h.proc.enqueue(ev("td", false));
+    h.proc.enqueue(ev("p1", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    expect(h.logs.some((m) => m.includes("fresh root"))).toBe(false);
+    expect(h.patched).toContainEqual({ uuid: "p1", parent: "a1" });
   });
 
   test("an expectation on a chain-id row with no deeper ancestry rebases quietly", async () => {

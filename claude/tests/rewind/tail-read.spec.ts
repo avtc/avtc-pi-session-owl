@@ -49,6 +49,26 @@ describe("tail-read — capsule tail parsing", () => {
     expect(facts.rows[0]?.parentUuid).toBeNull();
   });
 
+  test.each([
+    ["after", true],
+    ["before", false],
+  ])("a messageId row sharing a real row's id (written %s it) yields the slot to the real row", (_label, after) => {
+    const snapshot = JSON.stringify({ type: "file-history-snapshot", messageId: "p1", snapshot: {} });
+    const prompt = JSON.stringify({ uuid: "p1", parentUuid: "td", type: "user" });
+    const text = [
+      JSON.stringify({ uuid: "td", parentUuid: "a1", type: "system", subtype: "turn_duration" }),
+      ...(after ? [prompt, snapshot] : [snapshot, prompt]),
+      JSON.stringify({ type: "file-history-delta", messageId: "m9", snapshotMessageId: "p1" }),
+      "",
+    ].join("\n");
+    const facts = parseCapsuleTail(text, 10);
+    expect(facts.rows.map((r) => [r.uuid, r.parentUuid])).toEqual([
+      ["td", "a1"],
+      ["p1", "td"],
+      ["m9", null], // a messageId row with no real twin keeps its slot
+    ]);
+  });
+
   test("flags compaction-boundary rows", () => {
     const text = [
       JSON.stringify({ uuid: "b1", parentUuid: null, type: "system", subtype: "compact_boundary" }),
