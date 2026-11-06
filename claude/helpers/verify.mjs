@@ -67,7 +67,15 @@ if (tailN !== null) {
     }
     const CHUNK = 64 * 1024;
     let pos = size;
-    let carry = Buffer.alloc(0); // bytes after the newest complete newline
+    // the line being assembled, oldest chunk first: the bytes between the
+    // newest newline seen so far and the line already collected after it.
+    // Kept as a chunk list and joined once at the line's start — a single
+    // row can be ~100 MB, and re-concatenating per block is quadratic.
+    let pending = [];
+    // the bytes after the file's last newline are an unterminated final
+    // fragment (already flagged torn) — never a row; the first newline
+    // found closes that fragment
+    let pastFinalFragment = false;
     let sawNewestComplete = false; // the newest complete line has a junk rule
     const collect = (line) => {
       if (line === undefined || line.trim() === "") return;
@@ -110,34 +118,35 @@ if (tailN !== null) {
     // metadata (api requests, queue operations, attachments) crowd the
     // uuid rows out of the scan and the caller reads queued rows as
     // absent — a false amputation verdict
+    // a line is decoded only once whole (its bytes joined across every
+    // block it spans), so a block boundary never splits a row or a
+    // multibyte character
+    const emit = (head) => {
+      const line = pending.length === 0 ? head : Buffer.concat([head, ...pending]);
+      pending = [];
+      collect(line.toString("utf8"));
+    };
     while (pos > 0 && newest.length < tailN) {
       const readLen = Math.min(CHUNK, pos);
       pos -= readLen;
       const buf = Buffer.alloc(readLen);
       readSync(fd, buf, 0, readLen, pos);
-      const block = carry.length === 0 ? buf : Buffer.concat([buf, carry]);
-      const firstNl = block.indexOf(0x0a);
-      if (firstNl === -1) {
-        carry = block; // no complete line yet — the whole block carries
-        continue;
+      let end = readLen; // the buf bytes not yet assigned to a line
+      let nl = buf.lastIndexOf(0x0a, end - 1);
+      while (nl !== -1 && newest.length < tailN) {
+        if (pastFinalFragment) emit(buf.subarray(nl + 1, end));
+        else pastFinalFragment = true; // the final fragment ends here — dropped
+        end = nl;
+        nl = end > 0 ? buf.lastIndexOf(0x0a, end - 1) : -1;
       }
-      const lastNl = block.lastIndexOf(0x0a);
-      carry = block.subarray(lastNl + 1);
-      // decode only BETWEEN newlines (a block boundary can split a
-      // multibyte character — the trimmed head bytes are re-read by the
-      // older block, where they sit cleanly inside it; the file's true
-      // first line is the pos === 0 exception)
-      const from = pos === 0 ? 0 : firstNl + 1;
-      const text = block.toString("utf8", from, lastNl + 1);
-      const parts = text.split("\n");
-      for (let i = parts.length - 1; i >= 0; i -= 1) {
-        collect(parts[i]);
-        if (newest.length >= tailN) break;
-      }
+      if (newest.length >= tailN) break;
+      // the buf's head belongs to a line that starts in an older block
+      // (inside the final fragment it is dropped)
+      if (pastFinalFragment && end > 0) pending.unshift(buf.subarray(0, end));
     }
-    // the carried bytes past the last newline: an unterminated final
-    // fragment (already flagged torn) — never parsed; `newest` holds only
-    // complete uuid rows, newest-first
+    // the file's first line has no newline before it
+    if (pos === 0 && pastFinalFragment && pending.length > 0 && newest.length < tailN) emit(Buffer.alloc(0));
+    // `newest` holds only complete uuid rows, newest-first
     const out = newest.slice(0, tailN).reverse(); // oldest-first
     process.stdout.write(`${JSON.stringify({ ok: true, torn, tail: out })}\n`);
     process.exit(0);

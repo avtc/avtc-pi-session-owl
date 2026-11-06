@@ -254,6 +254,46 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     ]);
   });
 
+  test("rows straddling block boundaries all survive — mixed sizes, rows larger than a block, a deep window", async () => {
+    // a window spanning many 64 KiB blocks: every row that crosses a block
+    // boundary must come back (a dropped one reads as amputation in the
+    // caller and aborts the in-flight stage)
+    const sizes = [200, 800, 5000, 21000, 70000, 150000];
+    const rows: string[] = [];
+    const ids: string[] = [];
+    for (let i = 1; i <= 120; i += 1) {
+      const id = `s${i}`;
+      ids.push(id);
+      rows.push(
+        JSON.stringify({
+          uuid: id,
+          parentUuid: i === 1 ? null : `s${i - 1}`,
+          message: { role: "user", content: `\u{1F989}${"w".repeat(sizes[i % sizes.length] ?? 0)}` },
+        }),
+      );
+    }
+    const tmp = tempTranscript(`${rows.join("\n")}\n`);
+    const report = await verify(tmp, "--tail", "100");
+    expect(report.ok).toBe(true);
+    expect(report.torn).toBe(false);
+    expect(report.tail?.map((r) => r[0])).toEqual(ids.slice(-100));
+    // the whole file — the first line (no newline before it) included
+    const all = await verify(tmp, "--tail", "500");
+    expect(all.tail?.map((r) => r[0])).toEqual(ids);
+  });
+
+  test("an unterminated final fragment larger than a block is excluded, the rows before it intact", async () => {
+    const before = [1, 2, 3].map((i) =>
+      JSON.stringify({ uuid: `q${i}`, parentUuid: i === 1 ? null : `q${i - 1}`, content: "v".repeat(90000) }),
+    );
+    const fragment = `{"uuid":"q4","parentUuid":"q3","content":"${"t".repeat(200000)}`;
+    const tmp = tempTranscript(`${before.join("\n")}\n${fragment}`);
+    const report = await verify(tmp, "--tail", "8");
+    expect(report.ok).toBe(true);
+    expect(report.torn).toBe(true);
+    expect(report.tail?.map((r) => r[0])).toEqual(["q1", "q2", "q3"]);
+  });
+
   test("a complete but unparsable final line is torn", async () => {
     const file = tempTranscript(`${['{"uuid":"u1","parentUuid":null,"type":"user"}', "not json"].join("\n")}\n`);
     const report = await verify(file, "--tail", "8");
