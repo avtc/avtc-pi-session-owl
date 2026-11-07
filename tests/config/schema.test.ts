@@ -384,10 +384,10 @@ describe("agent-compact-threshold type (agentCompact's custom settings type)", (
   });
 
   it("accepts canonical thresholds and canonicalizes free input", () => {
-    expect(typeDef.parse("on>40k", ctx)).toBe("on>40k");
-    expect(typeDef.parse("on>40K", ctx)).toBe("on>40k");
-    expect(typeDef.parse(" 40 ", ctx)).toBe("on>40k");
-    expect(typeDef.parse("300", ctx)).toBe("on>300k");
+    expect(typeDef.parse("on>40K", ctx)).toBe("on>40K");
+    expect(typeDef.parse("on>40k", ctx)).toBe("on>40K");
+    expect(typeDef.parse(" 40 ", ctx)).toBe("on>40K");
+    expect(typeDef.parse("300", ctx)).toBe("on>300K");
   });
 
   it("rejects invalid and foreign-vocabulary input", () => {
@@ -398,18 +398,36 @@ describe("agent-compact-threshold type (agentCompact's custom settings type)", (
     expect(typeDef.parse("none", ctx)).toBeUndefined();
   });
 
+  it("passes the declared preset rungs through", () => {
+    for (const rung of ["on>75K", "on>125K", "on>200K", "on>500K"]) {
+      expect(typeDef.parse(rung, ctx)).toBe(rung);
+    }
+  });
+
   it("prefills the custom input with the bare threshold number", () => {
-    expect(typeDef.toInputPrefill?.("on>40k", ctx)).toBe("40");
+    expect(typeDef.toInputPrefill?.("on>40K", ctx)).toBe("40");
     expect(typeDef.toInputPrefill?.("on", ctx)).toBe("");
   });
 
+  it("declares the off/on/threshold preset ladder on the setting", () => {
+    const row = SESSION_OWL_SCHEMA.settings.find((s) => s.id === "agentCompact");
+    expect(row?.presets).toEqual([
+      ["off", "off"],
+      ["on", "on"],
+      ["on>75K", "on>75K"],
+      ["on>125K", "on>125K"],
+      ["on>200K", "on>200K"],
+      ["on>500K", "on>500K"],
+    ]);
+  });
+
   it("keeps every produced value parseable by parseAgentCompactValue", () => {
-    for (const input of ["off", "on", "on>40k", "40", "on>125K"]) {
+    for (const input of ["off", "on", "on>40K", "40", "on>125K"]) {
       const parsed = typeDef.parse(input, ctx);
       expect(parsed).toBeDefined();
       const setting = parseAgentCompactValue(parsed as string);
       expect(setting.mode).toBe(input === "off" ? "off" : "on");
-      const expected = /^on>(\d+)k$/.exec(parsed as string);
+      const expected = /^on>(\d+)K$/i.exec(parsed as string);
       expect(setting.thresholdK).toBe(expected !== null ? Number.parseInt(expected[1] as string, 10) : null);
     }
   });

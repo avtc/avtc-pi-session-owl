@@ -151,12 +151,13 @@ const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
 const DEFAULT_FAST_PATH = true;
 const DEFAULT_AGENT_COMPACT = "on";
 
-/** Canonical agent-compact threshold form: `on>Nk` (e.g. `on>40k`). No leading zero. */
-const AGENT_COMPACT_THRESHOLD_REGEX = /^on>([1-9]\d*)k$/;
+/** Canonical agent-compact threshold form: `on>NK` (e.g. `on>40K`). No leading zero. */
+const AGENT_COMPACT_THRESHOLD_REGEX = /^on>([1-9]\d*)K$/;
 
-/** The agentCompact setting's type: the `off`/`on` presets plus free-typed
- *  thresholds — `on>40k` directly, or a bare number ("40") canonicalized to
- *  `on>40k`. Invalid input returns undefined; the gate resets to default. */
+/** The agentCompact setting's type: the `off`/`on`/`on>NK` presets plus
+ *  free-typed thresholds — `on>40K` directly, or a bare number ("40")
+ *  canonicalized to `on>40K`. Invalid input returns undefined; the gate
+ *  resets to default. */
 const agentCompactThresholdType: TypeDefinition<string> = {
   id: "agent-compact-threshold",
   valueType: "string",
@@ -164,10 +165,10 @@ const agentCompactThresholdType: TypeDefinition<string> = {
     for (const [label, value] of ctx.presets) {
       if (label === input || String(value) === input) return value as string;
     }
-    const match = /^on>([1-9]\d*)k$/i.exec(input.trim());
-    if (match !== null) return `on>${match[1]}k`;
+    const match = /^on>([1-9]\d*)[kK]$/i.exec(input.trim());
+    if (match !== null) return `on>${match[1]}K`;
     const num = Number.parseInt(input.trim(), 10);
-    if (!Number.isNaN(num) && num >= 1) return `on>${num}k`;
+    if (!Number.isNaN(num) && num >= 1) return `on>${num}K`;
     return undefined;
   },
   format: (value) => value,
@@ -394,6 +395,10 @@ const SETTINGS: readonly SettingSchema[] = [
     presets: [
       ["off", "off"],
       ["on", "on"],
+      ["on>75K", "on>75K"],
+      ["on>125K", "on>125K"],
+      ["on>200K", "on>200K"],
+      ["on>500K", "on>500K"],
     ],
   }),
   setting("renderMode", {
