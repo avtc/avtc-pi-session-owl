@@ -10,6 +10,7 @@ Session memory as a background-maintained append-only knowledge graph; its roots
 - **Compaction summary** — at compaction, the graph's root level is refined toward a token budget and rendered into the summary pi injects; the full detail remains available to the agent via recall.
 - **Task-relative** — a Selector picks the nodes that matter to the current work and the planned next tasks; superseded and stale context drops out.
 - **Browse session memory** — `/owl:ls`, `/owl:cat`, `/owl:find` let you list, inspect, and search your memory graph; the `owl_recall` tool lets the agent recall on demand.
+- **Agent-initiated compaction** — agent can schedule a compaction with own continue notes.
 - **Live status widget** — a footer line shows the active maintenance stage, its progress, and its token cost.
 
 ## Installation
