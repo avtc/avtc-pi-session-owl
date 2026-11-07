@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { firePendingCompactAtSettled, makeOwlCompactTool } from "../../src/compaction/agent-compact.js";
 import {
   clearPendingCompact,
+  compactNotesFor,
   OWL_COMPACT_CONTINUE_PROMPT,
   OWL_COMPACT_DISABLED_TEXT,
   OWL_COMPACT_KEY,
@@ -107,12 +108,23 @@ describe("firePendingCompactAtSettled", () => {
     _resetGetSessionOwlSettings();
   });
 
-  function makeCtx(overrides: { isIdle?: () => boolean; hasPendingMessages?: () => boolean } | null) {
+  function makeCtx(
+    overrides: {
+      isIdle?: () => boolean;
+      hasPendingMessages?: () => boolean;
+      branch?: unknown[];
+    } | null,
+  ) {
     return {
       compact: vi.fn(),
       isIdle: overrides?.isIdle ?? (() => true),
       hasPendingMessages: overrides?.hasPendingMessages ?? (() => false),
+      sessionManager: { getBranch: () => overrides?.branch ?? [] },
     };
+  }
+
+  function assistantEntry(stopReason: string) {
+    return { type: "message", message: { role: "assistant", stopReason } };
   }
 
   function makePi() {
@@ -122,7 +134,7 @@ describe("firePendingCompactAtSettled", () => {
   it("is a no-op without a pending request", () => {
     setAgentCompact("on");
     const ctx = makeCtx(null);
-    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], makePi());
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], makePi(), false);
     expect(ctx.compact).not.toHaveBeenCalled();
   });
 
@@ -131,8 +143,20 @@ describe("firePendingCompactAtSettled", () => {
     peekSet("the plan");
     const ctx = makeCtx(null);
     const pi = makePi();
-    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi, false);
     expect(ctx.compact).toHaveBeenCalledWith(expect.objectContaining({ customInstructions: "the plan" }));
+  });
+
+  it("the fired instructions reach the hook as the agent's notes — rendered once, never as the user's", () => {
+    setAgentCompact("on");
+    peekSet("the plan");
+    const ctx = makeCtx(null);
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], makePi(), false);
+    const options = ctx.compact.mock.calls[0]?.[0] as { customInstructions: string };
+    // the compaction hook resolves its notes from the event's customInstructions
+    expect(compactNotesFor(OWL_COMPACT_KEY, options.customInstructions)).toEqual([
+      { text: "the plan", origin: "agent" },
+    ]);
   });
 
   it("onComplete sends the continuation followUp", () => {
@@ -141,7 +165,7 @@ describe("firePendingCompactAtSettled", () => {
     peekSet("the plan");
     const ctx = makeCtx(null);
     const pi = makePi();
-    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi, false);
     const options = ctx.compact.mock.calls[0]?.[0] as { onComplete: () => void };
     options.onComplete();
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
@@ -156,7 +180,7 @@ describe("firePendingCompactAtSettled", () => {
     peekSet("the plan");
     const ctx = makeCtx(null);
     const pi = makePi();
-    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi, false);
     // the compaction hook never ran (nothing to compact): the stash survives
     // the compact call itself — the error callback must drop it
     const options = ctx.compact.mock.calls[0]?.[0] as { onError: (err: Error) => void };
@@ -177,7 +201,7 @@ describe("firePendingCompactAtSettled", () => {
       }),
     };
     const pi = makePi();
-    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi, false);
     expect(peekPendingCompact(OWL_COMPACT_KEY)).toBeNull();
     vi.advanceTimersByTime(600);
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
@@ -190,7 +214,7 @@ describe("firePendingCompactAtSettled", () => {
     peekSet("the plan");
     const ctx = makeCtx({ isIdle: () => false }); // the steer's run is streaming
     const pi = makePi();
-    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi, false);
     const options = ctx.compact.mock.calls[0]?.[0] as { onComplete: () => void };
     options.onComplete();
     vi.advanceTimersByTime(600);
@@ -204,7 +228,7 @@ describe("firePendingCompactAtSettled", () => {
     peekSet("the plan");
     const ctx = makeCtx({ hasPendingMessages: () => true });
     const pi = makePi();
-    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi, false);
     const options = ctx.compact.mock.calls[0]?.[0] as { onComplete: () => void };
     options.onComplete();
     vi.advanceTimersByTime(600);
@@ -212,11 +236,52 @@ describe("firePendingCompactAtSettled", () => {
     vi.useRealTimers();
   });
 
+  it("a run the user aborted drops the request whole — no compaction, no continuation", () => {
+    vi.useFakeTimers();
+    setAgentCompact("on");
+    peekSet("the plan");
+    const ctx = makeCtx(null);
+    const pi = makePi();
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi, true);
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(peekPendingCompact(OWL_COMPACT_KEY)).toBeNull();
+    vi.advanceTimersByTime(600);
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("a run an error ended drops the request whole — no compaction, no continuation", () => {
+    vi.useFakeTimers();
+    setAgentCompact("on");
+    peekSet("the plan");
+    const branch = [
+      assistantEntry("toolUse"),
+      { type: "message", message: { role: "toolResult" } },
+      assistantEntry("error"),
+    ];
+    const ctx = makeCtx({ branch });
+    const pi = makePi();
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi, false);
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(peekPendingCompact(OWL_COMPACT_KEY)).toBeNull();
+    vi.advanceTimersByTime(600);
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("a run that answered fires (an earlier error the retry recovered from never counts)", () => {
+    setAgentCompact("on");
+    peekSet("the plan");
+    const ctx = makeCtx({ branch: [assistantEntry("error"), assistantEntry("toolUse"), assistantEntry("stop")] });
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], makePi(), false);
+    expect(ctx.compact).toHaveBeenCalledWith(expect.objectContaining({ customInstructions: "the plan" }));
+  });
+
   it("drops the request when the setting flipped off after the call", () => {
     setAgentCompact("off");
     peekSet("the plan");
     const ctx = makeCtx(null);
-    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], makePi());
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], makePi(), false);
     expect(ctx.compact).not.toHaveBeenCalled();
     expect(peekPendingCompact(OWL_COMPACT_KEY)).toBeNull();
   });

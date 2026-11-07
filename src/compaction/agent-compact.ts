@@ -129,16 +129,54 @@ function sendFollowUp(pi: FollowUpSender, text: string, ctx: ExtensionContext): 
   }, FOLLOWUP_DEFER_MS);
 }
 
+/** Whether the run ended on an error: its last assistant message carries
+ *  stopReason "error" (retries exhausted, an unavailable provider). An
+ *  unreadable session reads as no error — the stop reason is the only signal
+ *  agent_settled lacks. */
+function runEndedInError(ctx: ExtensionContext): boolean {
+  try {
+    const branch = ctx.sessionManager.getBranch();
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const entry = branch[i];
+      if (entry?.type !== "message") continue;
+      const message = entry.message as { role?: string; stopReason?: string };
+      if (message.role !== "assistant") continue;
+      return message.stopReason === "error";
+    }
+  } catch (err) {
+    log.warn(
+      `run stop-reason read failed (the fire proceeds without it): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  return false;
+}
+
 /** Fire the pending agent-initiated compaction at the settled boundary. No
- *  pending request = a no-op (the plain agent_settled of every run). The
+ *  pending request = a no-op (the plain agent_settled of every run). A run
+ *  the user aborted (Escape) or one an error ended drops the request whole —
+ *  no compaction, no continuation: the user decides what comes next. The
  *  notes ride customInstructions into the compaction hook, which consumes
  *  the stash when the compaction runs. The followUp resumes the agent ONLY
  *  when the compaction stood: a user abort (cancel), an unavailable
  *  service/provider, or any other failure ends the flow without a
  *  continuation — the session stays where the failure left it. */
-export async function firePendingCompactAtSettled(ctx: ExtensionContext, pi: FollowUpSender): Promise<void> {
+export async function firePendingCompactAtSettled(
+  ctx: ExtensionContext,
+  pi: FollowUpSender,
+  aborted: boolean,
+): Promise<void> {
   const pending = peekPendingCompact(OWL_COMPACT_KEY);
   if (pending === null) return;
+  if (aborted) {
+    log.info("agent-initiated compaction dropped: the user aborted the run");
+    clearPendingCompact(OWL_COMPACT_KEY);
+    return;
+  }
+  if (runEndedInError(ctx)) {
+    log.info("agent-initiated compaction dropped: the run ended on an error");
+    clearPendingCompact(OWL_COMPACT_KEY);
+    return;
+  }
   const settings = getSessionOwlSettings();
   const setting = parseAgentCompactValue(settings.agentCompact);
   if (!settings.enabled || isConflictPaused() || setting.mode === "off") {

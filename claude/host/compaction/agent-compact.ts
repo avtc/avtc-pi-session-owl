@@ -20,6 +20,12 @@ import {
   setPendingCompact,
 } from "../../core/src/compaction/agent-compact-core.js";
 
+/** The tool result when a subagent calls owl_compact: the engine's compact
+ *  call takes no agentId, so a plugin cannot start a subagent's compaction —
+ *  the loop is told to carry on instead of waiting for one. */
+export const OWL_COMPACT_SUBAGENT_TEXT =
+  "compaction not scheduled: subagent compaction can't be triggered by a plugin yet — continue your work";
+
 /** How long the continuation waits past the compaction boundary: the
  *  window in which a user steer typed during compaction starts its turn
  *  (and the continuation becomes redundant). */
@@ -45,9 +51,10 @@ export interface AgentCompactFireDeps {
   userTurnStartedSince: (ts: number) => boolean;
 }
 
-/** The tool.call serve: validate against the live setting and the context
- *  floor, stash the notes for the conversation, and answer. Nothing here
- *  compacts — the fire waits for the turn boundary. */
+/** The tool.call serve: validate against the live setting, the calling loop
+ *  (main conversation only) and the context floor, stash the notes for the
+ *  conversation, and answer. Nothing here compacts — the fire waits for the
+ *  turn boundary. */
 export function serveOwlCompactCall(
   input: { continue_notes?: unknown },
   deps: {
@@ -57,10 +64,15 @@ export function serveOwlCompactCall(
     contextTokensK: number | null;
     /** The conversation key the stash is filed under. */
     key: string;
+    /** The calling loop's agentId; null for the main conversation. */
+    agentId: string | null;
   },
 ): { text: string; error: boolean } {
   if (deps.key === "" || deps.setting.mode === "off") {
     return { text: OWL_COMPACT_DISABLED_TEXT, error: true };
+  }
+  if (deps.agentId !== null) {
+    return { text: OWL_COMPACT_SUBAGENT_TEXT, error: true };
   }
   if (
     deps.setting.thresholdK !== null &&
@@ -74,18 +86,7 @@ export function serveOwlCompactCall(
   return { text: OWL_COMPACT_SCHEDULED_TEXT, error: false };
 }
 
-/** Fire the pending agent-initiated compaction for a conversation at its
- *  turn boundary. No pending request = a no-op. The compact call is deferred
- *  past the hook (the turn's own completion must settle first — a call inside
- *  the turn.complete handler can still count as "a turn runs" and reject).
- *  The continuation prompt fires ONLY when the compaction stood: a veto
- *  (skip), a user abort, an unavailable service/provider, or any other
- *  failure ends the flow without a continuation — the session stays where
- *  the failure left it.
- *
- *  Main conversation only: $.session.compact takes no agentId, so a
- *  subagent loop's request is not fired explicitly — its stash waits for the
- *  loop's own engine compaction (the compaction hook consumes it there). */
+/** The conversations whose fire is in flight (one fire at a time each). */
 const firing = new Set<string>();
 
 /** Drop every firing marker of one session (session end): a fire whose
@@ -99,6 +100,15 @@ export function clearAgentCompactFiringForSession(sessionId: string): void {
   }
 }
 
+/** Fire the pending agent-initiated compaction for a conversation at its
+ *  turn boundary. No pending request = a no-op. The compact call is deferred
+ *  past the hook (the turn's own completion must settle first — a call inside
+ *  the turn.complete handler can still count as "a turn runs" and reject).
+ *  The continuation prompt fires ONLY when the compaction stood: a veto
+ *  (skip), a user abort, an unavailable service/provider, or any other
+ *  failure ends the flow without a continuation — the session stays where
+ *  the failure left it. Main conversation only: $.session.compact takes no
+ *  agentId (the serve refuses subagent loops). */
 export function firePendingAgentCompact(
   key: string,
   setting: ReturnType<typeof parseAgentCompactValue>,

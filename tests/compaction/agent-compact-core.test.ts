@@ -99,6 +99,19 @@ describe("compactNotesFor origin resolution", () => {
     expect(peekPendingCompact("n1")).toBeNull();
   });
 
+  it("the fire's own instructions (the pending notes) render once, as the agent's", () => {
+    setPendingCompact("n1b", "the plan");
+    expect(compactNotesFor("n1b", "the plan")).toEqual([{ text: "the plan", origin: "agent" }]);
+    expect(peekPendingCompact("n1b")).toBeNull();
+  });
+
+  it("a fired request renders however long the turn ran after the call (never stale)", () => {
+    setPendingCompact("n1c", "the plan");
+    const aged = peekPendingCompact("n1c");
+    if (aged !== null) aged.ts = Date.now() - 30 * 60 * 1000;
+    expect(compactNotesFor("n1c", "the plan")).toEqual([{ text: "the plan", origin: "agent" }]);
+  });
+
   it("typed instructions render as user origin when no request waits", () => {
     expect(compactNotesFor("n2", "keep the API decisions")).toEqual([
       { text: "keep the API decisions", origin: "user" },

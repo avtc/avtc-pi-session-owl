@@ -1662,15 +1662,19 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
     // The agent-initiated compaction fires at this boundary: the turn is
     // done and the compact call runs deferred past this hook (between
     // turns), followed by the continuation prompt. Main conversation only —
-    // the compact call takes no agentId (a subagent loop's stash waits for
-    // its own engine compaction, which consumes it in the takeover gate).
+    // the compact call takes no agentId (the serve refuses subagent loops).
     if (e && typeof (e as { agentId?: unknown }).agentId === "undefined") {
       const fireSessionId = state.getCurrentSession();
       if (fireSessionId !== null) {
         const fireKey = state.conversationKey(fireSessionId, null);
-        // a dormant owl never fires — and never KEEPS the request: a
-        // residual entry must not fire a stale compaction after a re-enable
+        const turnReason = (e as { reason?: unknown }).reason;
+        // a turn the user interrupted (or one an API error or a refusal
+        // ended) drops the request whole — no compaction, no continuation:
+        // the user decides what comes next. A dormant owl never fires — and
+        // never KEEPS the request: a residual entry must not fire a stale
+        // compaction after a re-enable
         if (
+          (typeof turnReason === "string" && turnReason !== "answer") ||
           !state.isOwlEnabled() ||
           isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))
         ) {
@@ -2158,8 +2162,8 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
       return { result: message };
     }
   }
-  // The owl_compact serve: validate against the live setting and the
-  // context floor, stash the notes for this conversation, and answer
+  // The owl_compact serve: validate against the live setting, the calling
+  // loop (subagents are refused) and the context floor, stash the notes for this conversation, and answer
   // in-band (a throw would be SKIPPED by the engine — the model would read
   // its generic no-hook-answered fallback). Nothing here compacts: the
   // fire waits for the turn boundary (see onTurnComplete).
@@ -2183,12 +2187,13 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
         setting,
         contextTokensK: tokens !== null && tokens > 0 ? Math.round(tokens / 1000) : null,
         key,
+        agentId,
       });
       diag(`owl_compact serve: key=${key} outcome=${outcome.error ? "refused" : "scheduled"}`);
       return outcome.error ? { deny: outcome.text } : { result: outcome.text };
     } catch (err) {
       report("owl_compact serve failed", err);
-      return { deny: `Error: session-owl owl_compact failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { deny: `owl_compact failed: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
   // The owl_recall serve: the gate order, the layered check, and the

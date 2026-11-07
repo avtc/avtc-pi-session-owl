@@ -18,7 +18,11 @@ import {
   peekPendingCompact,
   setPendingCompact,
 } from "../../core/src/compaction/agent-compact-core.js";
-import { firePendingAgentCompact, serveOwlCompactCall } from "../../host/compaction/agent-compact.js";
+import {
+  firePendingAgentCompact,
+  OWL_COMPACT_SUBAGENT_TEXT,
+  serveOwlCompactCall,
+} from "../../host/compaction/agent-compact.js";
 import {
   OWL_COMPACT_FULL_NAME,
   OWL_COMPACT_INPUT_SCHEMA,
@@ -33,7 +37,7 @@ describe("serveOwlCompactCall", () => {
   it("schedules: stashes and answers the scheduled text", () => {
     const outcome = serveOwlCompactCall(
       { continue_notes: "wrap up the refactor" },
-      { setting: on, contextTokensK: null, key: "k" },
+      { setting: on, contextTokensK: null, key: "k", agentId: null },
     );
     expect(outcome).toEqual({ text: OWL_COMPACT_SCHEDULED_TEXT, error: false });
     expect(peekPendingCompact("k")?.notes).toBe("wrap up the refactor");
@@ -43,7 +47,7 @@ describe("serveOwlCompactCall", () => {
   it("refuses when the setting is off", () => {
     const outcome = serveOwlCompactCall(
       { continue_notes: "x" },
-      { setting: parseAgentCompactValue("off"), contextTokensK: null, key: "k" },
+      { setting: parseAgentCompactValue("off"), contextTokensK: null, key: "k", agentId: null },
     );
     expect(outcome).toEqual({ text: OWL_COMPACT_DISABLED_TEXT, error: true });
     expect(peekPendingCompact("k")).toBeNull();
@@ -51,15 +55,33 @@ describe("serveOwlCompactCall", () => {
 
   it("refuses under the floor with the measured context", () => {
     const setting = parseAgentCompactValue("on>40k");
-    const outcome = serveOwlCompactCall({ continue_notes: "x" }, { setting, contextTokensK: 25, key: "k" });
+    const outcome = serveOwlCompactCall(
+      { continue_notes: "x" },
+      { setting, contextTokensK: 25, key: "k", agentId: null },
+    );
     expect(outcome.text).toBe("compaction not scheduled: context at 25k is below the user set 40k threshold");
     expect(outcome.error).toBe(true);
     expect(peekPendingCompact("k")).toBeNull();
   });
 
+  it("refuses a subagent loop (a plugin cannot start a subagent's compaction) and stashes nothing", () => {
+    const outcome = serveOwlCompactCall(
+      { continue_notes: "x" },
+      { setting: on, contextTokensK: null, key: "k|ag-1", agentId: "ag-1" },
+    );
+    expect(outcome).toEqual({ text: OWL_COMPACT_SUBAGENT_TEXT, error: true });
+    expect(OWL_COMPACT_SUBAGENT_TEXT).toBe(
+      "compaction not scheduled: subagent compaction can't be triggered by a plugin yet — continue your work",
+    );
+    expect(peekPendingCompact("k|ag-1")).toBeNull();
+  });
+
   it("an unknown context never blocks the schedule", () => {
     const setting = parseAgentCompactValue("on>40k");
-    const outcome = serveOwlCompactCall({ continue_notes: "x" }, { setting, contextTokensK: null, key: "k" });
+    const outcome = serveOwlCompactCall(
+      { continue_notes: "x" },
+      { setting, contextTokensK: null, key: "k", agentId: null },
+    );
     expect(outcome.error).toBe(false);
     clearPendingCompact("k");
   });

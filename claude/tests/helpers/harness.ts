@@ -95,6 +95,10 @@ export function createHarness() {
   const fsRefusals = new Set<string>();
   // the settings read result the test controls (defaults when never set)
   let settingsValue: Record<string, unknown> = {};
+  // the session's compactions and the prompts a plugin submitted (the
+  // agent-initiated compaction's fire + continuation)
+  const sessionCompacts: Array<{ instructions?: string }> = [];
+  const promptSubmits: Array<{ text: string }> = [];
   const $ = {
     fs: fsNoun,
     env: {
@@ -213,7 +217,16 @@ export function createHarness() {
         return { stdout: '{"pruned":0}', exitCode: 0 };
       },
     },
+    prompt: {
+      submit: async (input: { text: string }) => {
+        promptSubmits.push(input);
+      },
+    },
     session: {
+      compact: async (input?: { instructions?: string }) => {
+        sessionCompacts.push(input ?? {});
+        return { messages: [] };
+      },
       messages: async (opts?: { as?: string; agentId?: string }) => {
         // null = the test armed no view: the call fails, the checkpoint
         // degrades to the tripwire tier (an armed EMPTY view is a rewind)
@@ -419,6 +432,8 @@ export function createHarness() {
     },
     fsRead: async (p: string) => files.get(p),
     processRuns,
+    sessionCompacts,
+    promptSubmits,
     sessionApi: {
       set(messages: unknown[], rows?: Array<{ uuid?: string }>) {
         sessionApiMessages = messages;

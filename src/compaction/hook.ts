@@ -115,10 +115,10 @@ export async function compactionHook(
 ): Promise<CompactionResult | undefined> {
   const settings = settingsGetter();
 
-  // Continue notes: the agent's pending owl_compact request when one waits,
-  // else the instructions the user typed with /compact. Consumed here — one
-  // compaction renders them (a cancelled compaction drops them; the agent
-  // sees the failure and can ask again). One key per process: a pi process
+  // Continue notes: the instructions the user typed with /compact, then the
+  // agent's pending owl_compact request (see compactNotesFor). Consumed here —
+  // one compaction renders them; a cancelled compaction drops them and no
+  // continuation follows (the user decides what comes next). One key per process: a pi process
   // hosts exactly one conversation (subagents are their own processes, with
   // their own module instance and their own pending record).
   const compactNotes = compactNotesFor(OWL_COMPACT_KEY, event.customInstructions);

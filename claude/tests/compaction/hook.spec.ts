@@ -10,6 +10,7 @@ import type { SessionMessage } from "claude-code";
 // selected-root, enabled re-checked between phases) → render → snapshot
 // persist BEFORE the answer → answer. Failure anywhere ⇒ {skip} + notify.
 import { beforeEach, describe, expect, test } from "vitest";
+import { setPendingCompact } from "../../core/src/compaction/agent-compact-core.js";
 import { DEFAULT_CONFIG, type SessionOwlConfig } from "../../core/src/config/schema.js";
 import { clearDetailsCache } from "../../core/src/format/details.js";
 import { cloneLedger, EMPTY_LEDGER } from "../../core/src/store/codecs.js";
@@ -781,6 +782,20 @@ describe("compaction takeover — scoping + instructions", () => {
     // the rendered takeover carries the instructions under the user label
     expect(JSON.stringify(outcome)).toContain("## Continue instructions from user");
     expect(JSON.stringify(outcome)).toContain("focus on the parser work");
+  });
+
+  test("an owl_compact fire (its notes as the instructions) renders them once, under the agent label", async () => {
+    const h = makeHarness();
+    setPendingCompact("sess-c", "finish the parser");
+    const outcome = await compactionTakeover(
+      { trigger: "plugin", instructions: "finish the parser", messages: EVENT.messages },
+      h.deps,
+    );
+    expect(outcome.kind).toBe("answer");
+    const rendered = JSON.stringify(outcome);
+    expect(rendered).toContain("## Continue instructions you have sent before executing compaction");
+    expect(rendered).not.toContain("## Continue instructions from user");
+    expect(rendered.split("finish the parser").length - 1).toBe(1);
   });
 });
 

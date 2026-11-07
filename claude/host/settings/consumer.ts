@@ -152,7 +152,7 @@ function fireAfterChange(id: string, value: unknown, capsules: SettingsCapsules)
             markCompactToolRegistered();
           })
           .catch((err: unknown) => {
-            sayError(`session-owl: mid-session owl_compact registration failed: ${errDetail(err)}`);
+            sayError(`owl_compact registration failed: ${errDetail(err)}`);
           });
       }
     }
@@ -188,7 +188,7 @@ function fireAfterChange(id: string, value: unknown, capsules: SettingsCapsules)
           markCompactToolRegistered();
         })
         .catch((err: unknown) => {
-          sayError(`session-owl: mid-session owl_compact registration failed: ${errDetail(err)}`);
+          sayError(`owl_compact registration failed: ${errDetail(err)}`);
         });
     }
   }

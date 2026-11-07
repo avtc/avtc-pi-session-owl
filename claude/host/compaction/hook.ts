@@ -203,12 +203,12 @@ export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDe
     const runAnchor = deps.beginRunAnchor();
     if (runAnchor !== null) log(`compaction run anchor: ${runAnchor}`);
     try {
-      // Continue notes: the agent's pending owl_compact request when one
-      // waits, else the instructions the user typed with /compact — rendered
-      // into the summary under an origin label (pi consumes the same two
-      // sources). Consumed here, once the gate is committed: one compaction
-      // renders them (a cancelled compaction drops them; the agent sees the
-      // failure and can ask again).
+      // Continue notes: the instructions the user typed with /compact, then
+      // the agent's pending owl_compact request (see compactNotesFor) —
+      // rendered into the summary under origin labels (pi consumes the same
+      // two sources). Consumed here, once the gate is committed: one
+      // compaction renders them; a cancelled compaction drops them and no
+      // continuation follows (the user decides what comes next).
       const compactNotes = compactNotesFor(deps.key, typeof e.instructions === "string" ? e.instructions : undefined);
       // a prior owl summary row never rides the tail — the fresh summary
       // re-renders the same graph, so exactly one summary row exists at a time

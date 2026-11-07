@@ -38,7 +38,7 @@ export function owlCompactBelowFloorText(currentK: number, floorK: number): stri
 export const OWL_COMPACT_DISABLED_TEXT = "compaction not scheduled: user temporary disabled agent-initiated compact";
 
 /** The conflict-pause refusal both owl tools answer while session-owl is
- *  paused (pending owner approval of the exact wording). */
+ *  paused. */
 export const OWL_PAUSED_REASON =
   "session-owl is conflict-paused (the user must resolve the conflicting extension or set ignoreConflicts).";
 
@@ -123,22 +123,27 @@ export function clearPendingCompactForSession(sessionId: string): void {
   }
 }
 
-/** Resolve the notes a compaction renders: the agent's pending request when
- *  one waits (the agent asked for THIS compaction), else the instructions
- *  the user typed with their /compact, else none. */
-/** A pending request older than this never renders: an entry that somehow
- *  survived its turn boundary (a blocked fire, a pass-through race) must not
- *  surface as Continue instructions in a LATER compaction. The user's typed
- *  instructions are never affected — nothing is dropped silently. */
+/** A pending request older than this never renders in a compaction it did
+ *  not fire: an entry that somehow survived its turn boundary (a blocked
+ *  fire, a pass-through race) must not surface as Continue instructions in a
+ *  LATER compaction. The user's typed instructions are never affected. */
 const STALE_PENDING_MS = 10 * 60 * 1000;
 
+/** Resolve the notes a compaction renders, the user's leading: the
+ *  instructions the user typed with their /compact, then the agent's pending
+ *  request. The fire hands the request's own notes through the instructions
+ *  channel, so instructions equal to the pending notes ARE the agent's — they
+ *  render once, under the agent's origin, and the request is this
+ *  compaction's own (never stale, however long the turn ran after the call). */
 export function compactNotesFor(key: string, userInstructions: string | undefined): CompactNotes[] {
   const notes: CompactNotes[] = [];
-  if (typeof userInstructions === "string" && userInstructions.trim().length > 0) {
-    notes.push({ text: userInstructions, origin: "user" });
-  }
   const request = consumePendingCompact(key);
-  if (request !== null && Date.now() - request.ts <= STALE_PENDING_MS) {
+  const typed = typeof userInstructions === "string" && userInstructions.trim().length > 0 ? userInstructions : null;
+  const firedByRequest = request !== null && typed !== null && typed.trim() === request.notes.trim();
+  if (typed !== null && !firedByRequest) {
+    notes.push({ text: typed, origin: "user" });
+  }
+  if (request !== null && (firedByRequest || Date.now() - request.ts <= STALE_PENDING_MS)) {
     notes.push({ text: request.notes, origin: "agent" });
   }
   return notes;
