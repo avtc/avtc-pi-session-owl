@@ -9,8 +9,9 @@ import type {
   SettingsHandle,
   SettingsSchema,
   SettingsTabSchema,
+  TypeDefinition,
 } from "avtc-pi-settings-ui";
-import { registerSettingsCommand, settingsFilePaths } from "../../../node_modules/avtc-claude-settings-ui/dist/index.js";
+import { registerSettingsCommand, registerTypeDefinition, settingsFilePaths } from "../../../node_modules/avtc-claude-settings-ui/dist/index.js";
 
 /** Indirection over registerSettingsCommand so tests can inject a fake WITHOUT
  *  vi.mock(avtc-pi-settings-ui) — under isolate:false a module mock of this dep
@@ -149,6 +150,39 @@ const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
 const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
 const DEFAULT_FAST_PATH = true;
 const DEFAULT_AGENT_COMPACT = "on";
+
+/** Canonical agent-compact threshold form: `on>Nk` (e.g. `on>40k`). No leading zero. */
+const AGENT_COMPACT_THRESHOLD_REGEX = /^on>([1-9]\d*)k$/;
+
+/** The agentCompact setting's type: the `off`/`on` presets plus free-typed
+ *  thresholds — `on>40k` directly, or a bare number ("40") canonicalized to
+ *  `on>40k`. Invalid input returns undefined; the gate resets to default. */
+const agentCompactThresholdType: TypeDefinition<string> = {
+  id: "agent-compact-threshold",
+  valueType: "string",
+  parse: (input, ctx) => {
+    for (const [label, value] of ctx.presets) {
+      if (label === input || String(value) === input) return value as string;
+    }
+    const match = /^on>([1-9]\d*)k$/i.exec(input.trim());
+    if (match !== null) return `on>${match[1]}k`;
+    const num = Number.parseInt(input.trim(), 10);
+    if (!Number.isNaN(num) && num >= 1) return `on>${num}k`;
+    return undefined;
+  },
+  format: (value) => value,
+  toInputPrefill: (value) => {
+    const match = AGENT_COMPACT_THRESHOLD_REGEX.exec(value);
+    return match !== null ? (match[1] as string) : "";
+  },
+  supportsCustomValues: true,
+  errorMessage: "Enter a compact threshold (e.g. 300)",
+};
+
+/** The agentCompact type, exported for tests (registration happens at import). */
+export const AGENT_COMPACT_THRESHOLD_TYPE = agentCompactThresholdType;
+
+registerTypeDefinition(agentCompactThresholdType);
 
 export const DEFAULT_CONFIG: Readonly<SessionOwlConfig> = Object.freeze({
   // General
@@ -355,7 +389,7 @@ const SETTINGS: readonly SettingSchema[] = [
     label: "Agent-initiated compact",
     description:
       "When on, the owl_compact tool is registered and the agent can schedule a compaction at a moment of its choosing, attaching continue notes; on>Nk schedules only above the threshold of Nk tokens. off never registers the tool (a mid-session flip to off leaves it registered but it refuses).",
-    type: "string",
+    type: "agent-compact-threshold",
     defaultValue: DEFAULT_CONFIG.agentCompact,
     presets: [
       ["off", "off"],

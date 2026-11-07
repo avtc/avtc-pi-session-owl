@@ -2,13 +2,16 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { TypeContext } from "avtc-pi-settings-ui";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseAgentCompactValue } from "../../src/compaction/agent-compact-core.js";
 import type { SessionOwlConfig } from "../../src/config/schema.js";
 import {
   _resetGetSessionOwlSettings,
   _resetSessionOwlSettingsHandle,
   _setGetSessionOwlSettings,
   _setRegisterSettingsCommand,
+  AGENT_COMPACT_THRESHOLD_TYPE,
   DEFAULT_CONFIG,
   getSessionOwlSettings,
   initSessionOwlSettings,
@@ -199,7 +202,7 @@ describe("SESSION_OWL_SCHEMA", () => {
       defaultModel: "model",
       defaultThinkingLevel: "thinking-level",
       renderMode: "string",
-      agentCompact: "string",
+      agentCompact: "agent-compact-threshold",
       observerMode: "string",
       builderMode: "string",
       selectorMode: "string",
@@ -357,6 +360,58 @@ describe("tool schemas derive from canonical types (no drift)", () => {
 
   it("NodeStateSchema enum equals NODE_STATE_VALUES", () => {
     expect([...(NodeStateSchema as { enum: string[] }).enum]).toEqual([...NODE_STATE_VALUES]);
+  });
+});
+
+describe("agent-compact-threshold type (agentCompact's custom settings type)", () => {
+  const typeDef = AGENT_COMPACT_THRESHOLD_TYPE;
+  const ctx: TypeContext = {
+    presets: [
+      ["off", "off"],
+      ["on", "on"],
+    ],
+  };
+
+  it("is registered with custom-value support", () => {
+    expect(typeDef.id).toBe("agent-compact-threshold");
+    expect(typeDef.supportsCustomValues).toBe(true);
+    expect(typeDef.valueType).toBe("string");
+  });
+
+  it("passes the off/on presets through", () => {
+    expect(typeDef.parse("off", ctx)).toBe("off");
+    expect(typeDef.parse("on", ctx)).toBe("on");
+  });
+
+  it("accepts canonical thresholds and canonicalizes free input", () => {
+    expect(typeDef.parse("on>40k", ctx)).toBe("on>40k");
+    expect(typeDef.parse("on>40K", ctx)).toBe("on>40k");
+    expect(typeDef.parse(" 40 ", ctx)).toBe("on>40k");
+    expect(typeDef.parse("300", ctx)).toBe("on>300k");
+  });
+
+  it("rejects invalid and foreign-vocabulary input", () => {
+    expect(typeDef.parse("0", ctx)).toBeUndefined();
+    expect(typeDef.parse("abc", ctx)).toBeUndefined();
+    expect(typeDef.parse("", ctx)).toBeUndefined();
+    expect(typeDef.parse("compact>40K", ctx)).toBeUndefined();
+    expect(typeDef.parse("none", ctx)).toBeUndefined();
+  });
+
+  it("prefills the custom input with the bare threshold number", () => {
+    expect(typeDef.toInputPrefill?.("on>40k", ctx)).toBe("40");
+    expect(typeDef.toInputPrefill?.("on", ctx)).toBe("");
+  });
+
+  it("keeps every produced value parseable by parseAgentCompactValue", () => {
+    for (const input of ["off", "on", "on>40k", "40", "on>125K"]) {
+      const parsed = typeDef.parse(input, ctx);
+      expect(parsed).toBeDefined();
+      const setting = parseAgentCompactValue(parsed as string);
+      expect(setting.mode).toBe(input === "off" ? "off" : "on");
+      const expected = /^on>(\d+)k$/.exec(parsed as string);
+      expect(setting.thresholdK).toBe(expected !== null ? Number.parseInt(expected[1] as string, 10) : null);
+    }
   });
 });
 

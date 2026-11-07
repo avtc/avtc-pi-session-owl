@@ -10,8 +10,21 @@
 // not exist yet.
 
 import { describe, expect, test } from "vitest";
-import { createSettingsExtension } from "../../../node_modules/avtc-claude-settings-ui/dist/index.js";
-import { SESSION_OWL_SCHEMA, type SessionOwlConfig } from "../../core/src/config/schema.js";
+import {
+  createSettingsExtension,
+  registerTypeDefinition,
+} from "../../../node_modules/avtc-claude-settings-ui/dist/index.js";
+import {
+  AGENT_COMPACT_THRESHOLD_TYPE,
+  SESSION_OWL_SCHEMA,
+  type SessionOwlConfig,
+} from "../../core/src/config/schema.js";
+
+// The custom agentCompact type registers at schema-import into that import's
+// settings-lib instance; this spec drives the lib through its own literal-path
+// instance, so re-register there (idempotent either way).
+registerTypeDefinition(AGENT_COMPACT_THRESHOLD_TYPE);
+
 import { OWL_CLAUDE_SCHEMA, PORT_DEFAULTS_CONFIG } from "../../host/settings/consumer.js";
 import {
   PORT_DEFAULT_MODEL,

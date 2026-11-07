@@ -118,6 +118,7 @@ While session-owl works, a footer line shows the active stage, its progress, and
 | Tool | Description |
 |---|---|
 | `owl_recall` | Recall from memory — fetch by id, filter by time range, or regex search. Targets the rendered tree (selected-root or observations-root). |
+| `owl_compact` | Agent-initiated compaction — schedule the compaction at the end of this turn, attaching continue notes. |
 
 ### Tool visibility
 
