@@ -179,7 +179,9 @@ function fireAfterChange(id: string, value: unknown, capsules: SettingsCapsules)
   // exists). Registered-at-boot sessions never re-register.
   if (id === "agentCompact" && typeof value === "string") {
     setOwlAgentCompact(value);
-    if (!wasCompactToolRegistered() && parseAgentCompactValue(value).mode === "on") {
+    // a disabled owl never registers the tool (a dormant owl is
+    // compaction-transparent — the master enable flip registers it instead)
+    if (!wasCompactToolRegistered() && getSessionOwlSettings().enabled && parseAgentCompactValue(value).mode === "on") {
       capsules
         .toolRegister(owlCompactDeferredToolSpec())
         .then(() => {

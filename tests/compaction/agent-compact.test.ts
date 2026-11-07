@@ -18,8 +18,14 @@ import {
 } from "../../src/compaction/agent-compact-core.js";
 import { _resetGetSessionOwlSettings, _setGetSessionOwlSettings, DEFAULT_CONFIG } from "../../src/config/schema.js";
 
+let owlEnabled = true;
+
 function setAgentCompact(value: string): void {
-  _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, agentCompact: value }));
+  _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, agentCompact: value, enabled: owlEnabled }));
+}
+
+function setEnabled(value: boolean): void {
+  owlEnabled = value;
 }
 
 /** Run the tool's execute with the engine-side arguments filled in. */
@@ -41,6 +47,8 @@ function firstText(result: { content: { type: string; text?: string }[] }): stri
 describe("the owl_compact tool execute", () => {
   beforeEach(() => {
     clearPendingCompact(OWL_COMPACT_KEY);
+    _resetGetSessionOwlSettings();
+    owlEnabled = true;
   });
 
   it("schedules: stashes the notes and answers the scheduled text", async () => {
@@ -70,6 +78,15 @@ describe("the owl_compact tool execute", () => {
     expect(peekPendingCompact(OWL_COMPACT_KEY)).toBeNull();
   });
 
+  it("refuses when owl is disabled (a dormant owl is compaction-transparent)", async () => {
+    setAgentCompact("on");
+    setEnabled(false);
+    const tool = makeOwlCompactTool();
+    const result = await runTool(tool, { continue_notes: "x" }, {});
+    expect(firstText(result)).toBe(OWL_COMPACT_DISABLED_TEXT);
+    expect(peekPendingCompact(OWL_COMPACT_KEY)).toBeNull();
+  });
+
   it("schedules above the floor", async () => {
     setAgentCompact("on>40k");
     const ctx = { getContextUsage: async () => ({ tokens: 60_000, contextWindow: 200_000, percent: 30 }) };
@@ -83,6 +100,7 @@ describe("firePendingCompactAtSettled", () => {
   beforeEach(() => {
     clearPendingCompact(OWL_COMPACT_KEY);
     _resetGetSessionOwlSettings();
+    owlEnabled = true;
   });
 
   afterEach(() => {

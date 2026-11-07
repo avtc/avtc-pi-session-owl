@@ -12,7 +12,12 @@
 // thin, delegating decisions and path math to the data-only claude/host/*
 // modules.
 import type { Register } from "claude-code";
-import { clearPendingCompactForSession, parseAgentCompactValue } from "../core/src/compaction/agent-compact-core.js";
+import {
+  clearPendingCompact,
+  clearPendingCompactForSession,
+  OWL_COMPACT_DISABLED_TEXT,
+  parseAgentCompactValue,
+} from "../core/src/compaction/agent-compact-core.js";
 import { log } from "../core/src/log.js";
 import { captureAppend, getCapture, releaseAllCaptures, releaseCapture } from "../host/capture/append-handler.js";
 import { flushTurn } from "../host/capture/flush.js";
@@ -32,7 +37,11 @@ import {
   runOwlStatus,
 } from "../host/commands/handlers.js";
 import { buildViewerTree, setViewerContent, VIEWER_PANE_ID } from "../host/commands/viewer.js";
-import { firePendingAgentCompact, serveOwlCompactCall } from "../host/compaction/agent-compact.js";
+import {
+  clearAgentCompactFiringForSession,
+  firePendingAgentCompact,
+  serveOwlCompactCall,
+} from "../host/compaction/agent-compact.js";
 import { OWL_COMPACT_FULL_NAME } from "../host/compaction/agent-compact-spec.js";
 import {
   AWAIT_STAGE_TOOL,
@@ -1366,7 +1375,10 @@ async function onSessionEnd(_$: any, _e: AnyEvent, next: Next) {
     // a pending agent compaction request never outlives its session (a
     // residual entry must not fire a stale compaction after a resume)
     const endedSessionId = state.getCurrentSession();
-    if (endedSessionId !== null) clearPendingCompactForSession(endedSessionId);
+    if (endedSessionId !== null) {
+      clearPendingCompactForSession(endedSessionId);
+      clearAgentCompactFiringForSession(endedSessionId);
+    }
     await state.sessionEndBody();
     // durability before teardown: any still-buffered ledger records (a run
     // that outlived its last turn flush) are written, THEN the assemblies go
@@ -1639,24 +1651,31 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
     // turns), followed by the continuation prompt. Main conversation only —
     // the compact call takes no agentId (a subagent loop's stash waits for
     // its own engine compaction, which consumes it in the takeover gate).
-    if (
-      e &&
-      typeof (e as { agentId?: unknown }).agentId === "undefined" &&
-      state.isOwlEnabled() &&
-      !isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))
-    ) {
+    if (e && typeof (e as { agentId?: unknown }).agentId === "undefined") {
       const fireSessionId = state.getCurrentSession();
       if (fireSessionId !== null) {
-        firePendingAgentCompact(
-          state.conversationKey(fireSessionId, null),
-          parseAgentCompactValue(state.getOwlAgentCompact()),
-          {
+        const fireKey = state.conversationKey(fireSessionId, null);
+        // a dormant owl never fires — and never KEEPS the request: a
+        // residual entry must not fire a stale compaction after a re-enable
+        if (
+          !state.isOwlEnabled() ||
+          isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))
+        ) {
+          clearPendingCompact(fireKey);
+        } else {
+          firePendingAgentCompact(fireKey, parseAgentCompactValue(state.getOwlAgentCompact()), {
             sessionCompact: (input) => $.session.compact(input),
             promptSubmit: (input) => $.prompt.submit(input),
             clockAfter: (ms, cb) => $.clock.after(ms, cb),
             log: (message) => log.info(message),
-          },
-        );
+            belowFloor: () => {
+              const fireSetting = parseAgentCompactValue(state.getOwlAgentCompact());
+              if (fireSetting.thresholdK === null) return false;
+              const tokens = contextTokensFor(fireKey);
+              return tokens !== null && tokens > 0 && Math.round(tokens / 1000) < fireSetting.thresholdK;
+            },
+          });
+        }
       }
     }
     // Completion routing is ENGINE MECHANICS (resolving a parked
@@ -2137,8 +2156,12 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
       const key = sessionId !== null ? state.conversationKey(sessionId, agentId) : "";
       const tokens = key === "" ? null : contextTokensFor(key);
       const setting = parseAgentCompactValue(state.getOwlAgentCompact());
-      // a dormant owl (conflict-paused) is compaction-transparent: a fired
-      // request would run the engine's native compaction — refuse here
+      // a dormant owl (disabled or conflict-paused) is compaction-transparent:
+      // a fired request would run the engine's native compaction — refuse
+      // here (pi's execute refuses on the same gates)
+      if (!state.isOwlEnabled()) {
+        return { deny: OWL_COMPACT_DISABLED_TEXT };
+      }
       if (isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))) {
         return { deny: "Error: session-owl owl_compact failed: conflict-paused" };
       }

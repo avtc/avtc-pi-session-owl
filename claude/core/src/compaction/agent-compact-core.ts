@@ -58,7 +58,7 @@ export interface AgentCompactSetting {
  *  unparseable one is off (never register on garbage). */
 export function parseAgentCompactValue(value: string | undefined | null): AgentCompactSetting {
   if (typeof value !== "string") return { mode: "on", thresholdK: null };
-  const trimmed = value.trim();
+  const trimmed = value.trim().toLowerCase();
   if (trimmed === "on") return { mode: "on", thresholdK: null };
   const match = /^on>(\d+)k$/i.exec(trimmed);
   if (match !== null) return { mode: "on", thresholdK: Number.parseInt(match[1] ?? "0", 10) };

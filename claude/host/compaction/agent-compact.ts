@@ -31,6 +31,9 @@ export interface AgentCompactFireDeps {
   clockAfter: (ms: number, cb: () => void) => unknown;
   /** Log seam (the file logger). */
   log: (message: string) => void;
+  /** Re-check the context floor at fire time: true when the context sits
+   *  BELOW the setting's floor (no threshold = never true). */
+  belowFloor: () => boolean;
 }
 
 /** The tool.call serve: validate against the live setting and the context
@@ -76,6 +79,17 @@ export function serveOwlCompactCall(
  *  loop's own engine compaction (the compaction hook consumes it there). */
 const firing = new Set<string>();
 
+/** Drop every firing marker of one session (session end): a fire whose
+ *  deferred callback never ran must not block the conversation's next fire
+ *  forever. */
+export function clearAgentCompactFiringForSession(sessionId: string): void {
+  firing.delete(sessionId);
+  const prefix = `${sessionId}|`;
+  for (const key of firing) {
+    if (key.startsWith(prefix)) firing.delete(key);
+  }
+}
+
 export function firePendingAgentCompact(
   key: string,
   setting: ReturnType<typeof parseAgentCompactValue>,
@@ -92,6 +106,11 @@ export function firePendingAgentCompact(
     void (async () => {
       let stood = false;
       try {
+        if (deps.belowFloor()) {
+          deps.log("agent-initiated compaction not fired: context below the floor (re-checked at fire time)");
+          clearPendingCompact(key);
+          return;
+        }
         const result = await deps.sessionCompact({ instructions: pending.notes });
         if (typeof result?.skip === "string") {
           // a hook vetoed it (owl's own skip paths, a classic PreCompact

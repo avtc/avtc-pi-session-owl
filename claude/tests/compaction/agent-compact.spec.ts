@@ -8,6 +8,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  OWL_COMPACT_DESCRIPTION as CORE_OWL_COMPACT_DESCRIPTION,
+  OWL_COMPACT_NOTES_DESCRIPTION as CORE_OWL_COMPACT_NOTES_DESCRIPTION,
   clearPendingCompact,
   OWL_COMPACT_CONTINUE_PROMPT,
   OWL_COMPACT_DISABLED_TEXT,
@@ -66,12 +68,13 @@ describe("serveOwlCompactCall", () => {
 describe("firePendingAgentCompact", () => {
   const on = parseAgentCompactValue("on");
 
-  function makeDeps() {
+  function makeDeps(belowFloor = false) {
     return {
       sessionCompact: vi.fn(async () => ({})),
       promptSubmit: vi.fn(async () => undefined),
       clockAfter: vi.fn((_ms: number, cb: () => void) => cb()),
       log: vi.fn(),
+      belowFloor: () => belowFloor,
     };
   }
 
@@ -114,6 +117,16 @@ describe("firePendingAgentCompact", () => {
     expect(peekPendingCompact("fk3")).toBeNull();
   });
 
+  it("a fire-time floor hit sends nothing and clears the stash", async () => {
+    peekSet("fk6", "the plan");
+    const deps = makeDeps(true);
+    firePendingAgentCompact("fk6", on, deps);
+    await vi.waitFor(() => expect(deps.log).toHaveBeenCalled());
+    expect(deps.sessionCompact).not.toHaveBeenCalled();
+    expect(deps.promptSubmit).not.toHaveBeenCalled();
+    expect(peekPendingCompact("fk6")).toBeNull();
+  });
+
   it("a compaction that stood continues exactly once", async () => {
     peekSet("fk5", "the plan");
     const deps = makeDeps();
@@ -132,13 +145,8 @@ describe("firePendingAgentCompact", () => {
 });
 
 describe("the registration spec drift pin", () => {
-  it("the description matches the vendored core text", () => {
-    expect(OWL_COMPACT_TOOL_DESCRIPTION).toBe(
-      "Runs compaction at the end of this turn. continue_notes will be rendered into compaction summary - " +
-        "pass everything you keep in mind to effectively continue planned work after compaction. " +
-        "The past turns are observed by owl, but future plans are only in your mind. " +
-        "Consult with owl_recall to see root nodes summaries if needed",
-    );
+  it("the description matches the vendored core text (the spec literals never drift)", () => {
+    expect(OWL_COMPACT_TOOL_DESCRIPTION).toBe(CORE_OWL_COMPACT_DESCRIPTION);
   });
 
   it("the schema carries the required unbounded string parameter", () => {
@@ -147,7 +155,7 @@ describe("the registration spec drift pin", () => {
       properties: {
         continue_notes: {
           type: "string",
-          description: "What you need to know after compaction to effectively continue planned work",
+          description: CORE_OWL_COMPACT_NOTES_DESCRIPTION,
           minLength: 1,
         },
       },
