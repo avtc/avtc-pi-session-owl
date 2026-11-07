@@ -872,3 +872,38 @@ describe("buildContinueInstructions", () => {
     expect(out).toContain("real note");
   });
 });
+
+describe("buildSelectorInputView — continue-instructions section", () => {
+  it("renders inside the current-task context when notes exist", () => {
+    const branch: SessionEntry[] = [userEntry("u0", "the ask")];
+    const view = buildSelectorInputView({
+      sourceGraph: sourceGraphForAssembly(),
+      tail: { getLeafId: () => "leaf", getBranch: () => branch },
+      tailBoundary: { firstKeptEntryId: "u0" },
+      todo: null,
+      notes: [{ origin: "agent", text: "finish the parser" }],
+      touchedFiles: { getLeafId: () => "leaf", getBranch: () => branch },
+      sinceEntryId: "u0",
+      chunkOptions: ASSEMBLY_OPTS,
+    });
+    expect(view.contextView).toContain("Continue instructions for the continuation after this compaction");
+    expect(view.contextView.indexOf("finish the parser")).toBeGreaterThan(view.contextView.indexOf("Current task"));
+  });
+
+  it("omits the section entirely when notes are null or empty", () => {
+    const branch: SessionEntry[] = [userEntry("u0", "the ask")];
+    const mk = (notes: CompactNotes[] | null): string =>
+      buildSelectorInputView({
+        sourceGraph: sourceGraphForAssembly(),
+        tail: { getLeafId: () => "leaf", getBranch: () => branch },
+        tailBoundary: { firstKeptEntryId: "u0" },
+        todo: null,
+        notes,
+        touchedFiles: { getLeafId: () => "leaf", getBranch: () => branch },
+        sinceEntryId: "u0",
+        chunkOptions: ASSEMBLY_OPTS,
+      }).contextView;
+    expect(mk(null)).not.toContain("Continue instructions for the continuation");
+    expect(mk([])).not.toContain("Continue instructions for the continuation");
+  });
+});
