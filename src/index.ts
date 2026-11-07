@@ -228,11 +228,9 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
     // The agent-initiated compaction fires here: the run has fully settled
     // (no retry, compaction, or queued continuation pending), so the compact
     // never aborts live work. A no-op unless owl_compact left a request.
-    try {
-      firePendingCompactAtSettled(ctx, pi);
-    } catch (err) {
+    void firePendingCompactAtSettled(ctx, pi).catch((err: unknown) => {
       log.error("agent_settled: pending compact fire failed", err);
-    }
+    });
   });
 
   pi.on("session_start", emitReady);

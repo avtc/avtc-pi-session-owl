@@ -109,7 +109,13 @@ export interface FollowUpSender {
 /** The deferred follow-up: resume text delivered as a queued user message so
  *  anything the user typed during compaction goes first. */
 function sendFollowUp(pi: FollowUpSender, text: string): void {
-  setTimeout(() => pi.sendUserMessage(text, { deliverAs: "followUp" }), FOLLOWUP_DEFER_MS);
+  setTimeout(() => {
+    try {
+      pi.sendUserMessage(text, { deliverAs: "followUp" });
+    } catch (err) {
+      log.error(`continuation follow-up failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, FOLLOWUP_DEFER_MS);
 }
 
 /** Fire the pending agent-initiated compaction at the settled boundary. No
@@ -119,15 +125,24 @@ function sendFollowUp(pi: FollowUpSender, text: string): void {
  *  when the compaction stood: a user abort (cancel), an unavailable
  *  service/provider, or any other failure ends the flow without a
  *  continuation — the session stays where the failure left it. */
-export function firePendingCompactAtSettled(ctx: ExtensionContext, pi: FollowUpSender): void {
+export async function firePendingCompactAtSettled(ctx: ExtensionContext, pi: FollowUpSender): Promise<void> {
   const pending = peekPendingCompact(OWL_COMPACT_KEY);
   if (pending === null) return;
   const settings = getSessionOwlSettings();
-  if (!settings.enabled || isConflictPaused() || parseAgentCompactValue(settings.agentCompact).mode === "off") {
+  const setting = parseAgentCompactValue(settings.agentCompact);
+  if (!settings.enabled || isConflictPaused() || setting.mode === "off") {
     clearPendingCompact(OWL_COMPACT_KEY);
     return;
   }
   try {
+    if (setting.thresholdK !== null) {
+      const tokensK = await contextTokensK(ctx);
+      if (tokensK !== null && tokensK < setting.thresholdK) {
+        log.warn("agent-initiated compaction not fired: context below the floor (re-checked at fire time)");
+        clearPendingCompact(OWL_COMPACT_KEY);
+        return;
+      }
+    }
     ctx.compact({
       customInstructions: pending.notes,
       onComplete: () => sendFollowUp(pi, OWL_COMPACT_CONTINUE_PROMPT),

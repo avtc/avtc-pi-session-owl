@@ -92,7 +92,7 @@ export function renderSummary(args: RenderSummaryArgs): string {
   lines.push(MEMORY_USE);
   lines.push("");
 
-  if (args.notes !== null && args.notes !== undefined) {
+  if (args.notes !== null && args.notes !== undefined && args.notes.text.trim().length > 0) {
     lines.push(args.notes.origin === "agent" ? OWL_COMPACT_AGENT_LABEL : OWL_COMPACT_USER_LABEL);
     lines.push(args.notes.text);
     lines.push("");

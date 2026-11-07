@@ -105,6 +105,15 @@ describe("compactNotesFor origin resolution", () => {
   it("no request and no instructions render nothing", () => {
     expect(compactNotesFor("n3", undefined)).toBeNull();
     expect(compactNotesFor("n3", "")).toBeNull();
+    expect(compactNotesFor("n3", "   ")).toBeNull(); // whitespace-only instructions
+  });
+
+  it("a stale pending request renders nothing (an entry that outlived its turn boundary)", () => {
+    setPendingCompact("n4", "old plan");
+    const aged = peekPendingCompact("n4");
+    expect(aged).not.toBeNull();
+    if (aged !== null) aged.ts = Date.now() - 11 * 60 * 1000; // peek hands the stored record
+    expect(compactNotesFor("n4", undefined)).toBeNull();
   });
 });
 

@@ -121,10 +121,18 @@ export function clearPendingCompactForSession(sessionId: string): void {
 /** Resolve the notes a compaction renders: the agent's pending request when
  *  one waits (the agent asked for THIS compaction), else the instructions
  *  the user typed with their /compact, else none. */
+/** A pending request older than this never renders: an entry that somehow
+ *  survived its turn boundary (a blocked fire, a pass-through race) must not
+ *  surface as Continue instructions in a LATER compaction. */
+const STALE_PENDING_MS = 10 * 60 * 1000;
+
 export function compactNotesFor(key: string, userInstructions: string | undefined): CompactNotes | null {
   const request = consumePendingCompact(key);
-  if (request !== null) return { text: request.notes, origin: "agent" };
-  if (typeof userInstructions === "string" && userInstructions.length > 0) {
+  if (request !== null) {
+    if (Date.now() - request.ts > STALE_PENDING_MS) return null;
+    return { text: request.notes, origin: "agent" };
+  }
+  if (typeof userInstructions === "string" && userInstructions.trim().length > 0) {
     return { text: userInstructions, origin: "user" };
   }
   return null;

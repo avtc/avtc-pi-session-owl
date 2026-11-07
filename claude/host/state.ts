@@ -363,6 +363,7 @@ export function wasRecallToolRegistered(): boolean {
 export function reopenToolRegistrationGate(): void {
   toolsRegistered = false;
   recallToolRegistered = false;
+  compactToolRegistered = false;
 }
 
 export function reopenStageToolRegistrationGate(): void {
