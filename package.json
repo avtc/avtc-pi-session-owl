@@ -74,8 +74,8 @@
     "typebox": "^1.1.38",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9",
-    "avtc-claude-logger": "file:../avtc-pi-logger/claude",
-    "avtc-claude-settings-ui": "file:../avtc-pi-settings-ui/claude"
+    "avtc-claude-logger": "^1.0.5",
+    "avtc-claude-settings-ui": "^1.0.15"
   },
   "author": "avtc <tarasenkov@gmail.com>",
   "repository": {

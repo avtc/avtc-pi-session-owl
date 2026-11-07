@@ -57,11 +57,12 @@ release runbook.
 ## Development notes
 
 - Dev installs materialize the family libraries as REAL COPIES under
-  `claude/node_modules/` (`npm run claude:sync` re-materializes them from the
-  sibling checkouts of `avtc-pi-logger/claude` and
-  `avtc-pi-settings-ui/claude`; `claude:sync-check` verifies byte-identity).
-  `claude/package.json` carries the registry specs; the lockfile keeps `file:`
-  entries only until the siblings are live on npm.
+  `claude/node_modules/`: `cd claude && npm ci` installs them from the
+  registry specs in `claude/package.json`. When sibling checkouts of
+  `avtc-pi-logger/claude` and `avtc-pi-settings-ui/claude` sit next to this
+  repo, `npm run claude:sync` re-materializes the copies from those sources
+  and `claude:sync-check` verifies byte-identity; without the siblings, the
+  installed copies serve as-is and the checks pass on their presence.
 - A `--plugin-dir` plugin loads at process start; restart the CLI after
   code changes (installed-plugin edits are cached by the engine). NEVER edit
   the plugin tree while a session is live: the engine reloads the module on

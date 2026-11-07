@@ -112,10 +112,12 @@ const REWRITES = [
 // Family-library materialization: the hooks loader refuses paths that leave
 // the plugin tree (a node_modules SYMLINK to a sibling checkout resolves
 // outside it — the validator says "no such file under claude"), so the
-// dev tree carries REAL COPIES of the family dists. `npm install` re-creates
-// the symlinks; a sync pass replaces them with copies and --check verifies
-// byte-identity against the sibling sources. (Installed-marketplace copies
-// materialize real node_modules themselves — this bridges the dev layout.)
+// dev tree carries REAL COPIES of the family dists. A sync pass copies the
+// sibling dists in and --check verifies byte-identity; without a sibling
+// checkout, an installed copy under claude/node_modules (from claude/package.json's
+// registry specs) serves the same role and only its absence is a problem.
+// (Installed-marketplace copies materialize real node_modules themselves —
+// this bridges the dev layout.)
 // ---------------------------------------------------------------------------
 
 const FAMILY_LIBS = {
@@ -128,7 +130,13 @@ function materializeFamilyLibs(problems) {
     const src = path.resolve(ROOT, siblingRel);
     const dst = path.join(ROOT, "claude", "node_modules", name);
     if (!fs.existsSync(path.join(src, "dist", "index.js"))) {
-      problems.push(`family lib ${name}: sibling dist missing at ${siblingRel}/dist — build the sibling repo first`);
+      // No sibling checkout: the installed copy (claude/ npm ci) is the
+      // stand-in; report only when that is missing too.
+      if (!fs.existsSync(path.join(dst, "dist", "index.js"))) {
+        problems.push(
+          `family lib ${name}: no sibling dist at ${siblingRel}/dist and no installed copy under claude/node_modules — clone the sibling repo or run npm ci inside claude/`,
+        );
+      }
       continue;
     }
     // The copy set: dist/ + package.json (the loader only reads imported
