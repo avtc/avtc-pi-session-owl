@@ -404,3 +404,51 @@ describe("renderSummary — ## Memory use section (recall-before-relying guidanc
     expect(out).not.toContain("Before redoing or assuming");
   });
 });
+
+describe("continue notes", () => {
+  it("agent notes render under the agent label between Memory use and the initial prompt", () => {
+    const out = renderSummary({
+      graph: emptyGraph(),
+      selectedTree: null,
+      oInitialPrompt: PROMPT,
+      renderMode: "observations-root",
+      touchedFiles: [],
+      compactionCount: 0,
+      notes: { text: "finish the parser, then run the battery", origin: "agent" },
+    });
+    expect(out).toContain("## Continue instructions you have sent before executing compaction");
+    expect(out).toContain("finish the parser, then run the battery");
+    const useIdx = out.indexOf("## Memory use");
+    const notesIdx = out.indexOf("## Continue instructions you have sent before executing compaction");
+    const promptIdx = out.indexOf("## Initial prompt");
+    expect(useIdx).toBeLessThan(notesIdx);
+    expect(notesIdx).toBeLessThan(promptIdx);
+  });
+
+  it("user instructions render under the user label", () => {
+    const out = renderSummary({
+      graph: emptyGraph(),
+      selectedTree: null,
+      oInitialPrompt: PROMPT,
+      renderMode: "observations-root",
+      touchedFiles: [],
+      compactionCount: 0,
+      notes: { text: "keep the API decisions", origin: "user" },
+    });
+    expect(out).toContain("## Continue instructions from user");
+    expect(out).toContain("keep the API decisions");
+    expect(out).not.toContain("## Continue instructions you have sent");
+  });
+
+  it("no notes renders no Continue section", () => {
+    const out = renderSummary({
+      graph: emptyGraph(),
+      selectedTree: null,
+      oInitialPrompt: PROMPT,
+      renderMode: "observations-root",
+      touchedFiles: [],
+      compactionCount: 0,
+    });
+    expect(out).not.toContain("## Continue instructions");
+  });
+});

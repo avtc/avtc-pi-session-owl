@@ -20,6 +20,7 @@
  * project `<cwd>/.claude/avtc-session-owl-settings.json`.
  */
 
+import { parseAgentCompactValue } from "../../core/src/compaction/agent-compact-core.js";
 import {
   _setRegisterSettingsCommand,
   getSessionOwlSettings,
@@ -34,10 +35,18 @@ import {
   type EnvStore,
   settingsFilePaths,
 } from "../../node_modules/avtc-claude-settings-ui/dist/index.js";
+import { owlCompactDeferredToolSpec } from "../compaction/agent-compact-spec.js";
 import { getConflictHits, isConflictPaused } from "../conflicts/pause.js";
 import { errDetail, guarded, sayError } from "../log/err-detail.js";
 import { registerOwlRecallIfNewlyEnabled } from "../recall/register.js";
-import { setOwlEnabled, setOwlIgnoreConflicts, setOwlSubagentMode } from "../state.js";
+import {
+  markCompactToolRegistered,
+  setOwlAgentCompact,
+  setOwlEnabled,
+  setOwlIgnoreConflicts,
+  setOwlSubagentMode,
+  wasCompactToolRegistered,
+} from "../state.js";
 import { setPaneCwd } from "./pane.js";
 import { withPortDefaults, withPortFields } from "./port-fields.js";
 
@@ -152,6 +161,23 @@ function fireAfterChange(id: string, value: unknown, capsules: SettingsCapsules)
   if (id === "subagentMode" && (value === "inherited" || value === "disabled" || value === "on-compaction")) {
     setOwlSubagentMode(value);
   }
+  // agentCompact off→on mid-session registers the owl_compact tool once —
+  // deferred (behind ToolSearch), so the enable spends no prefix cache; a
+  // later on→off leaves it registered and the serve refuses (no unregister
+  // exists). Registered-at-boot sessions never re-register.
+  if (id === "agentCompact" && typeof value === "string") {
+    setOwlAgentCompact(value);
+    if (!wasCompactToolRegistered() && parseAgentCompactValue(value).mode === "on") {
+      capsules
+        .toolRegister(owlCompactDeferredToolSpec())
+        .then(() => {
+          markCompactToolRegistered();
+        })
+        .catch((err: unknown) => {
+          sayError(`session-owl: mid-session owl_compact registration failed: ${errDetail(err)}`);
+        });
+    }
+  }
   capsules.uiInvalidate();
 }
 
@@ -253,6 +279,7 @@ export async function initSettingsConsumer(init: SettingsConsumerInit): Promise<
     setOwlEnabled(getSessionOwlSettings().enabled);
     setOwlIgnoreConflicts(getSessionOwlSettings().ignoreConflicts);
     setOwlSubagentMode(getSessionOwlSettings().subagentMode);
+    setOwlAgentCompact(getSessionOwlSettings().agentCompact);
     setPaneCwd(init.cwd);
     // the reloaded files may carry new stage model/effort values — the
     // stage agent TYPES must re-register over them
@@ -270,6 +297,7 @@ export async function initSettingsConsumer(init: SettingsConsumerInit): Promise<
   setOwlEnabled(getSessionOwlSettings().enabled);
   setOwlIgnoreConflicts(getSessionOwlSettings().ignoreConflicts);
   setOwlSubagentMode(getSessionOwlSettings().subagentMode);
+  setOwlAgentCompact(getSessionOwlSettings().agentCompact);
   setPaneCwd(init.cwd);
   // the resolved settings decide the stage agent TYPES' model/effort: the
   // boot registered them with the empty slice, and the first real

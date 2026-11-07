@@ -53,6 +53,10 @@ export interface SessionOwlConfig {
    *  the session's thinking level (ctx.thinkingLevel). "off" = no thinking. */
   defaultThinkingLevel: string | null;
   renderMode: "selected-root" | "observations-root";
+  /** Agent-initiated compaction: off = the owl_compact tool is never
+   *  registered; on = the agent may schedule a compaction with continue
+   *  notes; "on>Nk" = only above Nk tokens of context. */
+  agentCompact: string;
   observerMode: "on-threshold" | "on-compaction";
   builderMode: "on-compaction" | "each-N-observations" | "on-session-context-threshold" | "on-root-view-threshold";
   selectorMode: "on-compaction" | "on-session-context-threshold";
@@ -144,6 +148,7 @@ const MIN_MAX_TOKENS = 1;
 const DEFAULT_TOOL_RESULT_TOKEN_BUDGET = 6000;
 const MIN_TOOL_RESULT_TOKEN_BUDGET = 512;
 const DEFAULT_FAST_PATH = true;
+const DEFAULT_AGENT_COMPACT = "on";
 
 export const DEFAULT_CONFIG: Readonly<SessionOwlConfig> = Object.freeze({
   // General
@@ -154,6 +159,7 @@ export const DEFAULT_CONFIG: Readonly<SessionOwlConfig> = Object.freeze({
   defaultModel: NO_MODEL,
   defaultThinkingLevel: NO_MODEL,
   renderMode: DEFAULT_RENDER_MODE,
+  agentCompact: DEFAULT_AGENT_COMPACT,
   observerMode: DEFAULT_OBSERVER_MODE,
   builderMode: DEFAULT_BUILDER_MODE,
   selectorMode: DEFAULT_SELECTOR_MODE,
@@ -344,6 +350,17 @@ const SETTINGS: readonly SettingSchema[] = [
     type: "thinking-level",
     defaultValue: DEFAULT_CONFIG.defaultThinkingLevel,
     presets: THINKING_LEVEL_SESSION_PRESETS,
+  }),
+  setting("agentCompact", {
+    label: "Agent-initiated compact",
+    description:
+      "When on, the owl_compact tool is registered and the agent can schedule a compaction at a moment of its choosing, attaching continue notes; on>Nk schedules only above the threshold of Nk tokens. off never registers the tool (a mid-session flip to off leaves it registered but it refuses).",
+    type: "string",
+    defaultValue: DEFAULT_CONFIG.agentCompact,
+    presets: [
+      ["off", "off"],
+      ["on", "on"],
+    ],
   }),
   setting("renderMode", {
     label: "Render mode",
@@ -615,6 +632,7 @@ const TABS: readonly SettingsTabSchema[] = [
       "defaultModel",
       "defaultThinkingLevel",
       "renderMode",
+      "agentCompact",
       "observerMode",
       "builderMode",
       "selectorMode",

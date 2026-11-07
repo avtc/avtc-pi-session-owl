@@ -78,3 +78,33 @@ describe("mid-session enable — the once-per-process registration", () => {
     expect(registered).toEqual([]); // already registered at the gate — NO double
   });
 });
+
+describe("owl_compact boot registration — the agentCompact gate", () => {
+  test("agentCompact on at boot ⇒ the tool registers in the prompt's list", () => {
+    state.setOwlAgentCompact("on");
+    const specs = state.pendingToolSpecs();
+    const compact = specs.find((s) => s.name === "owl_compact");
+    expect(compact).toBeDefined();
+    expect(compact?.isDeferred).toBe(false);
+    expect(state.wasCompactToolRegistered()).toBe(true);
+  });
+
+  test("agentCompact off at boot ⇒ the tool is ABSENT (off never registers)", () => {
+    state.setOwlAgentCompact("off");
+    const specs = state.pendingToolSpecs();
+    expect(specs.find((s) => s.name === "owl_compact")).toBeUndefined();
+    expect(state.wasCompactToolRegistered()).toBe(false);
+  });
+
+  test("a floor value still registers (on>40k is on with a floor)", () => {
+    state.setOwlAgentCompact("on>40k");
+    const specs = state.pendingToolSpecs();
+    expect(specs.find((s) => s.name === "owl_compact")).toBeDefined();
+  });
+
+  test("the once-consumed tools queue serves nothing on a second start (no duplicate registration)", () => {
+    state.setOwlAgentCompact("on");
+    expect(state.pendingToolSpecs().find((s) => s.name === "owl_compact")).toBeDefined();
+    expect(state.pendingToolSpecs()).toEqual([]);
+  });
+});

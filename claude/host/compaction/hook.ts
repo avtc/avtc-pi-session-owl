@@ -21,6 +21,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 // cut aligns by message-bearing branch position, falling back to the whole
 // branch when the views disagree (pi's cut-not-found rule).
 import type { SessionCompacted, SessionCompactSkipped, SessionMessage } from "claude-code";
+import { type CompactNotes, compactNotesFor } from "../../core/src/compaction/agent-compact-core.js";
 import { renderSummary } from "../../core/src/compaction/summary.js";
 import { extractTouchedFiles } from "../../core/src/compaction/touched-files.js";
 import { ledgerToStageUsages } from "../../core/src/compaction/usage-map.js";
@@ -176,11 +177,6 @@ export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDe
         `rewind check before compaction failed (continuing): ${cause instanceof Error ? cause.message : String(cause)}`,
       );
     }
-    // typed /compact instructions are ignored exactly as pi ignores them —
-    // the summary is built from the graph, never the focus text
-    if (typeof e.instructions === "string" && e.instructions.length > 0) {
-      log(`compaction instructions ignored: ${e.instructions}`);
-    }
     // (3) the precompute branch: a held result must be a pure mechanical
     // render — any backlog hands back to the real compaction (the full gate)
     if (e.trigger === "precompute") return precomputeTakeover(deps);
@@ -207,10 +203,17 @@ export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDe
     const runAnchor = deps.beginRunAnchor();
     if (runAnchor !== null) log(`compaction run anchor: ${runAnchor}`);
     try {
+      // Continue notes: the agent's pending owl_compact request when one
+      // waits, else the instructions the user typed with /compact — rendered
+      // into the summary under an origin label (pi consumes the same two
+      // sources). Consumed here, once the gate is committed: one compaction
+      // renders them (a cancelled compaction drops them; the agent sees the
+      // failure and can ask again).
+      const compactNotes = compactNotesFor(deps.key, typeof e.instructions === "string" ? e.instructions : undefined);
       // a prior owl summary row never rides the tail — the fresh summary
       // re-renders the same graph, so exactly one summary row exists at a time
       const keptTail = cut.kept.filter((m) => !isPriorSummaryRow(m, ownSummariesFor(deps.getGraphStore())));
-      return await runGate(deps, log, { kept: keptTail, scope, handle, signal });
+      return await runGate(deps, log, compactNotes, { kept: keptTail, scope, handle, signal });
     } finally {
       deps.endRunAnchor();
       handle.release();
@@ -233,6 +236,7 @@ export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDe
 async function runGate(
   deps: CompactionHookDeps,
   log: (m: string) => void,
+  compactNotes: CompactNotes | null,
   held: {
     kept: SessionMessage[];
     scope: { firstKeptEntryId: string | null };
@@ -334,6 +338,7 @@ async function runGate(
     renderMode: deps.settings.renderMode,
     touchedFiles,
     compactionCount,
+    notes: compactNotes,
   });
   // the compaction baseline for the status report's since-last arithmetic
   store.lastCompactionLedger = snapshotAtCompaction(store.usageLedger).lastCompactionLedger;

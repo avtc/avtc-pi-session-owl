@@ -53,7 +53,7 @@ describe("stage wiring — registration + hooks", () => {
       cwd: "/w",
     });
     await h.dispatch("session.start", { cwd: "/w", surface: null, isInteractive: false });
-    expect(h.tools.registered).toHaveLength(14); // owl_recall + stage_launched + await_stage + 11 stage tools (incl. the conditional todo_list), no doubles
+    expect(h.tools.registered).toHaveLength(15); // owl_recall + owl_compact (agentCompact on) + stage_launched + await_stage + 11 stage tools (incl. the conditional todo_list), no doubles
     expect(h.agents.registered).toHaveLength(6); // the first start's boot + settings re-registration; the second start adds none
   });
 

@@ -22,7 +22,9 @@
 //   dispose     per-conversation teardown callbacks (run-lock abort,
 //               regex worker termination, resolver clears)
 
+import { parseAgentCompactValue } from "../core/src/compaction/agent-compact-core.js";
 import { log } from "../core/src/log.js";
+import { owlCompactToolSpec } from "./compaction/agent-compact-spec.js";
 import { awaitStageToolSpec } from "./compaction/budget-free.js";
 import * as bridge from "./engine-bridge.js";
 import { owlRecallToolSpec } from "./recall/spec.js";
@@ -74,6 +76,7 @@ let toolsRegistered = false;
  *  it out only when enabled) — the mid-session enable path consults this so
  *  an enable off→on cycle never re-registers the tool. */
 let recallToolRegistered = false;
+let compactToolRegistered = false;
 let commandsRegistered = false;
 let stageToolsRegistered = false;
 let agentsRegistered = false;
@@ -250,6 +253,18 @@ export function getCurrentTranscriptPath(): string | null {
 // the launch callback the subagent companion reports stage spawns through
 const TOOL_SPECS = [owlRecallToolSpec(), stageLaunchedToolSpec(), awaitStageToolSpec()];
 
+/** The agentCompact setting mirror (the string value, read live at the
+ *  start gate and on every settings change; "on" until proven otherwise). */
+let owlAgentCompact = "on";
+
+export function setOwlAgentCompact(value: string): void {
+  owlAgentCompact = value;
+}
+
+export function getOwlAgentCompact(): string {
+  return owlAgentCompact;
+}
+
 // Command names are kebab-case (the engine allows letters, digits, `_` and
 // `-` only — no colons); the pi names map owl:STATUS -> owl-status etc. The
 // descriptions are pi's own (registerUserCommands + registerStatusCommand +
@@ -304,7 +319,25 @@ export function pendingToolSpecs(): Record<string, unknown>[] {
   // registers it then via the recall module's once-per-process path)
   if (!isOwlEnabled()) return [];
   recallToolRegistered = true;
-  return TOOL_SPECS;
+  const specs = [...TOOL_SPECS];
+  // agentCompact off never registers the owl_compact tool (a mid-session
+  // flip to on registers it once via the settings-reload wiring)
+  if (parseAgentCompactValue(owlAgentCompact).mode === "on") {
+    compactToolRegistered = true;
+    specs.push(owlCompactToolSpec());
+  }
+  return specs;
+}
+
+/** Did the start gate already register owl_compact? (The mid-session
+ *  enable path's coordination seam — a second $.tool.register would be a
+ *  duplicate registration the engine treats as an error.) */
+export function wasCompactToolRegistered(): boolean {
+  return compactToolRegistered;
+}
+
+export function markCompactToolRegistered(): void {
+  compactToolRegistered = true;
 }
 
 /** Did the start gate already register owl_recall? (The mid-session enable
@@ -406,5 +439,7 @@ export function _resetForTest(): void {
   owlEnabled = true;
   owlIgnoreConflicts = false;
   owlSubagentMode = "on-compaction";
+  owlAgentCompact = "on";
+  compactToolRegistered = false;
   currentTranscriptPath = null;
 }

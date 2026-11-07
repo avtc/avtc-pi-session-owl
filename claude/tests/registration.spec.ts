@@ -97,10 +97,13 @@ describe("host binding skeleton — registration", () => {
       transcript_path: "/t.jsonl",
       cwd: "/w",
     });
-    const recallSpec = h.tools.registered.find((t: any) => t.name === "owl_recall");
-    expect((recallSpec as any).isDeferred).toBe(false); // in-list: the schema rides the prompt from the first render
+    const inList = h.tools.registered
+      .filter((t: any) => t.isDeferred === false)
+      .map((t: any) => t.name)
+      .sort();
+    expect(inList).toEqual(["owl_compact", "owl_recall"]); // both browse/act tools ride the prompt from the first render
     for (const spec of h.tools.registered) {
-      if (spec.name !== "owl_recall") {
+      if (spec.name !== "owl_recall" && spec.name !== "owl_compact") {
         expect((spec as any).isDeferred).toBe(true); // stage tools: behind ToolSearch, cache-stable
       }
     }

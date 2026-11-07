@@ -202,7 +202,7 @@ describe("sessionOwlExtension (activate wiring)", () => {
   it("registers the owl_recall tool (read-only memory drill-down)", () => {
     const pi = makeFakePi() as unknown as ExtensionAPI & { registerTool: ReturnType<typeof vi.fn> };
     sessionOwlExtension(pi);
-    expect(pi.registerTool).toHaveBeenCalledTimes(1);
+    expect(pi.registerTool).toHaveBeenCalledTimes(2);
     const tool = pi.registerTool.mock.calls[0]?.[0] as { name: string };
     expect(tool.name).toBe("owl_recall");
   });

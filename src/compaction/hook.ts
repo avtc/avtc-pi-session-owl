@@ -40,6 +40,7 @@ import type { TodoBridge, TodoContext } from "../todo/types.js";
 import { computeUnobserved, makeMaybeBuilder } from "../triggers.js";
 import { O_INITIAL_PROMPT } from "../types.js";
 import type { WidgetController } from "../widget/tracker.js";
+import { compactNotesFor, OWL_COMPACT_KEY } from "./agent-compact-core.js";
 import { renderSummary } from "./summary.js";
 import { extractTouchedFiles } from "./touched-files.js";
 import { aggregateLedgerUsage, ledgerToStageUsages } from "./usage-map.js";
@@ -113,6 +114,14 @@ export async function compactionHook(
   todo: { context: TodoContext | null; bridge: TodoBridge | null },
 ): Promise<CompactionResult | undefined> {
   const settings = settingsGetter();
+
+  // Continue notes: the agent's pending owl_compact request when one waits,
+  // else the instructions the user typed with /compact. Consumed here — one
+  // compaction renders them (a cancelled compaction drops them; the agent
+  // sees the failure and can ask again). One key per process: a pi process
+  // hosts exactly one conversation (subagents are their own processes, with
+  // their own module instance and their own pending record).
+  const compactNotes = compactNotesFor(OWL_COMPACT_KEY, event.customInstructions);
 
   // Honor Pi's compaction signal: if Pi already gave up before we start, bail.
   if (event.signal.aborted) return cancelAborted(ctx);
@@ -216,6 +225,7 @@ export async function compactionHook(
       renderMode: settings.renderMode,
       touchedFiles,
       compactionCount: countCompactions(ctx.sessionManager),
+      notes: compactNotes,
     });
     // capture the compaction baseline so post-compaction /owl:status "since last
     // compaction" arithmetic is correct (deep copy — later stage activity must

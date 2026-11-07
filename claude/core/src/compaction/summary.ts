@@ -18,6 +18,7 @@ import {
 } from "../format/render.js";
 import { orderedNonObsoleteRoots } from "../graph/read-tools.js";
 import type { SerializedObservation, SerializedSelection } from "../store/codecs.js";
+import { type CompactNotes, OWL_COMPACT_AGENT_LABEL, OWL_COMPACT_USER_LABEL } from "./agent-compact-core.js";
 import { renderTouchedFiles, type TouchedFile } from "./touched-files.js";
 
 /** Which tree the active-set renders. */
@@ -48,6 +49,9 @@ export interface RenderSummaryArgs {
   touchedFiles: readonly TouchedFile[];
   /** Compactions so far this session (the tree-total footer's maturity signal). */
   compactionCount: number;
+  /** Continue notes to render near the top: the agent's owl_compact notes or
+   *  the user's typed /compact instructions, origin-labeled; null = none. */
+  notes?: CompactNotes | null;
 }
 
 const MEMORY_HEADING = "# Memory";
@@ -87,6 +91,12 @@ export function renderSummary(args: RenderSummaryArgs): string {
   lines.push(MEMORY_USE_HEADING);
   lines.push(MEMORY_USE);
   lines.push("");
+
+  if (args.notes !== null && args.notes !== undefined) {
+    lines.push(args.notes.origin === "agent" ? OWL_COMPACT_AGENT_LABEL : OWL_COMPACT_USER_LABEL);
+    lines.push(args.notes.text);
+    lines.push("");
+  }
 
   lines.push(INITIAL_PROMPT_HEADING);
   lines.push(args.oInitialPrompt === null ? NO_INITIAL_PROMPT : args.oInitialPrompt.summary);

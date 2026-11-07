@@ -162,13 +162,14 @@ describe("sessionOwlExtension (dormant conflict pause)", () => {
     const pi = makeFakePi();
     sessionOwlExtension(pi);
     expect([...pi._handlers.keys()].sort()).toEqual([
+      "agent_settled",
       "session_before_compact",
       "session_shutdown",
       "session_start",
       "session_tree",
       "turn_end",
     ]);
-    expect(pi.registerTool).toHaveBeenCalledTimes(1);
+    expect(pi.registerTool).toHaveBeenCalledTimes(2);
     expect(pi.registerCommand).toHaveBeenCalledTimes(7);
     expect(wiring.setStageRuns).toHaveBeenCalledTimes(1);
   });

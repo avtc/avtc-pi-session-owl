@@ -12,6 +12,7 @@
 // thin, delegating decisions and path math to the data-only claude/host/*
 // modules.
 import type { Register } from "claude-code";
+import { parseAgentCompactValue } from "../core/src/compaction/agent-compact-core.js";
 import { log } from "../core/src/log.js";
 import { captureAppend, getCapture, releaseAllCaptures, releaseCapture } from "../host/capture/append-handler.js";
 import { flushTurn } from "../host/capture/flush.js";
@@ -31,6 +32,8 @@ import {
   runOwlStatus,
 } from "../host/commands/handlers.js";
 import { buildViewerTree, setViewerContent, VIEWER_PANE_ID } from "../host/commands/viewer.js";
+import { firePendingAgentCompact, serveOwlCompactCall } from "../host/compaction/agent-compact.js";
+import { OWL_COMPACT_FULL_NAME } from "../host/compaction/agent-compact-spec.js";
 import {
   AWAIT_STAGE_TOOL,
   joinStageRunSliced,
@@ -110,7 +113,7 @@ import {
   releaseSessionStorage,
 } from "../host/storage/session-storage.js";
 import { newestAssistantUuid, shouldFireBoundary } from "../host/triggers/boundary-gate.js";
-import { recordMeasure, seedWindow } from "../host/triggers/context.js";
+import { contextTokensFor, recordMeasure, seedWindow } from "../host/triggers/context.js";
 import { onStepBoundary, onTurnCompleteBoundary } from "../host/triggers/eval.js";
 import { abortActiveFor, abortAllForSessionEnd, awaitIdle } from "../host/triggers/run-locks.js";
 import { composeBand, decideBand } from "../host/widget/band.js";
@@ -518,7 +521,19 @@ async function onSessionStart($: any, e: AnyEvent, next: Next) {
   );
   try {
     // Registration first: surfaces never depend on the config dir, and a
-    // missing-dir environment must not silently unregister the mod.
+    // missing-dir environment must not silently unregister the mod. The
+    // agentCompact mirror primes from the settings env blob BEFORE the
+    // tools queue serves (the engine loads it at app start; a stale or
+    // absent blob leaves the mirror's "on" default).
+    try {
+      const settingsBlob = await $.env.get("CLAUDE_SETTINGS_SESSION_OWL");
+      if (typeof settingsBlob === "string" && settingsBlob.length > 0) {
+        const parsed = JSON.parse(settingsBlob) as { agentCompact?: unknown };
+        if (typeof parsed.agentCompact === "string") state.setOwlAgentCompact(parsed.agentCompact);
+      }
+    } catch (err) {
+      diag(`agentCompact env prime skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
     await registerSurfaces($);
     const cfg = await $.env.get("CLAUDE_CONFIG_DIR");
     const home = await $.env.get("HOME");
@@ -1615,6 +1630,31 @@ async function* onTurnStep($: any, e: AnyEvent, next: any) {
 async function onTurnComplete($: any, e: AnyEvent, next: Next) {
   armAll($);
   try {
+    // The agent-initiated compaction fires at this boundary: the turn is
+    // done and the compact call runs deferred past this hook (between
+    // turns), followed by the continuation prompt. Main conversation only —
+    // the compact call takes no agentId (a subagent loop's stash waits for
+    // its own engine compaction, which consumes it in the takeover gate).
+    if (
+      e &&
+      typeof (e as { agentId?: unknown }).agentId === "undefined" &&
+      state.isOwlEnabled() &&
+      !isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))
+    ) {
+      const fireSessionId = state.getCurrentSession();
+      if (fireSessionId !== null) {
+        firePendingAgentCompact(
+          state.conversationKey(fireSessionId, null),
+          parseAgentCompactValue(state.getOwlAgentCompact()),
+          {
+            sessionCompact: (input) => $.session.compact(input),
+            promptSubmit: (input) => $.prompt.submit(input),
+            clockAfter: (ms, cb) => $.clock.after(ms, cb),
+            log: (message) => log.info(message),
+          },
+        );
+      }
+    }
     // Completion routing is ENGINE MECHANICS (resolving a parked
     // awaitAgentCompletion promise), not owl policy — it runs even while
     // conflict-paused: a run that was already in flight when the pause
@@ -2079,6 +2119,30 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
       const message = `Error: session-owl stage tool failed: ${err instanceof Error ? err.message : String(err)}`;
       diag(`stage tool.call failed: ${message}`);
       return { result: message };
+    }
+  }
+  // The owl_compact serve: validate against the live setting and the
+  // context floor, stash the notes for this conversation, and answer
+  // in-band (a throw would be SKIPPED by the engine — the model would read
+  // its generic no-hook-answered fallback). Nothing here compacts: the
+  // fire waits for the turn boundary (see onTurnComplete).
+  if (e && typeof e.tool === "string" && e.tool === OWL_COMPACT_FULL_NAME) {
+    try {
+      const sessionId = state.getCurrentSession();
+      const agentId = typeof e.agentId === "string" ? e.agentId : null;
+      const key = sessionId !== null ? state.conversationKey(sessionId, agentId) : "";
+      const tokens = key === "" ? null : contextTokensFor(key);
+      const setting = parseAgentCompactValue(state.getOwlAgentCompact());
+      const outcome = serveOwlCompactCall(e as { continue_notes?: unknown }, {
+        setting,
+        contextTokensK: tokens !== null && tokens > 0 ? Math.round(tokens / 1000) : null,
+        key,
+      });
+      diag(`owl_compact serve: key=${key} outcome=${outcome.error ? "refused" : "scheduled"}`);
+      return outcome.error ? { deny: outcome.text } : { result: outcome.text };
+    } catch (err) {
+      report("owl_compact serve failed", err);
+      return { deny: `Error: session-owl owl_compact failed: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
   // The owl_recall serve: the gate order, the layered check, and the

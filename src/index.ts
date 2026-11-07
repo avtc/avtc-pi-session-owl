@@ -9,6 +9,8 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerUserCommands } from "./commands/user.js";
+import { firePendingCompactAtSettled, makeOwlCompactTool } from "./compaction/agent-compact.js";
+import { parseAgentCompactValue } from "./compaction/agent-compact-core.js";
 import { compactionHook } from "./compaction/hook.js";
 import { getSessionOwlSettings, initSessionOwlSettings, reloadSessionOwlConfig } from "./config/schema.js";
 import { detectConflicts } from "./conflicts/detect.js";
@@ -37,7 +39,18 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
   // edit re-renders, keeping the pause line in step with live gate flips
   // (render-time liveness decides show/hide — see tracker.ts).
   const widget = initWidget();
-  initSessionOwlSettings(pi, () => widget.render());
+  let compactToolRegistered = false;
+  initSessionOwlSettings(pi, (id, _newValue) => {
+    widget.render();
+    // agentCompact off→on mid-session registers the tool once (there is no
+    // unregister; on→off leaves it registered and the handler refuses)
+    if (id === "agentCompact" && !compactToolRegistered) {
+      if (parseAgentCompactValue(getSessionOwlSettings().agentCompact).mode === "on") {
+        pi.registerTool(makeOwlCompactTool());
+        compactToolRegistered = true;
+      }
+    }
+  });
 
   // --- session-owl:ready extensibility API (for avtc-pi-bench-compact) ---
   // Lets a host reconfigure session-owl LIVE (reload the in-memory settings cache from
@@ -93,6 +106,15 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
   // (it is read-only and harmless even when session-owl is disabled — it just
   // reads whatever graph state exists).
   pi.registerTool(makeOwlRecallTool());
+
+  // The agent-initiated compaction tool. Registered only while the setting
+  // says on (off never registers it; a mid-session flip to on registers it
+  // once via the settings-change wiring above — pi has no unregister, so a
+  // later flip to off leaves it registered and the handler refuses).
+  if (parseAgentCompactValue(getSessionOwlSettings().agentCompact).mode === "on") {
+    pi.registerTool(makeOwlCompactTool());
+    compactToolRegistered = true;
+  }
 
   // The user's `/owl:*` browse commands (roots / cat / find / find-all / rescan).
   // They render via ui.notify (zero agent-context cost) and read the source graph
@@ -191,6 +213,17 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
       context: todo.getContext(),
       bridge: todo.getBridge(),
     });
+  });
+
+  pi.on("agent_settled", (_event, ctx) => {
+    // The agent-initiated compaction fires here: the run has fully settled
+    // (no retry, compaction, or queued continuation pending), so the compact
+    // never aborts live work. A no-op unless owl_compact left a request.
+    try {
+      firePendingCompactAtSettled(ctx, pi);
+    } catch (err) {
+      log.error("agent_settled: pending compact fire failed", err);
+    }
   });
 
   pi.on("session_start", emitReady);

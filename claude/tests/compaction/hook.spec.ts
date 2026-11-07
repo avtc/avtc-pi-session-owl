@@ -771,14 +771,16 @@ describe("compaction takeover — scoping + instructions", () => {
     expect(outcome.kind).toBe("answer");
   });
 
-  test("typed /compact instructions are ignored and logged (the summary is built from the graph)", async () => {
+  test("typed /compact instructions render into the summary under the user label", async () => {
     const h = makeHarness();
     const outcome = await compactionTakeover(
       { trigger: "manual", instructions: "focus on the parser work", messages: EVENT.messages },
       h.deps,
     );
     expect(outcome.kind).toBe("answer");
-    expect(h.logs.some((l) => l.includes("focus on the parser work"))).toBe(true);
+    // the rendered takeover carries the instructions under the user label
+    expect(JSON.stringify(outcome)).toContain("## Continue instructions from user");
+    expect(JSON.stringify(outcome)).toContain("focus on the parser work");
   });
 });
 
