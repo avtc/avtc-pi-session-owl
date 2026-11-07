@@ -7,6 +7,7 @@ import { join } from "node:path";
 // marker, teardown. Drives the real register.ts through the local harness;
 // the kit loader side is covered by claude/plugin-test/registration.test.ts.
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { OWL_PAUSED_REASON } from "../core/src/compaction/agent-compact-core.js";
 import { log } from "../core/src/log.js";
 import { OWL_RECALL_FULL_NAME, OWL_RECALL_TOOL_DESCRIPTION } from "../host/recall/spec.js";
 import { getBinding, releaseBinding } from "../host/runs/bind.js";
@@ -1018,14 +1019,13 @@ describe("owl_recall serving — tool.call", () => {
     }
   });
 
-  test("conflict-paused => SERVES (pause is not disabled; the tool is read-only)", async () => {
+  test("conflict-paused => DENIES the pause reason (the pause gates every owl tool)", async () => {
     await start("sess-rk-paused");
     const pa = await import("../host/conflicts/pause.js");
     pa.setConflictHits([{ channel: "B", name: "other-mod@x", evidence: "compaction-hook" }]);
     try {
       const out = await call({ tool: OWL_RECALL_FULL_NAME, tool_use_id: "u-rk4" });
-      expect(out).not.toHaveProperty("tool");
-      expect(typeof (out as { result?: unknown }).result).toBe("string");
+      expect((out as { deny?: unknown }).deny).toBe(OWL_PAUSED_REASON);
     } finally {
       pa.setConflictHits(null);
     }

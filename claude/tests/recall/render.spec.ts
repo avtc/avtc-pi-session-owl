@@ -112,7 +112,7 @@ describe("recallCallLine — reference drift-gate against the vendored renderCal
   } as never;
 
   function vendoredCallLine(input: Record<string, unknown>): string {
-    const tool = makeOwlRecallTool();
+    const tool = makeOwlRecallTool(null);
     if (tool.renderCall === undefined) throw new Error("vendored tool has no renderCall");
     const out = tool.renderCall(input as never, theme, undefined as never);
     return (out as unknown as { text: string }).text;

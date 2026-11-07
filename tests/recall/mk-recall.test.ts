@@ -262,7 +262,7 @@ function text(result: ToolResult): string {
 }
 
 describe("owl_recall", () => {
-  const tool = () => makeOwlRecallTool();
+  const tool = () => makeOwlRecallTool(null);
 
   /** Build a fresh store whose graph holds one node n1 with a single large
    *  observation o1 (4000 `a`s + `!`) — a payload that makes a catastrophic
@@ -1223,14 +1223,14 @@ const renderTheme = {
 
 /** The owl_recall tool definition's renderResult, if registered. */
 function renderResultOf(): NonNullable<ReturnType<typeof makeOwlRecallTool>["renderResult"]> {
-  const def = makeOwlRecallTool();
+  const def = makeOwlRecallTool(null);
   if (def.renderResult === undefined) throw new Error("owl_recall has no renderResult");
   return def.renderResult;
 }
 
 /** The owl_recall tool definition's renderCall, if registered. */
 function renderCallOf(): NonNullable<ReturnType<typeof makeOwlRecallTool>["renderCall"]> {
-  const def = makeOwlRecallTool();
+  const def = makeOwlRecallTool(null);
   if (def.renderCall === undefined) throw new Error("owl_recall has no renderCall");
   return def.renderCall;
 }
@@ -1391,7 +1391,7 @@ describe("owl_recall renderCall (transcript call line)", () => {
 
 describe("owl_recall description — recall-before-relying close", () => {
   it("carries the recall-first principle close (mirrors the ## Memory use section)", () => {
-    const description = String(makeOwlRecallTool().description);
+    const description = String(makeOwlRecallTool(null).description);
     expect(description).toContain("recall before relying on session-derived understanding");
     expect(description).toContain("fullDetails for exact source");
     expect(description).not.toContain("before redoing work or assuming a decision");
@@ -1405,7 +1405,7 @@ describe("owl_recall when session-owl is disabled", () => {
 
   it("forbids the call: pi's reason text delivered as an error result (details.error)", async () => {
     _setGetSessionOwlSettings(() => ({ ...DEFAULT_CONFIG, enabled: false }));
-    const out = await recall(makeOwlRecallTool(), {});
+    const out = await recall(makeOwlRecallTool(null), {});
     expect(out.content[0]?.text).toBe("session-owl is disabled (enable it first).");
     expect(out.details).toEqual({ error: true });
   });

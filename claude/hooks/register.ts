@@ -16,6 +16,7 @@ import {
   clearPendingCompact,
   clearPendingCompactForSession,
   OWL_COMPACT_DISABLED_TEXT,
+  OWL_PAUSED_REASON,
   parseAgentCompactValue,
 } from "../core/src/compaction/agent-compact-core.js";
 import { log } from "../core/src/log.js";
@@ -2163,7 +2164,7 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
         return { deny: OWL_COMPACT_DISABLED_TEXT };
       }
       if (isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))) {
-        return { deny: "Error: session-owl owl_compact failed: conflict-paused" };
+        return { deny: OWL_PAUSED_REASON };
       }
       const outcome = serveOwlCompactCall(e as { continue_notes?: unknown }, {
         setting,

@@ -236,7 +236,7 @@ export async function compactionTakeover(e: CompactEvent, deps: CompactionHookDe
 async function runGate(
   deps: CompactionHookDeps,
   log: (m: string) => void,
-  compactNotes: CompactNotes | null,
+  compactNotes: readonly CompactNotes[],
   held: {
     kept: SessionMessage[];
     scope: { firstKeptEntryId: string | null };

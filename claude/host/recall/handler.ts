@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
+import { OWL_PAUSED_REASON } from "../../core/src/compaction/agent-compact-core.js";
 // The owl_recall tool.call body — the port of the recall dispatch onto the
 // Claude surface. Gate order: the calling loop's key resolves first; a
 // conflict pause SERVES (pause is not disabled — the tool is read-only and
@@ -19,8 +20,8 @@ import { makeOwlRecallTool } from "../../core/src/recall/owl-recall.js";
 
 /** The disabled-only reject reason — pi's own user-facing phrasing
  *  (commands/user.ts), delivered as the deny text so the model reads why
- *  recall refuses. Conflict-paused sessions are NOT rejected (they serve,
- *  pi parity). */
+ *  recall refuses. A conflict-paused session refuses too (owner ruling: the
+ *  pause gates every owl tool). */
 export const OWL_RECALL_DISABLED_REASON = "session-owl is disabled (enable it first).";
 
 /** The subagentMode-disabled reject reason (pinned text:
@@ -61,7 +62,7 @@ export interface RecallHandlerDeps {
 }
 
 /** One shared tool instance (the vendored definition — execute is pi's). */
-const OWL_RECALL_TOOL = makeOwlRecallTool();
+const OWL_RECALL_TOOL = makeOwlRecallTool(null); // the pause gate lives in this handler, not the vendored tool
 
 /** The tool.call body. The register dispatches ONLY our full tool name
  *  here; error paths answer {deny: text} (the engine's error-result delivery
@@ -71,8 +72,12 @@ export async function handleOwlRecallCall(
   deps: RecallHandlerDeps,
 ): Promise<{ result: string } | { deny: string }> {
   const key = deps.resolveKey(typeof e.agentId === "string" ? e.agentId : null);
-  // pause is not disabled: a conflict-paused session still serves (pi parity)
-  if (!deps.isConflictPaused() && deps.isDisabled()) {
+  // the pause gates every owl tool (owner ruling): a conflict-paused session
+  // refuses read-only tools the same as acting ones
+  if (deps.isConflictPaused()) {
+    return { deny: OWL_PAUSED_REASON };
+  }
+  if (deps.isDisabled()) {
     return { deny: OWL_RECALL_DISABLED_REASON };
   }
   // subagentMode "disabled": session-owl is off for subagents — an

@@ -88,24 +88,31 @@ describe("pending compact stash", () => {
 });
 
 describe("compactNotesFor origin resolution", () => {
-  it("a pending agent request wins over typed user instructions", () => {
+  it("a pending agent request AND typed instructions both render, the user's leading", () => {
     setPendingCompact("n1", "agent notes");
     const notes = compactNotesFor("n1", "user focus");
-    expect(notes).toEqual({ text: "agent notes", origin: "agent" });
+    expect(notes).toEqual([
+      { text: "user focus", origin: "user" },
+      { text: "agent notes", origin: "agent" },
+    ]);
     expect(peekPendingCompact("n1")).toBeNull();
   });
 
   it("typed instructions render as user origin when no request waits", () => {
-    expect(compactNotesFor("n2", "keep the API decisions")).toEqual({
-      text: "keep the API decisions",
-      origin: "user",
-    });
+    expect(compactNotesFor("n2", "keep the API decisions")).toEqual([
+      { text: "keep the API decisions", origin: "user" },
+    ]);
+  });
+
+  it("an agent request alone renders as the agent origin", () => {
+    setPendingCompact("n2b", "agent notes");
+    expect(compactNotesFor("n2b", undefined)).toEqual([{ text: "agent notes", origin: "agent" }]);
   });
 
   it("no request and no instructions render nothing", () => {
-    expect(compactNotesFor("n3", undefined)).toBeNull();
-    expect(compactNotesFor("n3", "")).toBeNull();
-    expect(compactNotesFor("n3", "   ")).toBeNull(); // whitespace-only instructions
+    expect(compactNotesFor("n3", undefined)).toEqual([]);
+    expect(compactNotesFor("n3", "")).toEqual([]);
+    expect(compactNotesFor("n3", "   ")).toEqual([]); // whitespace-only instructions
   });
 
   it("a stale pending request renders nothing (an entry that outlived its turn boundary)", () => {
@@ -113,7 +120,12 @@ describe("compactNotesFor origin resolution", () => {
     const aged = peekPendingCompact("n4");
     expect(aged).not.toBeNull();
     if (aged !== null) aged.ts = Date.now() - 11 * 60 * 1000; // peek hands the stored record
-    expect(compactNotesFor("n4", undefined)).toBeNull();
+    expect(compactNotesFor("n4", undefined)).toEqual([]);
+    // a stale agent entry never drops the user's typed instructions
+    setPendingCompact("n4", "old plan");
+    const agedAgain = peekPendingCompact("n4");
+    if (agedAgain !== null) agedAgain.ts = Date.now() - 11 * 60 * 1000;
+    expect(compactNotesFor("n4", "fresh user text")).toEqual([{ text: "fresh user text", origin: "user" }]);
   });
 });
 

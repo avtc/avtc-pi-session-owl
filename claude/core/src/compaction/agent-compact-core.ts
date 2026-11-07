@@ -37,6 +37,11 @@ export function owlCompactBelowFloorText(currentK: number, floorK: number): stri
 /** The tool result when the setting was flipped off mid-session. */
 export const OWL_COMPACT_DISABLED_TEXT = "compaction not scheduled: user temporary disabled agent-initiated compact";
 
+/** The conflict-pause refusal both owl tools answer while session-owl is
+ *  paused (pending owner approval of the exact wording). */
+export const OWL_PAUSED_REASON =
+  "session-owl is conflict-paused (set ignoreConflicts or remove the conflicting extension).";
+
 /** The summary block label for notes the agent sent. */
 export const OWL_COMPACT_AGENT_LABEL = "## Continue instructions you have sent before executing compaction";
 
@@ -123,17 +128,18 @@ export function clearPendingCompactForSession(sessionId: string): void {
  *  the user typed with their /compact, else none. */
 /** A pending request older than this never renders: an entry that somehow
  *  survived its turn boundary (a blocked fire, a pass-through race) must not
- *  surface as Continue instructions in a LATER compaction. */
+ *  surface as Continue instructions in a LATER compaction. The user's typed
+ *  instructions are never affected — nothing is dropped silently. */
 const STALE_PENDING_MS = 10 * 60 * 1000;
 
-export function compactNotesFor(key: string, userInstructions: string | undefined): CompactNotes | null {
-  const request = consumePendingCompact(key);
-  if (request !== null) {
-    if (Date.now() - request.ts > STALE_PENDING_MS) return null;
-    return { text: request.notes, origin: "agent" };
-  }
+export function compactNotesFor(key: string, userInstructions: string | undefined): CompactNotes[] {
+  const notes: CompactNotes[] = [];
   if (typeof userInstructions === "string" && userInstructions.trim().length > 0) {
-    return { text: userInstructions, origin: "user" };
+    notes.push({ text: userInstructions, origin: "user" });
   }
-  return null;
+  const request = consumePendingCompact(key);
+  if (request !== null && Date.now() - request.ts <= STALE_PENDING_MS) {
+    notes.push({ text: request.notes, origin: "agent" });
+  }
+  return notes;
 }

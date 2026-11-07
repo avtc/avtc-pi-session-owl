@@ -49,9 +49,10 @@ export interface RenderSummaryArgs {
   touchedFiles: readonly TouchedFile[];
   /** Compactions so far this session (the tree-total footer's maturity signal). */
   compactionCount: number;
-  /** Continue notes to render near the top: the agent's owl_compact notes or
-   *  the user's typed /compact instructions, origin-labeled; null = none. */
-  notes?: CompactNotes | null;
+  /** Continue notes to render near the top, origin-labeled in the given
+   *  order (the user's typed instructions lead, the agent's follow); an
+   *  empty or absent list renders nothing. */
+  notes?: readonly CompactNotes[];
 }
 
 const MEMORY_HEADING = "# Memory";
@@ -92,9 +93,10 @@ export function renderSummary(args: RenderSummaryArgs): string {
   lines.push(MEMORY_USE);
   lines.push("");
 
-  if (args.notes !== null && args.notes !== undefined && args.notes.text.trim().length > 0) {
-    lines.push(args.notes.origin === "agent" ? OWL_COMPACT_AGENT_LABEL : OWL_COMPACT_USER_LABEL);
-    lines.push(args.notes.text);
+  for (const note of args.notes ?? []) {
+    if (note.text.trim().length === 0) continue;
+    lines.push(note.origin === "agent" ? OWL_COMPACT_AGENT_LABEL : OWL_COMPACT_USER_LABEL);
+    lines.push(note.text);
     lines.push("");
   }
 

@@ -23,6 +23,7 @@ import {
   OWL_COMPACT_NOTES_PARAM,
   OWL_COMPACT_SCHEDULED_TEXT,
   OWL_COMPACT_TOOL,
+  OWL_PAUSED_REASON,
   owlCompactBelowFloorText,
   parseAgentCompactValue,
   peekPendingCompact,
@@ -81,7 +82,10 @@ export function makeOwlCompactTool(): ToolDefinition<typeof OWL_COMPACT_PARAMS> 
       const settings = getSessionOwlSettings();
       // a dormant owl (disabled or conflict-paused) is compaction-transparent:
       // a fired request would run the engine's native compaction — refuse
-      if (!settings.enabled || isConflictPaused()) {
+      if (isConflictPaused()) {
+        return textResult(OWL_PAUSED_REASON, true);
+      }
+      if (!settings.enabled) {
         return textResult(OWL_COMPACT_DISABLED_TEXT, true);
       }
       const setting = parseAgentCompactValue(settings.agentCompact);

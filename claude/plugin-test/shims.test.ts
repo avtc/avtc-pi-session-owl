@@ -55,7 +55,7 @@ describe("packaged resolution — shims + vendored core", () => {
   });
 
   test("vendored owl-recall.ts loads in the packaged tree (the pi-tui edge rewritten): the tool factory builds", () => {
-    const tool = makeOwlRecallTool();
+    const tool = makeOwlRecallTool(null);
     expect(tool.name).toBe("owl_recall");
     expect(typeof tool.execute).toBe("function");
   });

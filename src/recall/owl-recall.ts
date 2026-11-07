@@ -713,12 +713,21 @@ interface OwlRecallParams {
 /** The disabled reject reason — the phrasing commands/user.ts speaks, brought
  *  to the tool as an error result (the model reads why recall refuses;
  *  details.error renders it in full, the sibling read-tools' convention).
- *  Conflict-paused sessions are NOT rejected — they serve. */
+ *  A conflict-paused session refuses the same way (owner ruling: the pause
+ *  gates every owl tool, read-only ones included). */
 const OWL_RECALL_DISABLED_REASON = "session-owl is disabled (enable it first).";
 
 /** Build the owl_recall ToolDefinition. Reads the graph store + renderMode live
  *  (closures; needs no ExtensionContext). Read-only — never mutates. */
-export function makeOwlRecallTool(): ToolDefinition<typeof OWL_RECALL_PARAMS> {
+/** The injected gates (host wiring owns the host-side predicates; this
+ *  module's import closure stays free of host files). While paused the tool
+ *  refuses (owner ruling: the pause gates every owl tool). */
+export interface OwlRecallGates {
+  isPaused: () => boolean;
+  pausedReason: string;
+}
+
+export function makeOwlRecallTool(gates: OwlRecallGates | null): ToolDefinition<typeof OWL_RECALL_PARAMS> {
   return {
     name: OWL_RECALL_TOOL,
     label: "Browse memory",
@@ -728,6 +737,12 @@ export function makeOwlRecallTool(): ToolDefinition<typeof OWL_RECALL_PARAMS> {
       if (!getSessionOwlSettings().enabled) {
         return {
           content: [{ type: "text", text: OWL_RECALL_DISABLED_REASON }],
+          details: { error: true },
+        };
+      }
+      if (gates?.isPaused() === true) {
+        return {
+          content: [{ type: "text", text: gates.pausedReason }],
           details: { error: true },
         };
       }

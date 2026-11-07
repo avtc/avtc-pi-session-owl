@@ -9,6 +9,7 @@
 // answer {deny: the exact error text} (the engine delivers it to the model
 // as an error result — identical to pi's in-band error result).
 import { beforeEach, describe, expect, test } from "vitest";
+import { OWL_PAUSED_REASON } from "../../core/src/compaction/agent-compact-core.js";
 import { clearDetailsCache } from "../../core/src/format/details.js";
 import { getGraphStore, resetForNewSession } from "../../core/src/store/graph-store.js";
 import { makeNode, nowStoredTimestamp } from "../../core/src/types.js";
@@ -89,11 +90,18 @@ beforeEach(() => {
 });
 
 describe("owl_recall handler — the gate order", () => {
-  test("conflict-paused AND disabled ⇒ still SERVES (pause wins over disable — pi parity)", async () => {
+  test("conflict-paused ⇒ DENIES the pause reason (the pause gates every owl tool)", async () => {
     seedGraph();
     const h = makeHarness({ isConflictPaused: () => true, isDisabled: () => true });
     const answer = await handleOwlRecallCall({ ...CALL, input: { ids: ["n-1"] } }, h.deps);
-    expect(answer).toEqual({ result: expect.stringContaining("the root with a detail line") });
+    expect(answer).toEqual({ deny: OWL_PAUSED_REASON });
+  });
+
+  test("conflict-paused but NOT disabled ⇒ DENIES the pause reason all the same", async () => {
+    seedGraph();
+    const h = makeHarness({ isConflictPaused: () => true, isDisabled: () => false });
+    const answer = await handleOwlRecallCall({ ...CALL, input: { ids: ["n-1"] } }, h.deps);
+    expect(answer).toEqual({ deny: OWL_PAUSED_REASON });
   });
 
   test("disabled (and not paused) ⇒ DENIES the reason, nothing served, no core pin", async () => {

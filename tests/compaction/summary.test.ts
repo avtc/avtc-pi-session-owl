@@ -414,7 +414,7 @@ describe("continue notes", () => {
       renderMode: "observations-root",
       touchedFiles: [],
       compactionCount: 0,
-      notes: { text: "finish the parser, then run the battery", origin: "agent" },
+      notes: [{ text: "finish the parser, then run the battery", origin: "agent" }],
     });
     expect(out).toContain("## Continue instructions you have sent before executing compaction");
     expect(out).toContain("finish the parser, then run the battery");
@@ -433,11 +433,32 @@ describe("continue notes", () => {
       renderMode: "observations-root",
       touchedFiles: [],
       compactionCount: 0,
-      notes: { text: "keep the API decisions", origin: "user" },
+      notes: [{ text: "keep the API decisions", origin: "user" }],
     });
     expect(out).toContain("## Continue instructions from user");
     expect(out).toContain("keep the API decisions");
     expect(out).not.toContain("## Continue instructions you have sent");
+  });
+
+  it("both origins render, the user's instructions leading", () => {
+    const out = renderSummary({
+      graph: emptyGraph(),
+      selectedTree: null,
+      oInitialPrompt: PROMPT,
+      renderMode: "observations-root",
+      touchedFiles: [],
+      compactionCount: 0,
+      notes: [
+        { text: "keep the API decisions", origin: "user" },
+        { text: "finish the parser, then run the battery", origin: "agent" },
+      ],
+    });
+    const userIdx = out.indexOf("## Continue instructions from user");
+    const agentIdx = out.indexOf("## Continue instructions you have sent before executing compaction");
+    expect(userIdx).toBeGreaterThan(-1);
+    expect(agentIdx).toBeGreaterThan(userIdx);
+    expect(out).toContain("keep the API decisions");
+    expect(out).toContain("finish the parser, then run the battery");
   });
 
   it("no notes renders no Continue section", () => {

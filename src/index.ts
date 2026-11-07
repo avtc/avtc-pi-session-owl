@@ -10,7 +10,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerUserCommands } from "./commands/user.js";
 import { firePendingCompactAtSettled, makeOwlCompactTool } from "./compaction/agent-compact.js";
-import { clearPendingCompact, OWL_COMPACT_KEY, parseAgentCompactValue } from "./compaction/agent-compact-core.js";
+import {
+  clearPendingCompact,
+  OWL_COMPACT_KEY,
+  OWL_PAUSED_REASON,
+  parseAgentCompactValue,
+} from "./compaction/agent-compact-core.js";
 import { compactionHook } from "./compaction/hook.js";
 import { getSessionOwlSettings, initSessionOwlSettings, reloadSessionOwlConfig } from "./config/schema.js";
 import { detectConflicts } from "./conflicts/detect.js";
@@ -108,7 +113,12 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
   // The agent's read-only memory drill-down tool. Registered unconditionally
   // (it is read-only and harmless even when session-owl is disabled — it just
   // reads whatever graph state exists).
-  pi.registerTool(makeOwlRecallTool());
+  pi.registerTool(
+    makeOwlRecallTool({
+      isPaused: () => isConflictPaused(),
+      pausedReason: OWL_PAUSED_REASON,
+    }),
+  );
 
   // The agent-initiated compaction tool. Registered only while owl is
   // enabled AND the setting says on (a disabled owl is compaction-transparent,

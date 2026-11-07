@@ -19,11 +19,11 @@ import {
 
 describe("owl_recall spec literals — pi-verbatim, drift-pinned", () => {
   test("the description is byte-identical to the vendored tool's", () => {
-    expect(OWL_RECALL_TOOL_DESCRIPTION).toBe(makeOwlRecallTool().description);
+    expect(OWL_RECALL_TOOL_DESCRIPTION).toBe(makeOwlRecallTool(null).description);
   });
 
   test("the JSON Schema is the vendored typebox params, JSON-round-tripped (symbols stripped)", () => {
-    const expected = JSON.parse(JSON.stringify(makeOwlRecallTool().parameters));
+    const expected = JSON.parse(JSON.stringify(makeOwlRecallTool(null).parameters));
     expect(OWL_RECALL_INPUT_SCHEMA).toEqual(expected);
   });
 
