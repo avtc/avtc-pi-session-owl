@@ -1644,6 +1644,18 @@ async function* onTurnStep($: any, e: AnyEvent, next: any) {
   return r;
 }
 
+/** When the main conversation's turn last started — the agent-compact
+ *  continuation's redundancy check (a steer the user typed during the
+ *  compaction starts a turn there; the continuation then never submits). */
+let mainTurnStartedAt = 0;
+
+async function onTurnStart(_$: any, e: AnyEvent, next: Next) {
+  if (e && typeof (e as { agentId?: unknown }).agentId === "undefined") {
+    mainTurnStartedAt = Date.now();
+  }
+  return next(e);
+}
+
 async function onTurnComplete($: any, e: AnyEvent, next: Next) {
   armAll($);
   try {
@@ -1675,6 +1687,7 @@ async function onTurnComplete($: any, e: AnyEvent, next: Next) {
               const tokens = contextTokensFor(fireKey);
               return tokens !== null && tokens > 0 && Math.round(tokens / 1000) < fireSetting.thresholdK;
             },
+            userTurnStartedSince: (ts: number) => mainTurnStartedAt > ts,
           });
         }
       }
@@ -2680,6 +2693,7 @@ export const register: Register = (on) => {
   // typed chunk union fights the AnyEvent envelope, so the call site casts.
   on("turn.step", onTurnStep as never);
   on("turn.complete", onTurnComplete);
+  on("turn.start", onTurnStart);
   on("session.measure", onSessionMeasure);
   on("session.compact", onSessionCompact);
   on("tool.register", onToolRegister);

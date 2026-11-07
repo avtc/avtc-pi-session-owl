@@ -20,6 +20,11 @@ import {
   setPendingCompact,
 } from "../../core/src/compaction/agent-compact-core.js";
 
+/** How long the continuation waits past the compaction boundary: the
+ *  window in which a user steer typed during compaction starts its turn
+ *  (and the continuation becomes redundant). */
+const FOLLOWUP_DEFER_MS = 600;
+
 /** The engine-call capsules the fire needs; each is spelled literally inside
  *  a handler-authored closure at the wiring (the scanner's rule). */
 export interface AgentCompactFireDeps {
@@ -34,6 +39,10 @@ export interface AgentCompactFireDeps {
   /** Re-check the context floor at fire time: true when the context sits
    *  BELOW the setting's floor (no threshold = never true). */
   belowFloor: () => boolean;
+  /** Whether a main-conversation turn started after the given timestamp —
+   *  the user's steer owning the continuation (the follow-up then never
+   *  submits). */
+  userTurnStartedSince: (ts: number) => boolean;
 }
 
 /** The tool.call serve: validate against the live setting and the context
@@ -131,11 +140,25 @@ export function firePendingAgentCompact(
         firing.delete(key);
       }
       if (!stood) return;
-      try {
-        await deps.promptSubmit({ text: OWL_COMPACT_CONTINUE_PROMPT });
-      } catch (submitErr) {
-        deps.log(`continuation prompt rejected: ${submitErr instanceof Error ? submitErr.message : String(submitErr)}`);
-      }
+      // the continuation defers past the compaction boundary: a steer the
+      // user typed during compaction delivers there, and when its turn
+      // starts the continuation is redundant and never submits
+      const resolvedAt = Date.now();
+      deps.clockAfter(FOLLOWUP_DEFER_MS, () => {
+        void (async () => {
+          if (deps.userTurnStartedSince(resolvedAt)) {
+            deps.log("continuation prompt skipped: the user's own message owns the continuation");
+            return;
+          }
+          try {
+            await deps.promptSubmit({ text: OWL_COMPACT_CONTINUE_PROMPT });
+          } catch (submitErr) {
+            deps.log(
+              `continuation prompt rejected: ${submitErr instanceof Error ? submitErr.message : String(submitErr)}`,
+            );
+          }
+        })();
+      });
     })();
   });
 }

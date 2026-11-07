@@ -111,10 +111,17 @@ export interface FollowUpSender {
 }
 
 /** The deferred follow-up: resume text delivered as a queued user message so
- *  anything the user typed during compaction goes first. */
-function sendFollowUp(pi: FollowUpSender, text: string): void {
+ *  anything the user typed during compaction goes first. When the user's
+ *  own message already owns the continuation (a steer delivered after the
+ *  compaction started a run, or one queued waiting), the follow-up is
+ *  redundant and never sends. */
+function sendFollowUp(pi: FollowUpSender, text: string, ctx: ExtensionContext): void {
   setTimeout(() => {
     try {
+      if (!ctx.isIdle() || ctx.hasPendingMessages()) {
+        log.info("continuation follow-up skipped: the user's own message owns the continuation");
+        return;
+      }
       pi.sendUserMessage(text, { deliverAs: "followUp" });
     } catch (err) {
       log.error(`continuation follow-up failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -149,7 +156,7 @@ export async function firePendingCompactAtSettled(ctx: ExtensionContext, pi: Fol
     }
     ctx.compact({
       customInstructions: pending.notes,
-      onComplete: () => sendFollowUp(pi, OWL_COMPACT_CONTINUE_PROMPT),
+      onComplete: () => sendFollowUp(pi, OWL_COMPACT_CONTINUE_PROMPT, ctx),
       onError: (err: Error) => {
         log.warn(`agent-initiated compaction failed (no continuation): ${err.message}`);
         // a compact that never reached the compaction hook (nothing to

@@ -107,9 +107,11 @@ describe("firePendingCompactAtSettled", () => {
     _resetGetSessionOwlSettings();
   });
 
-  function makeCtx() {
+  function makeCtx(overrides: { isIdle?: () => boolean; hasPendingMessages?: () => boolean } | null) {
     return {
       compact: vi.fn(),
+      isIdle: overrides?.isIdle ?? (() => true),
+      hasPendingMessages: overrides?.hasPendingMessages ?? (() => false),
     };
   }
 
@@ -119,7 +121,7 @@ describe("firePendingCompactAtSettled", () => {
 
   it("is a no-op without a pending request", () => {
     setAgentCompact("on");
-    const ctx = makeCtx();
+    const ctx = makeCtx(null);
     firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], makePi());
     expect(ctx.compact).not.toHaveBeenCalled();
   });
@@ -127,7 +129,7 @@ describe("firePendingCompactAtSettled", () => {
   it("passes the notes as customInstructions", () => {
     setAgentCompact("on");
     peekSet("the plan");
-    const ctx = makeCtx();
+    const ctx = makeCtx(null);
     const pi = makePi();
     firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
     expect(ctx.compact).toHaveBeenCalledWith(expect.objectContaining({ customInstructions: "the plan" }));
@@ -137,7 +139,7 @@ describe("firePendingCompactAtSettled", () => {
     vi.useFakeTimers();
     setAgentCompact("on");
     peekSet("the plan");
-    const ctx = makeCtx();
+    const ctx = makeCtx(null);
     const pi = makePi();
     firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
     const options = ctx.compact.mock.calls[0]?.[0] as { onComplete: () => void };
@@ -152,7 +154,7 @@ describe("firePendingCompactAtSettled", () => {
     vi.useFakeTimers();
     setAgentCompact("on");
     peekSet("the plan");
-    const ctx = makeCtx();
+    const ctx = makeCtx(null);
     const pi = makePi();
     firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
     // the compaction hook never ran (nothing to compact): the stash survives
@@ -182,10 +184,38 @@ describe("firePendingCompactAtSettled", () => {
     vi.useRealTimers();
   });
 
+  it("a user steer that started a run owns the continuation (the follow-up never sends)", () => {
+    vi.useFakeTimers();
+    setAgentCompact("on");
+    peekSet("the plan");
+    const ctx = makeCtx({ isIdle: () => false }); // the steer's run is streaming
+    const pi = makePi();
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
+    const options = ctx.compact.mock.calls[0]?.[0] as { onComplete: () => void };
+    options.onComplete();
+    vi.advanceTimersByTime(600);
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("a queued steer waiting to deliver owns the continuation too", () => {
+    vi.useFakeTimers();
+    setAgentCompact("on");
+    peekSet("the plan");
+    const ctx = makeCtx({ hasPendingMessages: () => true });
+    const pi = makePi();
+    firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
+    const options = ctx.compact.mock.calls[0]?.[0] as { onComplete: () => void };
+    options.onComplete();
+    vi.advanceTimersByTime(600);
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it("drops the request when the setting flipped off after the call", () => {
     setAgentCompact("off");
     peekSet("the plan");
-    const ctx = makeCtx();
+    const ctx = makeCtx(null);
     firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], makePi());
     expect(ctx.compact).not.toHaveBeenCalled();
     expect(peekPendingCompact(OWL_COMPACT_KEY)).toBeNull();

@@ -68,13 +68,14 @@ describe("serveOwlCompactCall", () => {
 describe("firePendingAgentCompact", () => {
   const on = parseAgentCompactValue("on");
 
-  function makeDeps(belowFloor = false) {
+  function makeDeps(belowFloor = false, opts?: { userTurnStartedSince?: (ts: number) => boolean }) {
     return {
       sessionCompact: vi.fn(async () => ({})),
       promptSubmit: vi.fn(async () => undefined),
       clockAfter: vi.fn((_ms: number, cb: () => void) => cb()),
       log: vi.fn(),
       belowFloor: () => belowFloor,
+      userTurnStartedSince: opts?.userTurnStartedSince ?? (() => false),
     };
   }
 
@@ -125,6 +126,14 @@ describe("firePendingAgentCompact", () => {
     expect(deps.sessionCompact).not.toHaveBeenCalled();
     expect(deps.promptSubmit).not.toHaveBeenCalled();
     expect(peekPendingCompact("fk6")).toBeNull();
+  });
+
+  it("a user steer that started a turn after the compaction owns the continuation (nothing submits)", async () => {
+    peekSet("fk7", "the plan");
+    const deps = makeDeps(false, { userTurnStartedSince: () => true });
+    firePendingAgentCompact("fk7", on, deps);
+    await vi.waitFor(() => expect(deps.log).toHaveBeenCalled());
+    expect(deps.promptSubmit).not.toHaveBeenCalled();
   });
 
   it("a compaction that stood continues exactly once", async () => {
