@@ -406,7 +406,7 @@ describe("renderSummary — ## Memory use section (recall-before-relying guidanc
 });
 
 describe("continue notes", () => {
-  it("agent notes render under the agent label between Memory use and the initial prompt", () => {
+  it("agent notes render under the agent label after the touched-files section", () => {
     const out = renderSummary({
       graph: emptyGraph(),
       selectedTree: null,
@@ -418,11 +418,10 @@ describe("continue notes", () => {
     });
     expect(out).toContain("## Continue instructions you have sent before executing compaction");
     expect(out).toContain("finish the parser, then run the battery");
-    const useIdx = out.indexOf("## Memory use");
+    const touchedIdx = out.indexOf("## Recently touched");
     const notesIdx = out.indexOf("## Continue instructions you have sent before executing compaction");
-    const promptIdx = out.indexOf("## Initial prompt");
-    expect(useIdx).toBeLessThan(notesIdx);
-    expect(notesIdx).toBeLessThan(promptIdx);
+    expect(touchedIdx).toBeLessThan(notesIdx);
+    expect(notesIdx).toBe(out.lastIndexOf("## Continue instructions"));
   });
 
   it("user instructions render under the user label", () => {

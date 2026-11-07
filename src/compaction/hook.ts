@@ -204,6 +204,7 @@ export async function compactionHook(
         scope: { firstKeptEntryId },
         todo: todo.context,
         todoBridge: todo.bridge,
+        notes: compactNotes,
       });
       log.info("compaction: selector end");
     }

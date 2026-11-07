@@ -17,6 +17,7 @@
 
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { CompactNotes } from "../compaction/agent-compact-core.js";
 import type { SessionOwlConfig } from "../config/schema.js";
 import { appendDump, DEFAULT_DUMP_BASE, DUMP_FOOTER, openStageDump, stageDumpHeader } from "../debug-dump.js";
 import { includeThinkingFor } from "../format/chunk.js";
@@ -86,6 +87,9 @@ export interface SelectorRunInput {
   /** The (optional) avtc-pi-todo bridge for the `todo_list` drill-down tool;
    *  null when avtc-pi-todo is not installed (the tool is omitted). */
   todoBridge: TodoBridge | null;
+  /** The compaction's continue instructions for the input-view's continue
+   *  section; null at mid-session (no compaction) or when none were sent. */
+  notes: readonly CompactNotes[] | null;
   /** Test seam — fake stage runner, or omitted for the real `runStage`. */
   runStageFn?: (input: StageRunInput) => Promise<StageRunResult>;
 }
@@ -361,6 +365,7 @@ function buildInputView(sourceGraph: Graph, input: SelectorRunInput): SelectorIn
     tail: input.ctx.sessionManager,
     tailBoundary,
     todo: input.todo,
+    notes: input.notes,
     touchedFiles: input.ctx.sessionManager,
     sinceEntryId: firstKeptEntryId,
     chunkOptions: {

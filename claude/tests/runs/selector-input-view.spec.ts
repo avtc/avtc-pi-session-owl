@@ -216,3 +216,26 @@ describe("renderWorkingRoots", () => {
     expect(irrAt).toBeGreaterThan(medAt);
   });
 });
+
+// --- buildContinueInstructions parity ----------------------------------------
+
+describe("buildContinueInstructions (pi parity)", () => {
+  test("heading, guidance, and origin labels match the pi input-view verbatim", async () => {
+    const { buildContinueInstructions } = await import("../../host/runs/selector-input-view.js");
+    const out = buildContinueInstructions([
+      { origin: "user", text: "focus on the parser work" },
+      { origin: "agent", text: "finish the parser, then run the battery" },
+    ]);
+    expect(out).toContain("Continue instructions for the continuation after this compaction");
+    expect(out).toContain("Weigh these when deciding what bears on the task — the work continues from this plan.");
+    expect(out.indexOf("From user:")).toBeGreaterThan(-1);
+    expect(out.indexOf("From agent:")).toBeGreaterThan(out.indexOf("From user:"));
+  });
+
+  test("empty notes for an origin omit its label", async () => {
+    const { buildContinueInstructions } = await import("../../host/runs/selector-input-view.js");
+    const out = buildContinueInstructions([{ origin: "agent", text: "notes only" }]);
+    expect(out).not.toContain("From user:");
+    expect(out).toContain("From agent:");
+  });
+});

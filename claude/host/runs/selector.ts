@@ -13,6 +13,7 @@
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { CompactNotes } from "../../core/src/compaction/agent-compact-core.js";
 import type { SessionOwlConfig } from "../../core/src/config/schema.js";
 import { renderStageInputMessages } from "../../core/src/format/chunk.js";
 import { renderTreeTotal } from "../../core/src/format/render.js";
@@ -89,6 +90,9 @@ export interface SelectorRunInput {
   scope: { firstKeptEntryId: string | null } | null;
   /** The (optional) todo context for the input-view's todo section; null omits it. */
   todo: TodoContext | null;
+  /** The compaction's continue instructions for the input-view's continue
+   *  section; null at mid-session (no compaction) or when none were sent. */
+  notes: readonly CompactNotes[] | null;
   /** The (optional) todo bridge — appends the conditional todo_list tool
    *  (pi's makeSelectorTools parity; null = no tool). */
   todoBridge?: TodoBridge | null;
@@ -149,6 +153,7 @@ export async function runSelector(input: SelectorRunInput): Promise<void> {
     tail,
     tailBoundary: { firstKeptEntryId: input.scope?.firstKeptEntryId ?? null },
     todo: input.todo,
+    notes: input.notes,
     touchedFiles: tail,
     sinceEntryId: input.scope?.firstKeptEntryId ?? null,
     chunkOptions: {

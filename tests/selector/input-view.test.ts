@@ -653,6 +653,7 @@ describe("buildSelectorInputView", () => {
         tail: { getLeafId: () => "leaf", getBranch: () => branch },
         tailBoundary: { firstKeptEntryId: "a2" },
         todo: { getInProgress: () => null, getPending: () => [] },
+        notes: null,
         touchedFiles: { getLeafId: () => "leaf", getBranch: () => branch },
         sinceEntryId: "a2",
         chunkOptions: ASSEMBLY_OPTS,
@@ -671,6 +672,7 @@ describe("buildSelectorInputView", () => {
         tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
         tailBoundary: { firstKeptEntryId: "a2" },
         todo: { getInProgress: () => null, getPending: () => [] },
+        notes: null,
         touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
         sinceEntryId: "a2",
         chunkOptions: ASSEMBLY_OPTS,
@@ -691,6 +693,7 @@ describe("buildSelectorInputView", () => {
         tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
         tailBoundary: { firstKeptEntryId: "a2" },
         todo: null,
+        notes: null,
         touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
         sinceEntryId: "a2",
         chunkOptions: ASSEMBLY_OPTS,
@@ -767,6 +770,7 @@ describe("buildSelectorInputView", () => {
         tail: { getLeafId: () => "leaf", getBranch: () => [assistantEntry("a2", "x")] },
         tailBoundary: { firstKeptEntryId: "a2" },
         todo: null,
+        notes: null,
         touchedFiles: { getLeafId: () => "leaf", getBranch: () => [] },
         sinceEntryId: "a2",
         chunkOptions: ASSEMBLY_OPTS,
@@ -792,6 +796,7 @@ describe("buildSelectorInputView", () => {
         tail: { getLeafId: () => "leaf", getBranch: () => branch },
         tailBoundary: { firstKeptEntryId: "a2" },
         todo: null,
+        notes: null,
         touchedFiles: toolCallBranch(),
         sinceEntryId: null,
         chunkOptions: ASSEMBLY_OPTS,
@@ -825,3 +830,45 @@ function toolCallEntry(id: string, toolName: string, args: Record<string, unknow
   };
   return { type: "message", id, parentId: null, timestamp: FIXED_TS, message };
 }
+
+// --- buildContinueInstructions tests -----------------------------------------
+
+import type { CompactNotes } from "../../src/compaction/agent-compact-core.js";
+import { buildContinueInstructions } from "../../src/selector/input-view.js";
+
+describe("buildContinueInstructions", () => {
+  it("renders heading, guidance, and both origins with the user leading", () => {
+    const notes: CompactNotes[] = [
+      { origin: "user", text: "focus on the parser work" },
+      { origin: "agent", text: "finish the parser, then run the battery" },
+    ];
+    const out = buildContinueInstructions(notes);
+    const heading = out.indexOf("Continue instructions for the continuation after this compaction");
+    const guidance = out.indexOf(
+      "Weigh these when deciding what bears on the task — the work continues from this plan.",
+    );
+    const userIdx = out.indexOf("From user:");
+    const agentIdx = out.indexOf("From agent:");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    expect(guidance).toBeGreaterThan(heading);
+    expect(userIdx).toBeGreaterThan(guidance);
+    expect(agentIdx).toBeGreaterThan(userIdx);
+    expect(out).toContain("focus on the parser work");
+    expect(out).toContain("finish the parser, then run the battery");
+  });
+
+  it("renders only the origins present", () => {
+    const out = buildContinueInstructions([{ origin: "agent", text: "notes only" }]);
+    expect(out).toContain("From agent:");
+    expect(out).not.toContain("From user:");
+  });
+
+  it("skips whitespace-only notes", () => {
+    const out = buildContinueInstructions([
+      { origin: "user", text: "   " },
+      { origin: "agent", text: "real note" },
+    ]);
+    expect(out).not.toContain("From user:");
+    expect(out).toContain("real note");
+  });
+});

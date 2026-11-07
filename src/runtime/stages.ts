@@ -123,6 +123,7 @@ export function makeSelectorRun(
       widget,
       todo: todo.getContext(),
       todoBridge: todo.getBridge(),
+      notes: null,
     });
   };
 }

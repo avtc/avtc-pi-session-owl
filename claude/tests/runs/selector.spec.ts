@@ -112,6 +112,7 @@ async function run(
     widget: NO_OP_WIDGET,
     scope: null,
     todo: null,
+    notes: null,
     readBranch: () => rig.unobservedTail,
     runStageFn: fx.runner,
     ...over,
@@ -390,6 +391,7 @@ describe("runSelector — the convergence loop", () => {
       widget: NO_OP_WIDGET,
       scope: null,
       todo: null,
+      notes: null,
       readBranch: () => rig.unobservedTail,
       runStageFn: async (input) => {
         const out = await fx.runner(input);

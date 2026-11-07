@@ -93,13 +93,6 @@ export function renderSummary(args: RenderSummaryArgs): string {
   lines.push(MEMORY_USE);
   lines.push("");
 
-  for (const note of args.notes ?? []) {
-    if (note.text.trim().length === 0) continue;
-    lines.push(note.origin === "agent" ? OWL_COMPACT_AGENT_LABEL : OWL_COMPACT_USER_LABEL);
-    lines.push(note.text);
-    lines.push("");
-  }
-
   lines.push(INITIAL_PROMPT_HEADING);
   lines.push(args.oInitialPrompt === null ? NO_INITIAL_PROMPT : args.oInitialPrompt.summary);
   lines.push("");
@@ -124,6 +117,16 @@ export function renderSummary(args: RenderSummaryArgs): string {
     for (const line of renderTouchedFiles(args.touchedFiles)) {
       lines.push(line);
     }
+  }
+
+  // The continuation plan closes the summary: the last thing read before the
+  // conversation resumes. Renders outside the Selector's view budget — the
+  // notes never shrink the memory view.
+  for (const note of args.notes ?? []) {
+    if (note.text.trim().length === 0) continue;
+    lines.push("");
+    lines.push(note.origin === "agent" ? OWL_COMPACT_AGENT_LABEL : OWL_COMPACT_USER_LABEL);
+    lines.push(note.text);
   }
 
   return lines.join("\n");

@@ -540,6 +540,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         signal,
         widget,
         scope: null,
+        notes: null,
         todo: todo === null ? null : todo.context,
         todoBridge: todo === null ? null : todo.bridge,
         readBranch: () => binding.branch() as never,
@@ -671,7 +672,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
             dumps: dumps(),
           });
         },
-        runSelector: async ({ signal, scope }) => {
+        runSelector: async ({ signal, scope, notes }) => {
           const todo = await makeTodoBridge({
             avtcTodoGetItems: () => services().avtcTodoGetItems(),
           });
@@ -682,6 +683,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
             signal,
             widget,
             scope,
+            notes,
             todo: todo === null ? null : todo.context,
             todoBridge: todo === null ? null : todo.bridge,
             readBranch: () => binding.branch() as never,

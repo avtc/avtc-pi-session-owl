@@ -215,6 +215,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: countingRunStage,
     });
     expect(passCount).toBe(2);
@@ -266,6 +267,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: countingRunStage,
     });
     // before the mutate the provider sees the pristine copy; after it, the
@@ -312,6 +314,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: countingRunStage,
     });
     expect(capturedMessages.length).toBe(2);
@@ -336,6 +339,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: (input) => {
         seen = input.systemPrompt;
         return scripted(input);
@@ -360,6 +364,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: scripted,
     });
     // grab the persisted snapshot
@@ -398,6 +403,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: scripted,
     });
     const sel = getGraphStore().selectedTree;
@@ -437,6 +443,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: () => {
         runStageCalls += 1;
         return Promise.resolve({
@@ -480,6 +487,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: () => {
         runStageCalls += 1;
         return Promise.resolve({
@@ -513,6 +521,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: (input) => {
         runStageCalls += 1;
         return scripted(input);
@@ -553,6 +562,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: () => {
         runStageCalls += 1;
         return Promise.resolve({
@@ -591,6 +601,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: (input) => {
         runStageCalls += 1;
         return scripted(input);
@@ -621,6 +632,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: (input) => {
         runStageCalls += 1;
         return scripted(input);
@@ -643,6 +655,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: (input) => {
         passCount += 1;
         return scripted(input);
@@ -673,6 +686,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: (input) => {
         passCount += 1;
         return scripted(input);
@@ -700,6 +714,7 @@ describe("runSelector", () => {
         scope: { firstKeptEntryId: "e2" },
         todo: null,
         todoBridge: null,
+        notes: null,
         runStageFn: (input) => {
           passCount += 1;
           return errorScript(input);
@@ -726,6 +741,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: () => {
         runStageCalls += 1;
         return Promise.resolve({
@@ -768,6 +784,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: () => {
         runStageCalls += 1;
         return Promise.resolve({
@@ -820,6 +837,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: countingRunStage,
     });
     // only pass 1 ran (the signal-abort break stopped the loop before pass 2)
@@ -844,6 +862,7 @@ describe("runSelector", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: () => {
         runStageCalls += 1;
         return Promise.resolve({
@@ -890,6 +909,7 @@ describe("selectorSystemPrompt (used by runSelector)", () => {
       scope: { firstKeptEntryId: "e2" },
       todo: null,
       todoBridge: null,
+      notes: null,
       runStageFn: (input) => {
         seenPassText = (input.messages[0] as unknown as { content: string })?.content ?? "";
         return scripted(input);

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 avtc <tarasenkov@gmail.com>
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { CompactNotes } from "../compaction/agent-compact-core.js";
 import {
   extractTouchedFiles,
   isMessageEntry,
@@ -207,6 +208,33 @@ function entryAt(branch: readonly SessionEntry[], index: number): SessionEntry {
 const TODO_HEADING = "Todo";
 const NO_IN_PROGRESS = "(nothing in progress)";
 
+// --- continue instructions ---------------------------------------------------
+
+const CONTINUE_HEADING = "Continue instructions for the continuation after this compaction";
+const CONTINUE_GUIDANCE = "Weigh these when deciding what bears on the task — the work continues from this plan.";
+
+/** Render the compaction's continue instructions for the Selector's
+ *  current-task context: the user's /compact instructions then the agent's
+ *  owl_compact notes — the continuation plan the active-set should ready the
+ *  agent for. */
+export function buildContinueInstructions(notes: readonly CompactNotes[]): string {
+  const lines: string[] = [CONTINUE_HEADING, CONTINUE_GUIDANCE];
+  const forOrigin = (origin: "user" | "agent"): string =>
+    notes
+      .filter((n) => n.origin === origin && n.text.trim().length > 0)
+      .map((n) => n.text)
+      .join("\n\n");
+  const user = forOrigin("user");
+  if (user.length > 0) {
+    lines.push("From user:", user);
+  }
+  const agent = forOrigin("agent");
+  if (agent.length > 0) {
+    lines.push("From agent:", agent);
+  }
+  return lines.join("\n");
+}
+
 /**
  * Render the Selector's todo context: the in-progress item with its full
  * details, plus the pending items as a terse list (no details). When there is
@@ -245,6 +273,10 @@ export interface SelectorInputViewArgs {
   tailBoundary: TailBoundary;
   /** `null` = avtc-pi-todo bridge absent → omit the todo section entirely. */
   todo: TodoContext | null;
+  /** The compaction's continue instructions (user + agent); null or empty at
+   *  mid-session runs and note-less compactions → omit the section. Renders
+   *  outside the try_finish budget — the notes never shrink the view. */
+  notes: readonly CompactNotes[] | null;
   touchedFiles: TouchedFilesContext;
   /** Touched files since this entry id (the compaction cut); null = whole branch. */
   sinceEntryId: string | null;
@@ -283,6 +315,9 @@ export function buildSelectorInputView(args: SelectorInputViewArgs): SelectorInp
   }
   if (args.todo !== null) {
     contextSections.push(buildTodo(args.todo));
+  }
+  if (args.notes !== null && args.notes.length > 0) {
+    contextSections.push(buildContinueInstructions(args.notes));
   }
   const touched = extractTouchedFiles(args.touchedFiles, args.sinceEntryId);
   if (touched.length > 0) {

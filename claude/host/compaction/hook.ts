@@ -70,7 +70,12 @@ export interface CompactionRuns {
      *  false so folding always runs. */
     ensureReady: boolean;
   }) => Promise<void>;
-  runSelector: (input: { signal: AbortSignal; scope: { firstKeptEntryId: string | null } | null }) => Promise<void>;
+  runSelector: (input: {
+    signal: AbortSignal;
+    scope: { firstKeptEntryId: string | null } | null;
+    /** The compaction's continue instructions; null when none were sent. */
+    notes: readonly CompactNotes[] | null;
+  }) => Promise<void>;
 }
 
 /** The takeover's named inputs — everything the gate touches, injected. */
@@ -302,7 +307,7 @@ async function runGate(
 
     // (c) the Selector — selected-root only (it owns its cached-tree fast-path)
     if (deps.settings.renderMode === "selected-root") {
-      await deps.runs.runSelector({ signal: held.signal, scope: held.scope });
+      await deps.runs.runSelector({ signal: held.signal, scope: held.scope, notes: compactNotes });
     }
     if (held.signal.aborted) return "cancel";
     return "ok";

@@ -91,6 +91,7 @@ interface Harness {
   deps: CompactionHookDeps;
   notifications: Array<{ message: string; level: string }>;
   logs: string[];
+  notesSeen: (readonly { origin: "user" | "agent"; text: string }[] | null)[];
   branch: SessionEntry[];
   store: ReturnType<typeof fakeStore>;
   setSettings: (s: Partial<SessionOwlConfig>) => void;
@@ -100,6 +101,7 @@ function makeHarness(over: Partial<CompactionHookDeps> = {}): Harness {
   const order: string[] = [];
   const notifications: Array<{ message: string; level: string }> = [];
   const logs: string[] = [];
+  const notesSeen: (readonly { origin: "user" | "agent"; text: string }[] | null)[] = [];
   const branch = [entry("e1"), entry("e2"), entry("e3"), entry("e4")];
   const store = fakeStore();
   const settings = { ...DEFAULT_CONFIG, observerThresholdTokens: 60 } as SessionOwlConfig;
@@ -129,6 +131,7 @@ function makeHarness(over: Partial<CompactionHookDeps> = {}): Harness {
       },
       runSelector: async (input) => {
         order.push(`selector:${input.scope?.firstKeptEntryId ?? "null"}`);
+        notesSeen.push(input.notes);
       },
     },
     persistSnapshot: async (details, compactionId) => {
@@ -147,6 +150,7 @@ function makeHarness(over: Partial<CompactionHookDeps> = {}): Harness {
     deps,
     notifications,
     logs,
+    notesSeen,
     branch,
     store,
     setSettings: (s) => {
@@ -291,6 +295,16 @@ describe("compaction takeover — success path", () => {
     expect(h.order.includes("summary-row")).toBe(false);
     expect(h.notifications).toEqual([]);
     expect(inFlight("sess-c")).toBe(false); // released in finally
+  });
+
+  test("selected-root: the compaction's continue notes reach the Selector run", async () => {
+    recordMeasure("sess-c", { tokens: 50_000, window: 200_000 });
+    const h = makeHarness();
+    h.setSettings({ renderMode: "selected-root" });
+    const outcome = await compactionTakeover({ ...EVENT, instructions: "focus on the parser work" }, h.deps);
+    expect(outcome.kind).toBe("answer");
+    expect(h.order.some((e) => e.startsWith("selector"))).toBe(true);
+    expect(h.notesSeen).toEqual([[{ origin: "user", text: "focus on the parser work" }]]);
   });
 
   test("the answer outcome carries the cut anchor — the kept tail's first row id (the alignment exemption boundary)", async () => {
