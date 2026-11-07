@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clearPendingCompact,
+  clearPendingCompactForSession,
   compactNotesFor,
   consumePendingCompact,
   OWL_COMPACT_AGENT_LABEL,
@@ -63,6 +64,19 @@ describe("pending compact stash", () => {
     setPendingCompact("k3", "x");
     clearPendingCompact("k3");
     expect(peekPendingCompact("k3")).toBeNull();
+  });
+
+  it("a session-end clear drops the main key and every loop key, other sessions untouched", () => {
+    setPendingCompact("sess-a", "main a");
+    setPendingCompact("sess-a|ag-1", "loop 1");
+    setPendingCompact("sess-a|ag-2", "loop 2");
+    setPendingCompact("sess-b", "main b");
+    clearPendingCompactForSession("sess-a");
+    expect(peekPendingCompact("sess-a")).toBeNull();
+    expect(peekPendingCompact("sess-a|ag-1")).toBeNull();
+    expect(peekPendingCompact("sess-a|ag-2")).toBeNull();
+    expect(peekPendingCompact("sess-b")?.notes).toBe("main b");
+    clearPendingCompact("sess-b");
   });
 
   it("keys are independent", () => {

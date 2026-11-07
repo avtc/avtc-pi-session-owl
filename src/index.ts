@@ -10,7 +10,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerUserCommands } from "./commands/user.js";
 import { firePendingCompactAtSettled, makeOwlCompactTool } from "./compaction/agent-compact.js";
-import { parseAgentCompactValue } from "./compaction/agent-compact-core.js";
+import { clearPendingCompact, OWL_COMPACT_KEY, parseAgentCompactValue } from "./compaction/agent-compact-core.js";
 import { compactionHook } from "./compaction/hook.js";
 import { getSessionOwlSettings, initSessionOwlSettings, reloadSessionOwlConfig } from "./config/schema.js";
 import { detectConflicts } from "./conflicts/detect.js";
@@ -42,10 +42,13 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
   let compactToolRegistered = false;
   initSessionOwlSettings(pi, (id, _newValue) => {
     widget.render();
-    // agentCompact off→on mid-session registers the tool once (there is no
-    // unregister; on→off leaves it registered and the handler refuses)
-    if (id === "agentCompact" && !compactToolRegistered) {
-      if (parseAgentCompactValue(getSessionOwlSettings().agentCompact).mode === "on") {
+    // agentCompact off→on (on an enabled owl), or the master enable turning
+    // on under agentCompact on: register the tool once (there is no
+    // unregister; a later flip to off leaves it registered and the handler
+    // refuses)
+    if ((id === "agentCompact" || id === "enabled") && !compactToolRegistered) {
+      const settings = getSessionOwlSettings();
+      if (settings.enabled && parseAgentCompactValue(settings.agentCompact).mode === "on") {
         pi.registerTool(makeOwlCompactTool());
         compactToolRegistered = true;
       }
@@ -107,11 +110,13 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
   // reads whatever graph state exists).
   pi.registerTool(makeOwlRecallTool());
 
-  // The agent-initiated compaction tool. Registered only while the setting
-  // says on (off never registers it; a mid-session flip to on registers it
-  // once via the settings-change wiring above — pi has no unregister, so a
-  // later flip to off leaves it registered and the handler refuses).
-  if (parseAgentCompactValue(getSessionOwlSettings().agentCompact).mode === "on") {
+  // The agent-initiated compaction tool. Registered only while owl is
+  // enabled AND the setting says on (a disabled owl is compaction-transparent,
+  // so a fired request would run the engine's native compaction; off never
+  // registers; a mid-session flip to on registers once via the settings-change
+  // wiring above — pi has no unregister, so a later flip to off leaves it
+  // registered and the handler refuses).
+  if (getSessionOwlSettings().enabled && parseAgentCompactValue(getSessionOwlSettings().agentCompact).mode === "on") {
     pi.registerTool(makeOwlCompactTool());
     compactToolRegistered = true;
   }
@@ -147,7 +152,11 @@ export default function sessionOwlExtension(pi: ExtensionAPI): void {
     }
     onSessionStart(event, ctx, pi, widget);
   });
-  pi.on("session_shutdown", (_event, _ctx) => onSessionShutdown(_event, widget));
+  pi.on("session_shutdown", (_event, _ctx) => {
+    // a pending agent request never outlives its session
+    clearPendingCompact(OWL_COMPACT_KEY);
+    onSessionShutdown(_event, widget);
+  });
 
   // `/tree` branch navigation: re-derive the store (graph + frontier +
   // resolver) for the new branch and stop any in-flight stage run whose chunk

@@ -130,7 +130,7 @@ describe("firePendingCompactAtSettled", () => {
     vi.useRealTimers();
   });
 
-  it("onError clears the stash and still resumes", () => {
+  it("onError clears the stash and sends NO continuation (a failed compact stays failed)", () => {
     vi.useFakeTimers();
     setAgentCompact("on");
     peekSet("the plan");
@@ -143,11 +143,11 @@ describe("firePendingCompactAtSettled", () => {
     options.onError(new Error("Nothing to compact"));
     expect(peekPendingCompact(OWL_COMPACT_KEY)).toBeNull();
     vi.advanceTimersByTime(600);
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(OWL_COMPACT_CONTINUE_PROMPT, { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 
-  it("a sync rejection clears the stash and resumes", () => {
+  it("a sync rejection clears the stash and sends NO continuation", () => {
     vi.useFakeTimers();
     setAgentCompact("on");
     peekSet("the plan");
@@ -160,7 +160,7 @@ describe("firePendingCompactAtSettled", () => {
     firePendingCompactAtSettled(ctx as unknown as Parameters<typeof firePendingCompactAtSettled>[0], pi);
     expect(peekPendingCompact(OWL_COMPACT_KEY)).toBeNull();
     vi.advanceTimersByTime(600);
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(OWL_COMPACT_CONTINUE_PROMPT, { deliverAs: "followUp" });
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

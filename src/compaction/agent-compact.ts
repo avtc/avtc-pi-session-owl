@@ -11,6 +11,7 @@
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getSessionOwlSettings } from "../config/schema.js";
+import { isConflictPaused } from "../conflicts/pause.js";
 import { log } from "../log.js";
 import {
   clearPendingCompact,
@@ -53,7 +54,10 @@ async function contextTokensK(ctx: ExtensionContext): Promise<number | null> {
     const usage = await ctx.getContextUsage();
     const tokens = usage?.tokens;
     return typeof tokens === "number" && tokens > 0 ? Math.round(tokens / 1000) : null;
-  } catch {
+  } catch (err) {
+    log.warn(
+      `context usage read failed (the floor check proceeds without it): ${err instanceof Error ? err.message : String(err)}`,
+    );
     return null;
   }
 }
@@ -74,7 +78,13 @@ export function makeOwlCompactTool(): ToolDefinition<typeof OWL_COMPACT_PARAMS> 
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ) {
-      const setting = parseAgentCompactValue(getSessionOwlSettings().agentCompact);
+      const settings = getSessionOwlSettings();
+      // a dormant owl (disabled or conflict-paused) is compaction-transparent:
+      // a fired request would run the engine's native compaction — refuse
+      if (!settings.enabled || isConflictPaused()) {
+        return textResult(OWL_COMPACT_DISABLED_TEXT, true);
+      }
+      const setting = parseAgentCompactValue(settings.agentCompact);
       if (setting.mode === "off") {
         return textResult(OWL_COMPACT_DISABLED_TEXT, true);
       }
@@ -105,14 +115,15 @@ function sendFollowUp(pi: FollowUpSender, text: string): void {
 /** Fire the pending agent-initiated compaction at the settled boundary. No
  *  pending request = a no-op (the plain agent_settled of every run). The
  *  notes ride customInstructions into the compaction hook, which consumes
- *  the stash when the compaction runs; the followUp resumes the agent
- *  whether the compaction stood or failed (a failed compact must not
- *  dead-stop the session — nothing else would resume it). */
+ *  the stash when the compaction runs. The followUp resumes the agent ONLY
+ *  when the compaction stood: a user abort (cancel), an unavailable
+ *  service/provider, or any other failure ends the flow without a
+ *  continuation — the session stays where the failure left it. */
 export function firePendingCompactAtSettled(ctx: ExtensionContext, pi: FollowUpSender): void {
   const pending = peekPendingCompact(OWL_COMPACT_KEY);
   if (pending === null) return;
-  const setting = parseAgentCompactValue(getSessionOwlSettings().agentCompact);
-  if (setting.mode === "off") {
+  const settings = getSessionOwlSettings();
+  if (!settings.enabled || isConflictPaused() || parseAgentCompactValue(settings.agentCompact).mode === "off") {
     clearPendingCompact(OWL_COMPACT_KEY);
     return;
   }
@@ -121,17 +132,17 @@ export function firePendingCompactAtSettled(ctx: ExtensionContext, pi: FollowUpS
       customInstructions: pending.notes,
       onComplete: () => sendFollowUp(pi, OWL_COMPACT_CONTINUE_PROMPT),
       onError: (err: Error) => {
-        log.warn(`agent-initiated compaction failed: ${err.message}`);
+        log.warn(`agent-initiated compaction failed (no continuation): ${err.message}`);
         // a compact that never reached the compaction hook (nothing to
-        // compact, already compacted) leaves the stash — drop it so the
-        // next settled boundary doesn't re-fire a dead request
+        // compact, already compacted), a user cancel, or a provider failure:
+        // drop the request and continue nothing
         clearPendingCompact(OWL_COMPACT_KEY);
-        sendFollowUp(pi, OWL_COMPACT_CONTINUE_PROMPT);
       },
     });
   } catch (err) {
-    log.warn(`agent-initiated compaction rejected: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(
+      `agent-initiated compaction rejected (no continuation): ${err instanceof Error ? err.message : String(err)}`,
+    );
     clearPendingCompact(OWL_COMPACT_KEY);
-    sendFollowUp(pi, OWL_COMPACT_CONTINUE_PROMPT);
   }
 }

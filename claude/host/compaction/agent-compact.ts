@@ -47,7 +47,7 @@ export function serveOwlCompactCall(
     key: string;
   },
 ): { text: string; error: boolean } {
-  if (deps.setting.mode === "off") {
+  if (deps.key === "" || deps.setting.mode === "off") {
     return { text: OWL_COMPACT_DISABLED_TEXT, error: true };
   }
   if (
@@ -65,13 +65,17 @@ export function serveOwlCompactCall(
 /** Fire the pending agent-initiated compaction for a conversation at its
  *  turn boundary. No pending request = a no-op. The compact call is deferred
  *  past the hook (the turn's own completion must settle first — a call inside
- *  the turn.complete handler can still count as "a turn runs" and reject);
- *  the continuation prompt follows the compaction either way (a failed or
- *  vetoed compact must not dead-stop the session — nothing else resumes it).
+ *  the turn.complete handler can still count as "a turn runs" and reject).
+ *  The continuation prompt fires ONLY when the compaction stood: a veto
+ *  (skip), a user abort, an unavailable service/provider, or any other
+ *  failure ends the flow without a continuation — the session stays where
+ *  the failure left it.
  *
  *  Main conversation only: $.session.compact takes no agentId, so a
  *  subagent loop's request is not fired explicitly — its stash waits for the
  *  loop's own engine compaction (the compaction hook consumes it there). */
+const firing = new Set<string>();
+
 export function firePendingAgentCompact(
   key: string,
   setting: ReturnType<typeof parseAgentCompactValue>,
@@ -79,34 +83,39 @@ export function firePendingAgentCompact(
 ): void {
   const pending = peekPendingCompact(key);
   if (pending === null) return;
-  if (setting.mode === "off") {
-    clearPendingCompact(key);
+  if (setting.mode === "off" || firing.has(key)) {
+    if (setting.mode === "off") clearPendingCompact(key);
     return;
   }
+  firing.add(key);
   deps.clockAfter(0, () => {
     void (async () => {
+      let stood = false;
       try {
         const result = await deps.sessionCompact({ instructions: pending.notes });
         if (typeof result?.skip === "string") {
-          deps.log(`agent-initiated compaction skipped: ${result.skip}`);
+          // a hook vetoed it (owl's own skip paths, a classic PreCompact
+          // block) — the compaction did not stand
+          deps.log(`agent-initiated compaction skipped (no continuation): ${result.skip}`);
           clearPendingCompact(key);
+        } else {
+          stood = true;
         }
-        // the compaction hook consumed the stash when it ran; either way the
-        // agent continues — the compacted context (or the unchanged one on a
-        // skip) gets the continuation turn
-        await deps.promptSubmit({ text: OWL_COMPACT_CONTINUE_PROMPT });
       } catch (err) {
+        // a user abort, an unavailable service/provider, a running turn —
+        // the compaction did not stand
         deps.log(
-          `agent-initiated compaction rejected: ${err instanceof Error ? err.message : String(err)} — clearing the pending request`,
+          `agent-initiated compaction rejected (no continuation): ${err instanceof Error ? err.message : String(err)} — clearing the pending request`,
         );
         clearPendingCompact(key);
-        try {
-          await deps.promptSubmit({ text: OWL_COMPACT_CONTINUE_PROMPT });
-        } catch (submitErr) {
-          deps.log(
-            `continuation prompt rejected: ${submitErr instanceof Error ? submitErr.message : String(submitErr)}`,
-          );
-        }
+      } finally {
+        firing.delete(key);
+      }
+      if (!stood) return;
+      try {
+        await deps.promptSubmit({ text: OWL_COMPACT_CONTINUE_PROMPT });
+      } catch (submitErr) {
+        deps.log(`continuation prompt rejected: ${submitErr instanceof Error ? submitErr.message : String(submitErr)}`);
       }
     })();
   });

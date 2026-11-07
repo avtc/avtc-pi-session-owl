@@ -173,21 +173,21 @@ describe("the settings consumer — gate flips", () => {
     expect(isOwlIgnoreConflicts()).toBe(true);
   });
 
-  test("an enable flip through the wrapped handle registers owl_recall once + invalidates", async () => {
+  test("an enable flip through the wrapped handle registers owl_recall (+owl_compact) once + invalidates", async () => {
     resetState(); // own the premise: no start-gate registration leaked from other suites
     const first = await makeConsumer({ files: { [GLOBAL_PATH]: JSON.stringify({ enabled: false }) } });
     expect(getSessionOwlSettings().enabled).toBe(false);
     first.handle.updateSetting("enabled", true);
     expect(getSessionOwlSettings().enabled).toBe(true); // the live read flipped
-    expect(first.capsules.registered).toHaveLength(1); // owl_recall registered
+    expect(first.capsules.registered).toHaveLength(2); // owl_recall + owl_compact (agentCompact on)
     expect(first.capsules.invalidates.length).toBeGreaterThan(0); // band invalidated
     // a second flip fires no second registration (once per process; settle
     // the async flag write first)
     await new Promise((r) => setTimeout(r, 10));
     first.handle.updateSetting("enabled", false);
     first.handle.updateSetting("enabled", true);
-    // the registration-once flag settles async — wait for it, don't race it
-    await vi.waitFor(() => expect(first.capsules.registered).toHaveLength(1));
+    // the registration-once flags settle async — wait for them, don't race them
+    await vi.waitFor(() => expect(first.capsules.registered).toHaveLength(2));
   });
 
   test("a failing toolRegister never becomes an unhandled rejection (logged degrade)", async () => {

@@ -107,6 +107,17 @@ export function clearPendingCompact(key: string): void {
   pending.delete(key);
 }
 
+/** Drop every pending request of one session (main key and its loop keys).
+ *  A request never outlives its session: a residual entry from an aborted or
+ *  blocked flow must not fire a stale compaction after a resume or re-enable. */
+export function clearPendingCompactForSession(sessionId: string): void {
+  pending.delete(sessionId);
+  const prefix = `${sessionId}|`;
+  for (const key of pending.keys()) {
+    if (key.startsWith(prefix)) pending.delete(key);
+  }
+}
+
 /** Resolve the notes a compaction renders: the agent's pending request when
  *  one waits (the agent asked for THIS compaction), else the instructions
  *  the user typed with their /compact, else none. */

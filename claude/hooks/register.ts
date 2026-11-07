@@ -12,7 +12,7 @@
 // thin, delegating decisions and path math to the data-only claude/host/*
 // modules.
 import type { Register } from "claude-code";
-import { parseAgentCompactValue } from "../core/src/compaction/agent-compact-core.js";
+import { clearPendingCompactForSession, parseAgentCompactValue } from "../core/src/compaction/agent-compact-core.js";
 import { log } from "../core/src/log.js";
 import { captureAppend, getCapture, releaseAllCaptures, releaseCapture } from "../host/capture/append-handler.js";
 import { flushTurn } from "../host/capture/flush.js";
@@ -1363,6 +1363,10 @@ async function onSessionEnd(_$: any, _e: AnyEvent, next: Next) {
     // (the looped await_stage) unwinds at its next signal check and settles
     // — its takeover degrades to a skip, never a stale answer.
     abortAllForSessionEnd();
+    // a pending agent compaction request never outlives its session (a
+    // residual entry must not fire a stale compaction after a resume)
+    const endedSessionId = state.getCurrentSession();
+    if (endedSessionId !== null) clearPendingCompactForSession(endedSessionId);
     await state.sessionEndBody();
     // durability before teardown: any still-buffered ledger records (a run
     // that outlived its last turn flush) are written, THEN the assemblies go
@@ -2133,6 +2137,11 @@ async function onToolCall($: any, e: AnyEvent, next: Next) {
       const key = sessionId !== null ? state.conversationKey(sessionId, agentId) : "";
       const tokens = key === "" ? null : contextTokensFor(key);
       const setting = parseAgentCompactValue(state.getOwlAgentCompact());
+      // a dormant owl (conflict-paused) is compaction-transparent: a fired
+      // request would run the engine's native compaction — refuse here
+      if (isConflictPaused(() => ({ enabled: state.isOwlEnabled(), ignoreConflicts: state.isOwlIgnoreConflicts() }))) {
+        return { deny: "Error: session-owl owl_compact failed: conflict-paused" };
+      }
       const outcome = serveOwlCompactCall(e as { continue_notes?: unknown }, {
         setting,
         contextTokensK: tokens !== null && tokens > 0 ? Math.round(tokens / 1000) : null,

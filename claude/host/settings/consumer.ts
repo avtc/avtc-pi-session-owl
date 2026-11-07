@@ -143,6 +143,18 @@ function fireAfterChange(id: string, value: unknown, capsules: SettingsCapsules)
         // transport (file log + user-visible ui.log, console last)
         sayError(`session-owl: mid-session owl_recall registration failed: ${errDetail(err)}`);
       });
+      // the boot gate skipped owl_compact while disabled; the enable brings
+      // it up too (deferred — cache-safe), when agentCompact is on
+      if (!wasCompactToolRegistered() && parseAgentCompactValue(getSessionOwlSettings().agentCompact).mode === "on") {
+        capsules
+          .toolRegister(owlCompactDeferredToolSpec())
+          .then(() => {
+            markCompactToolRegistered();
+          })
+          .catch((err: unknown) => {
+            sayError(`session-owl: mid-session owl_compact registration failed: ${errDetail(err)}`);
+          });
+      }
     }
     // the timeline anchor: enable/disable transitions feed Channel C's
     // owl-active windows (idempotent appends — a redundant same-direction

@@ -92,26 +92,34 @@ describe("firePendingAgentCompact", () => {
     clearPendingCompact("fk");
   });
 
-  it("a skipped compact still continues and clears the stash", async () => {
+  it("a skipped compact sends NO continuation and clears the stash", async () => {
     peekSet("fk2", "the plan");
     const deps = makeDeps();
     deps.sessionCompact = vi.fn(async () => ({ skip: "session-owl: nothing to compact" }));
     firePendingAgentCompact("fk2", on, deps);
-    await vi.waitFor(() => expect(deps.promptSubmit).toHaveBeenCalled());
-    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("nothing to compact"));
+    await vi.waitFor(() => expect(deps.log).toHaveBeenCalled());
+    expect(deps.promptSubmit).not.toHaveBeenCalled();
     expect(peekPendingCompact("fk2")).toBeNull();
   });
 
-  it("a rejected compact still continues and clears the stash", async () => {
+  it("a rejected compact (user abort, provider failure) sends NO continuation and clears the stash", async () => {
     peekSet("fk3", "the plan");
     const deps = makeDeps();
     deps.sessionCompact = vi.fn(async () => {
       throw new Error("a turn runs");
     });
     firePendingAgentCompact("fk3", on, deps);
-    await vi.waitFor(() => expect(deps.promptSubmit).toHaveBeenCalled());
-    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("a turn runs"));
+    await vi.waitFor(() => expect(deps.log).toHaveBeenCalled());
+    expect(deps.promptSubmit).not.toHaveBeenCalled();
     expect(peekPendingCompact("fk3")).toBeNull();
+  });
+
+  it("a compaction that stood continues exactly once", async () => {
+    peekSet("fk5", "the plan");
+    const deps = makeDeps();
+    deps.sessionCompact = vi.fn(async () => ({ messages: [] }));
+    firePendingAgentCompact("fk5", on, deps);
+    await vi.waitFor(() => expect(deps.promptSubmit).toHaveBeenCalledTimes(1));
   });
 
   it("drops the request when the setting flipped off after the call", () => {
