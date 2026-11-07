@@ -16,6 +16,7 @@ import {
   OWL_COMPACT_DISABLED_TEXT,
   OWL_COMPACT_SCHEDULED_TEXT,
   OWL_COMPACT_USER_LABEL,
+  OWL_PAUSED_REASON,
   parseAgentCompactValue,
   peekPendingCompact,
   setPendingCompact,
@@ -137,5 +138,8 @@ describe("the user-facing strings stay stable", () => {
     expect(OWL_COMPACT_DISABLED_TEXT).toBe("compaction not scheduled: user temporary disabled agent-initiated compact");
     expect(OWL_COMPACT_AGENT_LABEL).toBe("## Continue instructions you have sent before executing compaction");
     expect(OWL_COMPACT_USER_LABEL).toBe("## Continue instructions from user");
+    expect(OWL_PAUSED_REASON).toBe(
+      "session-owl is conflict-paused (the user must resolve the conflicting extension or set ignoreConflicts).",
+    );
   });
 });

@@ -40,7 +40,7 @@ export const OWL_COMPACT_DISABLED_TEXT = "compaction not scheduled: user tempora
 /** The conflict-pause refusal both owl tools answer while session-owl is
  *  paused (pending owner approval of the exact wording). */
 export const OWL_PAUSED_REASON =
-  "session-owl is conflict-paused (set ignoreConflicts or remove the conflicting extension).";
+  "session-owl is conflict-paused (the user must resolve the conflicting extension or set ignoreConflicts).";
 
 /** The summary block label for notes the agent sent. */
 export const OWL_COMPACT_AGENT_LABEL = "## Continue instructions you have sent before executing compaction";
