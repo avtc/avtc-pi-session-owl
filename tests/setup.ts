@@ -27,7 +27,11 @@
  * extension-idempotency / cache-refresh pattern): vi.resetModules() drops the
  * shared cache, vi.doMock registers file-scoped mocks for the freshly
  * re-evaluated graph, and a dynamic `await import(...)` binds that graph
- * deterministically; vi.doUnmock in afterEach releases the registrations.
+ * deterministically. When the file ends, vi.doUnmock releases the
+ * registrations AND vi.resetModules drops the mocked graph: the modules that
+ * imported a stand-in stay cached otherwise, and a later file importing them
+ * (a settings schema bound to a fake registerSettingsCommand) reads the
+ * stand-in.
  */
 
 import "./log-backend-setup.js"; // FIRST — installs the claude-logger backend the rewritten vendored core needs at log.ts load

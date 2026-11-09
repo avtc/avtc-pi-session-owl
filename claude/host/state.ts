@@ -210,6 +210,46 @@ export function subagentsFullyDisabled(): boolean {
   return owlSubagentMode === "disabled";
 }
 
+// ---- session lifecycle generations ------------------------------------------------
+//
+// Work that outlives an await (a start between its engine calls, a lazy
+// store load, a timer-lane warm) captures a liveness check and re-checks it
+// before it rebuilds resident state: a conversation the session end already
+// tore down must not come back (registry entry, core, binding), and an
+// older start must not overwrite what a newer one set up. The counters only
+// ever grow — a reset never makes stale work current again.
+
+/** Bumped by every session end: every resident conversation is dead. */
+let endGeneration = 0;
+/** Bumped by every bootstrapping main start: a newer start supersedes an
+ *  older one still between its awaits. */
+let startGeneration = 0;
+
+/** Raised by work whose session ended (or whose start was superseded)
+ *  while it awaited: the caller abandons quietly — nothing failed. */
+export class SupersededError extends Error {
+  constructor(what: string) {
+    super(`${what} abandoned: the session ended or a newer start superseded it`);
+    this.name = "SupersededError";
+  }
+}
+
+/** A conversation's liveness, captured where its lazy work is created:
+ *  true until the next session end. */
+export function conversationLiveness(): () => boolean {
+  const at = endGeneration;
+  return () => endGeneration === at;
+}
+
+/** Open a bootstrapping main start: its liveness holds until a session end
+ *  or a newer start. */
+export function beginMainStart(): () => boolean {
+  startGeneration += 1;
+  const start = startGeneration;
+  const end = endGeneration;
+  return () => startGeneration === start && endGeneration === end;
+}
+
 /** The session id of the loop currently being observed. */
 export function setCurrentSession(sessionId: string): void {
   currentSessionId = sessionId;
@@ -409,6 +449,8 @@ export function pendingAgentSpecs<T>(specs: T[]): T[] {
  * engine calls (nothing to call out for here).
  */
 export async function sessionEndBody(): Promise<void> {
+  // first: work resuming during the disposes below already sees the end
+  endGeneration += 1;
   for (const state of registry.values()) {
     for (const dispose of state.dispose) {
       try {

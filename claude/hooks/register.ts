@@ -646,6 +646,9 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
   // released by the failure catch below when a start dies before the
   // warm is ever scheduled (nothing else would clear the gate)
   let warmGateArmed = false;
+  // this start's liveness, opened once the envelope names a session: a
+  // session end or a newer start between the awaits below abandons it
+  let startLive: () => boolean = () => true;
   // lifecycle trace: which start pulse actually fires, with
   // what source, and whether the envelope carries its cwd — every settings,
   // backfill and boundary decision below keys off these three facts
@@ -670,6 +673,13 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       return next(e);
     }
     if (e && typeof e.session_id === "string") {
+      startLive = state.beginMainStart();
+      /** Stop an abandoned start before it touches resident state: the
+       *  conversation it would rebuild is already torn down, or a newer
+       *  start owns it. */
+      const ensureLive = (): void => {
+        if (!startLive()) throw new state.SupersededError("session start");
+      };
       // The session cwd rides the envelope: the dumps' per-project dir stem
       // + the goal-extract launcher's conversation lookup.
       if (typeof e.cwd === "string") setSessionCwd(e.cwd);
@@ -806,6 +816,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       // gains its provider and the store's counts before any frame that
       // outlives the opening one (turns, compaction and recall would each
       // have created this same instance on first use).
+      ensureLive();
       void getBinding(e.session_id, e.session_id, null);
       // Branch/fork lineage: under this new id the engine
       // copied a /branch or /fork's TRANSCRIPT (the first row's
@@ -832,6 +843,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       // from cwd (a /cd mid-session must not move it). An absent or
       // corrupt marker is simply replaced (tolerant read).
       await $.fs.write(state.sessionMarkerPath(e.session_id), state.sessionMarkerJson(e.session_id, e.transcript_path));
+      ensureLive();
       state.setCurrentSession(e.session_id);
       state.setCurrentTranscriptPath(typeof e.transcript_path === "string" ? e.transcript_path : null);
       state.ensureConversation(e.session_id, null);
@@ -872,6 +884,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       // Runs once per process (the installed set cannot change mid-process;
       // reload waves recompute through Channel B).
       await runConflictActivationOnce($, configDir, $.plugin.root);
+      ensureLive();
       // The per-process timeline anchor: an enabled owl records its enable
       // transition (and a pause mirror when the activation found conflicts),
       // so Channel C's owl-active windows cover this process from the start.
@@ -905,15 +918,6 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
         }));
       const convKey = state.conversationKey(e.session_id, null);
       const storage = getSessionStorage(convKey, e.session_id, null);
-      // The boot section's service capsules, captured ONCE: a concurrent
-      // session end (a fast /clear on a fresh resume, a cross-boundary
-      // teardown in tests) clears the armed bridge between the awaits of
-      // this start — a lazy re-resolve there would throw mid-start and
-      // leave a half-bootstrapped session (marker written, store never
-      // loaded). The captured table stays callable after the clear; the
-      // long-lived handles above (settings/log consumers) keep their lazy
-      // re-resolve on purpose — they outlive this handler.
-      const bootServices = bridge.currentServices();
       // the readiness gate opens only after the store read AND the details
       // warm — the owl line waits for a system that can serve queries from
       // cache. The warm is scheduled AFTER the backfill resolves (the core
@@ -936,6 +940,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
         fireGoalExtract: (verbatim: string) => launchGoalExtract(verbatim, e.session_id),
         forkParentSessionId: null,
         computePending: corePendingEvaluator,
+        isLive: startLive,
         bootstrapOverCap:
           state.getCurrentTranscriptPath() !== null
             ? async (transcriptPath) => {
@@ -950,7 +955,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                 const result = await onePerSession(configDir, e.session_id, () =>
                   runBootstrapHelper(
                     {
-                      runProcess: (argv) => bootServices.processRun(argv),
+                      runProcess: (argv) => bridge.currentServices().processRun(argv),
                       log: (m, err) =>
                         log.warn(
                           `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
@@ -961,7 +966,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                       transcriptPath,
                       configDir,
                       sessionId: e.session_id,
-                      pluginRoot: bootServices.pluginRoot(),
+                      pluginRoot: bridge.currentServices().pluginRoot(),
                     },
                   ),
                 );
@@ -976,14 +981,14 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                 // it keeps the duplicates — disk cost only, never correctness)
                 const result = await runMirrorCompact(
                   {
-                    runProcess: (argv) => bootServices.processRun(argv),
+                    runProcess: (argv) => bridge.currentServices().processRun(argv),
                     log: (m, err) =>
                       log.warn(
                         `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
                       ),
                   },
                   {
-                    pluginRoot: bootServices.pluginRoot(),
+                    pluginRoot: bridge.currentServices().pluginRoot(),
                     configDir,
                     sessionId: e.session_id,
                     transcriptPath: state.getCurrentTranscriptPath(),
@@ -1000,14 +1005,14 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                 // a later load retries — correctness never depends on it)
                 return runLedgerHeal(
                   {
-                    runProcess: (argv) => bootServices.processRun(argv),
+                    runProcess: (argv) => bridge.currentServices().processRun(argv),
                     log: (m, err) =>
                       log.warn(
                         `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
                       ),
                   },
                   {
-                    pluginRoot: bootServices.pluginRoot(),
+                    pluginRoot: bridge.currentServices().pluginRoot(),
                     sessionDir: state.sessionDirPath(configDir, e.session_id, null),
                   },
                 );
@@ -1015,6 +1020,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
             : undefined,
       })
         .then((backfillResult) => {
+          ensureLive();
           // the blocked-backlog note for /owl-status (the ladder's rung 2 hint
           // " + EM + " the exact manual command, cleared on every clean start)
           state.setBootstrapBlockedCommand(
@@ -1024,7 +1030,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                   transcriptPath: state.getCurrentTranscriptPath() ?? "",
                   configDir,
                   sessionId: e.session_id,
-                  pluginRoot: bootServices.pluginRoot(),
+                  pluginRoot: bridge.currentServices().pluginRoot(),
                 })
               : null,
           );
@@ -1043,6 +1049,12 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
             try {
               $.clock.after(0, () => {
                 void (async () => {
+                  // an abandoned start leaves the warm, and the readiness
+                  // latch, to the start that superseded it
+                  if (!startLive()) {
+                    log.info("details cache warm skipped: the session ended or a newer start superseded it");
+                    return;
+                  }
                   try {
                     const handle = await getCore(convKey);
                     const store = handle.store.getGraphStore();
@@ -1079,12 +1091,14 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                       `details cache warm failed (queries render inline until the cache fills): ${errText(err)}`,
                     );
                   } finally {
-                    markDetailsWarmDone();
-                    try {
-                      $.ui.invalidate("ui.render");
-                    } catch (err) {
-                      // the pane may not exist yet — the next engine render picks the line up
-                      diag(`band render invalidate failed (pane absent?): ${errText(err)}`);
+                    if (startLive()) {
+                      markDetailsWarmDone();
+                      try {
+                        $.ui.invalidate("ui.render");
+                      } catch (err) {
+                        // the pane may not exist yet — the next engine render picks the line up
+                        diag(`band render invalidate failed (pane absent?): ${errText(err)}`);
+                      }
                     }
                   }
                 })();
@@ -1099,6 +1113,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       // The mirror-retention sweep (the S5 read path): planned from the LIVE
       // settings (mirrorRetentionDays — keep-forever by default), run on CLI
       // surfaces via $.process.run, and never blocking the start sequence.
+      ensureLive();
       try {
         const live = getInstalledSettingsHandle()?.getSettings() as { mirrorRetentionDays?: unknown } | undefined;
         const retentionDays = typeof live?.mirrorRetentionDays === "number" ? live.mirrorRetentionDays : null;
@@ -1123,8 +1138,15 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       }
     }
   } catch (err) {
-    if (warmGateArmed) markDetailsWarmDone();
-    report("session bootstrap failed", err);
+    if (startLive()) {
+      if (warmGateArmed) markDetailsWarmDone();
+      report("session bootstrap failed", err);
+    } else {
+      // the session ended (or a newer start began) mid-start: the store
+      // files stay the session's own — the next start re-derives them —
+      // and the readiness latch belongs to the newer start; nothing failed
+      log.info(`session start abandoned: ${errText(err)}`);
+    }
   }
   return next(e);
 }
@@ -1378,38 +1400,47 @@ async function onSessionEnd(_$: any, _e: AnyEvent, next: Next) {
     )}`,
   );
   try {
-    // The user's exit cancels every live gate: an in-flight compaction wait
-    // (the looped await_stage) unwinds at its next signal check and settles
-    // — its takeover degrades to a skip, never a stale answer.
-    abortAllForSessionEnd();
-    // a pending agent compaction request never outlives its session (a
-    // residual entry must not fire a stale compaction after a resume)
-    const endedSessionId = state.getCurrentSession();
-    if (endedSessionId !== null) {
-      clearPendingCompactForSession(endedSessionId);
-      clearAgentCompactFiringForSession(endedSessionId);
-    }
-    await state.sessionEndBody();
-    // durability before teardown: any still-buffered ledger records (a run
-    // that outlived its last turn flush) are written, THEN the assemblies go
-    await flushAllSessionStorage();
-    releaseAllCaptures();
-    releaseAllSessionStorage();
-    releaseAllBindings();
-    clearAllStageRuns();
-    resetStageToolExecutors();
-    bridge.clearAllForSessionEnd();
-    // the checkpoint maps follow the session out (main-key dead sets,
-    // boundaries, prepared registrations, watermarks, skip marks — never
-    // leak across sessions)
-    checkpointService().releaseAll();
-    if (liveChain !== null) liveChain.dispose();
-    liveChain = null;
-    liveChainKey = null;
+    await teardownSessions({ flush: true });
   } catch (err) {
     report("teardown failed", err);
   }
   return next(_e);
+}
+
+/** The session-end teardown: every resident conversation goes. `flush`
+ *  writes the still-buffered records first (a real end's durability step). */
+async function teardownSessions(opts: { flush: boolean }): Promise<void> {
+  // The user's exit cancels every live gate: an in-flight compaction wait
+  // (the looped await_stage) unwinds at its next signal check and settles
+  // — its takeover degrades to a skip, never a stale answer.
+  abortAllForSessionEnd();
+  // a pending agent compaction request never outlives its session (a
+  // residual entry must not fire a stale compaction after a resume)
+  const endedSessionId = state.getCurrentSession();
+  if (endedSessionId !== null) {
+    clearPendingCompactForSession(endedSessionId);
+    clearAgentCompactFiringForSession(endedSessionId);
+  }
+  await state.sessionEndBody();
+  // durability before teardown: any still-buffered ledger records (a run
+  // that outlived its last turn flush) are written, THEN the assemblies go
+  if (opts.flush) await flushAllSessionStorage();
+  releaseAllCaptures();
+  releaseAllSessionStorage();
+  releaseAllBindings();
+  clearAllStageRuns();
+  resetStageToolExecutors();
+  // a launch still parked on the companion's callback is rejected — its
+  // settle timer must not spawn a stage agent for the ended session
+  stageLaunchBroker.reset();
+  bridge.clearAllForSessionEnd();
+  // the checkpoint maps follow the session out (main-key dead sets,
+  // boundaries, prepared registrations, watermarks, skip marks — never
+  // leak across sessions)
+  checkpointService().releaseAll();
+  if (liveChain !== null) liveChain.dispose();
+  liveChain = null;
+  liveChainKey = null;
 }
 
 // --- the layered rewind checkpoint ---------------------------------------------------
@@ -2761,10 +2792,12 @@ export function _resetRegisterForTest(): void {
 }
 
 /** Test seam: the FILE-boundary reset — everything a finished spec file
- *  must not hand the next one, beyond the per-load state: the timeline
- *  pause-mirror carry, the serialized append chain, and the per-process
- *  once-latches. */
-export function _resetRegisterBoundaryForTest(): void {
+ *  must not hand the next one: the session-end teardown over whatever the
+ *  file left resident (no flush — its writes belong to a finished
+ *  harness), the per-load state, the timeline pause-mirror carry, the
+ *  serialized append chain, and the per-process once-latches. */
+export async function _resetRegisterBoundaryForTest(): Promise<void> {
+  await teardownSessions({ flush: false });
   _resetRegisterForTest();
   timelinePausedMirror = false;
   timelineAppendChain = Promise.resolve();

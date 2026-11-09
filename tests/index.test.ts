@@ -181,6 +181,9 @@ describe("sessionOwlExtension (activate wiring)", () => {
   });
   afterAll(() => {
     for (const path of MOCKED_PATHS) vi.doUnmock(path);
+    // drop the mocked graph too: modules bound to the mocks stay cached
+    // otherwise, and a later file importing them reads the stand-ins
+    vi.resetModules();
   });
   beforeEach(() => {
     vi.clearAllMocks();
@@ -347,6 +350,9 @@ describe("sessionOwlExtension :ready API (session-owl:ready)", () => {
   });
   afterAll(() => {
     for (const path of MOCKED_PATHS) vi.doUnmock(path);
+    // drop the mocked graph too: modules bound to the mocks stay cached
+    // otherwise, and a later file importing them reads the stand-ins
+    vi.resetModules();
   });
   beforeEach(() => {
     vi.clearAllMocks();

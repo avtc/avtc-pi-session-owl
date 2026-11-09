@@ -191,6 +191,9 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
 
   const storage = getSessionStorage(key, sessionId, agentId);
   const services = () => bridge.currentServices();
+  /** False once the session ends: a pin still loading then must not
+   *  rebuild the torn-down conversation (registry entry, resident core). */
+  const live = state.conversationLiveness();
 
   // The conversation's prepared store context — the runtime fold of its
   // segment files (the boot backfill's own prepare is the same
@@ -344,6 +347,7 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
     // a temporary-unavailable denial (the model retries later) while the
     // load keeps running in the background and the NEXT pin reuses it.
     const prepared = await raceLoadBudget(preparedCtx());
+    if (!live()) throw new state.SupersededError(`conversation ${key} pin`);
     const ctx = prepared.ctx;
     resolvedCtx = ctx;
     const handle = await getCore(key, {
@@ -473,6 +477,11 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
         }
       })
       .catch((err: unknown) => {
+        // the session ended while the store loaded: nothing to prime
+        if (err instanceof state.SupersededError) {
+          log.info(`widget: ${err.message}`);
+          return;
+        }
         // the fold's own failure reporting covers the storage side; this
         // names the priming loss where it was seen (the bare mark staying)
         log.warn(`widget: idle priming failed: ${errText(err)}`);
@@ -490,6 +499,10 @@ export function getBinding(key: string, sessionId: string, agentId: string | nul
               }
             })
             .catch((retryErr: unknown) => {
+              if (retryErr instanceof state.SupersededError) {
+                log.info(`widget: ${retryErr.message}`);
+                return;
+              }
               log.warn(`widget: idle re-priming failed: ${errText(retryErr)}`);
             });
         }

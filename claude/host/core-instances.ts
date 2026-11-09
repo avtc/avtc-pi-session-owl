@@ -374,5 +374,6 @@ export function _resetCoreInstances(): void {
   currentKey = null;
   factories.clear();
   pump = Promise.resolve();
-  teardownEpoch = 0;
+  // forward, never back: a switch still in flight reads its epoch stale
+  teardownEpoch += 1;
 }

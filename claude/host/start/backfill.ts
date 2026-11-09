@@ -16,7 +16,7 @@ import { groupRows } from "../capture/grouper.js";
 // ledger batches copied into the child's dir — the records carry over and
 // the frontier derives from them).
 import { getCore } from "../core-instances.js";
-import { sanitize } from "../state.js";
+import { SupersededError, sanitize } from "../state.js";
 import type { FsAdapter } from "../storage/fs-adapter.js";
 import type { LedgerWriter } from "../storage/ledger.js";
 import { batchNameParts, type MirrorWriter, type SweepResult, sweepMirror } from "../storage/mirror.js";
@@ -103,6 +103,10 @@ export interface BackfillOptions {
   /** Heal restated lineage storage through the process seam (see
    *  ledger-heal.ts); the fold inside this backfill detects and re-reads. */
   healLedger?: () => Promise<{ done: boolean; restatedEdges?: number; uniqueEdges?: number }>;
+  /** The start's liveness: false once the session ended or a newer start
+   *  began — the start then stops before it builds the core (absent =
+   *  always live). */
+  isLive?: () => boolean;
 }
 
 export interface BackfillResult {
@@ -283,6 +287,9 @@ export async function runBackfill(
     ...(opts.runAnchor !== undefined ? { runAnchor: opts.runAnchor } : {}),
   });
   const { prepared, transcript, remirrored, bootstrapBlocked } = loaded;
+  // the store files are the session's own (a later start re-derives them);
+  // the resident core is not — an abandoned start must not rebuild it
+  if (opts.isLive !== undefined && !opts.isLive()) throw new SupersededError("session start");
   const handle = await getCore(opts.key, {
     ctxFactory: () => prepared.ctx,
     resolverFactory: () => makeEntryResolver({ rows: () => mirrorRowsOf(mirror), version: () => mirror.rowVersion() }),

@@ -10,30 +10,23 @@
 // Every import is DYNAMIC — the reset must reach the module instance the
 // registry currently serves, not one bound at this file's load.
 //
-// The reset SETTLES FIRST: the wiring arms fire-and-forget continuations
-// (the details warm on the clock lane, the binding prime, queued serves)
-// whose real timers fire after the spec's last await. Draining a few
-// macrotask turns lets them land while the ending file's state is still
-// coherent — a continuation landing AFTER the resets re-populates cleared
-// singletons mid-next-file (the resurrected registry entry, a warm latch
-// stuck pending, mirror writes racing the next file's waits).
+// The boundary first ENDS every session the file left resident (the real
+// session-end teardown, minus its flush): the lifecycle generations move
+// on, so work the file left in flight (a start between its awaits, a pin
+// still loading, the timer-lane warm) reads stale at its next check and
+// never rebuilds what the resets below clear; parked stage launches are
+// rejected and the bridge is disarmed. Then each module's own state goes.
 export async function resetClaudeHostSingletons(): Promise<void> {
-  // drain order: immediate lanes first, then the short debounce lanes
-  // (the tracker's trailing publish, the checkpoint retries) — a leftover
-  // running during the resets re-populates cleared singletons mid-next-file
-  for (let i = 0; i < 3; i += 1) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
-  for (let i = 0; i < 2; i += 1) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
-  }
-  await new Promise<void>((resolve) => setTimeout(resolve, 60));
+  const wiring = await import("../../hooks/register.js");
+  await wiring._resetRegisterBoundaryForTest();
+  const state = await import("../../host/state.js");
+  state._resetForTest();
   const pause = await import("../../host/conflicts/pause.js");
   pause._resetConflictStateForTest();
   const consumer = await import("../../host/settings/consumer.js");
   consumer._resetSettingsConsumerForTest();
-  const bridge = await import("../../host/engine-bridge.js");
-  bridge.clearAllForSessionEnd();
+  const pane = await import("../../host/settings/pane.js");
+  pane._resetSettingsPaneForTest();
   const capture = await import("../../host/capture/append-handler.js");
   capture._resetCapture();
   const remat = await import("../../host/compaction/remat.js");
@@ -48,20 +41,24 @@ export async function resetClaudeHostSingletons(): Promise<void> {
   cores._resetCoreInstances();
   const bindings = await import("../../host/runs/bind.js");
   bindings._resetBindings();
+  const goalRun = await import("../../host/runs/goal-extract.js");
+  goalRun._resetGoalExtractRun();
+  const goalLauncher = await import("../../host/start/goal-extract.js");
+  goalLauncher._resetGoalExtractLauncher();
   const context = await import("../../host/triggers/context.js");
-  context.pruneMeasures();
+  context._resetMeasureSnapshots();
   const runLocks = await import("../../host/triggers/run-locks.js");
-  runLocks.pruneIdleLocks();
+  runLocks._resetRunLocks();
+  const recall = await import("../../host/recall/register.js");
+  recall._resetRecallRegistration();
+  const widgetLine = await import("../../host/widget/line-store.js");
+  widgetLine._resetWidgetLine();
+  const viewer = await import("../../host/commands/viewer.js");
+  viewer.clearViewerContent();
   const coreSchema = await import("../../core/src/config/schema.js");
   coreSchema._resetSessionOwlSettingsHandle();
   coreSchema._setRegisterSettingsCommand(null);
   // the session-model slot: a start-time `$.session.model()` seed (or a
   // turn.step refresh) is per-FILE state the next spec must not inherit
-  const state = await import("../../host/state.js");
   state.setSessionModel(null);
-  // the wiring's own module state (the live-chain, the conflict once-latch,
-  // compaction claims, the fired-assistant index) — a leftover arms the
-  // next file's dispatches with the previous file's verdicts
-  const wiring = await import("../../hooks/register.js");
-  wiring._resetRegisterBoundaryForTest();
 }

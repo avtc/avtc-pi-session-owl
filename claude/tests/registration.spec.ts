@@ -10,7 +10,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { OWL_PAUSED_REASON } from "../core/src/compaction/agent-compact-core.js";
 import { log } from "../core/src/log.js";
 import { OWL_RECALL_FULL_NAME, OWL_RECALL_TOOL_DESCRIPTION } from "../host/recall/spec.js";
-import { getBinding, releaseBinding } from "../host/runs/bind.js";
+import { getBinding, hasBinding, releaseBinding } from "../host/runs/bind.js";
+import { SupersededError } from "../host/state.js";
 import { contextTokensFor, recordMeasure } from "../host/triggers/context.js";
 import { acquireOrSkip, pruneIdleLocks } from "../host/triggers/run-locks.js";
 import { createHarness } from "./helpers/harness.js";
@@ -424,13 +425,6 @@ describe("host binding skeleton — registration", () => {
     // after sessionEndBody's registry.clear() and the teardown assertion races
     // (full-suite-only flake — the entry reappears after the clear)
     await vi.waitFor(() => expect(h.registryKeys()).toContain("s4"));
-    // the start path also primes the conversation binding fire-and-forget
-    // (`void getBinding(...)`): drain the macrotask lane so its continuation
-    // lands BEFORE the clear — under a loaded event loop it would otherwise
-    // re-register the conversation after sessionEndBody's registry.clear()
-    for (let i = 0; i < 5; i += 1) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
     let tornDown = 0;
     h.onTeardown(() => {
       tornDown += 1;
@@ -445,6 +439,69 @@ describe("host binding skeleton — registration", () => {
     expect(h.registryKeys()).toEqual([]);
     expect(contextTokensFor("s4")).toBeNull(); // measures pruned
     expect(pruneIdleLocks()).toBe(0); // the idle lock entry already pruned
+  });
+
+  test("a session end between the start's awaits abandons the start quietly — nothing is rebuilt", async () => {
+    await h.load();
+    const warn = vi.spyOn(log, "warn");
+    try {
+      // the start runs to its first engine call, the end lands, the start resumes
+      const started = h.dispatch("classic.SessionStart", {
+        source: "resume",
+        session_id: "s-abandon",
+        transcript_path: "/t.jsonl",
+        cwd: "/w",
+      });
+      await h.dispatch("session.end", { reason: "clear", sessionId: "s-abandon", resume: false });
+      await started;
+      // an abandoned start is no failure: no error report
+      expect(warn.mock.calls.some(([m]) => String(m).includes("session bootstrap failed"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(h.registryKeys()).toEqual([]);
+    expect(hasBinding("s-abandon")).toBe(false);
+    expect(h.fsPaths().some((p: string) => p.includes("/sessions/s-abandon/"))).toBe(false);
+  });
+
+  test("a newer start supersedes an older one still between its awaits", async () => {
+    await h.load();
+    const older = h.dispatch("classic.SessionStart", {
+      source: "resume",
+      session_id: "s-older",
+      transcript_path: "/t-older.jsonl",
+      cwd: "/w",
+    });
+    await h.dispatch("classic.SessionStart", {
+      source: "startup",
+      session_id: "s-newer",
+      transcript_path: "/t-newer.jsonl",
+      cwd: "/w",
+    });
+    await older;
+    const state2 = await import("../host/state.js");
+    expect(state2.getCurrentSession()).toBe("s-newer");
+    expect(h.registryKeys()).toEqual(["s-newer"]);
+    expect(hasBinding("s-older")).toBe(false);
+    expect(h.uiLog.some((l: string) => l.includes("session bootstrap failed"))).toBe(false);
+  });
+
+  test("a pin that resumes after the session end never rebuilds the ended conversation", async () => {
+    await h.load();
+    await h.dispatch("classic.SessionStart", {
+      source: "startup",
+      session_id: "s-pin",
+      transcript_path: "/t.jsonl",
+      cwd: "/w",
+    });
+    const binding = getBinding("s-pin", "s-pin", null);
+    await binding.pinCore(); // the store is folded: a later pin reuses it
+    await h.dispatch("session.end", { reason: "clear", sessionId: "s-pin", resume: false });
+    expect(h.registryKeys()).toEqual([]);
+    // work still holding the binding (the start's fire-and-forget prime,
+    // a queued serve) resumes after the end: it must not come back
+    await expect(binding.pinCore()).rejects.toBeInstanceOf(SupersededError);
+    expect(h.registryKeys()).toEqual([]);
   });
 
   test("engine.create folds the sessionOwl noun; closures work without a live $", async () => {
@@ -1247,28 +1304,35 @@ describe("handback channel — no interception (the platform routes spawned agen
     expect(state2.getSessionModel()).toBe(null);
   });
 
-  test("the file-boundary reset also clears the readiness latch, remat expectations, and the wiring's own module state", async () => {
+  test("the file-boundary reset ends the sessions a file left resident — its in-flight work reads stale", async () => {
     const { resetClaudeHostSingletons } = await import("./helpers/host-teardown.js");
+    const state2 = await import("../host/state.js");
     const readiness = await import("../host/start/readiness.js");
     const remat = await import("../host/compaction/remat.js");
-    const wiring = await import("../hooks/register.js");
-    // the shapes a finished file leaves behind: a released warm latch, an
-    // in-window remat expectation, and the wiring's once-latches/claims
+    await h.load();
+    await h.dispatch("classic.SessionStart", {
+      source: "startup",
+      session_id: "s-boundary",
+      transcript_path: "/t.jsonl",
+      cwd: "/w",
+    });
+    // the shapes a finished file leaves behind: work holding a liveness
+    // check, a released warm latch, a half-consumed remat expectation
+    const leftover = state2.conversationLiveness();
     readiness.markDetailsWarmDone();
-    remat.setRematExpectation("boundary-pin", [{ role: "user", text: "pin", toolUses: [] }]);
-    const matchingRow = {
-      uuid: "u-pin",
-      door: "note",
-      message: { type: "user", content: [{ type: "text", text: "pin" }] },
-    } as never;
-    expect(remat.matchRematRow("boundary-pin", matchingRow)).toBe("summary"); // armed before
-    expect(typeof wiring._resetRegisterForTest).toBe("function");
-    expect(typeof wiring._resetRegisterBoundaryForTest).toBe("function");
+    remat.setRematExpectation("boundary-remat", [
+      { role: "user", text: "pin", toolUses: [] },
+      { role: "user", text: "kept", toolUses: [] },
+    ]);
+    const row = (text: string) =>
+      ({ uuid: `u-${text}`, door: "note", message: { type: "user", content: [{ type: "text", text }] } }) as never;
+    expect(remat.matchRematRow("boundary-remat", row("pin"))).toBe("summary"); // armed, one message still awaited
     await resetClaudeHostSingletons();
+    expect(leftover()).toBe(false); // in-flight work never rebuilds what the reset cleared
+    expect(h.registryKeys()).toEqual([]);
+    expect(hasBinding("s-boundary")).toBe(false);
     expect(readiness.detailsWarmPending()).toBe(true); // pristine again
-    expect(remat.matchRematRow("boundary-pin", matchingRow)).toBe(null); // expectation gone
-    wiring._resetRegisterForTest(); // idempotent, never throws
-    wiring._resetRegisterBoundaryForTest();
+    expect(remat.matchRematRow("boundary-remat", row("kept"))).toBe(null); // expectation gone
   });
 
   test("classic.SessionStart seeds the widget's window from $.session.usage() — denominator ready before any measure", async () => {
