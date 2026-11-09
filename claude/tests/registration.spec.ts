@@ -424,6 +424,13 @@ describe("host binding skeleton — registration", () => {
     // after sessionEndBody's registry.clear() and the teardown assertion races
     // (full-suite-only flake — the entry reappears after the clear)
     await vi.waitFor(() => expect(h.registryKeys()).toContain("s4"));
+    // the start path also primes the conversation binding fire-and-forget
+    // (`void getBinding(...)`): drain the macrotask lane so its continuation
+    // lands BEFORE the clear — under a loaded event loop it would otherwise
+    // re-register the conversation after sessionEndBody's registry.clear()
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
     let tornDown = 0;
     h.onTeardown(() => {
       tornDown += 1;
@@ -856,11 +863,14 @@ describe("startup backfill wiring — the classic.SessionStart start sequence", 
     });
     // the re-mirror runs on the start pipeline's flush timer — wait for the
     // first batch instead of racing it (a loaded event loop writes it late)
-    const mirrorBatches = await vi.waitFor(() => {
-      const found = h.fsPaths().filter((p: string) => /session-owl\/sessions\/sess-bf\/m\d+-/.test(p));
-      expect(found.length).toBeGreaterThan(0);
-      return found;
-    });
+    const mirrorBatches = await vi.waitFor(
+      () => {
+        const found = h.fsPaths().filter((p: string) => /session-owl\/sessions\/sess-bf\/m\d+-/.test(p));
+        expect(found.length).toBeGreaterThan(0);
+        return found;
+      },
+      { timeout: 5000 },
+    );
     // the batches carry the transcript's live rows verbatim (uuid-keyed)
     let allBatchText = "";
     for (const p of mirrorBatches) {
@@ -882,14 +892,17 @@ describe("startup backfill wiring — the classic.SessionStart start sequence", 
     // nGoal seeded + the initial prompt captured: at least one ledger
     // record file exists beyond the mirror batches and the marker —
     // on the flush timer, so wait for it rather than race it
-    const ledgerFiles = await vi.waitFor(() => {
-      const found = h
-        .fsPaths()
-        .filter((p: string) => /session-owl\/sessions\/sess-bf2\//.test(p))
-        .filter((p: string) => !/\/m\d+-/.test(p) && !/\.session\.json$/.test(p) && !/timeline-/.test(p));
-      expect(found.length).toBeGreaterThan(0);
-      return found;
-    });
+    const ledgerFiles = await vi.waitFor(
+      () => {
+        const found = h
+          .fsPaths()
+          .filter((p: string) => /session-owl\/sessions\/sess-bf2\//.test(p))
+          .filter((p: string) => !/\/m\d+-/.test(p) && !/\.session\.json$/.test(p) && !/timeline-/.test(p));
+        expect(found.length).toBeGreaterThan(0);
+        return found;
+      },
+      { timeout: 5000 },
+    );
     expect(ledgerFiles.length).toBeGreaterThan(0);
   });
 });
@@ -1232,6 +1245,30 @@ describe("handback channel — no interception (the platform routes spawned agen
     state2.setSessionModel("leaked-model");
     await resetClaudeHostSingletons();
     expect(state2.getSessionModel()).toBe(null);
+  });
+
+  test("the file-boundary reset also clears the readiness latch, remat expectations, and the wiring's own module state", async () => {
+    const { resetClaudeHostSingletons } = await import("./helpers/host-teardown.js");
+    const readiness = await import("../host/start/readiness.js");
+    const remat = await import("../host/compaction/remat.js");
+    const wiring = await import("../hooks/register.js");
+    // the shapes a finished file leaves behind: a released warm latch, an
+    // in-window remat expectation, and the wiring's once-latches/claims
+    readiness.markDetailsWarmDone();
+    remat.setRematExpectation("boundary-pin", [{ role: "user", text: "pin", toolUses: [] }]);
+    const matchingRow = {
+      uuid: "u-pin",
+      door: "note",
+      message: { type: "user", content: [{ type: "text", text: "pin" }] },
+    } as never;
+    expect(remat.matchRematRow("boundary-pin", matchingRow)).toBe("summary"); // armed before
+    expect(typeof wiring._resetRegisterForTest).toBe("function");
+    expect(typeof wiring._resetRegisterBoundaryForTest).toBe("function");
+    await resetClaudeHostSingletons();
+    expect(readiness.detailsWarmPending()).toBe(true); // pristine again
+    expect(remat.matchRematRow("boundary-pin", matchingRow)).toBe(null); // expectation gone
+    wiring._resetRegisterForTest(); // idempotent, never throws
+    wiring._resetRegisterBoundaryForTest();
   });
 
   test("classic.SessionStart seeds the widget's window from $.session.usage() — denominator ready before any measure", async () => {

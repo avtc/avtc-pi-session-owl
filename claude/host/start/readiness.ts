@@ -27,3 +27,8 @@ export function markDetailsWarmDone(): void {
 export function detailsWarmPending(): boolean {
   return warmPending;
 }
+
+/** Test seam: restore the pristine pending latch (the file-boundary reset). */
+export function _resetReadinessForTest(): void {
+  warmPending = true;
+}

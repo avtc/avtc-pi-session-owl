@@ -327,6 +327,9 @@ export function createHarness() {
     state = await import(require.resolve("../../host/state.ts"));
     bridge = await import(require.resolve("../../host/engine-bridge.ts"));
     state._resetForTest();
+    // the wiring's OWN module state (live-chain, once-latches, claim maps)
+    // seeds nothing into this harness's dispatches — same rule as state's
+    mod._resetRegisterForTest();
     // fresh registration per load: a second load on the same hooks map
     // would double-register every handler and double-dispatch events
     hooks.clear();

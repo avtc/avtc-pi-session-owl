@@ -905,6 +905,15 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
         }));
       const convKey = state.conversationKey(e.session_id, null);
       const storage = getSessionStorage(convKey, e.session_id, null);
+      // The boot section's service capsules, captured ONCE: a concurrent
+      // session end (a fast /clear on a fresh resume, a cross-boundary
+      // teardown in tests) clears the armed bridge between the awaits of
+      // this start — a lazy re-resolve there would throw mid-start and
+      // leave a half-bootstrapped session (marker written, store never
+      // loaded). The captured table stays callable after the clear; the
+      // long-lived handles above (settings/log consumers) keep their lazy
+      // re-resolve on purpose — they outlive this handler.
+      const bootServices = bridge.currentServices();
       // the readiness gate opens only after the store read AND the details
       // warm — the owl line waits for a system that can serve queries from
       // cache. The warm is scheduled AFTER the backfill resolves (the core
@@ -941,7 +950,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                 const result = await onePerSession(configDir, e.session_id, () =>
                   runBootstrapHelper(
                     {
-                      runProcess: (argv) => bridge.currentServices().processRun(argv),
+                      runProcess: (argv) => bootServices.processRun(argv),
                       log: (m, err) =>
                         log.warn(
                           `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
@@ -952,7 +961,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                       transcriptPath,
                       configDir,
                       sessionId: e.session_id,
-                      pluginRoot: bridge.currentServices().pluginRoot(),
+                      pluginRoot: bootServices.pluginRoot(),
                     },
                   ),
                 );
@@ -967,14 +976,14 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                 // it keeps the duplicates — disk cost only, never correctness)
                 const result = await runMirrorCompact(
                   {
-                    runProcess: (argv) => bridge.currentServices().processRun(argv),
+                    runProcess: (argv) => bootServices.processRun(argv),
                     log: (m, err) =>
                       log.warn(
                         `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
                       ),
                   },
                   {
-                    pluginRoot: bridge.currentServices().pluginRoot(),
+                    pluginRoot: bootServices.pluginRoot(),
                     configDir,
                     sessionId: e.session_id,
                     transcriptPath: state.getCurrentTranscriptPath(),
@@ -991,14 +1000,14 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                 // a later load retries — correctness never depends on it)
                 return runLedgerHeal(
                   {
-                    runProcess: (argv) => bridge.currentServices().processRun(argv),
+                    runProcess: (argv) => bootServices.processRun(argv),
                     log: (m, err) =>
                       log.warn(
                         `${m}${err instanceof Error ? `: ${err.message}` : err !== undefined ? `: ${String(err)}` : ""}`,
                       ),
                   },
                   {
-                    pluginRoot: bridge.currentServices().pluginRoot(),
+                    pluginRoot: bootServices.pluginRoot(),
                     sessionDir: state.sessionDirPath(configDir, e.session_id, null),
                   },
                 );
@@ -1015,7 +1024,7 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
                   transcriptPath: state.getCurrentTranscriptPath() ?? "",
                   configDir,
                   sessionId: e.session_id,
-                  pluginRoot: bridge.currentServices().pluginRoot(),
+                  pluginRoot: bootServices.pluginRoot(),
                 })
               : null,
           );
@@ -2725,3 +2734,39 @@ export const register: Register = (on) => {
   on("prompt.attachment", onPromptAttachment);
   on("session.receive", onSessionReceive);
 };
+
+/** Test seam: reset the wiring's own module state (the harness load and the
+ *  file-boundary teardown both call it — under the shared module registry a
+ *  spec file's leftover live-chain, compaction claims, and fired-assistant
+ *  index would otherwise seed the next file's dispatches). State a spec
+ *  legitimately carries across loads WITHIN its file — the timeline
+ *  pause-mirror carry, the append chain, the conflict activation's
+ *  once-latch — is NOT here; the file boundary resets it
+ *  (_resetRegisterBoundaryForTest). */
+export function _resetRegisterForTest(): void {
+  if (liveChain !== null) {
+    try {
+      liveChain.dispose();
+    } catch {
+      // best-effort — a disposed processor may already be torn down
+    }
+  }
+  liveChain = null;
+  liveChainKey = null;
+  lastStartSurface = null;
+  lastFiredAssistantByKey.clear();
+  mainTurnStartedAt = 0;
+  compactClaims.clear();
+  settingsPaneSurface = "keyboard";
+}
+
+/** Test seam: the FILE-boundary reset — everything a finished spec file
+ *  must not hand the next one, beyond the per-load state: the timeline
+ *  pause-mirror carry, the serialized append chain, and the per-process
+ *  once-latches. */
+export function _resetRegisterBoundaryForTest(): void {
+  _resetRegisterForTest();
+  timelinePausedMirror = false;
+  timelineAppendChain = Promise.resolve();
+  conflictActivationDone = false;
+}
