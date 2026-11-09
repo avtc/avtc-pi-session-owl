@@ -436,4 +436,53 @@ describe("append-handler — the re-materialized kept tail (a hook-answered fold
     expect(gap.map((e) => (e as { id: string }).id)).toEqual(["n1"]);
     _resetRematExpectations();
   });
+
+  test("frozen fold rows (the engine's non-extensible payload) are stamped on a copy; a thinking-only kept message matches its placeholder row", async () => {
+    const { _resetRematExpectations, setRematExpectation } = await import("../../host/compaction/remat.js");
+    _resetRematExpectations();
+    const frozen = (r: ClaudeRow): ClaudeRow => Object.freeze({ ...r, message: Object.freeze({ ...r.message }) });
+    setRematExpectation("s-frozen", [
+      { role: "user", text: "# Memory\nthe roots", toolUses: [] },
+      { role: "user", text: "the kept prompt", toolUses: [] },
+      { role: "assistant", text: "", toolUses: [] },
+      { role: "assistant", text: "the kept reply", toolUses: [] },
+    ]);
+    const fold = [
+      frozen(
+        row("sum1", null, {
+          door: "note",
+          message: { type: "user", content: [{ type: "text", text: "# Memory\nthe roots" }] },
+        }),
+      ),
+      frozen(
+        row("f1", "sum1", {
+          door: "note",
+          message: { type: "user", content: [{ type: "text", text: "the kept prompt" }] },
+        }),
+      ),
+      frozen(
+        row("f2", "f1", {
+          door: "response",
+          message: { type: "assistant", content: [{ type: "text", text: "(no content)" }] } as never,
+        }),
+      ),
+      frozen(
+        row("f3", "f2", {
+          door: "response",
+          message: { type: "assistant", content: [{ type: "text", text: "the kept reply" }] } as never,
+        }),
+      ),
+    ];
+    for (const r of fold) expect(captureAppend("s-frozen", r, mirrorFor)).toBe(true);
+    const cap = ensureCapture("s-frozen", mirrorFor);
+    for (const id of ["sum1", "f1", "f2", "f3"]) {
+      expect((cap.rowCache.get(id) as { remat?: boolean }).remat).toBe(true);
+    }
+    // the engine's own objects stay untouched
+    for (const r of fold) expect((r as { remat?: boolean }).remat).toBeUndefined();
+    expect(cap.pending).toEqual(["sum1", "f1", "f2", "f3"]);
+    // every fold row is skipped from the entries view — none is re-observed
+    expect(entriesForCache("s-frozen")).toEqual([]);
+    _resetRematExpectations();
+  });
 });

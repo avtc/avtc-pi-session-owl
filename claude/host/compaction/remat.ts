@@ -9,7 +9,9 @@
 // observation sources. The matcher: the answer's exact message list is
 // recorded at the verdict; the fold's content rows arrive in order right
 // after and match one-to-one (role + exact text — the platform writes the
-// handed-back text verbatim). Matched rows are stamped `remat` and skipped
+// handed-back text verbatim, except an empty text, which it persists as the
+// "(no content)" placeholder: a kept assistant message whose only blocks
+// were thinking). Matched rows are stamped `remat` and skipped
 // by the grouper; the stamp persists in the mirror, so a resume reads it
 // back. A content row that does not match abandons the expectation — a
 // block that is not the answer must never skip real rows — and the
@@ -30,6 +32,10 @@ interface Expectation {
 
 const expectations = new Map<string, Expectation>();
 
+/** The text the platform persists for a built message whose text is empty
+ *  (and that carries no tool blocks to stand in for it). */
+const EMPTY_TEXT_PLACEHOLDER = "(no content)";
+
 /** Arm the matcher at the verdict: the answer's own messages, exactly as
  *  handed back (the platform materializes them in this order). */
 export function setRematExpectation(convKey: string, messages: readonly SessionMessage[]): void {
@@ -48,6 +54,13 @@ function textOf(row: ClaudeRow): string {
     }
   }
   return parts.join("");
+}
+
+/** Whether the row's text is what the platform persists for the expected
+ *  text (verbatim, or the placeholder for an empty one). */
+function textMatches(row: ClaudeRow, expected: string): boolean {
+  const text = textOf(row);
+  return text === expected || (expected === "" && text === EMPTY_TEXT_PLACEHOLDER);
 }
 
 function roleOf(row: ClaudeRow): "user" | "assistant" | null {
@@ -71,7 +84,7 @@ export function matchRematRow(convKey: string, row: ClaudeRow): boolean {
   const role = roleOf(row);
   if (role === null) return false;
   const expected = live.remaining[0];
-  if (expected === undefined || expected.role !== role || textOf(row) !== expected.text) {
+  if (expected === undefined || expected.role !== role || !textMatches(row, expected.text)) {
     expectations.delete(convKey);
     return false;
   }

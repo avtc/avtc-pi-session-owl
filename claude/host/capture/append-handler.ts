@@ -84,18 +84,20 @@ export function captureAppend(
   if (row.door === "queue") return false;
   // a hook-answered fold's materialized rows match the verdict's own
   // message list in order — stamped remat (the grouper skips them; the
-  // stamp persists in the mirror, so a resume reads it back)
-  if (matchRematRow(key, row)) row.remat = true;
-  const cap = ensureCapture(key, mirrorFor, row);
-  const known = cap.rowCache.has(row.uuid);
+  // stamp persists in the mirror, so a resume reads it back). The stamp
+  // goes on a copy: the engine's event payload is non-extensible, and
+  // assigning a new field to it throws.
+  const marked = matchRematRow(key, row) ? ({ ...row, remat: true } as typeof row) : row;
+  const cap = ensureCapture(key, mirrorFor, marked);
+  const known = cap.rowCache.has(marked.uuid);
   // The envelope carries no timestamp either — a row without one is stamped
   // with its ARRIVAL time (rows arrive ~live; an absent stamp rendered every
   // observation range as the epoch — "Jan 01 03:00").
   const stamped =
-    typeof row.timestamp === "string" && row.timestamp.length > 0
-      ? row
-      : ({ ...row, timestamp: new Date().toISOString() } as typeof row);
-  cap.rowCache.set(row.uuid, stamped);
+    typeof marked.timestamp === "string" && marked.timestamp.length > 0
+      ? marked
+      : ({ ...marked, timestamp: new Date().toISOString() } as typeof marked);
+  cap.rowCache.set(marked.uuid, stamped);
   // a re-delivered uuid refreshes the cache but never re-buffers (one line,
   // one row — the mirror must stay deduplicated)
   if (!known) {
@@ -107,7 +109,7 @@ export function captureAppend(
     // one-row branch, and every fold drops every record not marked at the
     // current leaf — the whole graph vanishing on each core switch.
     cap.mirror.bufferRow(toMirroredRow({ ...stamped, parentUuid: stamped.parentUuid ?? cap.mirror.tipUuid() }));
-    cap.pending.push(row.uuid);
+    cap.pending.push(marked.uuid);
   }
   return true;
 }

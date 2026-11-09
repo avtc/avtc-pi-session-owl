@@ -139,6 +139,42 @@ describe("remat expectation matcher", () => {
     ).toBe(false);
   });
 
+  test("an empty expected text matches the platform's placeholder row (a thinking-only kept message)", () => {
+    setRematExpectation("conv", [{ role: "assistant", text: "", toolUses: [] }, KEPT_ASSISTANT]);
+    expect(
+      matchRematRow(
+        "conv",
+        contentRow("p1", null, {
+          door: "response",
+          message: { type: "assistant", content: [{ type: "text", text: "(no content)" }] } as never,
+        }),
+      ),
+    ).toBe(true);
+    // the expectation is still armed: the next kept row matches too
+    expect(
+      matchRematRow(
+        "conv",
+        contentRow("p2", "p1", {
+          door: "response",
+          message: { type: "assistant", content: [{ type: "text", text: KEPT_ASSISTANT.text }] } as never,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  test("the placeholder matches only an empty expected text", () => {
+    setRematExpectation("conv", [KEPT_ASSISTANT]);
+    expect(
+      matchRematRow(
+        "conv",
+        contentRow("p3", null, {
+          door: "response",
+          message: { type: "assistant", content: [{ type: "text", text: "(no content)" }] } as never,
+        }),
+      ),
+    ).toBe(false);
+  });
+
   test("no expectation for the key → false", () => {
     expect(
       matchRematRow(
