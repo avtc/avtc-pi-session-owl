@@ -11,9 +11,13 @@
 // after and match one-to-one (role + exact text — the platform writes the
 // handed-back text verbatim, except an empty text, which it persists as the
 // "(no content)" placeholder: a kept assistant message whose only blocks
-// were thinking). Matched rows are stamped `remat` and skipped
-// by the grouper; the stamp persists in the mirror, so a resume reads it
-// back. A content row that does not match abandons the expectation — a
+// were thinking). The answer's first message is the summary: its row is the
+// fold's compaction carrier and is recorded with the compaction door, the
+// same door the transcript reader derives for the row after a boundary — a
+// compaction entry, never an observation source, and the summary witness a
+// reload anchors its snapshot on. Every later matched row is stamped `remat`
+// and skipped by the grouper. Both persist in the mirror, so a resume reads
+// them back. A content row that does not match abandons the expectation — a
 // block that is not the answer must never skip real rows — and the
 // expectation expires after its window: a fold that never lands must not
 // arm a stale skip.
@@ -28,7 +32,13 @@ interface Expectation {
   at: number;
   /** The messages still awaited, in materialization order. */
   remaining: SessionMessage[];
+  /** Whether the next match consumes the answer's first message (the summary). */
+  atSummary: boolean;
 }
+
+/** What a fold row matched: the answer's summary, a later answer message
+ *  (the kept tail, the display echo), or nothing. */
+export type RematMatch = "summary" | "kept" | null;
 
 const expectations = new Map<string, Expectation>();
 
@@ -40,7 +50,7 @@ const EMPTY_TEXT_PLACEHOLDER = "(no content)";
  *  handed back (the platform materializes them in this order). */
 export function setRematExpectation(convKey: string, messages: readonly SessionMessage[]): void {
   if (messages.length === 0) return;
-  expectations.set(convKey, { at: Date.now(), remaining: [...messages] });
+  expectations.set(convKey, { at: Date.now(), remaining: [...messages], atSummary: true });
 }
 
 /** The row's text blocks joined (the comparison form on the row side). */
@@ -69,28 +79,31 @@ function roleOf(row: ClaudeRow): "user" | "assistant" | null {
   return null;
 }
 
-/** Whether the row is the fold's next expected content row: consumes it in
- *  order, stamps it for the skip. Chrome inside the block (the boundary
- *  row, attachments, ceremony commands) passes through unconsumed; a
- *  mismatched content row abandons the expectation. */
-export function matchRematRow(convKey: string, row: ClaudeRow): boolean {
+/** Whether the row is the fold's next expected content row, and which: the
+ *  summary (the first answer message) or a later one. Consumes it in order.
+ *  Chrome inside the block (the boundary row, attachments, ceremony
+ *  commands) passes through unconsumed; a mismatched content row abandons
+ *  the expectation. */
+export function matchRematRow(convKey: string, row: ClaudeRow): RematMatch {
   const live = expectations.get(convKey);
-  if (live === undefined) return false;
+  if (live === undefined) return null;
   if (Date.now() - live.at > REMAT_EXPECTATION_MS) {
     expectations.delete(convKey);
-    return false;
+    return null;
   }
-  if (row.door === "compaction" || row.door === "command") return false;
+  if (row.door === "compaction" || row.door === "command") return null;
   const role = roleOf(row);
-  if (role === null) return false;
+  if (role === null) return null;
   const expected = live.remaining[0];
   if (expected === undefined || expected.role !== role || !textMatches(row, expected.text)) {
     expectations.delete(convKey);
-    return false;
+    return null;
   }
   live.remaining.shift();
+  const match: RematMatch = live.atSummary ? "summary" : "kept";
+  live.atSummary = false;
   if (live.remaining.length === 0) expectations.delete(convKey);
-  return true;
+  return match;
 }
 
 /** Test-only: drop every expectation. */

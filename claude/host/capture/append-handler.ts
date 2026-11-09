@@ -83,11 +83,19 @@ export function captureAppend(
   // the file can never confirm them.
   if (row.door === "queue") return false;
   // a hook-answered fold's materialized rows match the verdict's own
-  // message list in order — stamped remat (the grouper skips them; the
-  // stamp persists in the mirror, so a resume reads it back). The stamp
-  // goes on a copy: the engine's event payload is non-extensible, and
-  // assigning a new field to it throws.
-  const marked = matchRematRow(key, row) ? ({ ...row, remat: true } as typeof row) : row;
+  // message list in order: the summary row is recorded with the compaction
+  // door (the transcript reader's door for the row after a boundary — a
+  // compaction entry the grouper keeps and never observes), every later
+  // match is stamped remat (the grouper skips it). Both persist in the
+  // mirror, so a resume reads them back. The change goes on a copy: the
+  // engine's event payload is non-extensible, and assigning to it throws.
+  const match = matchRematRow(key, row);
+  const marked =
+    match === "summary"
+      ? ({ ...row, door: "compaction", origin: { kind: "system" } } as typeof row)
+      : match === "kept"
+        ? ({ ...row, remat: true } as typeof row)
+        : row;
   const cap = ensureCapture(key, mirrorFor, marked);
   const known = cap.rowCache.has(marked.uuid);
   // The envelope carries no timestamp either — a row without one is stamped

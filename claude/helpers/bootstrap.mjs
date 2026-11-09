@@ -334,6 +334,12 @@ try {
       continue;
     }
     if (row.type !== "user" && row.type !== "assistant") continue; // same filter as the host reader
+    // the boundary's carrier is the NEXT conversation row in file order,
+    // whether this run writes it or not: a carrier the mirror already holds
+    // (or one the walk skips) still consumes the boundary, so the flag never
+    // rides on to a later row (the host reader's rule)
+    const atBoundary = pendingBoundary;
+    pendingBoundary = false;
     if (livePathMode && !liveSet.has(uuid)) continue; // off the tip's lineage
     if (!seenAfter) {
       if (uuid === afterUuid) seenAfter = true;
@@ -349,9 +355,8 @@ try {
     const plain = JSON.stringify({
       uuid,
       parentUuid: rawParent === null ? null : resolveParent(rawParent),
-      row: deriveRow(row, pendingBoundary),
+      row: deriveRow(row, atBoundary),
     });
-    pendingBoundary = false;
     out += BigInt(byteLength(line));
     n += 1;
     const lineBytes = byteLength(plain) + 1;

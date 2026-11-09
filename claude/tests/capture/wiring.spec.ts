@@ -104,12 +104,15 @@ describe("capture wiring — session.append → capture → turn.complete flush"
     // captures the initial prompt (pi's every-turn-end gate): the seed +
     // CHECK flush with the turn, then the capture's oInitialPrompt records
     // (graph_delta + observation) flush their own batch
+    // batch file names carry no order: read the records in append order
+    // (the producer's seq), the order the fold itself serves them in
     const ledgerLines = (
       await Promise.all(
         ledger.map(async (p2) => ((await harness.fsRead(p2)) ?? "").split("\n").filter((l) => l.length > 0)),
       )
     ).flat();
-    const kinds = ledgerLines.map((l) => JSON.parse(l).kind);
+    const records = ledgerLines.map((l) => JSON.parse(l) as { kind: string; seq: number });
+    const kinds = records.sort((a, b) => a.seq - b.seq).map((r) => r.kind);
     expect(kinds).toEqual(["graph_delta", "CHECK", "graph_delta", "observation"]);
   });
 

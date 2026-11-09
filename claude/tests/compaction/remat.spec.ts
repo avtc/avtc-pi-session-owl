@@ -3,10 +3,11 @@
 
 import type { SessionMessage } from "claude-code";
 // The remat expectation suite: a hook-answered compaction's materialized
-// rows are matched in order against the answer's own message list and
-// stamped `remat` (skipped by the grouper — the originals' entries are the
-// observation sources; the fresh rows are the platform re-persisting the
-// same content under new uuids).
+// rows are matched in order against the answer's own message list. The
+// first match is the summary (recorded as the compaction entry); the later
+// ones are stamped `remat` (skipped by the grouper — the originals' entries
+// are the observation sources; the fresh rows are the platform re-persisting
+// the same content under new uuids).
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { ClaudeRow } from "../../host/capture/grouper.js";
 import { _resetRematExpectations, matchRematRow, setRematExpectation } from "../../host/compaction/remat.js";
@@ -43,7 +44,7 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: "Conversation compacted" }] },
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
     // the summary row (a built user row → door note)
     expect(
       matchRematRow(
@@ -53,7 +54,7 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: SUMMARY.text }] },
         }),
       ),
-    ).toBe(true);
+    ).toBe("summary");
     // kept user row (door note)
     expect(
       matchRematRow(
@@ -63,14 +64,14 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: KEPT_USER.text }] },
         }),
       ),
-    ).toBe(true);
+    ).toBe("kept");
     // an attachment row inside the block does not consume
     expect(
       matchRematRow(
         "conv",
         contentRow("at1", "f1", { door: "attachment", message: { type: "attachment", content: [] } }),
       ),
-    ).toBe(false);
+    ).toBeNull();
     // kept assistant row (door response — the leak this matcher closes)
     expect(
       matchRematRow(
@@ -80,7 +81,7 @@ describe("remat expectation matcher", () => {
           message: { type: "assistant", content: [{ type: "text", text: KEPT_ASSISTANT.text }] } as never,
         }),
       ),
-    ).toBe(true);
+    ).toBe("kept");
     // the list is exhausted: the next ceremony/content row is a normal row
     expect(
       matchRematRow(
@@ -90,7 +91,7 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: "/compact" }] },
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
   });
 
   test("a content row that does not match abandons the expectation — never skip a real row", () => {
@@ -104,7 +105,7 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: "something else entirely" }] },
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
     // the expectation is gone: even the exact expected text no longer matches
     expect(
       matchRematRow(
@@ -114,7 +115,7 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: SUMMARY.text }] },
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
   });
 
   test("a role mismatch also abandons (an assistant row where a user row was expected)", () => {
@@ -127,7 +128,7 @@ describe("remat expectation matcher", () => {
           message: { type: "assistant", content: [{ type: "text", text: KEPT_USER.text }] } as never,
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
     expect(
       matchRematRow(
         "conv",
@@ -136,20 +137,29 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: KEPT_USER.text }] },
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
   });
 
   test("an empty expected text matches the platform's placeholder row (a thinking-only kept message)", () => {
-    setRematExpectation("conv", [{ role: "assistant", text: "", toolUses: [] }, KEPT_ASSISTANT]);
+    setRematExpectation("conv", [SUMMARY, { role: "assistant", text: "", toolUses: [] }, KEPT_ASSISTANT]);
     expect(
       matchRematRow(
         "conv",
-        contentRow("p1", null, {
+        contentRow("s1", null, {
+          door: "note",
+          message: { type: "user", content: [{ type: "text", text: SUMMARY.text }] },
+        }),
+      ),
+    ).toBe("summary");
+    expect(
+      matchRematRow(
+        "conv",
+        contentRow("p1", "s1", {
           door: "response",
           message: { type: "assistant", content: [{ type: "text", text: "(no content)" }] } as never,
         }),
       ),
-    ).toBe(true);
+    ).toBe("kept");
     // the expectation is still armed: the next kept row matches too
     expect(
       matchRematRow(
@@ -159,7 +169,7 @@ describe("remat expectation matcher", () => {
           message: { type: "assistant", content: [{ type: "text", text: KEPT_ASSISTANT.text }] } as never,
         }),
       ),
-    ).toBe(true);
+    ).toBe("kept");
   });
 
   test("the placeholder matches only an empty expected text", () => {
@@ -172,10 +182,10 @@ describe("remat expectation matcher", () => {
           message: { type: "assistant", content: [{ type: "text", text: "(no content)" }] } as never,
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
   });
 
-  test("no expectation for the key → false", () => {
+  test("no expectation for the key → no match", () => {
     expect(
       matchRematRow(
         "conv",
@@ -184,7 +194,7 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: SUMMARY.text }] },
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
   });
 
   test("an expectation older than the window never matches (stale state cannot skip rows)", () => {
@@ -200,7 +210,7 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: SUMMARY.text }] },
         }),
       ),
-    ).toBe(false);
+    ).toBeNull();
   });
 
   test("per-conversation keys: another conversation's fold does not consume this one's expectation", () => {
@@ -214,7 +224,7 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: KEPT_USER.text }] },
         }),
       ),
-    ).toBe(true);
+    ).toBe("summary");
     // conv-a's expectation is untouched
     expect(
       matchRematRow(
@@ -224,6 +234,6 @@ describe("remat expectation matcher", () => {
           message: { type: "user", content: [{ type: "text", text: SUMMARY.text }] },
         }),
       ),
-    ).toBe(true);
+    ).toBe("summary");
   });
 });

@@ -441,6 +441,91 @@ describe("store-context — THE INTEGRATION (graph-store load on this adapter)",
     expect(result.skippedDeltas).toBe(1);
   });
 
+  test("a live owl-answered fold's summary row (the engine's note-door row) witnesses its snapshot on reload", async () => {
+    const { _resetCapture, captureAppend } = await import("../../host/capture/append-handler.js");
+    const { _resetRematExpectations, setRematExpectation } = await import("../../host/compaction/remat.js");
+    _resetCapture();
+    _resetRematExpectations();
+    const ledger1 = new LedgerWriter(fs, DIR, "proc-live", () => 1000);
+    const mirror1 = new MirrorWriter(fs, DIR, "proc-live");
+    const p1 = await prepareStoreContext(fs, DIR, ledger1, mirror1);
+    mirror1.bufferRow(row("u1", null));
+    mirror1.bufferRow(row("u2", "u1"));
+    p1.ctx.appendEntry(OBSERVATION_TYPE, obsEntry("u1", "u2", ["o1"]));
+    await ledger1.flush();
+    await mirror1.flush();
+    // the compaction persists its snapshot (n1 holding o1) + summary pair
+    const SUMMARY = "# Memory\nthe roots";
+    const details = {
+      type: "session-owl",
+      version: "v1",
+      nodes: [
+        {
+          id: "n1",
+          summary: "node one",
+          summaryTokens: 3,
+          state: "active",
+          importance: "med",
+          parentNode: null,
+          observationIds: ["o1"],
+          childNodeIds: [],
+          supersededBy: null,
+          timestamps: {
+            createdAt: "2026-10-11T10:00:00.000Z",
+            updatedAt: "2026-10-11T10:00:00.000Z",
+            rangeStart: "2026-10-11T10:00:00.000Z",
+            rangeEnd: "2026-10-11T10:00:00.000Z",
+          },
+        },
+      ],
+      oInitialPrompt: null,
+      nextObsId: 2,
+      nextNodeId: 2,
+      selectedTree: null,
+      lastCompactionLedger: null,
+      compactionStages: {},
+      observations: [
+        makeObservation({
+          id: "o1",
+          parentNode: "n1",
+          summary: "obs one",
+          importance: "med",
+          sourceEntryIds: ["u1"],
+          timestamp: "2026-10-11T10:00:00.000Z",
+        }),
+      ],
+    };
+    await persistSnapshotText(fs, DIR, ledger1, "snapLive", JSON.stringify(details), "u2");
+    ledger1.append("summary", { text: SUMMARY }, "u2");
+    // the platform materializes the answer: the summary arrives as a frozen
+    // note-door engine row (no parent edge on the envelope)
+    setRematExpectation("live", [{ role: "user", text: SUMMARY, toolUses: [] }]);
+    const summaryRow = Object.freeze({
+      uuid: "s1",
+      door: "note",
+      origin: Object.freeze({ kind: "engine" }),
+      message: Object.freeze({ type: "user", content: [{ type: "text", text: SUMMARY }] }),
+    });
+    expect(captureAppend("live", summaryRow as never, () => mirror1)).toBe(true);
+    await ledger1.flush();
+    await mirror1.flush();
+    // restart: sweep + load — the snapshot is witnessed and anchors the load
+    const sweep = await (await import("../../host/storage/store-context.js")).sweepSession(fs, DIR);
+    const mirror2 = new MirrorWriter(fs, DIR, "proc-live2");
+    mirror2.adoptRows(sweep.rows);
+    const p2 = await prepareStoreContext(fs, DIR, new LedgerWriter(fs, DIR, "proc-live2"), mirror2);
+    const graphStore = await import("../../core/src/store/graph-store.js");
+    await graphStore.load(p2.ctx);
+    // the snapshot anchors (a deltas-only fold would re-wrap o1 into a fresh
+    // node instead of restoring the snapshot's own)
+    expect(p2.resolvedSnapshot()).not.toBeNull();
+    const store = graphStore.getGraphStore();
+    expect(store.graph.nodes.get("n1" as NodeId)?.summary).toBe("node one");
+    expect(store.graph.nodes.get("n1" as NodeId)?.observationIds).toEqual(["o1"]);
+    _resetCapture();
+    _resetRematExpectations();
+  });
+
   test("a restart KEEPS a snapshot persisted past the last CHECK", async () => {
     // THE RESUME SHAPE: a normal turn closed its
     // CHECK; the compaction catch-up then persisted a NEW snapshot + deltas

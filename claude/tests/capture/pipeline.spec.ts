@@ -418,20 +418,24 @@ describe("append-handler — the re-materialized kept tail (a hook-answered fold
         mirrorFor,
       ),
     ).toBe(true);
-    // the stamp persisted in the capture cache (the mirror lines carry it)
+    // the capture cache holds what the mirror lines carry: the summary row
+    // with the compaction door, the kept rows stamped remat
     const cap = ensureCapture("s-fold", mirrorFor);
-    expect((cap.rowCache.get("sum1") as { remat?: boolean }).remat).toBe(true);
+    expect(cap.rowCache.get("sum1")?.door).toBe("compaction");
+    expect((cap.rowCache.get("sum1") as { remat?: boolean }).remat).toBeUndefined();
     expect((cap.rowCache.get("f1") as { remat?: boolean }).remat).toBe(true);
     expect((cap.rowCache.get("f2") as { remat?: boolean }).remat).toBe(true);
     expect((cap.rowCache.get("b1") as { remat?: boolean }).remat).toBeUndefined();
     expect((cap.rowCache.get("n1") as { remat?: boolean }).remat).toBeUndefined();
-    // the entries view: the fold's content rows are gone (the boundary's
-    // compaction entry stays — the observation floor marker); with the
-    // frontier at the pre-fold reply the gap holds ONLY the new turn — the
-    // kept tail is never re-observed, the new content still is
-    const entries = entriesForCache("s-fold") as Array<{ id: string; type?: string }>;
-    expect(entries.map((e) => e.id)).toEqual(["u1", "a1", "b1", "n1"]);
+    // the entries view: the kept rows are gone; the boundary and the summary
+    // ride as compaction entries (the summary is the witness a reload
+    // anchors its snapshot on). With the frontier at the pre-fold reply the
+    // gap holds ONLY the new turn — the kept tail is never re-observed, the
+    // new content still is
+    const entries = entriesForCache("s-fold") as Array<{ id: string; type?: string; summary?: string }>;
+    expect(entries.map((e) => e.id)).toEqual(["u1", "a1", "b1", "sum1", "n1"]);
     expect(entries.find((e) => e.id === "b1")?.type).toBe("compaction");
+    expect(entries.find((e) => e.id === "sum1")).toMatchObject({ type: "compaction", summary: "# Memory\nthe roots" });
     const gap = computeUnobserved(entries as never, "a1").filter((e) => (e as { type?: string }).type === "message");
     expect(gap.map((e) => (e as { id: string }).id)).toEqual(["n1"]);
     _resetRematExpectations();
@@ -475,14 +479,18 @@ describe("append-handler — the re-materialized kept tail (a hook-answered fold
     ];
     for (const r of fold) expect(captureAppend("s-frozen", r, mirrorFor)).toBe(true);
     const cap = ensureCapture("s-frozen", mirrorFor);
-    for (const id of ["sum1", "f1", "f2", "f3"]) {
+    expect(cap.rowCache.get("sum1")?.door).toBe("compaction");
+    for (const id of ["f1", "f2", "f3"]) {
       expect((cap.rowCache.get(id) as { remat?: boolean }).remat).toBe(true);
     }
     // the engine's own objects stay untouched
     for (const r of fold) expect((r as { remat?: boolean }).remat).toBeUndefined();
+    expect(fold[0]?.door).toBe("note");
     expect(cap.pending).toEqual(["sum1", "f1", "f2", "f3"]);
-    // every fold row is skipped from the entries view — none is re-observed
-    expect(entriesForCache("s-frozen")).toEqual([]);
+    // the summary is the fold's one entry (a compaction entry, never
+    // observed); the kept rows are skipped — none is re-observed
+    const entries = entriesForCache("s-frozen") as Array<{ id: string; type?: string }>;
+    expect(entries.map((e) => [e.id, e.type])).toEqual([["sum1", "compaction"]]);
     _resetRematExpectations();
   });
 });

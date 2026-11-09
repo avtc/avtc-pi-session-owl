@@ -2017,8 +2017,9 @@ async function onSessionCompact(_$: any, e: AnyEvent, next: Next) {
     // claim would already be expired when the rows land)
     compactClaims.set(claimKey, { at: Date.now(), kind: "answer" });
     // the fold's materialized rows arrive right after, in order — arm the
-    // in-order matcher with the answer's own messages so they are stamped
-    // remat (never re-observed; the originals' entries stay the sources)
+    // in-order matcher with the answer's own messages: the summary row
+    // records as the compaction entry, the rest are stamped remat (never
+    // re-observed; the originals' entries stay the sources)
     if (outcome.kind === "answer") {
       setRematExpectation(claimKey, outcome.result.messages);
     }

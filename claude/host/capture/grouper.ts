@@ -54,8 +54,9 @@ export interface ClaudeRow {
   /** True on the re-materialized kept tail of a hook-answered compaction
    *  (matched at capture against the answer's own messages — see
    *  host/compaction/remat.ts): the row is the platform re-persisting
-   *  already-observed content under a fresh uuid and never becomes an
-   *  entry. */
+   *  content whose original row is the observation source, under a fresh
+   *  uuid, and never becomes an entry. The fold's summary row is not
+   *  stamped: it carries the compaction door instead. */
   remat?: boolean;
 }
 

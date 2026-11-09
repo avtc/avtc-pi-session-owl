@@ -333,6 +333,40 @@ describe("helpers/bootstrap.mjs — the user-run bootstrap", () => {
     expect(byUuid.get("u-2")).toBe("prompt");
   }, 30_000);
 
+  test("an already-mirrored carrier consumes the boundary: a rerun's first absent row stays a prompt", async () => {
+    const run = promisify(execFile);
+    const tmp = tempDir("owl-boot-boundary-rerun");
+    const t = join(tmp, "t.jsonl");
+    const cfg = join(tmp, "cfg");
+    const lines: Record<string, unknown>[] = [
+      { uuid: "u-1", parentUuid: null, type: "user", message: { role: "user", content: "first" } },
+      { uuid: "b-1", parentUuid: "u-1", type: "system", subtype: "compact_boundary" },
+      { uuid: "mem-1", parentUuid: "b-1", type: "user", message: { role: "user", content: "# Memory\nthe render" } },
+      { uuid: "u-2", parentUuid: "mem-1", type: "user", message: { role: "user", content: "after" } },
+    ];
+    const helper = join(__dirname, "..", "..", "helpers", "bootstrap.mjs");
+    writeFileSync(t, lines.map((r) => JSON.stringify(r)).join("\n"), "utf8");
+    await run(process.execPath, [helper, t, "--config-dir", cfg, "--session-id", "sess-b"]);
+    // the conversation goes on: a later prompt the mirror does not hold yet
+    lines.push({ uuid: "u-3", parentUuid: "u-2", type: "user", message: { role: "user", content: "much later" } });
+    writeFileSync(t, lines.map((r) => JSON.stringify(r)).join("\n"), "utf8");
+    const second = await run(process.execPath, [helper, t, "--config-dir", cfg, "--session-id", "sess-b"]);
+    const s2 = JSON.parse(second.stderr.trim().split("\n").pop() ?? "{}");
+    expect(s2.rows).toBe(1); // only u-3 is absent
+    const sessDir = join(cfg, "session-owl", "sessions", "sess-b");
+    const doors = new Map<string, string | undefined>();
+    for (const f of readdirSync(sessDir).filter((x) => /^m\d+-[0-9a-f]+\.jsonl$/.test(x))) {
+      for (const l of readFileSync(join(sessDir, f), "utf8").split("\n")) {
+        if (l.length === 0) continue;
+        const r = JSON.parse(l) as { uuid: string; row?: { door?: string } };
+        doors.set(r.uuid, r.row?.door);
+      }
+    }
+    expect(doors.get("mem-1")).toBe("compaction");
+    // the boundary was consumed by its (skipped, already-mirrored) carrier
+    expect(doors.get("u-3")).toBe("prompt");
+  }, 30_000);
+
   test("multi-page runs keep ONE seq with .k continuation parts (writer parity)", async () => {
     const run = promisify(execFile);
     const tmp = tempDir("owl-boot2");
