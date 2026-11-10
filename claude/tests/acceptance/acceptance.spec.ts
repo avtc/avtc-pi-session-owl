@@ -186,7 +186,7 @@ describe("acceptance sweep — the thirteen done-condition areas", () => {
     expect(plugin.version).toBe(rootPkg.version); // one version per repo
     expect(claudePkg.version).toBe(rootPkg.version);
     expect(claudePkg.dependencies.typebox).toBe("1.3.27"); // exact pin
-    expect(claudePkg.dependencies["avtc-claude-logger"]).toBe("^1.0.5"); // registry spec (release state — was the file: dev link)
+    expect(claudePkg.dependencies["avtc-claude-logger"]).toBe("^1.0.6"); // registry spec (release state — was the file: dev link)
     expect(claudePkg.dependencies["avtc-claude-settings-ui"]).toBe("^1.0.15");
     expect(exists("claude/package-lock.json")).toBe(true); // lockfile committed
     expect(exists("claude/.claude-plugin/types")).toBe(true); // committed types dir

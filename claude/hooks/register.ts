@@ -704,10 +704,28 @@ async function onClassicSessionStart($: any, e: AnyEvent, next: Next) {
       const configDir = state.getCachedConfigDir() ?? "";
       initLogConsumer({
         configDir,
+        // the window's timer rides the engine clock — the sandbox has no
+        // host timers, and an empty-queue tick is a no-op, so an uncancellable
+        // one-shot is fine here
+        schedule: (ms: number, fn: () => void) => {
+          $.clock.after(ms, fn);
+          return null;
+        },
         fs: {
           read: (p) => bridge.currentServices().fsRead(p),
           write: (p, t) => bridge.currentServices().fsWrite(p, t),
           list: (d) => bridge.currentServices().fsList(d),
+          stat: async (p) => {
+            try {
+              const s = await bridge.currentServices().fsStat(p);
+              return { mtimeMs: s.mtimeMs, size: s.size };
+            } catch (err) {
+              // an absent file is the contract's null — anything else must
+              // reject so the library turns its read-skip guard off entirely
+              if (/ENOENT|no such file/i.test(errText(err))) return null;
+              throw err;
+            }
+          },
         },
       });
       await initSettingsConsumer({

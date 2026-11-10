@@ -10,7 +10,8 @@
 // fresh (every real resume — session.end released the old one), and it is
 // cleared by the first check that actually knows our rows.
 
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { log } from "../../core/src/log.js";
 import { conversationKey as conversationKeyOf } from "../../host/state.js";
 import { getSessionStorage } from "../../host/storage/session-storage.js";
 import { createHarness } from "../helpers/harness.js";
@@ -91,12 +92,22 @@ const apiToolResult = (toolUseId: string) => ({
   content: [{ type: "tool_result", tool_use_id: toolUseId, content: "ok" }],
 });
 
+let logged: string[] = [];
+beforeEach(() => {
+  // The production log line is this suite’s seam for live-chain verdicts:
+  // captured synchronously at the logger — the writer batches file writes
+  // into a window, so the specs must not race the flush.
+  logged = [];
+  vi.spyOn(log, "info").mockImplementation((message: string) => {
+    logged.push(message);
+  });
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 async function logText(): Promise<string> {
-  const parts: string[] = [];
-  for (const p of harness.fsPaths().filter((x) => x.startsWith("/cfg/logs/"))) {
-    parts.push((await harness.fsRead(p)) ?? "");
-  }
-  return parts.join("\n");
+  return logged.join("\n");
 }
 
 describe("resume exemption — the process-start check at a resume", () => {

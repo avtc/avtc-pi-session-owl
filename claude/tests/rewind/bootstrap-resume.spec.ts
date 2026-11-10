@@ -10,7 +10,8 @@
 // (the chain simply extends past where the boundary stood), and a real
 // rewind after the resume still fires.
 
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { log } from "../../core/src/log.js";
 import { createHarness } from "../helpers/harness.js";
 
 const harness = createHarness();
@@ -78,12 +79,22 @@ function summaryFileRow(uuid: string, parentUuid: string): string {
 
 const jsonl = (...rows: string[]) => `${rows.join("\n")}\n`;
 
+let logged: string[] = [];
+beforeEach(() => {
+  // The production log line is this suite’s seam for live-chain verdicts:
+  // captured synchronously at the logger — the writer batches file writes
+  // into a window, so the specs must not race the flush.
+  logged = [];
+  vi.spyOn(log, "info").mockImplementation((message: string) => {
+    logged.push(message);
+  });
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 async function logText(): Promise<string> {
-  const parts: string[] = [];
-  for (const p of harness.fsPaths().filter((x) => x.startsWith("/cfg/logs/"))) {
-    parts.push((await harness.fsRead(p)) ?? "");
-  }
-  return parts.join("\n");
+  return logged.join("\n");
 }
 
 async function turn(): Promise<void> {

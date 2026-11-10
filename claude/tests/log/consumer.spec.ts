@@ -52,7 +52,7 @@ describe("the translating backend", () => {
   test("after init: files land under the real root, not the sentinel", async () => {
     _resetLogConsumerForTest();
     const { files, fs } = memFiles();
-    initLogConsumer({ configDir: "/cfg", fs });
+    initLogConsumer({ configDir: "/cfg", fs, schedule: null });
     const logger = createLogger("ring-probe", { baseDir: testBackend().baseDir, backend: testBackend().adapter });
     logger.error("hello ring", null);
     // the consumer flushes on a timer — wait for this logger's file instead
@@ -73,7 +73,7 @@ describe("the translating backend", () => {
   test("the vendored core's logger name is preserved (avtc-pi-session-owl ring)", async () => {
     _resetLogConsumerForTest();
     const { files, fs } = memFiles();
-    initLogConsumer({ configDir: "/cfg2", fs });
+    initLogConsumer({ configDir: "/cfg2", fs, schedule: null });
     const logger = createLogger("avtc-pi-session-owl", {
       baseDir: testBackend().baseDir,
       backend: testBackend().adapter,
@@ -82,5 +82,53 @@ describe("the translating backend", () => {
     await new Promise((r) => setTimeout(r, 50));
     const paths = [...files.keys()];
     expect(paths.some((p) => p.startsWith("/cfg2/logs/avtc-pi-session-owl"))).toBe(true);
+  });
+});
+
+describe("the window schedule and stat seams", () => {
+  test("init forwards the timer authority — lines batch until the window's callback fires", async () => {
+    _resetLogConsumerForTest();
+    const { files, fs } = memFiles();
+    // a holder array: the callback assigns it; TS can't narrow through a
+    // closure back to the local
+    const armed: Array<{ ms: number; fn: () => void }> = [];
+    initLogConsumer({
+      configDir: "/cfgW",
+      fs,
+      schedule: (ms, fn) => {
+        armed.push({ ms, fn });
+        return null;
+      },
+    });
+    const logger = createLogger("win-probe", { baseDir: testBackend().baseDir, backend: testBackend().adapter });
+    logger.info("coalesce");
+    await new Promise((r) => setTimeout(r, 40));
+    // inside the window: the line is queued, not written
+    expect([...files.keys()].some((p) => p.startsWith("/cfgW/logs/win-probe"))).toBe(false);
+    expect(armed).toHaveLength(1);
+    expect(armed[0]?.ms).toBe(100); // the default agglomeration window
+    armed[0]?.fn(); // the seam's "timer" lands
+    const ring = await vi.waitFor(() => {
+      const hits = [...files.keys()].filter((p) => p.startsWith("/cfgW/logs/win-probe"));
+      expect(hits.length).toBeGreaterThan(0);
+      return hits;
+    });
+    expect(files.get(ring[0] as string)).toContain("coalesce");
+  });
+
+  test("stat: passed through when the surface carries it; a missing stat surface rejects (retention off)", async () => {
+    _resetLogConsumerForTest();
+    const { fs } = memFiles();
+    const withStat = {
+      ...fs,
+      stat: async (_p: string) => ({ mtimeMs: 42, size: 7 }),
+    };
+    initLogConsumer({ configDir: "/cfgS", fs: withStat, schedule: null });
+    await expect(testBackend().adapter.stat?.("/probe")).resolves.toEqual({ mtimeMs: 42, size: 7 });
+    // fresh consumer on a surface WITHOUT stat — the library turns retention
+    // off the moment its authority throws; the adapter must reject, never lie
+    _resetLogConsumerForTest();
+    initLogConsumer({ configDir: "/cfgS2", fs, schedule: null });
+    await expect(testBackend().adapter.stat?.("/probe")).rejects.toThrow();
   });
 });

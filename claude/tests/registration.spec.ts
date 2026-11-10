@@ -778,10 +778,9 @@ describe("turn-boundary trigger arms — the loop goes live", () => {
     });
     h.sessionApi.set([]);
     await h.dispatch("turn.complete", { answer: "done", isAborted: false });
-    // fire-and-forget: the launch chain settles asynchronously
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    // the harness's spawn recorder saw the observe stage agent spawn
-    expect(h.spawned.calls.length).toBeGreaterThan(0);
+    // fire-and-forget: the launch chain settles asynchronously — wait for
+    // the harness's spawn recorder to see it, never a fixed sleep
+    await vi.waitFor(() => expect(h.spawned.calls.length).toBeGreaterThan(0), { timeout: 3000, interval: 25 });
     expect(String((h.spawned.calls[0] as Record<string, unknown>).subagentType ?? "")).toContain("observe");
   });
 
