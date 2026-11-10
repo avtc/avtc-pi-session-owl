@@ -59,6 +59,9 @@ if (tailN !== null) {
   // snapshot, so one id can name a parentless chrome row AND the real row
   const uuidIds = new Set();
   const messageIdOnly = new Set();
+  // ids the file names only on file-history chrome — presence evidence for
+  // a queued row the transcript never files (a side-branched command row)
+  const echoIds = new Set();
   let torn = false;
   const fd = openSync(file, "r");
   try {
@@ -103,8 +106,13 @@ if (tailN !== null) {
       // file-history chrome: no uuid, no parent — under the messageId of a
       // message, echoing its chain row's id. Never a chain slot: a stand-in
       // caught before the twin row lands would prove presence for it and
-      // anchor a fresh root on chrome (a false rewind verdict)
-      if (row.type === "file-history-snapshot" || row.type === "file-history-delta") return;
+      // anchor a fresh root on chrome (a false rewind verdict). Its messageId
+      // still names the id for the verifier's presence check — on a
+      // side-branched command row the echo is the row's only file trace
+      if (row.type === "file-history-snapshot" || row.type === "file-history-delta") {
+        if (typeof row.messageId === "string") echoIds.add(row.messageId);
+        return;
+      }
       // every chain slot the capture can name: rows written with no uuid
       // (command rows) are mirrored under their messageId, so the tail
       // window must count them too
@@ -166,7 +174,7 @@ if (tailN !== null) {
       .slice(0, tailN)
       .filter((e) => !(messageIdOnly.has(e) && uuidIds.has(e[0])))
       .reverse(); // oldest-first
-    process.stdout.write(`${JSON.stringify({ ok: true, torn, tail: out })}\n`);
+    process.stdout.write(`${JSON.stringify({ ok: true, torn, tail: out, echo: [...echoIds] })}\n`);
     process.exit(0);
   } catch (err) {
     process.stdout.write(`${JSON.stringify({ ok: false, error: String(err?.message || err) })}\n`);

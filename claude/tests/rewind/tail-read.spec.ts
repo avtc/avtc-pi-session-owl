@@ -66,6 +66,9 @@ describe("tail-read — capsule tail parsing", () => {
     expect(facts.torn).toBe(false);
     expect(facts.rows.map((r) => r.uuid)).toEqual(["u1", "u2"]);
     expect(facts.rows.some((r) => r.parentUuid === null && r.uuid !== "u1")).toBe(false);
+    // the echo: the file still NAMES the chrome's ids — presence evidence
+    // for a queued row (side-branched command) the transcript never files
+    expect([...facts.echoIds].sort()).toEqual(["m1a", "t05"]);
   });
 
   test.each([
@@ -180,6 +183,7 @@ describe("tail-read — helper output parsing", () => {
         { uuid: "b1", parentUuid: null, boundary: true },
         { uuid: "u1", parentUuid: "b1", boundary: false },
       ],
+      echoIds: new Set<string>(),
     });
   });
   test("ok:false, malformed JSON, and an empty stdout all degrade to null", () => {

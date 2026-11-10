@@ -39,7 +39,7 @@ function tail(): TailFacts {
     { uuid: BETA_RE, parentUuid: SYS, boundary: false }, // THE FORK
     { uuid: EPSILON_A, parentUuid: BETA_RE, boundary: false },
   ];
-  return { rows, torn: false };
+  return { rows, torn: false, echoIds: new Set<string>() };
 }
 
 const known = new Set([A, OLD_BETA, OLD_BETA_A, GAMMA, GAMMA_A, DELTA, DELTA_A, BETA_RE, EPSILON_A]);
@@ -98,7 +98,7 @@ describe("the anchor walk tolerates same-parent shapes (no false rewind)", () =>
     const known = new Set(tailRows.map((r) => r.uuid));
     const proc = new LiveChainProcessor({
       statSize: async () => 1000,
-      readTail: async () => ({ rows: tailRows, torn: false }),
+      readTail: async () => ({ rows: tailRows, torn: false, echoIds: new Set<string>() }),
       owlTailExcluding: (exclude: ReadonlySet<string>) => {
         const order = tailRows.map((r) => r.uuid).filter((u) => !exclude.has(u));
         return order.length > 0 ? order[order.length - 1] : null;

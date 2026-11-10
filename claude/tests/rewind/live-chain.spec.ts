@@ -19,7 +19,7 @@ function row(uuid: string, parent: string | null, boundary = false): TailRow {
 }
 
 function facts(rows: TailRow[], torn = false): TailFacts {
-  return { rows, torn };
+  return { rows, torn, echoIds: new Set<string>() };
 }
 
 interface Harness {
@@ -260,6 +260,29 @@ describe("live chain processor — the normal tick", () => {
     expect(h.patched).toEqual([]);
     expect(h.logs.some((m) => m.includes("amputation"))).toBe(false);
     expect(h.logs.some((m) => m.includes("fresh root"))).toBe(false);
+  });
+
+  test("a queued row whose only file trace is a file-history echo never reads as amputation", async () => {
+    // a canceled /compact command row is side-branched: the transcript
+    // never files it, and the only line carrying its id is a
+    // file-history-snapshot the engine writes at that message boundary.
+    // The echo proves the id is named by the file — it never takes a chain
+    // slot (no uuid, nothing to anchor) — so with a real row present after
+    // it the queued row is never condemned, and the chain verifies on
+    const text = [
+      JSON.stringify({ uuid: "r1", parentUuid: "r0", type: "user" }),
+      JSON.stringify({ uuid: "br", parentUuid: "r1", type: "user" }),
+      JSON.stringify({ type: "file-history-snapshot", messageId: "cmd1", snapshot: {} }),
+      "",
+    ].join("\n");
+    const h = harness({ owlTail: "r1", known: ["r1"], tail: parseCapsuleTail(text, 10) });
+    h.proc.enqueue(ev("cmd1", true, "note"));
+    h.proc.enqueue(ev("br", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    expect(h.logs.some((m) => m.includes("amputation"))).toBe(false);
+    expect(h.logs.some((m) => m.includes("fresh root"))).toBe(false);
+    expect(h.patched).toContainEqual({ uuid: "br", parent: "r1" });
   });
 
   test("an expectation on a chain-id row with no deeper ancestry rebases quietly", async () => {

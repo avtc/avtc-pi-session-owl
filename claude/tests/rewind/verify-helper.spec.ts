@@ -25,6 +25,7 @@ interface VerifyReport {
   rowsAfter?: number;
   torn?: boolean;
   tail?: [string, string | null, number][];
+  echo?: string[];
 }
 
 async function verify(file: string, ...args: string[]): Promise<VerifyReport> {
@@ -183,6 +184,27 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
       ]);
     },
   );
+
+  test("file-history chrome names its ids in echo — presence without a chain slot", async () => {
+    // a side-branched command row is never filed: its id survives only on
+    // the file-history-snapshot of that message boundary — echoed, never a
+    // tail row (no uuid, no parent)
+    const file = tempTranscript(
+      [
+        '{"uuid":"r1","parentUuid":"r0","type":"user"}',
+        '{"uuid":"br","parentUuid":"r1","type":"user"}',
+        '{"type":"file-history-snapshot","messageId":"cmd1","snapshot":{}}',
+        "",
+      ].join("\n"),
+    );
+    const report = await verify(file, "--tail", "10");
+    expect(report.ok).toBe(true);
+    expect(report.tail).toEqual([
+      ["r1", "r0", 0, 0],
+      ["br", "r1", 0, 0],
+    ]);
+    expect(report.echo).toEqual(["cmd1"]);
+  });
 
   test("the window counts UUID rows, not raw lines — dense metadata cannot push queued rows out of the tail", async () => {
     // a busy turn's file: every uuid row is surrounded by several metadata

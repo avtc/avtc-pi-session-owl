@@ -35,6 +35,11 @@ export interface TailFacts {
   rows: TailRow[];
   /** the file's last line looked mid-write — back off and re-read */
   torn: boolean;
+  /** ids the file names ONLY on file-history chrome (its messageId) —
+   * presence evidence for a queued id the transcript never files as a row
+   * (a side-branched command row), never a chain slot: no uuid, no parent,
+   * nothing to anchor */
+  echoIds: Set<string>;
 }
 
 /** Parse the file's last N uuid-bearing rows out of a whole-file capsule
@@ -43,7 +48,7 @@ export interface TailFacts {
  *  last line without a trailing newline, or one that fails to parse, is
  *  torn and excluded from the rows. */
 export function parseCapsuleTail(text: string, maxRows: number, log?: (message: string) => void): TailFacts {
-  if (text === "") return { rows: [], torn: false };
+  if (text === "") return { rows: [], torn: false, echoIds: new Set() };
   const endsWithNewline = text.endsWith("\n");
   const lines = text.split("\n");
   // a trailing "" from the final newline is not a line
@@ -55,6 +60,7 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
   // scan from the END: only the last maxRows uuid-bearing rows matter, so
   // the prefix is never parsed
   const rows: TailRow[] = [];
+  const echoIds = new Set<string>();
   // ids a real uuid row holds, and the rows named only by messageId: the
   // engine writes file-history rows under the messageId of the message they
   // snapshot, so the same id can name a parentless chrome row AND the real
@@ -89,7 +95,14 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
     // delta ahead of the assistant rows), a parentless stand-in would prove
     // presence for that twin and anchor a fresh root on chrome — a false
     // rewind verdict. It never takes a chain slot; the twin owns the id.
-    if (row.type === "file-history-snapshot" || row.type === "file-history-delta") continue;
+    // What the messageId does carry is the file NAMING that id: on a
+    // side-branched command row the transcript never files as a row, the
+    // echo is the row's only trace — the verifier reads it as presence,
+    // never as chain structure.
+    if (row.type === "file-history-snapshot" || row.type === "file-history-delta") {
+      if (typeof row.messageId === "string") echoIds.add(row.messageId);
+      continue;
+    }
     // every chain slot the capture can name: the engine writes some rows
     // (command rows) with no uuid at all — their messageId is the id the
     // capture mirrors them under, and a window that drops them makes the
@@ -122,7 +135,7 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
   // the real row owns the shared id: a parentless messageId row standing in
   // for it would read as a fresh root — a false rewind verdict
   const kept = rows.filter((r) => !(messageIdOnly.has(r) && uuidIds.has(r.uuid)));
-  return { rows: kept.reverse(), torn };
+  return { rows: kept.reverse(), torn, echoIds };
 }
 
 /** Which tier serves this read: the capsule under the cap, the helper over
@@ -152,9 +165,10 @@ export function planTailInvocation(input: {
   ];
 }
 
-/** Parse the helper's stdout (ONE JSON line: {ok, torn, tail: [[uuid,
- *  parent|null, 0|1, 0|1], ...] — boundary flag, then tool-result flag})
- *  into the tail facts; anything malformed or ok:false degrades to null. */
+/** Parse the helper's stdout (ONE JSON line: {ok, torn, echo: [id, …],
+ *  tail: [[uuid, parent|null, 0|1, 0|1], ...] — boundary flag, then
+ *  tool-result flag}) into the tail facts; anything malformed or ok:false
+ *  degrades to null. */
 export function parseTailHelperOutput(raw: string, log?: (message: string, err?: unknown) => void): TailFacts | null {
   const line = raw.trim().split("\n").pop() ?? "";
   if (line === "") return null;
@@ -166,7 +180,7 @@ export function parseTailHelperOutput(raw: string, log?: (message: string, err?:
     return null;
   }
   if (parsed === null || typeof parsed !== "object") return null;
-  const report = parsed as { ok?: unknown; torn?: unknown; tail?: unknown };
+  const report = parsed as { ok?: unknown; torn?: unknown; tail?: unknown; echo?: unknown };
   if (report.ok !== true || !Array.isArray(report.tail)) return null;
   const rows: TailRow[] = [];
   for (const entry of report.tail) {
@@ -178,7 +192,11 @@ export function parseTailHelperOutput(raw: string, log?: (message: string, err?:
       ...(entry[3] === 1 ? { toolResult: true } : {}),
     });
   }
-  return { rows, torn: report.torn === true };
+  const echoIds = new Set<string>();
+  if (Array.isArray(report.echo)) {
+    for (const id of report.echo) if (typeof id === "string") echoIds.add(id);
+  }
+  return { rows, torn: report.torn === true, echoIds };
 }
 
 /** The seams readTail needs (all injected — the register wiring spells the

@@ -382,6 +382,15 @@ export class LiveChainProcessor {
     // row (ceremony the engine never persists) simply leaves the queue —
     // it never had a file slot, so its absence proves nothing; an absent
     // row after the last present one is only the debounce lag (kept).
+    // The file-history ECHO of a queued id (its messageId on chrome the
+    // transcript files instead of the row — a side-branched command row)
+    // counts as present only once a REAL row later in the queue is present:
+    // the file names the id without ever holding the row, so the queued id
+    // is never condemned — and chrome alone never rises to evidence against
+    // rows still waiting (the stand-in must not become amputation proof).
+    const echoIds = new Set(tail.echoIds);
+    const sampled = tail.rows.filter((r) => r.uuid.length <= MAX_UUID);
+    for (const id of sampled) echoIds.delete(id.uuid); // a real row owns its id
     const present: QueuedEvent[] = [];
     const keep: QueuedEvent[] = [];
     const amputated: QueuedEvent[] = [];
@@ -393,6 +402,10 @@ export class LiveChainProcessor {
       if (byUuid.has(event.uuid)) {
         sawPresent = true;
         present.unshift(event);
+        continue;
+      }
+      if (sawPresent && echoIds.has(event.uuid)) {
+        present.unshift(event); // named by the file, no chain slot — never condemned
         continue;
       }
       if (!sawPresent) {
@@ -449,7 +462,7 @@ export class LiveChainProcessor {
     });
     for (const event of present) {
       const row = byUuid.get(event.uuid);
-      if (row === undefined) continue; // unreachable (present membership)
+      if (row === undefined) continue; // an echo member: present evidence, no chain slot
       if (row.boundary) {
         // the chain's fresh root: the boundary edge marks it (the mirror
         // never holds the row; the ledger keeps the reset point)
