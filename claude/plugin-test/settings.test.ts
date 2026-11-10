@@ -98,7 +98,7 @@ describe("settings surface — engine-run twin", () => {
 });
 
 describe("the settings pane mounts and drives — engine-run twin", () => {
-  test("mount, find the title, switch tabs", async ($, on) => {
+  test("mount, find the title, switch tabs", { timeoutMs: 15_000 }, async ($, on) => {
     teardown();
     const made = await setup();
     if (made.controller === null) throw new Error("controller null");

@@ -686,15 +686,20 @@ describe("turn-boundary trigger arms — the loop goes live", () => {
     });
     h.sessionApi.set([]);
     await h.dispatch("turn.complete", { answer: "noted", isAborted: false });
-    await new Promise((resolve) => setTimeout(resolve, 80));
     // the launch went through the companion's tool, and the spawn the
     // harness saw came from the simulated companion's ambient code — the
-    // plugin itself never spawned directly
-    const launches = h.toolCalls.calls.filter((c: unknown) =>
-      String((c as { tool?: unknown }).tool ?? "").includes("session-owl-subagent-support__launch"),
+    // plugin itself never spawned directly; wait for both signals
+    // (fire-and-forget chains, never a fixed sleep)
+    await vi.waitFor(
+      () => {
+        const launches = h.toolCalls.calls.filter((c: unknown) =>
+          String((c as { tool?: unknown }).tool ?? "").includes("session-owl-subagent-support__launch"),
+        );
+        expect(launches.length).toBeGreaterThan(0);
+        expect(h.spawned.calls.length).toBeGreaterThan(0);
+      },
+      { timeout: 3000, interval: 25 },
     );
-    expect(launches.length).toBeGreaterThan(0);
-    expect(h.spawned.calls.length).toBeGreaterThan(0);
     expect(String((h.spawned.calls[0] as Record<string, unknown>).subagentType ?? "")).toContain("observe");
   });
 
@@ -826,8 +831,7 @@ describe("turn-boundary trigger arms — the loop goes live", () => {
     // SYNCHRONOUSLY releases the capture — the boundary must snapshot the
     // loop's rows before that release or the wrap-up reads an empty branch
     await h.dispatch("turn.complete", { agentId: "sub-9", answer: "done", isAborted: false });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(h.spawned.calls.length).toBeGreaterThan(0); // the observer launched
+    await vi.waitFor(() => expect(h.spawned.calls.length).toBeGreaterThan(0), { timeout: 3000, interval: 25 }); // the observer launched
     expect(String((h.spawned.calls[0] as Record<string, unknown>).subagentType ?? "")).toContain("observe");
     // the loop is TERMINAL at its completion: its binding is released with
     // the capture/storage/checkpoint (no per-loop retention for the
@@ -872,8 +876,7 @@ describe("turn-boundary trigger arms — the loop goes live", () => {
     });
     h.sessionApi.set([]);
     await h.dispatch("turn.step", { index: 1, turnId: "tt" });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(h.spawned.calls.length).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(h.spawned.calls.length).toBeGreaterThan(0), { timeout: 3000, interval: 25 });
   });
 
   test("a disabled session never launches (dormant parity)", async () => {
@@ -1001,8 +1004,13 @@ describe("compaction takeover wiring — session.compact", () => {
     expect(result.messages.slice(1).map((m) => m.text)).toEqual(["second prompt"]); // the swallowed rows drop
     expect(typeof result.tokensAfter).toBe("number");
     // the ensure-ready phases launched at least the always-on Builder
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(h.spawned.calls.some((c: Record<string, unknown>) => String(c.subagentType).includes(":build"))).toBe(true);
+    await vi.waitFor(
+      () =>
+        expect(h.spawned.calls.some((c: Record<string, unknown>) => String(c.subagentType).includes(":build"))).toBe(
+          true,
+        ),
+      { timeout: 3000, interval: 25 },
+    );
   });
 
   test("disabled => pass through to the engine's own compaction (identity return)", async () => {

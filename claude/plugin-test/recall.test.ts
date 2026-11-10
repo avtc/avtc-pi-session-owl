@@ -153,33 +153,41 @@ describe("owl_recall serving — engine-run twin", () => {
     });
   }
 
-  test("a classic start then a $.tool.call SERVE the recall ({result} answers, empty store)", async ($: unknown, on: On) => {
-    const world = armWorld(on);
-    const dollar = $ as ToolCallDollar;
-    await startSession(dollar);
-    // the REAL bootstrap ran: it registered owl's surfaces through the
-    // engine seam (what it does through it is asserted, not blind)
-    expect(world.tools).toContain("owl_recall");
-    expect(world.commands.some((c) => c.startsWith("owl-"))).toBe(true);
-    expect(world.agents.some((a) => a.includes("observer"))).toBe(true);
-    const out = await dollar.tool.call({ tool: OWL_RECALL_FULL_NAME, tool_use_id: "tw-serve" });
-    expect(typeof out.result).toBe("string"); // served text — seed-dependent exact text pins elsewhere
-    expect(String(out.result).length).toBeGreaterThan(0);
-    expect(world.logs.some((l) => l.includes("session bootstrap failed"))).toBe(false);
-  });
+  test(
+    "a classic start then a $.tool.call SERVE the recall ({result} answers, empty store)",
+    { timeoutMs: 15_000 },
+    async ($: unknown, on: On) => {
+      const world = armWorld(on);
+      const dollar = $ as ToolCallDollar;
+      await startSession(dollar);
+      // the REAL bootstrap ran: it registered owl's surfaces through the
+      // engine seam (what it does through it is asserted, not blind)
+      expect(world.tools).toContain("owl_recall");
+      expect(world.commands.some((c) => c.startsWith("owl-"))).toBe(true);
+      expect(world.agents.some((a) => a.includes("observer"))).toBe(true);
+      const out = await dollar.tool.call({ tool: OWL_RECALL_FULL_NAME, tool_use_id: "tw-serve" });
+      expect(typeof out.result).toBe("string"); // served text — seed-dependent exact text pins elsewhere
+      expect(String(out.result).length).toBeGreaterThan(0);
+      expect(world.logs.some((l) => l.includes("session bootstrap failed"))).toBe(false);
+    },
+  );
 
-  test("an in-band error ANSWERS {deny} with pi's exact text (args spread beside tool)", async ($: unknown, on: On) => {
-    armWorld(on);
-    const dollar = $ as ToolCallDollar;
-    await startSession(dollar);
-    const EXACT =
-      "`lines` reads a range of a single observation — pass one observation id, or a node id with one observation.";
-    const out = await dollar.tool.call({
-      tool: OWL_RECALL_FULL_NAME,
-      tool_use_id: "tw-err",
-      lines: "40-60",
-    });
-    // the hook answers {deny: text} — the error delivery the model reads
-    expect(out as unknown).toEqual({ deny: EXACT });
-  });
+  test(
+    "an in-band error ANSWERS {deny} with pi's exact text (args spread beside tool)",
+    { timeoutMs: 15_000 },
+    async ($: unknown, on: On) => {
+      armWorld(on);
+      const dollar = $ as ToolCallDollar;
+      await startSession(dollar);
+      const EXACT =
+        "`lines` reads a range of a single observation — pass one observation id, or a node id with one observation.";
+      const out = await dollar.tool.call({
+        tool: OWL_RECALL_FULL_NAME,
+        tool_use_id: "tw-err",
+        lines: "40-60",
+      });
+      // the hook answers {deny: text} — the error delivery the model reads
+      expect(out as unknown).toEqual({ deny: EXACT });
+    },
+  );
 });

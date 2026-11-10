@@ -80,6 +80,7 @@ kit.describe("conflicts — engine-run twins (closure-load + decisions)", () => 
 
   kit.test(
     "Channel C: a door-compaction row through the real engine path stays verbatim (windows empty under kit)",
+    { timeoutMs: 15_000 },
     async ($: unknown, on: unknown) => {
       const mockRef = (
         kit as unknown as {

@@ -146,20 +146,27 @@ describe("owl-* command dispatch — engine-run twin", () => {
     });
   }
 
-  test("a classic start then $.command.run serves owl-ls and the usage arms through the engine", async ($: unknown, on: On) => {
-    const world = armWorld(on);
-    const dollar = $ as CommandDollar;
-    await startSession(dollar);
-    const out = await dollar.command.run({ command: "owl-ls", args: "" });
-    expect(out).toEqual({});
-    // the serve routes the WHOLE listing to the viewer pane — one root is
-    // still a browse surface (ui.open sees it; the notify line does not)
-    expect(world.panes).toContain("owl-ls — roots");
-    expect(world.logs.some((l) => l.startsWith("📁 nGoal"))).toBe(false); // not via the notify line
-    expect(world.logs.some((l) => l.includes("session bootstrap failed"))).toBe(false);
-    // the usage arm answers pi's text through the same armed session
-    const cat = await dollar.command.run({ name: "owl-cat", args: "  " });
-    expect(cat).toEqual({});
-    expect(world.logs).toContain("Usage: /owl-cat <id> — give a node id or an observation id.");
-  });
+  // an engine-run twin boots a classic session + a command round trip:
+  // on 2.1.322 that needs more than the kit’s 5s default (the runner’s
+  // fixed budget — no config file reaches it — so the allowance rides here)
+  test(
+    "a classic start then $.command.run serves owl-ls and the usage arms through the engine",
+    { timeoutMs: 15_000 },
+    async ($: unknown, on: On) => {
+      const world = armWorld(on);
+      const dollar = $ as CommandDollar;
+      await startSession(dollar);
+      const out = await dollar.command.run({ command: "owl-ls", args: "" });
+      expect(out).toEqual({});
+      // the serve routes the WHOLE listing to the viewer pane — one root is
+      // still a browse surface (ui.open sees it; the notify line does not)
+      expect(world.panes).toContain("owl-ls — roots");
+      expect(world.logs.some((l) => l.startsWith("📁 nGoal"))).toBe(false); // not via the notify line
+      expect(world.logs.some((l) => l.includes("session bootstrap failed"))).toBe(false);
+      // the usage arm answers pi's text through the same armed session
+      const cat = await dollar.command.run({ name: "owl-cat", args: "  " });
+      expect(cat).toEqual({});
+      expect(world.logs).toContain("Usage: /owl-cat <id> — give a node id or an observation id.");
+    },
+  );
 });
