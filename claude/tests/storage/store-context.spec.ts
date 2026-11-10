@@ -240,6 +240,52 @@ describe("store-context — snapshots", () => {
     expect((compaction as { details?: unknown }).details).toEqual({ type: "session-owl", version: "v1", nodes: [] });
     expect(branch[branch.length - 2]).toBe(compaction); // after its marker row u2, its summary record follows
   });
+
+  test("a snapshot anchored off the served branch keeps its arrival position — never the fold tail", async () => {
+    // siblings under one parent: walking from the witness tip serves
+    // parent++sibling chain and leaves the middle sibling off-serve (the
+    // shape a side-branch leaves after aborted compactions/restarts). A
+    // record anchored there used to RIDE the tail — consumers read position
+    // as time (the snapshot replay horizon), so the tail always outranked
+    // records that truly followed it.
+    const mirror = new MirrorWriter(fs, DIR, "livep");
+    const ledgerR = new LedgerWriter(fs, DIR, "live");
+    mirror.bufferRow(row("r1", null));
+    mirror.bufferRow(row("s1", "r1"));
+    mirror.bufferRow(row("s2", "r1"));
+    // the snapshot's order row = the OFF-serve middle sibling (arrival rank 1)
+    await persistSnapshotText(
+      fs,
+      DIR,
+      ledgerR,
+      "snapOff",
+      JSON.stringify({ type: "session-owl", version: "v1", nodes: [] }),
+      "s1",
+    );
+    // the summary pair + its transcript witness row (the resolver's
+    // transcript-backed anchor rule), arriving after s2
+    ledgerR.append("summary", { text: "the compaction summary off" }, "s1");
+    mirror.bufferRow(summaryWitnessRow("w1", "s1", "the compaction summary off"));
+    // a later record anchored at s2 (also off-serve, later arrival) — must follow the snapshot
+    ledgerR.append("usage", { ledger: { entries: [] } }, "r1", "s2");
+    await ledgerR.flush();
+    await mirror.flush();
+
+    const prepared = await prepareStoreContext(fs, DIR, new LedgerWriter(fs, DIR, "live2"), mirror);
+    const branch = prepared.ctx.getBranch("w1");
+    const ids = branch.map((e) => String(e.id));
+    const compaction = branch.findIndex((e) => e.type === "compaction");
+    const r1 = ids.indexOf("r1");
+    const s1 = ids.indexOf("s1");
+    const w1 = ids.indexOf("w1");
+    const usage = ids.findIndex((id) => id.endsWith(":3"));
+    // arrival order: r1 → s1 → snapshot anchored at s1 → usage at s2 → witness
+    expect(r1).toBeGreaterThanOrEqual(0);
+    expect(compaction).toBeGreaterThan(s1);
+    expect(usage).toBeGreaterThan(compaction);
+    expect(w1).toBeGreaterThan(usage);
+    expect(compaction).toBeLessThan(branch.length - 1); // never riding the tail
+  });
 });
 
 describe("store-context — session marker", () => {

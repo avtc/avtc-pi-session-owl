@@ -160,12 +160,24 @@ function buildBranch(
   branch: readonly string[],
   records: readonly LedgerRecord[],
   snapshot: { details: unknown; record: LedgerRecord } | null,
+  arrival: readonly string[],
   onRide?: (r: LedgerRecord, reason: "marker" | "at") => void,
 ): StoreEntry[] {
   const rowsInBranch = new Set(branch);
+  // The anchor's rank in the mirror's arrival: resolves even when the anchor
+  // row is NOT on the served branch (a side-branch sibling — the shape a
+  // night of aborted compactions/restarts leaves behind). Consumers read a
+  // record's position as TIME (the snapshot replay horizon), so such a
+  // record keeps its arrival position instead of riding the tail — a
+  // tail-riding snapshot outranks every record that truly followed it.
+  const arrivalRank = new Map<string, number>();
+  arrival.forEach((u, i) => {
+    arrivalRank.set(u, i);
+  });
   const byAtRow = new Map<string, StoreEntry[]>();
+  const anchoredOff = new Map<number, StoreEntry[]>(); // arrived anchor, off-serve
   const seedFirst: StoreEntry[] = []; // records written at the pre-rows origin
-  const riding: StoreEntry[] = []; // off-branch records — kept, appended
+  const riding: StoreEntry[] = []; // anchor never arrived — kept, appended
   const seenRecordIds = new Set<string>(); // once each across fold ∪ live views
   for (const r of records) {
     if (r.kind === "CHECK" || r.kind === "lineage") continue;
@@ -184,7 +196,17 @@ function buildBranch(
           details: snapshot.details,
         };
         if (r.at === "seed") seedFirst.push(entry);
-        else place(byAtRow, r.at, entry, rowsInBranch, riding, onBranch ? onRide?.bind(null, r) : undefined);
+        else
+          place(
+            byAtRow,
+            anchoredOff,
+            riding,
+            r.at,
+            entry,
+            rowsInBranch,
+            arrivalRank,
+            onBranch ? onRide?.bind(null, r) : undefined,
+          );
       }
       continue;
     }
@@ -193,33 +215,69 @@ function buildBranch(
     const entry: StoreCustomEntry = { type: "custom", id: `${r.producerId}:${r.seq}`, customType, data: r.payload };
     if (!onBranch) onRide?.(r, "marker");
     if (r.at === "seed") seedFirst.push(entry);
-    else place(byAtRow, r.at, entry, rowsInBranch, riding, onBranch ? onRide?.bind(null, r) : undefined);
+    else
+      place(
+        byAtRow,
+        anchoredOff,
+        riding,
+        r.at,
+        entry,
+        rowsInBranch,
+        arrivalRank,
+        onBranch ? onRide?.bind(null, r) : undefined,
+      );
   }
   const entries: StoreEntry[] = [...seedFirst];
+  // one walk: served rows in branch order, the off-serve anchored records
+  // merged in at their anchor's arrival rank (after the row itself when the
+  // anchor is served — the interleave's "immediately after the at row")
+  const offRanks = [...anchoredOff.keys()].sort((a, b) => a - b);
+  const drainOff = (rank: number, eq: boolean): void => {
+    while (oi < offRanks.length) {
+      const k = offRanks[oi];
+      if (k === undefined || (eq ? k !== rank : k >= rank)) break;
+      entries.push(...(anchoredOff.get(k) ?? []));
+      oi += 1;
+    }
+  };
+  let oi = 0;
   for (const uuid of branch) {
+    const rank = arrivalRank.get(uuid);
+    if (rank !== undefined) drainOff(rank, false);
     entries.push(rowEntry(uuid));
     for (const e of byAtRow.get(uuid) ?? []) entries.push(e);
+    if (rank !== undefined) drainOff(rank, true);
   }
+  for (; oi < offRanks.length; oi += 1) entries.push(...(anchoredOff.get(offRanks[oi]) ?? []));
   entries.push(...riding);
   return entries;
 }
 
 function place(
   byAtRow: Map<string, StoreEntry[]>,
+  anchoredOff: Map<number, StoreEntry[]>,
+  riding: StoreEntry[],
   at: string,
   entry: StoreEntry,
   rowsInBranch: Set<string>,
-  riding: StoreEntry[],
+  arrivalRank: ReadonlyMap<string, number>,
   onAtRide?: (reason: "at") => void,
 ): void {
-  if (!rowsInBranch.has(at)) {
-    riding.push(entry); // written off-branch — kept (verdicts decide, not the fold)
+  const rank = arrivalRank.get(at);
+  if (rank === undefined) {
+    riding.push(entry); // the anchor never arrived — appended, verdicts decide
     onAtRide?.("at");
     return;
   }
-  const list = byAtRow.get(at) ?? [];
+  if (rowsInBranch.has(at)) {
+    const list = byAtRow.get(at) ?? [];
+    list.push(entry);
+    byAtRow.set(at, list);
+    return;
+  }
+  const list = anchoredOff.get(rank) ?? [];
   list.push(entry);
-  byAtRow.set(at, list);
+  anchoredOff.set(rank, list);
 }
 
 /** The branch for a leaf: the SERVED branch (the parent chain plus the
@@ -502,7 +560,7 @@ export async function prepareStoreContext(
         setLastBranch(branchForLeaf(mirror, leafId));
       }
       const records = [...flushed, ...ledger.liveRecords()];
-      return buildBranch(lastBranch, records, snapshot, reportRide);
+      return buildBranch(lastBranch, records, snapshot, mirror.arrivalOrder(), reportRide);
     },
   };
   // The core's swap re-fold hook (duck-typed at the swap site — the
