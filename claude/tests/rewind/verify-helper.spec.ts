@@ -142,7 +142,8 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
     const file = tempTranscript(
       [
         '{"type":"cost-state","x":1}', // no chain id — skipped
-        '{"type":"file-history-snapshot","messageId":"m1a","snapshot":{}}',
+        '{"type":"file-history-snapshot","messageId":"m1a","snapshot":{}}', // chrome — no slot
+        '{"type":"command","messageId":"m1a","command":{}}',
         '{"uuid":"u1","parentUuid":null,"type":"user"}',
         '{"uuid":"u2","parentUuid":"u1","type":"user"}',
         "",
@@ -178,7 +179,7 @@ describe("helpers/verify.mjs --tail N — the live chain verifier's tail tier", 
       expect(report.tail).toEqual([
         ["td", "a1", 0, 0],
         ["p1", "td", 0, 0],
-        ["m9", null, 0, 0], // a messageId row with no real twin keeps its slot
+        // the twinless delta row ("m9") is chrome — no chain slot
       ]);
     },
   );

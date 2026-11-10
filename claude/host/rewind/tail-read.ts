@@ -83,10 +83,17 @@ export function parseCapsuleTail(text: string, maxRows: number, log?: (message: 
       subtype?: unknown;
       message?: unknown;
     };
+    // file-history chrome: written with no uuid and no parent under the
+    // messageId of the message it snapshots — an id that ECHOES a chain
+    // row. Caught before its twin row has landed (the engine persists the
+    // delta ahead of the assistant rows), a parentless stand-in would prove
+    // presence for that twin and anchor a fresh root on chrome — a false
+    // rewind verdict. It never takes a chain slot; the twin owns the id.
+    if (row.type === "file-history-snapshot" || row.type === "file-history-delta") continue;
     // every chain slot the capture can name: the engine writes some rows
-    // (command rows, file-history snapshots) with no uuid at all — their
-    // messageId is the id the capture mirrors them under, and a window
-    // that drops them makes the expected tail look amputated
+    // (command rows) with no uuid at all — their messageId is the id the
+    // capture mirrors them under, and a window that drops them makes the
+    // expected tail look amputated
     const id = typeof row.uuid === "string" ? row.uuid : typeof row.messageId === "string" ? row.messageId : undefined;
     if (id === undefined) continue; // metadata without a chain slot
     const parent =

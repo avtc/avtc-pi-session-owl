@@ -39,7 +39,7 @@ describe("tail-read — capsule tail parsing", () => {
   test("a chain-id row written without a uuid keeps its slot via messageId", () => {
     const text = [
       JSON.stringify({ type: "queue-operation", x: 1 }), // no chain id — skipped
-      JSON.stringify({ type: "file-history-snapshot", messageId: "m1a", snapshot: {} }),
+      JSON.stringify({ type: "command", messageId: "m1a", command: {} }),
       JSON.stringify({ uuid: "u2", parentUuid: "u1", type: "user" }),
       "",
     ].join("\n");
@@ -47,6 +47,25 @@ describe("tail-read — capsule tail parsing", () => {
     expect(facts.torn).toBe(false);
     expect(facts.rows.map((r) => r.uuid)).toEqual(["m1a", "u2"]);
     expect(facts.rows[0]?.parentUuid).toBeNull();
+  });
+
+  test("file-history chrome never takes a chain slot — with or without its twin", () => {
+    // the engine writes file-history snapshot/delta rows with no uuid and no
+    // parent, under the messageId of a message: an id that echoes a chain
+    // row. A tail read that catches one while its twin row has not landed
+    // yet must see NOTHING of it — a parentless stand-in would read as a
+    // fresh root and as presence for rows no amputation has proved absent
+    const text = [
+      JSON.stringify({ type: "file-history-snapshot", messageId: "m1a", snapshot: {} }),
+      JSON.stringify({ type: "file-history-delta", messageId: "t05", parent: undefined }),
+      JSON.stringify({ uuid: "u1", parentUuid: null, type: "user" }),
+      JSON.stringify({ uuid: "u2", parentUuid: "u1", type: "assistant" }),
+      "",
+    ].join("\n");
+    const facts = parseCapsuleTail(text, 10);
+    expect(facts.torn).toBe(false);
+    expect(facts.rows.map((r) => r.uuid)).toEqual(["u1", "u2"]);
+    expect(facts.rows.some((r) => r.parentUuid === null && r.uuid !== "u1")).toBe(false);
   });
 
   test.each([
@@ -65,7 +84,7 @@ describe("tail-read — capsule tail parsing", () => {
     expect(facts.rows.map((r) => [r.uuid, r.parentUuid])).toEqual([
       ["td", "a1"],
       ["p1", "td"],
-      ["m9", null], // a messageId row with no real twin keeps its slot
+      // the twinless delta row ("m9") is chrome — no chain slot
     ]);
   });
 

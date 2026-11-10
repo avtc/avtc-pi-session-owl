@@ -100,9 +100,14 @@ if (tailN !== null) {
         return; // middle junk — skipped as content, never torn evidence
       }
       if (row === null || typeof row !== "object") return;
+      // file-history chrome: no uuid, no parent — under the messageId of a
+      // message, echoing its chain row's id. Never a chain slot: a stand-in
+      // caught before the twin row lands would prove presence for it and
+      // anchor a fresh root on chrome (a false rewind verdict)
+      if (row.type === "file-history-snapshot" || row.type === "file-history-delta") return;
       // every chain slot the capture can name: rows written with no uuid
-      // (command rows, file-history snapshots) are mirrored under their
-      // messageId, so the tail window must count them too
+      // (command rows) are mirrored under their messageId, so the tail
+      // window must count them too
       const id = typeof row.uuid === "string" ? row.uuid : typeof row.messageId === "string" ? row.messageId : null;
       if (id === null) return; // metadata — never a tail row
       const parent =

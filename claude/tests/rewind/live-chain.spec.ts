@@ -240,6 +240,28 @@ describe("live chain processor — the normal tick", () => {
     expect(h.patched).toContainEqual({ uuid: "p1", parent: "a1" });
   });
 
+  test("file-history chrome written ahead of its message rows never reads as amputation", async () => {
+    // the engine persists a Write turn as: file-history-delta (messageId =
+    // the tool row's id, parentless), THEN the assistant rows — a tail read
+    // catching that instant must keep the pending queue for the next retry,
+    // never declare amputation/rewind for rows that are merely unflushed
+    const delta = JSON.stringify({ type: "file-history-delta", messageId: "t05", snapshotMessageId: "t05" });
+    const text = [
+      JSON.stringify({ uuid: "d07", parentUuid: "a0", type: "user" }),
+      delta, // the message rows after it have not landed yet
+      "",
+    ].join("\n");
+    const h = harness({ owlTail: "d07", known: ["d07"], tail: parseCapsuleTail(text, 10) });
+    h.proc.enqueue(ev("a07", true));
+    h.proc.enqueue(ev("a08", true));
+    h.proc.enqueue(ev("t05", true));
+    await h.proc.flush();
+    expect(h.rewinds).toEqual([]);
+    expect(h.patched).toEqual([]);
+    expect(h.logs.some((m) => m.includes("amputation"))).toBe(false);
+    expect(h.logs.some((m) => m.includes("fresh root"))).toBe(false);
+  });
+
   test("an expectation on a chain-id row with no deeper ancestry rebases quietly", async () => {
     // the tail names a row the engine wrote without a parent (command /
     // file-history chrome): its ancestry reaches nothing, so no jump is
