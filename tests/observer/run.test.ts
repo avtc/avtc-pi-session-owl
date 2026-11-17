@@ -1273,3 +1273,233 @@ describe("runObserver — stage dump", () => {
     expect(fs.existsSync(path.join(dumpRoot, ".pi", "session-owl", "dumps"))).toBe(false);
   });
 });
+
+describe("runObserver — duplicate re-send protection", () => {
+  beforeEach(() => {
+    resetForNewSession();
+    setClock(() => "2026-07-29T10:05:00.000Z");
+    _resetSessionAffinity();
+  });
+  afterAll(() => {
+    setClock(null);
+  });
+
+  /** A runStage that executes several record_observations calls within ONE
+   *  chunk (a multi-turn model), recording every ack + isError + details.
+   *  `perChunk[c]` = chunk c's list of calls; each call is a records batch. */
+  function multiCallRunStage(perChunk: RecordObservationInput[][][]) {
+    const acks: string[] = [];
+    const ackIsError: boolean[] = [];
+    const ackAccepted: number[] = [];
+    let chunks = 0;
+    const fn = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
+      const tool = input.tools[0] as AgentTool;
+      const calls = perChunk[chunks] ?? [];
+      chunks += 1;
+      for (const call of calls) {
+        const result = await tool.execute(`call-${acks.length + 1}`, { observations: call });
+        acks.push((result.content[0] as { text: string }).text);
+        ackIsError.push(result.isError === true);
+        ackAccepted.push((result.details as { accepted: number } | undefined)?.accepted ?? -1);
+      }
+      return {
+        messages: [] as AgentMessage[],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+    return {
+      fn,
+      acks,
+      ackIsError,
+      ackAccepted,
+      get chunks() {
+        return chunks;
+      },
+    };
+  }
+
+  const REC: RecordObservationInput = {
+    summary: "Chose vitest for the run.",
+    importance: "high",
+    sourceEntryIds: ["a1"],
+  };
+
+  it("rejects a re-send of an accepted record (same summary + ids) with an explanatory line; the record stays single", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = multiCallRunStage([[[REC], [REC]]]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    expect(script.acks[0]).toBe("accepted: all");
+    expect(script.acks[1]).toBe(
+      "rejected:\n#1: duplicate — this observation (same summary and source ids) was already recorded this pass",
+    );
+    expect(script.ackIsError[1]).toBe(true); // the only record of the batch was rejected
+    // the chunk still completed normally: one wrapped record, frontier advanced
+    const newNodes = [...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new");
+    expect(newNodes).toHaveLength(1);
+    const obsEntries = appended.filter((e) => e.type === "session-owl.observation");
+    expect(obsEntries).toHaveLength(1);
+    expect((obsEntries[0].data as { records: unknown[] }).records).toHaveLength(1);
+    expect(getGraphStore().observerFrontier).toBe("a1");
+  });
+
+  it("normalizes whitespace and id order: a reflowed re-send with reordered ids is still a duplicate", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = multiCallRunStage([
+      [
+        [{ summary: "Chose vitest for  the run.", importance: "high", sourceEntryIds: ["a1", "u1"] }],
+        [{ summary: "Chose vitest for the  run.", importance: "high", sourceEntryIds: ["u1", "a1"] }],
+      ],
+    ]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    expect(script.acks[1]).toContain("duplicate");
+    expect([...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new")).toHaveLength(1);
+  });
+
+  it("importance is not part of the duplicate key: a same-summary re-send with another importance is still a duplicate", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = multiCallRunStage([
+      [[REC], [{ summary: REC.summary, importance: "low", sourceEntryIds: [...REC.sourceEntryIds] }]],
+    ]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    expect(script.acks[1]).toContain("duplicate");
+    expect([...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new")).toHaveLength(1);
+  });
+
+  it("different source ids are not duplicates: both records land", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = multiCallRunStage([
+      [[REC], [{ summary: REC.summary, importance: REC.importance, sourceEntryIds: ["u1"] }]],
+    ]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    expect(script.acks[1]).toBe("accepted: all");
+    expect([...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new")).toHaveLength(2);
+  });
+
+  it("a duplicate inside ONE batch: the second copy is rejected, the first lands (no abort)", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = multiCallRunStage([[[REC, REC]]]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    expect(script.acks[0]).toBe(
+      "accepted: #1\nrejected:\n#2: duplicate — this observation (same summary and source ids) was already recorded this pass",
+    );
+    expect(script.ackIsError[0]).toBe(false);
+    expect([...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new")).toHaveLength(1);
+  });
+
+  it("a re-send AFTER the duplicate rejection aborts the chunk: isError ack, nothing persisted, no empty verdict, frontier unchanged, notify warning", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    ctx.ui = { notify: (..._a: unknown[]) => {} } as unknown as ExtensionContext["ui"];
+    const notify = vi.spyOn(ctx.ui, "notify");
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = multiCallRunStage([[[REC], [REC], [REC]]]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    // the fatal call answers as an errored tool call carrying the abort line
+    expect(script.acks[2]).toBe("rejected:\n#1: duplicate re-sent after rejection — aborting this chunk");
+    expect(script.ackIsError[2]).toBe(true);
+    // discarded accepts must not feed the widget's +N obs signal
+    expect(script.ackAccepted[2]).toBe(0);
+    // nothing landed anywhere: no graph delta, no observation entry (no empty
+    // verdict either — the range stays unobserved), frontier did not move
+    expect(appended.filter((e) => e.type === "session-owl.graph_delta")).toHaveLength(0);
+    expect(appended.filter((e) => e.type === "session-owl.observation")).toHaveLength(0);
+    expect([...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new")).toHaveLength(0);
+    expect(getGraphStore().observerFrontier).toBeNull();
+    expect(notify).toHaveBeenCalled();
+  });
+
+  it("the fatal call reports accepted=0 even when the same batch also carried a fresh record (it gets discarded)", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const script = multiCallRunStage([
+      [[REC], [REC], [REC, { summary: "Fresh fact.", importance: "med", sourceEntryIds: ["u1"] }]],
+    ]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn }));
+
+    expect(script.ackIsError[2]).toBe(true);
+    expect(script.ackAccepted[2]).toBe(0);
+    expect([...getGraphStore().graph.nodes.values()].filter((n) => n.state === "new")).toHaveLength(0);
+  });
+
+  it("an aborted chunk stops the run: later chunks stay unobserved (the frontier cannot jump past the hole)", async () => {
+    const { pi, appended } = makeFakePi();
+    const ctx = makeFakeCtx();
+    ctx.ui = { notify: (..._a: unknown[]) => {} } as unknown as ExtensionContext["ui"];
+    vi.spyOn(ctx.ui, "notify");
+    const unobserved = [
+      userEntry("u1", "initial prompt captured mechanically"),
+      assistantEntry("a1", `chose vitest ${"x".repeat(200)}`),
+      assistantEntry("a2", `keep green ${"y".repeat(200)}`),
+    ];
+    const script = multiCallRunStage([
+      [[REC], [REC], [REC]],
+      [
+        [{ summary: "Keep green.", importance: "high", sourceEntryIds: ["a2"] }], // chunk 2 — must never run
+      ],
+    ]);
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: script.fn, thresholdTokens: 50 }));
+
+    expect(script.chunks).toBe(1); // the run stopped at the aborted chunk
+    expect(appended.filter((e) => e.type === "session-owl.observation")).toHaveLength(0);
+    expect(getGraphStore().observerFrontier).toBeNull();
+  });
+
+  it("stopAfterTurn ends the chunk loop once the fatal flag is set (beats the no-progress streak)", async () => {
+    const { pi } = makeFakePi();
+    const ctx = makeFakeCtx();
+    const unobserved = [userEntry("u1", "initial prompt captured mechanically"), assistantEntry("a1", "chose vitest")];
+    const stops: boolean[] = [];
+    // evaluate the chunk's stop predicate right after EACH tool call — the
+    // flag state is only meaningful DURING the run
+    const fn = async (input: Parameters<NonNullable<ObserverRunInput["runStageFn"]>>[0]) => {
+      const tool = input.tools[0] as AgentTool;
+      const stop = input.stopAfterTurn ?? null;
+      for (let i = 0; i < 3; i += 1) {
+        await tool.execute(`call-${i + 1}`, { observations: [REC] });
+        if (stop !== null) stops.push(stop(stopTurn(null)));
+      }
+      return {
+        messages: [] as AgentMessage[],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, elapsedMs: 0 },
+        outputTokens: 0,
+        aborted: false,
+        timedOut: false,
+      };
+    };
+
+    await runObserver(makeArgs({ pi, ctx, unobserved, runStageFn: fn }));
+
+    expect(stops).toHaveLength(3);
+    expect(stops[0]).toBe(false); // after the accept: progress, no flag
+    expect(stops[1]).toBe(false); // after the warn-rejection: streak only, flag not set
+    expect(stops[2]).toBe(true); // after the fatal re-send: abort
+  });
+});

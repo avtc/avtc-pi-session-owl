@@ -105,6 +105,9 @@ interface RecordTool {
   readonly records: RecordObservation[];
   /** Total observations the model attempted (accepted + rejected) across calls. */
   readonly attempted: number;
+  /** True once the model re-sent a record already rejected as a duplicate —
+   *  the chunk's pass is void: nothing persists, the range re-observes. */
+  readonly duplicateAbort: boolean;
 }
 
 /** A summary must carry at least one letter or digit to be substantive. A
@@ -118,6 +121,24 @@ function isSubstantiveSummary(summary: string): boolean {
 
 /** At least one Unicode letter or digit anywhere in the summary. */
 const SUBSTANTIVE_SUMMARY_TEST = /\p{L}|\p{N}/u;
+
+// --- duplicate re-send protection -------------------------------------------
+
+/** Prior valid submissions of a key seen once: the re-send (attempt 2) is
+ *  rejected with an explanatory line — the model is told it already sent this. */
+const DUPLICATE_RESEND_WARN = 1;
+/** Prior submissions seen twice: a re-send AFTER the duplicate rejection
+ *  (attempt 3+) aborts the chunk — a pass that cannot stop re-sending is not a
+ *  verdict (the 2026-11-17 incident: 779 byte-identical records over 796 turns). */
+const DUPLICATE_RESEND_FATAL = 2;
+
+/** The duplicate key: whitespace-collapsed summary + sorted resolved source
+ *  ids (citation order must not distinguish a re-send; importance is
+ *  deliberately NOT part of it — a re-send with a tweaked importance is the
+ *  same observation re-sent). */
+function duplicateKey(summary: string, resolvedIds: readonly string[]): string {
+  return `${summary.replace(/\s+/g, " ").trim()}\u0000${[...resolvedIds].sort().join(",")}`;
+}
 
 // --- per-call record forensics (debug logging) ------------------------------
 
@@ -150,8 +171,11 @@ function dumpRecordsForLog(summaries: readonly string[]): string {
  * Each record is validated per-observation: every cited `sourceEntryId` must
  * resolve into `allowedIds` — a chunk short through `idMap` (when the chunk
  * was rendered with short ids) or an exact stored id — (a foreign id rejects
- * that one record only, not the whole batch) and the summary must be
- * substantive. Valid records accumulate on `records` with STORED ids.
+ * that one record only, not the whole batch), the summary must be
+ * substantive, and a record identical to one already submitted this chunk
+ * (whitespace-collapsed summary + same source ids) is rejected as a duplicate;
+ * a re-send AFTER that rejection flags `duplicateAbort` (the caller voids the
+ * pass). Valid records accumulate on `records` with STORED ids.
  */
 function makeRecordObservationsTool(
   allowedIds: ReadonlySet<string>,
@@ -159,6 +183,12 @@ function makeRecordObservationsTool(
 ): RecordTool {
   const records: RecordObservation[] = [];
   let attempted = 0;
+  // duplicate ledger: prior VALID submissions per key (whitespace-collapsed
+  // summary + sorted ids). Foreign-id/non-substantive rejects never register —
+  // their own failure line already explains them, and a model fixing a cited
+  // id must not trip the duplicate path.
+  const seenAttempts = new Map<string, number>();
+  let duplicateAbort = false;
   const tool: AgentTool<typeof RECORD_OBS_PARAMS> = {
     name: RECORD_OBS_TOOL,
     description: "Record the observations worth keeping from this chunk.",
@@ -189,6 +219,24 @@ function makeRecordObservationsTool(
           failures.push(`#${index + 1}: non-substantive summary`);
           return;
         }
+        // duplicate re-send protection: identical (normalized) summary over the
+        // same source ids. Attempt 2 is rejected with the reason; attempt 3+
+        // (a re-send after that rejection) aborts the chunk.
+        const key = duplicateKey(raw.summary, resolved);
+        const priorAttempts = seenAttempts.get(key) ?? 0;
+        if (priorAttempts >= DUPLICATE_RESEND_FATAL) {
+          failures.push(`#${index + 1}: duplicate re-sent after rejection — aborting this chunk`);
+          duplicateAbort = true;
+          return;
+        }
+        if (priorAttempts >= DUPLICATE_RESEND_WARN) {
+          failures.push(
+            `#${index + 1}: duplicate — this observation (same summary and source ids) was already recorded this pass`,
+          );
+          seenAttempts.set(key, priorAttempts + 1);
+          return;
+        }
+        seenAttempts.set(key, priorAttempts + 1);
         records.push({
           summary: raw.summary,
           importance: raw.importance as Importance,
@@ -216,6 +264,18 @@ function makeRecordObservationsTool(
       // text ack reads positive to the model — the error flag is the
       // unambiguous signal that NOTHING landed
       const allRejected = accepted === EMPTY_RECORDS && failures.length > EMPTY_RECORDS;
+      // a duplicate re-send after rejection ABORTS the chunk: the whole call
+      // answers as an error and reports accepted=0 — any fresh records in the
+      // same batch are discarded with the pass, so neither the ack nor the
+      // widget's +N obs signal may claim them
+      if (duplicateAbort) {
+        log.debug(`observer: record_observations duplicate-abort accepted=${accepted} rejected=${rejected}`);
+        return {
+          content: [{ type: "text", text: ["rejected:", ...failures].join("\n") }],
+          details: { accepted: EMPTY_RECORDS, rejected: failures.length },
+          isError: true,
+        };
+      }
       log.debug(`observer: record_observations accepted=${accepted} rejected=${rejected}`);
       if (accepted > EMPTY_RECORDS) {
         log.debug(`observer: recorded ${accepted} — ${dumpRecordsForLog(callSummaries)}`);
@@ -232,6 +292,9 @@ function makeRecordObservationsTool(
     records,
     get attempted() {
       return attempted;
+    },
+    get duplicateAbort() {
+      return duplicateAbort;
     },
   };
 }
@@ -368,6 +431,15 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         return;
       }
       const recordTool = makeRecordObservationsTool(chunk.allowedIds, chunk.idMap ?? null);
+      // Duplicate-abort ends the chunk's loop at the very next turn boundary
+      // (the fatal flag beats the no-progress streak — rejected duplicates no
+      // longer advance records, but the explicit abort fires one re-send
+      // sooner and carries its own semantics: the pass is void, not stalled).
+      const noProgressStop = makeNoProgressTurnStop(
+        OBSERVER_NO_PROGRESS_TURNS,
+        () => recordTool.records.length,
+        OBSERVER_STOP_LABEL,
+      );
       // chunk forensics: brackets the chunk's record_observations calls in the
       // log (coverage range + rendered size — the sanity denominator for how
       // many records a chunk can plausibly yield).
@@ -391,12 +463,9 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         // that accepted no records (streamed text does NOT reset the streak —
         // a model pairing chatter with a failing tool call every turn would
         // otherwise spin forever under NO_TURN_LIMIT; each call also completes
-        // well under the per-call timeout, so nothing else bounds it).
-        stopAfterTurn: makeNoProgressTurnStop(
-          OBSERVER_NO_PROGRESS_TURNS,
-          () => recordTool.records.length,
-          OBSERVER_STOP_LABEL,
-        ),
+        // well under the per-call timeout, so nothing else bounds it). A fatal
+        // duplicate re-send stops the loop immediately.
+        stopAfterTurn: (turn) => recordTool.duplicateAbort || noProgressStop(turn),
         maxTokens: input.settings.observerMaxTokens,
         timeoutMs: input.settings.llmCallTimeoutMs,
         onEvent: (event) => input.widget.onEvent(event),
@@ -435,6 +504,22 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       // hook cancels compaction + surfaces a visible error.
       if (timedOut) {
         throw new StageTimeoutError("Observer", input.settings.llmCallTimeoutMs);
+      }
+      // Duplicate fatal-abort: the pass is not a verdict — NOTHING persists
+      // (no records, no empty verdict; the frontier stays put) so the next
+      // trigger or compaction re-observes this range from scratch. The run
+      // stops here: persisting a LATER chunk would advance the frontier past
+      // this hole and silently skip the range forever.
+      if (recordTool.duplicateAbort) {
+        log.warn(
+          `observer: chunk ${chunkIndex + 1}/${totalChunks} aborted — duplicate re-sent after rejection (covers ${chunk.firstEntryId}..${chunk.lastEntryId})`,
+        );
+        notify(
+          input.ctx,
+          "Observer aborted a chunk: the model re-sent an already-rejected duplicate. The chunk stays unobserved and will be retried",
+          "warning",
+        );
+        return;
       }
       // this chunk succeeded → persist IMMEDIATELY (per-chunk durability: an
       // abort loses only the in-flight chunk; the frontier has already advanced
