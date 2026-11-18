@@ -15,7 +15,7 @@ import { _resetCoreInstances } from "../../host/core-instances.js";
 import { runObserver } from "../../host/runs/observer.js";
 import { NO_OP_WIDGET, type StageWidget } from "../../host/runs/seams.js";
 import { StageModelError } from "../../host/runs/stage-errors.js";
-import { clearAllStageRuns, markContextBudgetHit } from "../../host/stage/runs.js";
+import { clearAllStageRuns, markContextBudgetHit, type StageRunState } from "../../host/stage/runs.js";
 import { handleStageToolCall } from "../../host/stage/tools.js";
 import type { EngineStageRunInput } from "../../shims/pi-agent-core/index.js";
 import {
@@ -27,6 +27,7 @@ import {
   mem,
   msgEntry,
   PAD,
+  type Rig,
   recorderWidget,
   rigUp,
 } from "./helpers.js";
@@ -743,5 +744,181 @@ describe("runObserver — the widget event wire", () => {
       dumps: null,
     });
     expect(seen).toEqual(["message_start", "message_end"]);
+  });
+});
+
+// ---- duplicate re-send protection (pi's seenAttempts ledger) ---------------
+
+describe("runObserver — duplicate re-send protection", () => {
+  /** One canonical record: cites the chunk's first allowed entry (e1). */
+  const REC = { summary: "Chose vitest for the run.", importance: "high", sourceEntryIds: ["e1"] };
+
+  const wrappers = (r: Rig): number =>
+    [...r.core.store.getGraphStore().graph.nodes.values()].filter((n) => n.state === "new").length;
+
+  /** Run the chunks of `entryCount` entries (the rendered user entries are
+   *  the allowed cites — 2 per chunk at threshold 60: entries(2) = one chunk
+   *  allowing e1; entries(4) = one chunk allowing e1+e3) whose first behavior
+   *  makes one record_observations call per given batch; returns the tool
+   *  acks (text + denied flag), the live run states, and the run's own rig
+   *  for graph assertions. */
+  async function runOneChunk(
+    sessionId: string,
+    calls: Record<string, unknown>[][],
+    notes?: string[],
+    entryCount = 2,
+  ): Promise<{ acks: { text: string; denied: boolean }[]; agents: StageRunState[]; rig: Rig }> {
+    const unobserved = entries(entryCount);
+    const rig = await rigUp(sessionId, unobserved, true);
+    const acks: { text: string; denied: boolean }[] = [];
+    const fx = makeRunner([
+      async (_i, agentId) => {
+        for (const call of calls) {
+          const out = (await recordViaTool(agentId, call)) as { result?: string; deny?: string };
+          acks.push({ text: out.result ?? out.deny ?? "", denied: out.deny !== undefined });
+        }
+        return {};
+      },
+    ]);
+    await runObserver({
+      core: rig.core,
+      store: rig.store,
+      settings: SETTINGS,
+      unobserved,
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      notify: (m) => notes?.push(m),
+      runStageFn: fx.runner,
+    });
+    return { acks, agents: fx.agents, rig };
+  }
+
+  test("rejects a re-send of an accepted record with an explanatory line; the record stays single", async () => {
+    const { acks, agents, rig } = await runOneChunk("dup-warn", [[REC], [REC]]);
+    expect(acks[0]).toEqual({ text: "accepted: all", denied: false });
+    expect(acks[1]).toEqual({
+      text: "rejected:\n#1: duplicate — this observation (same summary and source ids) was already recorded this pass",
+      denied: true, // the only record of the batch was rejected
+    });
+    // the rejected re-send did not feed the relay's accepted counter
+    expect(agents[0].acceptedRecords).toBe(1);
+    // the chunk still completed normally: one wrapper + one single-record
+    // observation entry, frontier advanced
+    expect(wrappers(rig)).toBe(1); // the goal node is not "new"
+    const obs = branchCustoms(rig, "session-owl.observation");
+    expect(obs).toHaveLength(1);
+    expect(obs[0].records).toHaveLength(1);
+    expect(rig.core.store.getGraphStore().observerFrontier).toBe(obs[0].coversUpToId);
+  });
+
+  test("normalizes whitespace and id order: a reflowed re-send with reordered ids is still a duplicate", async () => {
+    const { acks, rig } = await runOneChunk(
+      "dup-norm",
+      [
+        [{ summary: "Chose vitest for  the run.", importance: "high", sourceEntryIds: ["e3", "e1"] }],
+        [{ summary: "Chose vitest for the  run.", importance: "high", sourceEntryIds: ["e1", "e3"] }],
+      ],
+      undefined,
+      4, // one chunk allowing e1+e3
+    );
+    expect(acks[1].text).toContain("duplicate");
+    expect(acks[1].denied).toBe(true);
+    expect(wrappers(rig)).toBe(1);
+  });
+
+  test("importance is not part of the duplicate key: a same-summary re-send with another importance is still a duplicate", async () => {
+    const { acks, rig } = await runOneChunk("dup-imp", [
+      [REC],
+      [{ summary: REC.summary, importance: "low", sourceEntryIds: [...REC.sourceEntryIds] }],
+    ]);
+    expect(acks[1].text).toContain("duplicate");
+    expect(wrappers(rig)).toBe(1);
+  });
+
+  test("different source ids are not duplicates: both records land", async () => {
+    const { acks, rig } = await runOneChunk(
+      "dup-ids",
+      [[REC], [{ ...REC, sourceEntryIds: ["e3"] }]],
+      undefined,
+      4, // one chunk allowing e1+e3
+    );
+    expect(acks[1]).toEqual({ text: "accepted: all", denied: false });
+    expect(wrappers(rig)).toBe(2);
+  });
+
+  test("a duplicate inside ONE batch: the second copy is rejected, the first lands (no abort)", async () => {
+    const { acks, rig } = await runOneChunk("dup-batch", [[REC, REC]]);
+    expect(acks[0]).toEqual({
+      text: "accepted: #1\nrejected:\n#2: duplicate — this observation (same summary and source ids) was already recorded this pass",
+      denied: false,
+    });
+    expect(wrappers(rig)).toBe(1);
+  });
+
+  test("a re-send AFTER the duplicate rejection aborts the chunk: deny ack, relay abort, nothing persisted, frontier unchanged, notify warning", async () => {
+    const notes: string[] = [];
+    const { acks, agents, rig } = await runOneChunk("dup-fatal", [[REC], [REC], [REC]], notes);
+    // the fatal call answers as a deny carrying the abort line
+    expect(acks[2]).toEqual({
+      text: "rejected:\n#1: duplicate re-sent after rejection — aborting this chunk",
+      denied: true,
+    });
+    // the relay wiring (pi's stopAfterTurn counterpart): the pass ends at the
+    // next step boundary with the duplicate reason
+    expect(agents[0].abortFlag).toBe(true);
+    expect(agents[0].abortReason).toBe("duplicate");
+    // nothing landed anywhere: no observation entry (no empty verdict either —
+    // the range stays unobserved), no wrappers, frontier did not move
+    expect(branchCustoms(rig, "session-owl.observation")).toHaveLength(0);
+    expect(wrappers(rig)).toBe(0);
+    expect(rig.core.store.getGraphStore().observerFrontier).toBeNull();
+    expect(notes).toContain(
+      "Observer aborted a chunk: the model re-sent an already-rejected duplicate. The chunk stays unobserved and will be retried",
+    );
+  });
+
+  test("the fatal call denies even when the same batch also carried a fresh record (it gets discarded)", async () => {
+    const { acks, rig } = await runOneChunk("dup-fresh", [
+      [REC],
+      [REC],
+      [REC, { summary: "Fresh fact.", importance: "med", sourceEntryIds: ["e1"] }],
+    ]);
+    expect(acks[2].denied).toBe(true);
+    expect(acks[2].text).not.toContain("accepted:"); // the fresh record is discarded with the pass
+    expect(wrappers(rig)).toBe(0);
+  });
+
+  test("an aborted chunk stops the run: later chunks stay unobserved (the frontier cannot jump past the hole)", async () => {
+    const unobserved = entries(9); // three chunks at threshold 60
+    const perChunk = chunkFirstIds(unobserved);
+    expect(perChunk.length).toBe(3);
+    const rig = await rigUp("dup-stop", unobserved, true);
+    const notes: string[] = [];
+    const fx = makeRunner([
+      async (_i, agentId) => {
+        const rec = { summary: REC.summary, importance: REC.importance, sourceEntryIds: [perChunk[0][0]] };
+        await recordViaTool(agentId, [rec]);
+        await recordViaTool(agentId, [rec]);
+        await recordViaTool(agentId, [rec]);
+        return { aborted: true, abortReason: "duplicate" };
+      },
+      recordsIds([perChunk[1][0]]), // chunk 2 — must never run
+    ]);
+    await runObserver({
+      core: rig.core,
+      store: rig.store,
+      settings: SETTINGS,
+      unobserved,
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      notify: (m) => notes.push(m),
+      runStageFn: fx.runner,
+    });
+    expect(fx.calls.length).toBe(1); // the run stopped at the aborted chunk
+    expect(branchCustoms(rig, "session-owl.observation")).toHaveLength(0);
+    expect(rig.core.store.getGraphStore().observerFrontier).toBeNull();
+    expect(notes).toContain(
+      "Observer aborted a chunk: the model re-sent an already-rejected duplicate. The chunk stays unobserved and will be retried",
+    );
   });
 });

@@ -7,7 +7,9 @@
 //
 //   - one shim runStage per chunk (the stage engine owns the loop; the
 //     relay enforces abort/timeout/caps/no-progress — the run's
-//     stopAfterTurn counterpart rides the noProgressTurns knob);
+//     stopAfterTurn counterpart rides the noProgressTurns knob; a fatal
+//     duplicate re-send aborts the pass through the same relay flag,
+//     reason "duplicate");
 //   - the `record_observations` tool is a REGISTERED engine tool whose
 //     per-chunk body (allowedIds closure) binds at spawn via onSpawn —
 //     the validation/ack semantics are pi's execute verbatim;
@@ -70,6 +72,7 @@ import {
 import { errDetail, sayError } from "../log/err-detail.js";
 import { recordDumpSection } from "../stage/dumps.js";
 import {
+  abortRun,
   enableStageDumpArchive,
   getStageRun,
   noteAccepted,
@@ -117,20 +120,57 @@ function isSubstantiveSummary(summary: string): boolean {
   return SUBSTANTIVE_SUMMARY_TEST.test(summary);
 }
 
+// --- duplicate re-send protection -------------------------------------------
+
+/** Prior submissions of a key seen once: the re-send (attempt 2) is rejected
+ *  with an explanatory line — the model is told it already sent this. */
+const DUPLICATE_RESEND_WARN = 1;
+/** Prior submissions seen twice: a re-send AFTER the duplicate rejection
+ *  (attempt 3+) aborts the chunk — a pass that cannot stop re-sending is not
+ *  a verdict (pi's duplicate-abort rule). */
+const DUPLICATE_RESEND_FATAL = 2;
+/** The relay abort reason a fatal duplicate re-send sets (pi's stopAfterTurn
+ *  counterpart): the flag ends the pass at the next step boundary. */
+const DUPLICATE_ABORT_REASON = "duplicate";
+
+/** The duplicate key: whitespace-collapsed summary + sorted resolved source
+ *  ids (citation order must not distinguish a re-send; importance is
+ *  deliberately NOT part of it — a re-send with a tweaked importance is the
+ *  same observation re-sent). */
+function duplicateKey(summary: string, resolvedIds: readonly string[]): string {
+  return `${summary.replace(/\s+/g, " ").trim()}\u0000${[...resolvedIds].sort().join(",")}`;
+}
+
 // --- the per-chunk record tool body ----------------------------------------
+
+/** The per-chunk record-tool state the run module reads after the pass:
+ *  `attempted` feeds the all-bad-chunk notify; `duplicateAbort` (a re-send
+ *  after the duplicate rejection) voids the pass — nothing persists. */
+interface RecordToolState {
+  attempted: number;
+  duplicateAbort: boolean;
+}
 
 /** The port of pi's makeRecordObservationsTool execute body: per-record
  *  validation against the chunk's allowed-id set (a foreign id or a
  *  non-substantive summary rejects THAT record only; a chunk short resolves
- *  through the id map and persists the stored id), the pure-state ack, and
+ *  through the id map and persists the stored id), a record identical to one
+ *  already submitted this chunk (whitespace-collapsed summary + same source
+ *  ids) is rejected as a duplicate — a re-send AFTER that rejection flags
+ *  `duplicateAbort` (the run module voids the pass), the pure-state ack, and
  *  the accepted-count feed the relay's no-progress rule reads. */
 function makeRecordExecutor(
   allowedIds: ReadonlySet<string>,
   idMap: ReadonlyMap<string, string> | undefined,
   agentId: string,
   records: RecordObservation[],
-  state: { attempted: number },
+  state: RecordToolState,
 ): (e: Record<string, unknown>) => Promise<{ result: unknown } | { deny: string }> {
+  // duplicate ledger: prior submissions per key (whitespace-collapsed
+  // summary + sorted ids). Foreign-id/non-substantive/schema rejects never
+  // register — their own failure line already explains them, and a model
+  // fixing a cited id must not trip the duplicate path.
+  const seenAttempts = new Map<string, number>();
   return async (e) => {
     const observations = (e.observations as unknown[] | undefined) ?? [];
     const acceptedIndexes: number[] = [];
@@ -173,6 +213,25 @@ function makeRecordExecutor(
         failures.push(`#${index + 1}: non-substantive summary`);
         return;
       }
+      // duplicate re-send protection (pi's seenAttempts ledger): identical
+      // (normalized) summary over the same source ids. Attempt 2 is rejected
+      // with the reason; attempt 3+ (a re-send AFTER that rejection) aborts
+      // the chunk.
+      const key = duplicateKey(summary, sourceEntryIds);
+      const priorAttempts = seenAttempts.get(key) ?? 0;
+      if (priorAttempts >= DUPLICATE_RESEND_FATAL) {
+        failures.push(`#${index + 1}: duplicate re-sent after rejection — aborting this chunk`);
+        state.duplicateAbort = true;
+        return;
+      }
+      if (priorAttempts >= DUPLICATE_RESEND_WARN) {
+        failures.push(
+          `#${index + 1}: duplicate — this observation (same summary and source ids) was already recorded this pass`,
+        );
+        seenAttempts.set(key, priorAttempts + 1);
+        return;
+      }
+      seenAttempts.set(key, priorAttempts + 1);
       records.push({
         summary,
         importance: raw.importance as Importance,
@@ -181,6 +240,15 @@ function makeRecordExecutor(
       acceptedIndexes.push(index + 1);
     });
     const accepted = acceptedIndexes.length;
+    // a fatal duplicate re-send ABORTS the chunk (pi's duplicateAbort): the
+    // batch's accepts are discarded with the pass — the accepted count must
+    // NOT feed the relay's no-progress reset, the whole call answers as a
+    // DENY (nothing landed), and the relay ends the pass at the next step
+    // boundary
+    if (state.duplicateAbort) {
+      abortRun(agentId, DUPLICATE_ABORT_REASON);
+      return { deny: ["rejected:", ...failures].join("\n") };
+    }
     noteAccepted(agentId, accepted);
     const lines: string[] = [];
     if (failures.length === EMPTY_RECORDS) {
@@ -380,7 +448,7 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
       }
 
       const records: RecordObservation[] = [];
-      const toolState = { attempted: 0 };
+      const toolState: RecordToolState = { attempted: 0, duplicateAbort: false };
       let boundAgent: string | null = null;
 
       const stageInput: EngineStageRunInput = {
@@ -515,6 +583,22 @@ export async function runObserver(input: ObserverRunInput): Promise<void> {
         } catch (drainErr) {
           runsLog("observer dump drain failed", drainErr);
         }
+      }
+      // Duplicate fatal-abort (pi's duplicateAbort): the pass is not a
+      // verdict — NOTHING persists (no records, no empty verdict; the
+      // frontier stays put) so the next trigger or compaction re-observes
+      // this range from scratch. The run stops here: persisting a LATER
+      // chunk would advance the frontier past this hole and silently skip
+      // the range forever.
+      if (toolState.duplicateAbort) {
+        runsLog(
+          `observer: chunk ${chunkIndex + 1}/${totalChunks} aborted — duplicate re-sent after rejection (covers ${chunk.firstEntryId}..${chunk.lastEntryId})`,
+        );
+        notify(
+          "Observer aborted a chunk: the model re-sent an already-rejected duplicate. The chunk stays unobserved and will be retried",
+          "warning",
+        );
+        return;
       }
       // this chunk completed → persist IMMEDIATELY (per-chunk durability).
       try {
