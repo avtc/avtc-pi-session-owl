@@ -135,8 +135,8 @@ export interface StageUsageLike {
 
 /** pi's StageRunResult shape (agent-loop.ts), spelled locally, plus the
  *  abort classification pi folds into its error classes: the run-state
- *  abort reason ("signal" | "timeout" | "no-progress"), null on a clean
- *  end. A timeout reason is the skip-and-notify surface (pi's
+ *  abort reason ("signal" | "timeout" | "no-progress" | "duplicate"), null
+ *  on a clean end. A timeout reason is the skip-and-notify surface (pi's
  *  StageTimeoutError semantics). */
 export interface StageRunResultLike {
   messages: AgentMessage[];

@@ -750,18 +750,18 @@ describe("runObserver — the widget event wire", () => {
 // ---- duplicate re-send protection (pi's seenAttempts ledger) ---------------
 
 describe("runObserver — duplicate re-send protection", () => {
-  /** One canonical record: cites the chunk's first allowed entry (e1). */
+  /** One canonical record: cites the chunk's first allowed entry. */
   const REC = { summary: "Chose vitest for the run.", importance: "high", sourceEntryIds: ["e1"] };
 
   const wrappers = (r: Rig): number =>
     [...r.core.store.getGraphStore().graph.nodes.values()].filter((n) => n.state === "new").length;
 
   /** Run the chunks of `entryCount` entries (the rendered user entries are
-   *  the allowed cites — 2 per chunk at threshold 60: entries(2) = one chunk
-   *  allowing e1; entries(4) = one chunk allowing e1+e3) whose first behavior
-   *  makes one record_observations call per given batch; returns the tool
-   *  acks (text + denied flag), the live run states, and the run's own rig
-   *  for graph assertions. */
+   *  the allowed cites — two per chunk at threshold 60: the smallest pair of
+   *  entries yields ONE chunk with a single allowed cite, four entries one
+   *  chunk with two) whose first behavior makes one record_observations call
+   *  per given batch; returns the tool acks (text + denied flag), the live
+   *  run states, and the run's own rig for graph assertions. */
   async function runOneChunk(
     sessionId: string,
     calls: Record<string, unknown>[][],
@@ -819,7 +819,7 @@ describe("runObserver — duplicate re-send protection", () => {
         [{ summary: "Chose vitest for the  run.", importance: "high", sourceEntryIds: ["e1", "e3"] }],
       ],
       undefined,
-      4, // one chunk allowing e1+e3
+      4, // one chunk with two allowed cites
     );
     expect(acks[1].text).toContain("duplicate");
     expect(acks[1].denied).toBe(true);
@@ -840,7 +840,7 @@ describe("runObserver — duplicate re-send protection", () => {
       "dup-ids",
       [[REC], [{ ...REC, sourceEntryIds: ["e3"] }]],
       undefined,
-      4, // one chunk allowing e1+e3
+      4, // one chunk with two allowed cites
     );
     expect(acks[1]).toEqual({ text: "accepted: all", denied: false });
     expect(wrappers(rig)).toBe(2);
@@ -878,13 +878,16 @@ describe("runObserver — duplicate re-send protection", () => {
   });
 
   test("the fatal call denies even when the same batch also carried a fresh record (it gets discarded)", async () => {
-    const { acks, rig } = await runOneChunk("dup-fresh", [
+    const { acks, agents, rig } = await runOneChunk("dup-fresh", [
       [REC],
       [REC],
       [REC, { summary: "Fresh fact.", importance: "med", sourceEntryIds: ["e1"] }],
     ]);
     expect(acks[2].denied).toBe(true);
     expect(acks[2].text).not.toContain("accepted:"); // the fresh record is discarded with the pass
+    // the discarded fresh accept must not feed the relay's accepted counter
+    // (a fed counter would reset the no-progress streak)
+    expect(agents[0].acceptedRecords).toBe(1);
     expect(wrappers(rig)).toBe(0);
   });
 
@@ -920,5 +923,42 @@ describe("runObserver — duplicate re-send protection", () => {
     expect(notes).toContain(
       "Observer aborted a chunk: the model re-sent an already-rejected duplicate. The chunk stays unobserved and will be retried",
     );
+  });
+
+  test("the aborted chunk's forensics still drain into the dump (the void persists nothing, the dump keeps the pass)", async () => {
+    const unobserved = entries(2); // one chunk, one allowed cite
+    const rig = await rigUp("dup-dump", unobserved, true);
+    const dump = makeMemoryDumpFs();
+    const fx = makeRunner([
+      async (_i, agentId) => {
+        await recordViaTool(agentId, [REC]);
+        await recordViaTool(agentId, [REC]);
+        await recordViaTool(agentId, [REC]);
+        return { aborted: true, abortReason: "duplicate" };
+      },
+    ]);
+    await runObserver({
+      core: rig.core,
+      store: rig.store,
+      settings: { ...SETTINGS, debugDumpLimit: 1 },
+      unobserved,
+      signal: new AbortController().signal,
+      widget: NO_OP_WIDGET,
+      notify: () => {},
+      runStageFn: fx.runner,
+      dumps: { fs: dump.fs, baseDir: "/owl-data", cwd: "E:\\obs" },
+    });
+    // the per-chunk drain ran BEFORE the void return: the aborted chunk's
+    // input + wrapper landed, the closer rode the run-end flush — the
+    // wrappers stay balanced exactly as for a completed chunk
+    const text = dump.files.get("/owl-data/dumps/E-obs/observer-0.txt") ?? "";
+    expect(text).toContain('<dump stage="observer" started="');
+    expect(text).toContain("<input>");
+    expect(text).toContain('<chunk i="1/1">');
+    expect(text).toContain("</chunk>");
+    expect(text.endsWith("</dump>\n")).toBe(true);
+    // ...while NOTHING persisted from the voided pass
+    expect(branchCustoms(rig, "session-owl.observation")).toHaveLength(0);
+    expect(rig.core.store.getGraphStore().observerFrontier).toBeNull();
   });
 });
